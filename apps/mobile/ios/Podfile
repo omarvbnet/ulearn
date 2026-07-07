@@ -1,0 +1,84 @@
+# Uncomment this line to define a global platform for your project
+platform :ios, '13.0'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+ENV['COCOAPODS_PARALLEL_CODE_SIGN'] = 'false'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_ios_podfile_setup
+
+target 'Runner' do
+  use_frameworks!
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+def patch_frameworks_script!(path)
+  return unless File.exist?(path)
+
+  contents = File.read(path)
+  marker = '# ULEARN_DESKTOP_CODESIGN_FIX'
+
+  return if contents.include?(marker)
+
+  contents = contents.gsub(
+    "  rsync --delete -av \"${RSYNC_PROTECT_TMP_FILES[@]}\" --links --filter \"- CVS/\" --filter \"- .svn/\" --filter \"- .git/\" --filter \"- .hg/\" --filter \"- Headers\" --filter \"- PrivateHeaders/\" --filter \"- Modules\" \"${source}\" \"${destination}\"",
+    "#{marker}\n  dot_clean -m \"${source}\" 2>/dev/null || true\n  xattr -cr \"${source}\" 2>/dev/null || true\n  rsync --delete -av \"${RSYNC_PROTECT_TMP_FILES[@]}\" --links --filter \"- CVS/\" --filter \"- .svn/\" --filter \"- .git/\" --filter \"- .hg/\" --filter \"- Headers\" --filter \"- PrivateHeaders/\" --filter \"- Modules\" \"${source}\" \"${destination}\""
+  )
+
+  # Fix typo in filter - PrivateHeaders not PrivateHeaders/
+  contents = contents.gsub(
+    "  rsync --delete -av \"${RSYNC_PROTECT_TMP_FILES[@]}\" --links --filter \"- CVS/\" --filter \"- .svn/\" --filter \"- .git/\" --filter \"- .hg/\" --filter \"- Headers\" --filter \"- PrivateHeaders\" --filter \"- Modules\" \"${source}\" \"${destination}\"",
+    "#{marker}\n  dot_clean -m \"${source}\" 2>/dev/null || true\n  xattr -cr \"${source}\" 2>/dev/null || true\n  rsync --delete -av \"${RSYNC_PROTECT_TMP_FILES[@]}\" --links --filter \"- CVS/\" --filter \"- .svn/\" --filter \"- .git/\" --filter \"- .hg/\" --filter \"- Headers\" --filter \"- PrivateHeaders\" --filter \"- Modules\" \"${source}\" \"${destination}\""
+  )
+
+  unless contents.include?(marker)
+    # Already patched destination signing path from a previous run.
+    contents = contents.gsub(
+      '  code_sign_if_enabled "${destination}/$(basename "$1")"',
+      "  dot_clean -m \"${destination}/$(basename \"$1\")\" 2>/dev/null || true\n  xattr -cr \"${destination}/$(basename \"$1\")\" 2>/dev/null || true\n  code_sign_if_enabled \"${destination}/$(basename \"$1\")\""
+    )
+  end
+
+  contents = contents.gsub(
+    "    if [ \"${COCOAPODS_PARALLEL_CODE_SIGN}\" == \"true\" ]; then\n      code_sign_cmd=\"$code_sign_cmd &\"\n    fi",
+    "    if [ \"${COCOAPODS_PARALLEL_CODE_SIGN}\" == \"true\" ] && [ \"${ULEARN_FORCE_SYNC_SIGN:-}\" == \"true\" ]; then\n      code_sign_cmd=\"$code_sign_cmd &\"\n    fi"
+  )
+
+  File.write(path, contents)
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+    end
+  end
+
+  patch_frameworks_script!(File.join(__dir__, 'Pods/Target Support Files/Pods-Runner/Pods-Runner-frameworks.sh'))
+end

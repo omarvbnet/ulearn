@@ -1,0 +1,858 @@
+// U Learn – Production PostgreSQL Schema
+// Multi-country, multi-language, RBAC, soft deletes, audit-ready
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  COUNTRY_ADMIN
+  TEACHER
+  STUDENT
+  CERTIFICATE_USER
+}
+
+enum UserStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+  REJECTED
+  INACTIVE
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum Locale {
+  AR
+  KU
+  TR
+  EN
+}
+
+enum TextDirection {
+  RTL
+  LTR
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum PackageType {
+  SINGLE_SUBJECT
+  FULL_STAGE
+  CERTIFICATE_PROGRAM
+}
+
+enum QuizType {
+  LESSON
+  CHAPTER
+  SUBJECT_FINAL
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+}
+
+enum NotificationChannel {
+  PUSH
+  EMAIL
+  IN_APP
+}
+
+enum NotificationTarget {
+  EVERYONE
+  COUNTRY
+  PROVINCE
+  USERS
+}
+
+enum ContentType {
+  VIDEO
+  PDF
+  ATTACHMENT
+}
+
+// ─────────────────────────────────────────────
+// Geography
+// ─────────────────────────────────────────────
+
+model Country {
+  id        String    @id @default(cuid())
+  code      String    @unique // IQ, TR, etc.
+  nameEn    String
+  nameAr    String
+  nameKu    String
+  nameTr    String
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  provinces          Province[]
+  users              User[]
+  educationalStages  EducationalStage[]
+  subjects           Subject[]
+  packages           SubscriptionPackage[]
+  teachers           TeacherProfile[]
+  notifications      Notification[]
+  introOutros        IntroOutro[]
+  settings           SystemSetting[]
+
+  @@index([deletedAt])
+}
+
+model Province {
+  id        String    @id @default(cuid())
+  countryId String
+  nameEn    String
+  nameAr    String
+  nameKu    String
+  nameTr    String
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  country       Country        @relation(fields: [countryId], references: [id])
+  users         User[]
+  teachers      TeacherProfile[]
+  notifications Notification[]
+
+  @@index([countryId])
+  @@index([deletedAt])
+}
+
+// ─────────────────────────────────────────────
+// Users & Auth
+// ─────────────────────────────────────────────
+
+model User {
+  id              String     @id @default(cuid())
+  phone           String     @unique
+  email           String?
+  fullLegalName   String?
+  gender          Gender?
+  nationalId      String?
+  nationalIdImage String?
+  parentPhone     String?
+  latitude        Float?
+  longitude       Float?
+  locationLabel   String?
+  role            UserRole
+  status          UserStatus @default(PENDING)
+  locale          Locale     @default(AR)
+  countryId       String?
+  provinceId      String?
+  lastLoginAt     DateTime?
+  lastActivityAt  DateTime?
+  fcmTokens       String[]   @default([])
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  deletedAt       DateTime?
+
+  country              Country?              @relation(fields: [countryId], references: [id])
+  province             Province?             @relation(fields: [provinceId], references: [id])
+  studentProfile       StudentProfile?
+  certificateProfile   CertificateProfile?
+  teacherProfile       TeacherProfile?
+  devices              Device[]
+  otpCodes             OtpCode[]
+  sessions             Session[]
+  subscriptions        Subscription[]
+  activationRequests   ActivationRequest[]
+  videoProgress        VideoProgress[]
+  quizAttempts         QuizAttempt[]
+  questions            LessonQuestion[]      @relation("StudentQuestions")
+  answers              LessonAnswer[]        @relation("TeacherAnswers")
+  certificates         Certificate[]
+  notifications        UserNotification[]
+  auditLogs            AuditLog[]            @relation("ActorLogs")
+  ratingsGiven         TeacherRating[]
+  complaints           Complaint[]           @relation("StudentComplaints")
+  complaintsHandled    Complaint[]           @relation("HandledComplaints")
+
+  @@index([role, status])
+  @@index([countryId])
+  @@index([provinceId])
+  @@index([status])
+  @@index([lastActivityAt])
+  @@index([deletedAt])
+}
+
+model StudentProfile {
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  educationalStageId String?
+  grade            String?
+  schoolUniversity String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  educationalStage EducationalStage? @relation(fields: [educationalStageId], references: [id])
+
+  @@index([educationalStageId])
+}
+
+model CertificateProfile {
+  id                      String   @id @default(cuid())
+  userId                  String   @unique
+  educationalQualification String?
+  specialization          String?
+  occupation              String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model TeacherProfile {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  countryId      String?
+  provinceId     String?
+  bio            String?
+  specializations String[] @default([])
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  country   Country?  @relation(fields: [countryId], references: [id])
+  province  Province? @relation(fields: [provinceId], references: [id])
+  subjects  TeacherSubject[]
+  ratings   TeacherRating[]
+  complaints Complaint[]
+
+  @@index([countryId])
+  @@index([deletedAt])
+}
+
+model TeacherSubject {
+  id        String   @id @default(cuid())
+  teacherId String
+  subjectId String
+  createdAt DateTime @default(now())
+
+  teacher TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subject Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, subjectId])
+}
+
+model TeacherRating {
+  id        String   @id @default(cuid())
+  teacherId String
+  userId    String
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  teacher TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, userId])
+  @@index([teacherId])
+}
+
+model Complaint {
+  id          String    @id @default(cuid())
+  studentId   String
+  teacherId   String?
+  subject     String
+  description String
+  status      String    @default("OPEN")
+  handledById String?
+  resolution  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  resolvedAt  DateTime?
+
+  student   User            @relation("StudentComplaints", fields: [studentId], references: [id])
+  teacher   TeacherProfile? @relation(fields: [teacherId], references: [id])
+  handledBy User?           @relation("HandledComplaints", fields: [handledById], references: [id])
+
+  @@index([studentId])
+  @@index([teacherId])
+  @@index([status])
+}
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  userId    String?
+  phone     String
+  code      String
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([phone, code])
+  @@index([expiresAt])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  deviceId  String?
+  ipAddress String?
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Device {
+  id         String   @id @default(cuid())
+  userId     String
+  deviceId   String
+  deviceName String?
+  platform   String?
+  lastSeenAt DateTime @default(now())
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────
+// Educational Structure (Country-specific)
+// ─────────────────────────────────────────────
+
+model EducationalStage {
+  id          String    @id @default(cuid())
+  countryId   String
+  nameEn      String
+  nameAr      String
+  nameKu      String
+  nameTr      String
+  description String?
+  sortOrder   Int       @default(0)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  country          Country            @relation(fields: [countryId], references: [id])
+  subjects         Subject[]
+  packages         SubscriptionPackage[]
+  studentProfiles  StudentProfile[]
+
+  @@index([countryId])
+  @@index([deletedAt])
+}
+
+model Subject {
+  id          String    @id @default(cuid())
+  countryId   String
+  stageId     String?
+  nameEn      String
+  nameAr      String
+  nameKu      String
+  nameTr      String
+  description String?
+  thumbnail   String?
+  isCertificateProgram Boolean @default(false)
+  totalHours  Float     @default(0)
+  sortOrder   Int       @default(0)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  country    Country          @relation(fields: [countryId], references: [id])
+  stage      EducationalStage? @relation(fields: [stageId], references: [id])
+  chapters   Chapter[]
+  packages   SubscriptionPackage[]
+  teachers   TeacherSubject[]
+  quizzes    Quiz[]
+  certificates Certificate[]
+
+  @@index([countryId])
+  @@index([stageId])
+  @@index([isCertificateProgram])
+  @@index([deletedAt])
+}
+
+model Chapter {
+  id          String    @id @default(cuid())
+  subjectId   String
+  nameEn      String
+  nameAr      String
+  nameKu      String
+  nameTr      String
+  description String?
+  sortOrder   Int       @default(0)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  subject Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  lessons Lesson[]
+  quizzes Quiz[]
+
+  @@index([subjectId])
+  @@index([deletedAt])
+}
+
+model Lesson {
+  id          String    @id @default(cuid())
+  chapterId   String
+  nameEn      String
+  nameAr      String
+  nameKu      String
+  nameTr      String
+  description String?
+  isFree      Boolean   @default(false)
+  sortOrder   Int       @default(0)
+  durationSec Int       @default(0)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  chapter   Chapter          @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  contents  LessonContent[]
+  quizzes   Quiz[]
+  questions LessonQuestion[]
+  progress  VideoProgress[]
+
+  @@index([chapterId])
+  @@index([isFree])
+  @@index([deletedAt])
+}
+
+model LessonContent {
+  id          String      @id @default(cuid())
+  lessonId    String
+  type        ContentType
+  titleEn     String?
+  titleAr     String?
+  titleKu     String?
+  titleTr     String?
+  fileKey     String
+  fileUrl     String?
+  fileSize    Int?
+  mimeType    String?
+  durationSec Int?
+  sortOrder   Int         @default(0)
+  hasSubtitles Boolean    @default(false)
+  subtitleKeys Json?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([lessonId])
+  @@index([type])
+  @@index([deletedAt])
+}
+
+// ─────────────────────────────────────────────
+// Intro / Outro (per language)
+// ─────────────────────────────────────────────
+
+model IntroOutro {
+  id        String   @id @default(cuid())
+  countryId String?
+  locale    Locale
+  type      String   // INTRO | OUTRO
+  fileKey   String
+  fileUrl   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  country Country? @relation(fields: [countryId], references: [id])
+
+  @@unique([countryId, locale, type])
+  @@index([locale, type])
+}
+
+// ─────────────────────────────────────────────
+// Video Progress
+// ─────────────────────────────────────────────
+
+model VideoProgress {
+  id              String   @id @default(cuid())
+  userId          String
+  lessonId        String
+  positionSec     Int      @default(0)
+  durationSec     Int      @default(0)
+  completionPct   Float    @default(0)
+  isCompleted     Boolean  @default(false)
+  totalWatchSec   Int      @default(0)
+  lastWatchedAt   DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@index([userId])
+  @@index([lessonId])
+  @@index([isCompleted])
+}
+
+// ─────────────────────────────────────────────
+// Subscriptions
+// ─────────────────────────────────────────────
+
+model SubscriptionPackage {
+  id           String      @id @default(cuid())
+  countryId    String
+  type         PackageType
+  nameEn       String
+  nameAr       String
+  nameKu       String
+  nameTr       String
+  description  String?
+  price        Decimal     @db.Decimal(12, 2)
+  currency     String      @default("IQD")
+  durationDays Int?
+  deviceLimit  Int         @default(1)
+  subjectId    String?
+  stageId      String?
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  deletedAt    DateTime?
+
+  country            Country           @relation(fields: [countryId], references: [id])
+  subject            Subject?          @relation(fields: [subjectId], references: [id])
+  stage              EducationalStage? @relation(fields: [stageId], references: [id])
+  subscriptions      Subscription[]
+  activationRequests ActivationRequest[]
+
+  @@index([countryId])
+  @@index([type])
+  @@index([deletedAt])
+}
+
+model ActivationRequest {
+  id          String   @id @default(cuid())
+  userId      String
+  packageId   String
+  status      String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  notes       String?
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user    User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  package SubscriptionPackage  @relation(fields: [packageId], references: [id])
+  codes   ActivationCode[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model ActivationCode {
+  id          String    @id @default(cuid())
+  requestId   String?
+  code        String    @unique
+  packageId   String?
+  userId      String?
+  usedAt      DateTime?
+  expiresAt   DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  request ActivationRequest? @relation(fields: [requestId], references: [id])
+
+  @@index([code])
+}
+
+model Subscription {
+  id          String             @id @default(cuid())
+  userId      String
+  packageId   String
+  status      SubscriptionStatus @default(PENDING)
+  startsAt    DateTime?
+  expiresAt   DateTime?
+  deviceLimit Int                @default(1)
+  activatedBy String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  user    User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  package SubscriptionPackage @relation(fields: [packageId], references: [id])
+
+  @@index([userId, status])
+  @@index([expiresAt])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────
+// Quizzes
+// ─────────────────────────────────────────────
+
+model Quiz {
+  id              String   @id @default(cuid())
+  type            QuizType
+  lessonId        String?
+  chapterId       String?
+  subjectId       String?
+  titleEn         String
+  titleAr         String
+  titleKu         String
+  titleTr         String
+  timeLimitSec    Int?
+  maxAttempts     Int      @default(3)
+  passPercentage  Float    @default(50)
+  randomize       Boolean  @default(true)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  lesson    Lesson?       @relation(fields: [lessonId], references: [id])
+  chapter   Chapter?      @relation(fields: [chapterId], references: [id])
+  subject   Subject?      @relation(fields: [subjectId], references: [id])
+  questions QuizQuestion[]
+  attempts  QuizAttempt[]
+
+  @@index([lessonId])
+  @@index([chapterId])
+  @@index([subjectId])
+  @@index([deletedAt])
+}
+
+model QuizQuestion {
+  id           String       @id @default(cuid())
+  quizId       String
+  type         QuestionType @default(MULTIPLE_CHOICE)
+  textEn       String
+  textAr       String
+  textKu       String
+  textTr       String
+  options      Json
+  correctKey   String
+  points       Int          @default(1)
+  sortOrder    Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@index([quizId])
+}
+
+model QuizAttempt {
+  id          String   @id @default(cuid())
+  quizId      String
+  userId      String
+  score       Float    @default(0)
+  maxScore    Float    @default(0)
+  percentage  Float    @default(0)
+  passed      Boolean  @default(false)
+  answers     Json
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+  timeSpentSec Int?
+
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([quizId, userId])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────
+// Q&A
+// ─────────────────────────────────────────────
+
+model LessonQuestion {
+  id          String    @id @default(cuid())
+  lessonId    String
+  studentId   String
+  body        String
+  attachmentKey String?
+  attachmentUrl String?
+  isResolved  Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  lesson  Lesson         @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  student User           @relation("StudentQuestions", fields: [studentId], references: [id])
+  answers LessonAnswer[]
+
+  @@index([lessonId])
+  @@index([studentId])
+  @@index([isResolved])
+}
+
+model LessonAnswer {
+  id            String   @id @default(cuid())
+  questionId    String
+  teacherId     String
+  body          String
+  attachmentKey String?
+  attachmentUrl String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  question LessonQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  teacher  User           @relation("TeacherAnswers", fields: [teacherId], references: [id])
+
+  @@index([questionId])
+  @@index([teacherId])
+}
+
+// ─────────────────────────────────────────────
+// Certificates
+// ─────────────────────────────────────────────
+
+model Certificate {
+  id               String   @id @default(cuid())
+  userId           String
+  subjectId        String
+  certificateNumber String  @unique
+  verificationCode String   @unique
+  userName         String
+  courseName       String
+  completionDate   DateTime
+  totalHours       Float
+  pdfKey           String?
+  pdfUrl           String?
+  qrCodeData       String?
+  createdAt        DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id])
+  subject Subject @relation(fields: [subjectId], references: [id])
+
+  @@unique([userId, subjectId])
+  @@index([verificationCode])
+  @@index([certificateNumber])
+}
+
+// ─────────────────────────────────────────────
+// Notifications
+// ─────────────────────────────────────────────
+
+model Notification {
+  id          String              @id @default(cuid())
+  titleEn     String
+  titleAr     String
+  titleKu     String
+  titleTr     String
+  bodyEn      String
+  bodyAr      String
+  bodyKu      String
+  bodyTr      String
+  channels    NotificationChannel[]
+  target      NotificationTarget
+  countryId   String?
+  provinceId  String?
+  userIds     String[]            @default([])
+  sentAt      DateTime?
+  createdById String?
+  createdAt   DateTime            @default(now())
+
+  country  Country?  @relation(fields: [countryId], references: [id])
+  province Province? @relation(fields: [provinceId], references: [id])
+  deliveries UserNotification[]
+
+  @@index([target])
+  @@index([countryId])
+}
+
+model UserNotification {
+  id             String   @id @default(cuid())
+  userId         String
+  notificationId String?
+  title          String
+  body           String
+  isRead         Boolean  @default(false)
+  data           Json?
+  createdAt      DateTime @default(now())
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notification Notification? @relation(fields: [notificationId], references: [id])
+
+  @@index([userId, isRead])
+}
+
+// ─────────────────────────────────────────────
+// Audit & System
+// ─────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+  previousValue Json?
+  newValue   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation("ActorLogs", fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  countryId String?
+  key       String
+  value     Json
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  country Country? @relation(fields: [countryId], references: [id])
+
+  @@unique([countryId, key])
+}
+
+model DailyActivity {
+  id           String   @id @default(cuid())
+  userId       String
+  date         DateTime @db.Date
+  watchTimeSec Int      @default(0)
+  lessonsDone  Int      @default(0)
+  quizzesTaken Int      @default(0)
+  loginCount   Int      @default(0)
+
+  @@unique([userId, date])
+  @@index([date])
+}
