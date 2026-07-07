@@ -1,10 +1,31 @@
 "use client";
 
-import { Button, Card, Input } from "@/components/ui";
+import { Button, Card, Input, Select } from "@/components/ui";
 import { SkeletonRows, useToast } from "@/components/overlay";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type SettingsMap = Record<string, unknown>;
+
+type Clip = {
+  id: string;
+  locale: string;
+  type: string;
+  fileUrl: string | null;
+  country: { nameEn: string; code: string } | null;
+};
+
+/** Converts "MM-DD" to the next occurrence of that date (this year or next). */
+function nextOccurrence(monthDay: string): Date | null {
+  const m = monthDay.match(/^(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const [, mm, dd] = m;
+  const now = new Date();
+  let candidate = new Date(now.getFullYear(), Number(mm) - 1, Number(dd), 23, 59, 59);
+  if (candidate <= now) {
+    candidate = new Date(now.getFullYear() + 1, Number(mm) - 1, Number(dd), 23, 59, 59);
+  }
+  return candidate;
+}
 
 export function SettingsClient() {
   const { toast } = useToast();
@@ -12,7 +33,7 @@ export function SettingsClient() {
   const [saving, setSaving] = useState<string | null>(null);
   const [expiryDate, setExpiryDate] = useState("07-15");
   const [excludeCertUsers, setExcludeCertUsers] = useState(true);
-  const [inactivityDays, setInactivityDays] = useState("90");
+  const [inactivityDays, setInactivityDays] = useState("30");
   const [otpExpiryMin, setOtpExpiryMin] = useState("5");
 
   useEffect(() => {
@@ -21,9 +42,16 @@ export function SettingsClient() {
         const { settings } = await r.json();
         const map: SettingsMap = {};
         for (const s of settings) map[s.key] = s.value;
-        if (map.subscription_expiry_date) setExpiryDate(String(map.subscription_expiry_date));
-        if (map.expiry_excludes_certificate_users !== undefined)
-          setExcludeCertUsers(Boolean(map.expiry_excludes_certificate_users));
+        if (typeof map.global_subscription_expiry === "string") {
+          const d = new Date(map.global_subscription_expiry);
+          if (!Number.isNaN(d.getTime())) {
+            setExpiryDate(
+              `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+            );
+          }
+        }
+        if (map.exclude_certificate_from_global_expiry !== undefined)
+          setExcludeCertUsers(Boolean(map.exclude_certificate_from_global_expiry));
         if (map.inactivity_days) setInactivityDays(String(map.inactivity_days));
         if (map.otp_expiry_minutes) setOtpExpiryMin(String(map.otp_expiry_minutes));
       }
@@ -73,8 +101,17 @@ export function SettingsClient() {
         <Button
           disabled={saving === "expiry"}
           onClick={async () => {
-            await save("subscription_expiry_date", expiryDate, "Expiry date");
-            await save("expiry_excludes_certificate_users", excludeCertUsers, "Certificate exclusion");
+            const next = nextOccurrence(expiryDate);
+            if (!next) {
+              toast("Use MM-DD format, e.g. 07-15", "error");
+              return;
+            }
+            await save("global_subscription_expiry", next.toISOString(), "Expiry date");
+            await save(
+              "exclude_certificate_from_global_expiry",
+              excludeCertUsers,
+              "Certificate exclusion"
+            );
           }}
         >
           Save Expiry Settings
@@ -85,7 +122,8 @@ export function SettingsClient() {
         <div>
           <h3 className="font-semibold">Inactive Users</h3>
           <p className="mt-1 text-sm text-muted">
-            Users with no activity for this many days are marked INACTIVE by the daily cron job.
+            Users with no activity for this many days are marked INACTIVE and notified by the
+            daily cron job.
           </p>
         </div>
         <Input
@@ -124,13 +162,127 @@ export function SettingsClient() {
         </Button>
       </Card>
 
-      <Card className="space-y-2">
-        <h3 className="font-semibold">Intro & Outro Videos</h3>
-        <p className="text-sm text-muted">
-          Upload per-language intro/outro clips in Courses → lesson media, using the type
-          selector. They are automatically stitched into every lesson playback.
-        </p>
-      </Card>
+      <IntroOutroCard />
     </div>
+  );
+}
+
+function IntroOutroCard() {
+  const { toast } = useToast();
+  const [clips, setClips] = useState<Clip[] | null>(null);
+  const [locale, setLocale] = useState("AR");
+  const [type, setType] = useState("INTRO");
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const load = useCallback(() => {
+    fetch("/api/admin/intro-outro")
+      .then((r) => (r.ok ? r.json() : { clips: [] }))
+      .then((d) => setClips(d.clips || []));
+  }, []);
+
+  useEffect(load, [load]);
+
+  async function upload(e: React.FormEvent) {
+    e.preventDefault();
+    if (!file) return;
+    setUploading(true);
+
+    try {
+      const presign = await fetch("/api/admin/uploads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: file.type,
+          size: file.size,
+          category: "video",
+          folder: "intro-outro",
+        }),
+      });
+      if (!presign.ok) throw new Error((await presign.json()).error);
+      const { uploadUrl, key, publicUrl } = await presign.json();
+
+      const put = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!put.ok) throw new Error("Upload failed");
+
+      const saved = await fetch("/api/admin/intro-outro", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locale, type, fileKey: key, fileUrl: publicUrl }),
+      });
+      if (!saved.ok) throw new Error("Save failed");
+
+      toast(`${type === "INTRO" ? "Intro" : "Outro"} clip saved`);
+      setFile(null);
+      load();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Upload failed", "error");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function remove(id: string) {
+    const res = await fetch(`/api/admin/intro-outro/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      toast("Clip removed");
+      load();
+    }
+  }
+
+  return (
+    <Card className="space-y-4">
+      <div>
+        <h3 className="font-semibold">Intro & Outro Videos</h3>
+        <p className="mt-1 text-sm text-muted">
+          Per-language clips played before and after every lesson video.
+        </p>
+      </div>
+
+      <form onSubmit={upload} className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <Select label="Language" value={locale} onChange={(e) => setLocale(e.target.value)}>
+            <option value="AR">العربية</option>
+            <option value="KU">کوردی</option>
+            <option value="TR">Türkçe</option>
+            <option value="EN">English</option>
+          </Select>
+          <Select label="Type" value={type} onChange={(e) => setType(e.target.value)}>
+            <option value="INTRO">Intro</option>
+            <option value="OUTRO">Outro</option>
+          </Select>
+        </div>
+        <input
+          type="file"
+          accept="video/*"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          className="input file:me-3 file:rounded-lg file:border-0 file:bg-accent/15 file:px-3 file:py-1.5 file:text-sm file:text-accent"
+        />
+        <Button type="submit" disabled={!file || uploading} className="w-full">
+          {uploading ? "Uploading…" : "Upload Clip"}
+        </Button>
+      </form>
+
+      {clips !== null && clips.length > 0 && (
+        <ul className="space-y-2 text-sm">
+          {clips.map((c) => (
+            <li key={c.id} className="flex items-center justify-between rounded-lg border border-card-border px-3 py-2">
+              <span>
+                {c.type} · {c.locale}
+                {c.country && ` · ${c.country.code}`}
+              </span>
+              <button className="text-danger hover:underline" onClick={() => remove(c.id)}>
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }

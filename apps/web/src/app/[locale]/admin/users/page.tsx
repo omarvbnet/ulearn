@@ -48,6 +48,16 @@ export default function AdminUsersPage() {
     load();
   }
 
+  async function reject(id: string) {
+    const reason = window.prompt("Rejection reason (optional):") ?? undefined;
+    await fetch(`/api/admin/users/${id}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    });
+    load();
+  }
+
   return (
     <div>
       <PageHeader
@@ -126,13 +136,22 @@ export default function AdminUsersPage() {
                 <td className="px-4 py-3">
                   <div className="flex gap-2">
                     {u.status === "PENDING" && (
-                      <Button
-                        variant="outline"
-                        className="!px-3 !py-1 text-xs"
-                        onClick={() => approve(u.id)}
-                      >
-                        Approve
-                      </Button>
+                      <>
+                        <Button
+                          variant="outline"
+                          className="!px-3 !py-1 text-xs"
+                          onClick={() => approve(u.id)}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          variant="danger"
+                          className="!px-3 !py-1 text-xs"
+                          onClick={() => reject(u.id)}
+                        >
+                          Reject
+                        </Button>
+                      </>
                     )}
                     {u.status === "APPROVED" && (
                       <Button

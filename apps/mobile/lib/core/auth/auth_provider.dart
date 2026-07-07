@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:ulearn/core/api/api_client.dart';
 
@@ -56,10 +58,26 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Stable per-install device identifier used for device-limit enforcement.
+  Future<String?> _deviceId() async {
+    try {
+      final plugin = DeviceInfoPlugin();
+      if (Platform.isIOS) {
+        return (await plugin.iosInfo).identifierForVendor;
+      }
+      if (Platform.isAndroid) {
+        return (await plugin.androidInfo).id;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Future<Map<String, dynamic>> verifyOtp(String phone, String code) async {
+    final deviceId = await _deviceId();
     final data = await _api.post('/api/auth/otp/verify', {
       'phone': phone,
       'code': code,
+      'deviceId': ?deviceId,
     });
 
     if (data['token'] != null) {

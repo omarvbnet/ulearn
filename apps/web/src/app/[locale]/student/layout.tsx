@@ -24,6 +24,8 @@ export default async function StudentLayout({
         { href: `${base}/rankings`, label: t.nav.rankings },
         { href: `${base}/certificates`, label: t.nav.certificates },
         { href: `${base}/notifications`, label: t.nav.notifications },
+        { href: `${base}/devices`, label: t.nav.devices },
+        { href: `${base}/support`, label: t.nav.support },
       ]}
     >
       {children}

@@ -17,16 +17,25 @@ export async function POST(request: Request) {
   const body = await request.json();
   const schema = z.object({
     requestId: z.string(),
+    action: z.enum(["approve", "reject"]).optional(),
     sendAutomatically: z.boolean().optional(),
+    notes: z.string().optional(),
   });
   const parsed = schema.safeParse(body);
   if (!parsed.success) return error("Invalid input", 400);
 
-  const result = await SubscriptionService.approveRequest(
-    parsed.data.requestId,
-    auth.session.userId,
-    parsed.data.sendAutomatically ?? false
-  );
+  const result =
+    parsed.data.action === "reject"
+      ? await SubscriptionService.rejectRequest(
+          parsed.data.requestId,
+          auth.session.userId,
+          parsed.data.notes
+        )
+      : await SubscriptionService.approveRequest(
+          parsed.data.requestId,
+          auth.session.userId,
+          parsed.data.sendAutomatically ?? false
+        );
 
   if (!result.success) return error(result.error, 400);
   return json(result);

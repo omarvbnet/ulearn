@@ -55,6 +55,9 @@ export function LogsClient() {
           />
         </div>
         <p className="pb-2.5 text-sm text-muted">{total} entries</p>
+        <a href="/api/admin/logs/export" className="ms-auto pb-1">
+          <Button variant="outline">Export Excel</Button>
+        </a>
       </div>
 
       {loading ? (

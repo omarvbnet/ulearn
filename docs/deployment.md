@@ -80,13 +80,11 @@ Wire cron routes to `SubscriptionService.expireDueSubscriptions()` and `AuthServ
 cd apps/mobile
 flutter pub get
 
-# Android
-flutter build appbundle \
-  --dart-define=API_BASE_URL=https://your-domain.vercel.app
+# Android (production API https://ulearn.usmart-iot.com is the default)
+flutter build appbundle
 
 # iOS
-flutter build ipa \
-  --dart-define=API_BASE_URL=https://your-domain.vercel.app
+flutter build ipa
 ```
 
 ### Android security

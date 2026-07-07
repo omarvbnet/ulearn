@@ -23,6 +23,7 @@ const bucket = process.env.R2_BUCKET || "ulearn";
 const allowedOrigins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
+  "https://ulearn.usmart-iot.com",
   ...(process.env.NEXT_PUBLIC_APP_URL ? [process.env.NEXT_PUBLIC_APP_URL] : []),
   ...(process.env.APP_URL ? [process.env.APP_URL] : []),
 ];

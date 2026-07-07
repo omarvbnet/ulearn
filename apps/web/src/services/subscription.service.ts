@@ -27,6 +27,47 @@ export class SubscriptionService {
     return { success: true as const, request };
   }
 
+  static async rejectRequest(requestId: string, actorId: string, notes?: string) {
+    const request = await prisma.activationRequest.findUnique({
+      where: { id: requestId },
+      include: { user: true },
+    });
+    if (!request || request.status !== "PENDING") {
+      return { success: false as const, error: "INVALID_REQUEST" };
+    }
+
+    await prisma.activationRequest.update({
+      where: { id: requestId },
+      data: {
+        status: "REJECTED",
+        notes: notes || request.notes,
+        reviewedBy: actorId,
+        reviewedAt: new Date(),
+      },
+    });
+
+    await LoggingService.log({
+      actorId,
+      action: "REJECT_ACTIVATION_REQUEST",
+      entityType: "ActivationRequest",
+      entityId: requestId,
+      newValue: { userId: request.userId, notes },
+    });
+
+    await NotificationService.notifyUser(request.userId, {
+      titleEn: "Activation Request Declined",
+      titleAr: "تم رفض طلب التفعيل",
+      titleKu: "داواکاری چالاککردن ڕەتکرایەوە",
+      titleTr: "Aktivasyon Talebi Reddedildi",
+      bodyEn: notes || "Your activation request was declined. Contact support for details.",
+      bodyAr: notes || "تم رفض طلب التفعيل الخاص بك. تواصل مع الدعم للمزيد من التفاصيل.",
+      bodyKu: notes || "داواکاری چالاککردنەکەت ڕەتکرایەوە. بۆ زانیاری زیاتر پەیوەندی بە پشتگیری بکە.",
+      bodyTr: notes || "Aktivasyon talebiniz reddedildi. Ayrıntılar için destek ile iletişime geçin.",
+    });
+
+    return { success: true as const };
+  }
+
   static async approveRequest(requestId: string, actorId: string, sendAutomatically = false) {
     const request = await prisma.activationRequest.findUnique({
       where: { id: requestId },

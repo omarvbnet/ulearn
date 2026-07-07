@@ -3,6 +3,7 @@
 import { Badge, Button, Card, Textarea } from "@/components/ui";
 import { EmptyState, ProgressBar, Skeleton, useToast } from "@/components/overlay";
 import { cn, getLocalizedField } from "@/lib/utils";
+import { VideoWatermark } from "@/components/video-watermark";
 import { useT } from "@/i18n/client";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -42,6 +43,10 @@ type LessonData = {
   };
   progress: { positionSec: number; completionPct: number } | null;
   hasAccess: boolean;
+  introOutro?: {
+    intro?: { fileUrl?: string | null } | null;
+    outro?: { fileUrl?: string | null } | null;
+  } | null;
 };
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -54,10 +59,21 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
   const [activeVideo, setActiveVideo] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [completion, setCompletion] = useState(0);
+  const [phase, setPhase] = useState<"intro" | "main" | "outro">("main");
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastReported = useRef(0);
   const resumed = useRef(false);
+  const [watermark, setWatermark] = useState("");
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.user) setWatermark(d.user.phone || d.user.fullLegalName || "");
+      })
+      .catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/lessons/${lessonId}`);
@@ -65,6 +81,10 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
       const d: LessonData = await res.json();
       setData(d);
       setCompletion(d.progress?.completionPct ?? 0);
+      // Play the branded intro first, unless the student is resuming mid-lesson.
+      if (d.introOutro?.intro?.fileUrl && !d.progress?.positionSec) {
+        setPhase("intro");
+      }
     }
     setLoading(false);
   }, [lessonId]);
@@ -158,19 +178,48 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
       <div className="space-y-5 xl:col-span-2">
         {/* Player */}
         {currentVideo?.fileUrl ? (
-          <div className="animate-scale-in overflow-hidden rounded-2xl border border-card-border bg-black shadow-[0_0_48px_rgba(160,32,240,0.15)]">
-            <video
-              ref={videoRef}
-              key={currentVideo.id}
-              src={currentVideo.fileUrl}
-              controls
-              controlsList="nodownload"
-              onContextMenu={(e) => e.preventDefault()}
-              onLoadedMetadata={onLoadedMetadata}
-              onPause={reportProgress}
-              onEnded={reportProgress}
-              className="aspect-video w-full"
-            />
+          <div className="animate-scale-in relative overflow-hidden rounded-2xl border border-card-border bg-black shadow-[0_0_48px_rgba(160,32,240,0.15)]">
+            <VideoWatermark label={watermark} />
+            {phase !== "main" ? (
+              <video
+                key={phase}
+                src={
+                  (phase === "intro"
+                    ? data.introOutro?.intro?.fileUrl
+                    : data.introOutro?.outro?.fileUrl) ?? undefined
+                }
+                autoPlay
+                controls={false}
+                onContextMenu={(e) => e.preventDefault()}
+                onEnded={() => setPhase("main")}
+                onError={() => setPhase("main")}
+                className="aspect-video w-full"
+              />
+            ) : (
+              <video
+                ref={videoRef}
+                key={currentVideo.id}
+                src={currentVideo.fileUrl}
+                controls
+                controlsList="nodownload"
+                onContextMenu={(e) => e.preventDefault()}
+                onLoadedMetadata={onLoadedMetadata}
+                onPause={reportProgress}
+                onEnded={() => {
+                  reportProgress();
+                  if (data.introOutro?.outro?.fileUrl) setPhase("outro");
+                }}
+                className="aspect-video w-full"
+              />
+            )}
+            {phase === "intro" && (
+              <button
+                onClick={() => setPhase("main")}
+                className="absolute bottom-4 end-4 z-10 rounded-lg bg-black/60 px-3 py-1.5 text-xs text-white/90 backdrop-blur hover:bg-black/80"
+              >
+                {t.common.skip} ›
+              </button>
+            )}
           </div>
         ) : (
           <Card className="flex aspect-video items-center justify-center">

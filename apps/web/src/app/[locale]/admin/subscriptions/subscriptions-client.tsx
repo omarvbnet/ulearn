@@ -88,6 +88,21 @@ export function SubscriptionsClient() {
     }
   }
 
+  async function rejectRequest(requestId: string) {
+    const notes = window.prompt("Reason for declining (sent to the student):") ?? undefined;
+    const res = await fetch("/api/admin/subscriptions/requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId, action: "reject", notes }),
+    });
+    if (res.ok) {
+      toast("Request declined");
+      loadRequests();
+    } else {
+      toast("Failed to decline request", "error");
+    }
+  }
+
   async function togglePackage(pkg: Package) {
     const res = await fetch(`/api/admin/packages/${pkg.id}`, {
       method: "PATCH",
@@ -111,6 +126,11 @@ export function SubscriptionsClient() {
 
   return (
     <div className="space-y-5">
+      <div className="flex justify-end">
+        <a href="/api/admin/subscriptions/export">
+          <Button variant="outline">Export Excel</Button>
+        </a>
+      </div>
       <Tabs
         tabs={[
           { id: "requests", label: "Requests" },
@@ -139,7 +159,10 @@ export function SubscriptionsClient() {
                   <span className="badge badge-free">{r.package.nameEn}</span>
                   <span className="ms-2 text-muted">{r.package.price} {r.package.currency ?? "IQD"}</span>
                 </div>
-                <Button onClick={() => approve(r.id)}>Generate & Send Code</Button>
+                <div className="flex gap-2">
+                  <Button onClick={() => approve(r.id)}>Generate & Send Code</Button>
+                  <Button variant="danger" onClick={() => rejectRequest(r.id)}>Decline</Button>
+                </div>
               </Card>
             ))}
           </div>

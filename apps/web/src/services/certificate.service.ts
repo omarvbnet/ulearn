@@ -64,7 +64,7 @@ export class CertificateService {
 
     const certificateNumber = generateCertificateNumber();
     const verificationCode = generateVerificationCode();
-    const verifyUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://ulearn.app"}/verify/${verificationCode}`;
+    const verifyUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://ulearn.usmart-iot.com"}/verify/${verificationCode}`;
 
     const certificate = await prisma.certificate.create({
       data: {

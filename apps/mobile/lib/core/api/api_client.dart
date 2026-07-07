@@ -3,10 +3,11 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class ApiClient {
-  /// Override via --dart-define=API_BASE_URL=https://your-api.vercel.app
+  /// Production API. For local development override with:
+  /// flutter run --dart-define=API_BASE_URL=http://<your-mac-ip>:3000
   static const baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:3000',
+    defaultValue: 'https://ulearn.usmart-iot.com',
   );
 
   final _storage = const FlutterSecureStorage();

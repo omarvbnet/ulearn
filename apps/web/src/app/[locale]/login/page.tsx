@@ -17,6 +17,19 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const errorMessages: Record<string, string> = {
+    OTP_INVALID: t.auth.otpInvalid,
+    OTP_EXPIRED_OR_INVALID: t.auth.otpExpired,
+    OTP_MAX_ATTEMPTS: t.auth.tooManyAttempts,
+    DEVICE_LIMIT_REACHED: t.auth.deviceLimitReached,
+    ACCOUNT_SUSPENDED: t.auth.accountSuspended,
+    ACCOUNT_REJECTED: t.auth.accountRejected,
+    RATE_LIMITED: t.auth.tooManyAttempts,
+  };
+
+  const friendly = (codeOrMessage: string) =>
+    errorMessages[codeOrMessage] ?? codeOrMessage;
+
   async function sendOtp(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -31,7 +44,7 @@ export default function LoginPage() {
       if (!res.ok) throw new Error(data.error || "Failed");
       setStep("otp");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send OTP");
+      setError(friendly(err instanceof Error ? err.message : "Failed to send OTP"));
     } finally {
       setLoading(false);
     }
@@ -69,7 +82,7 @@ export default function LoginPage() {
         router.push(`/${locale}/student`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Verification failed");
+      setError(friendly(err instanceof Error ? err.message : "Verification failed"));
     } finally {
       setLoading(false);
     }

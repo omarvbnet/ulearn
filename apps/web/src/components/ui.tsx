@@ -76,11 +76,16 @@ export function Select({
 export function Card({
   className,
   children,
-}: {
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & {
   className?: string;
   children: ReactNode;
 }) {
-  return <div className={cn("card p-6", className)}>{children}</div>;
+  return (
+    <div className={cn("card p-6", className)} {...props}>
+      {children}
+    </div>
+  );
 }
 
 export function StatCard({

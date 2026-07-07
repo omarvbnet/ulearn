@@ -112,9 +112,8 @@ export async function sendWhatsAppOtp(phone: string, code: string): Promise<void
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
 
   if (!phoneNumberId || !accessToken) {
-    if (process.env.NODE_ENV === "development") {
-      console.info(`[DEV] WhatsApp OTP for ${phone}: ${code}`);
-    }
+    // No WhatsApp credentials — log the code so testing is still possible.
+    console.info(`[OTP fallback — WhatsApp not configured] ${phone}: ${code}`);
     return;
   }
 

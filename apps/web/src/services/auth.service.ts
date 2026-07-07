@@ -49,10 +49,13 @@ export class AuthService {
   /** Send OTP via WhatsApp (provider integration point). */
   static async sendOtp(phone: string): Promise<{ success: boolean; expiresIn: number }> {
     const normalized = phone.replace(/\s+/g, "");
+    // Use the fixed DEV_OTP whenever WhatsApp delivery is not configured —
+    // otherwise a random code would be generated that nobody ever receives.
+    const whatsappConfigured = Boolean(
+      process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN
+    );
     const code =
-      process.env.NODE_ENV === "development" && process.env.DEV_OTP
-        ? process.env.DEV_OTP
-        : generateOtp(6);
+      !whatsappConfigured && process.env.DEV_OTP ? process.env.DEV_OTP : generateOtp(6);
 
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + OTP_EXPIRY_MINUTES);
@@ -144,6 +147,17 @@ export class AuthService {
         user,
         token,
       };
+    }
+
+    // Enforce the subscription device limit for approved students/cert users.
+    if (meta?.deviceId && (user.role === "STUDENT" || user.role === "CERTIFICATE_USER")) {
+      const { DeviceService } = await import("@/services/device.service");
+      const device = await DeviceService.registerDevice(user.id, meta.deviceId, {
+        deviceName: meta.userAgent?.slice(0, 120),
+      });
+      if (!device.allowed) {
+        return { success: false as const, error: "DEVICE_LIMIT_REACHED" };
+      }
     }
 
     await prisma.user.update({
@@ -303,6 +317,38 @@ export class AuthService {
     return { success: true as const, user };
   }
 
+  static async rejectUser(userId: string, actorId: string, reason?: string) {
+    const previous = await prisma.user.findUnique({ where: { id: userId } });
+    if (!previous) return { success: false as const, error: "NOT_FOUND" };
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { status: "REJECTED" },
+    });
+
+    await LoggingService.log({
+      actorId,
+      action: "REJECT_USER",
+      entityType: "User",
+      entityId: userId,
+      previousValue: { status: previous.status },
+      newValue: { status: "REJECTED", reason },
+    });
+
+    await NotificationService.notifyUser(userId, {
+      titleEn: "Registration Rejected",
+      titleAr: "تم رفض التسجيل",
+      titleKu: "تۆمارکردن ڕەتکرایەوە",
+      titleTr: "Kayıt Reddedildi",
+      bodyEn: reason || "Your registration was not approved. Contact support for details.",
+      bodyAr: reason || "لم تتم الموافقة على تسجيلك. تواصل مع الدعم للمزيد من التفاصيل.",
+      bodyKu: reason || "تۆمارکردنەکەت پەسەند نەکرا. بۆ زانیاری زیاتر پەیوەندی بە پشتگیری بکە.",
+      bodyTr: reason || "Kaydınız onaylanmadı. Ayrıntılar için destek ile iletişime geçin.",
+    });
+
+    return { success: true as const, user };
+  }
+
   static async suspendUser(userId: string, actorId: string) {
     const previous = await prisma.user.findUnique({ where: { id: userId } });
     if (!previous) return { success: false as const, error: "NOT_FOUND" };
@@ -349,19 +395,35 @@ export class AuthService {
     const threshold = new Date();
     threshold.setDate(threshold.getDate() - inactivityDays);
 
-    const result = await prisma.user.updateMany({
-      where: {
-        status: "APPROVED",
-        role: { in: ["STUDENT", "CERTIFICATE_USER"] },
-        OR: [
-          { lastActivityAt: { lt: threshold } },
-          { lastActivityAt: null, createdAt: { lt: threshold } },
-        ],
-      },
-      data: { status: "INACTIVE" },
-    });
+    const where = {
+      status: "APPROVED" as const,
+      role: { in: ["STUDENT", "CERTIFICATE_USER"] as UserRole[] },
+      OR: [
+        { lastActivityAt: { lt: threshold } },
+        { lastActivityAt: null, createdAt: { lt: threshold } },
+      ],
+    };
 
-    return result.count;
+    const users = await prisma.user.findMany({ where, select: { id: true } });
+    if (users.length === 0) return 0;
+
+    await prisma.user.updateMany({ where, data: { status: "INACTIVE" } });
+
+    // Nudge each user so they can come back (in-app + push + email).
+    for (const { id } of users) {
+      await NotificationService.notifyUser(id, {
+        titleEn: "We miss you at U Learn",
+        titleAr: "اشتقنا لك في يو ليرن",
+        titleKu: "بیرت دەکەین لە یو لێرن",
+        titleTr: "U Learn'de seni özledik",
+        bodyEn: `You have been inactive for ${inactivityDays} days. Log in to continue learning.`,
+        bodyAr: `لم تسجل أي نشاط منذ ${inactivityDays} يوماً. سجّل الدخول لمتابعة التعلم.`,
+        bodyKu: `ماوەی ${inactivityDays} ڕۆژە چالاک نیت. بچۆ ژوورەوە بۆ بەردەوامبوون لە فێربوون.`,
+        bodyTr: `${inactivityDays} gündür aktif değilsiniz. Öğrenmeye devam etmek için giriş yapın.`,
+      }).catch(() => {});
+    }
+
+    return users.length;
   }
 
   static async logout() {
