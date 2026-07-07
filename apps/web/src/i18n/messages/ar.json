@@ -21,7 +21,10 @@
     "logs": "سجلات التدقيق",
     "complaints": "الشكاوى",
     "devices": "الأجهزة",
-    "support": "الدعم"
+    "support": "الدعم",
+    "store": "متجر الدورات",
+    "myCourses": "دوراتي",
+    "courseReview": "مراجعة الدورات"
   },
   "auth": {
     "phone": "رقم الهاتف",
@@ -161,7 +164,18 @@
     "complaintSubmitted": "تم إرسال الشكوى — سنراجعها قريباً",
     "myComplaints": "شكاواي",
     "noComplaints": "لا توجد شكاوى مقدمة",
-    "resolution": "القرار"
+    "resolution": "القرار",
+    "storeTitle": "متجر الدورات",
+    "storeDescription": "دورات مدفوعة من معلمينا — تمت مراجعتها واعتمادها من الإدارة",
+    "storeEmpty": "لا توجد دورات متاحة بعد",
+    "storeEmptyHint": "ستظهر دورات المعلمين هنا بعد اعتمادها.",
+    "buyCourse": "شراء الدورة",
+    "purchased": "تم الشراء",
+    "purchasePending": "بانتظار تأكيد الدفع",
+    "purchaseRequested": "تم طلب الشراء — سنؤكد دفعتك قريباً",
+    "purchaseAlreadyRequested": "لقد طلبت هذه الدورة مسبقاً",
+    "enrolled": "مشترك",
+    "lessonsWord": "درس"
   },
   "quiz": {
     "questions": "الأسئلة",

@@ -21,7 +21,10 @@
     "logs": "Audit Logs",
     "complaints": "Complaints",
     "devices": "Devices",
-    "support": "Support"
+    "support": "Support",
+    "store": "Course Store",
+    "myCourses": "My Courses",
+    "courseReview": "Course Review"
   },
   "auth": {
     "phone": "Mobile Number",
@@ -161,7 +164,18 @@
     "complaintSubmitted": "Complaint submitted — we'll review it soon",
     "myComplaints": "My Complaints",
     "noComplaints": "No complaints filed",
-    "resolution": "Resolution"
+    "resolution": "Resolution",
+    "storeTitle": "Course Store",
+    "storeDescription": "Paid courses from our teachers — reviewed and approved by the administration",
+    "storeEmpty": "No courses available yet",
+    "storeEmptyHint": "Teacher courses will appear here once approved.",
+    "buyCourse": "Buy Course",
+    "purchased": "Purchased",
+    "purchasePending": "Awaiting payment confirmation",
+    "purchaseRequested": "Purchase requested — we'll confirm your payment shortly",
+    "purchaseAlreadyRequested": "You already requested this course",
+    "enrolled": "enrolled",
+    "lessonsWord": "lessons"
   },
   "quiz": {
     "questions": "Questions",

@@ -19,6 +19,7 @@ export default async function TeacherLayout({
       title="Teacher"
       nav={[
         { href: base, label: t.nav.dashboard },
+        { href: `${base}/courses`, label: t.nav.myCourses },
         { href: `${base}/students`, label: t.nav.users },
         { href: `${base}/questions`, label: t.nav.questions },
         { href: `${base}/analytics`, label: t.nav.analytics },

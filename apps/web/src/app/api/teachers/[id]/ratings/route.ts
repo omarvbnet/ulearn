@@ -30,6 +30,10 @@ export async function POST(
     create: { teacherId, userId: auth.session.userId, rating, comment: comment || null },
   });
 
+  // Student evaluations drive the teacher level (unless pinned by an admin).
+  const { TeacherCourseService } = await import("@/services/teacher-course.service");
+  await TeacherCourseService.recomputeLevel(teacherId).catch(() => {});
+
   return json({ rating: saved }, 201);
 }
 

@@ -162,8 +162,105 @@ export function SettingsClient() {
         </Button>
       </Card>
 
+      <DeductionsCard />
+
       <IntroOutroCard />
     </div>
+  );
+}
+
+/**
+ * Platform revenue deduction (%) per teacher level.
+ * Teachers at "Needs improvement" cannot sell at all, so no rate is needed.
+ */
+function DeductionsCard() {
+  const { toast } = useToast();
+  const [good, setGood] = useState("30");
+  const [excellent, setExcellent] = useState("20");
+  const [master, setMaster] = useState("10");
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/admin/settings").then(async (r) => {
+      if (r.ok) {
+        const { settings } = await r.json();
+        for (const s of settings) {
+          if (s.key === "deduction_good") setGood(String(s.value));
+          if (s.key === "deduction_excellent") setExcellent(String(s.value));
+          if (s.key === "deduction_master") setMaster(String(s.value));
+        }
+      }
+      setLoaded(true);
+    });
+  }, []);
+
+  async function saveAll() {
+    const entries: Array<[string, string]> = [
+      ["deduction_good", good],
+      ["deduction_excellent", excellent],
+      ["deduction_master", master],
+    ];
+    for (const [, v] of entries) {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0 || n > 100) {
+        toast("Percentages must be between 0 and 100", "error");
+        return;
+      }
+    }
+    setSaving(true);
+    for (const [key, v] of entries) {
+      await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, value: Number(v) }),
+      });
+    }
+    setSaving(false);
+    toast("Deduction rates saved");
+  }
+
+  return (
+    <Card className="space-y-4">
+      <div>
+        <h3 className="font-semibold">Teacher Revenue Deductions</h3>
+        <p className="mt-1 text-sm text-muted">
+          Platform share (%) of each course sale, by teacher level. Teachers rated
+          &quot;Needs improvement&quot; have all courses paused automatically.
+        </p>
+      </div>
+      {loaded && (
+        <div className="grid grid-cols-3 gap-3">
+          <Input
+            label="Good (%)"
+            type="number"
+            min="0"
+            max="100"
+            value={good}
+            onChange={(e) => setGood(e.target.value)}
+          />
+          <Input
+            label="Excellent (%)"
+            type="number"
+            min="0"
+            max="100"
+            value={excellent}
+            onChange={(e) => setExcellent(e.target.value)}
+          />
+          <Input
+            label="Master (%)"
+            type="number"
+            min="0"
+            max="100"
+            value={master}
+            onChange={(e) => setMaster(e.target.value)}
+          />
+        </div>
+      )}
+      <Button disabled={saving || !loaded} onClick={saveAll}>
+        {saving ? "Saving…" : "Save Deduction Rates"}
+      </Button>
+    </Card>
   );
 }
 

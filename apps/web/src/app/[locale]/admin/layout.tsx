@@ -22,6 +22,7 @@ export default async function AdminLayout({
         { href: `${base}/users`, label: t.nav.users },
         { href: `${base}/teachers`, label: t.nav.teachers },
         { href: `${base}/courses`, label: t.nav.courses },
+        { href: `${base}/course-review`, label: t.nav.courseReview },
         { href: `${base}/subscriptions`, label: t.nav.subscriptions },
         { href: `${base}/notifications`, label: t.nav.notifications },
         { href: `${base}/complaints`, label: t.nav.complaints },

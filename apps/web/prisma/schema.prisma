@@ -188,6 +188,7 @@ model User {
   ratingsGiven         TeacherRating[]
   complaints           Complaint[]           @relation("StudentComplaints")
   complaintsHandled    Complaint[]           @relation("HandledComplaints")
+  coursePurchases      CoursePurchase[]
 
   @@index([role, status])
   @@index([countryId])
@@ -224,6 +225,13 @@ model CertificateProfile {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+enum TeacherLevel {
+  NEEDS_IMPROVEMENT
+  GOOD
+  EXCELLENT
+  MASTER
+}
+
 model TeacherProfile {
   id             String    @id @default(cuid())
   userId         String    @unique
@@ -232,6 +240,9 @@ model TeacherProfile {
   bio            String?
   specializations String[] @default([])
   isActive       Boolean   @default(true)
+  level          TeacherLevel @default(GOOD)
+  levelSetByAdmin Boolean  @default(false)
+  levelUpdatedAt DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   deletedAt      DateTime?
@@ -242,9 +253,104 @@ model TeacherProfile {
   subjects  TeacherSubject[]
   ratings   TeacherRating[]
   complaints Complaint[]
+  courses   Course[]
 
   @@index([countryId])
   @@index([deletedAt])
+  @@index([level])
+}
+
+enum CourseStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  CLOSED
+}
+
+enum PurchaseStatus {
+  PENDING
+  PAID
+  REJECTED
+}
+
+/// Teacher-authored paid course. Only visible to students when APPROVED,
+/// the teacher account is active, and the teacher level is GOOD or higher.
+model Course {
+  id            String       @id @default(cuid())
+  teacherId     String
+  stageId       String
+  subjectId     String
+  titleEn       String
+  titleAr       String?
+  titleKu       String?
+  titleTr       String?
+  description   String?
+  thumbnail     String?
+  price         Float
+  currency      String       @default("IQD")
+  status        CourseStatus @default(PENDING_REVIEW)
+  reviewNotes   String?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  closedByLevel Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
+
+  teacher   TeacherProfile   @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  stage     EducationalStage @relation(fields: [stageId], references: [id])
+  subject   Subject          @relation(fields: [subjectId], references: [id])
+  lessons   CourseLesson[]
+  purchases CoursePurchase[]
+
+  @@index([teacherId])
+  @@index([stageId])
+  @@index([subjectId])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model CourseLesson {
+  id            String   @id @default(cuid())
+  courseId      String
+  title         String
+  fileKey       String?
+  fileUrl       String?
+  durationSec   Int?
+  sortOrder     Int      @default(0)
+  isFreePreview Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId])
+}
+
+/// A student's purchase of a teacher course. Revenue split is snapshotted
+/// at approval time using the teacher's level deduction percentage.
+model CoursePurchase {
+  id             String         @id @default(cuid())
+  courseId       String
+  userId         String
+  price          Float
+  currency       String         @default("IQD")
+  teacherLevel   TeacherLevel?
+  deductionPct   Float?
+  platformAmount Float?
+  teacherAmount  Float?
+  status         PurchaseStatus @default(PENDING)
+  approvedById   String?
+  approvedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, userId])
+  @@index([userId])
+  @@index([status])
 }
 
 model TeacherSubject {
@@ -366,6 +472,7 @@ model EducationalStage {
   subjects         Subject[]
   packages         SubscriptionPackage[]
   studentProfiles  StudentProfile[]
+  courses          Course[]
 
   @@index([countryId])
   @@index([deletedAt])
@@ -396,6 +503,7 @@ model Subject {
   teachers   TeacherSubject[]
   quizzes    Quiz[]
   certificates Certificate[]
+  courses    Course[]
 
   @@index([countryId])
   @@index([stageId])

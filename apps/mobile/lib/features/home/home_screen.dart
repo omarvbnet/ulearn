@@ -7,6 +7,7 @@ import 'package:ulearn/features/courses/courses_screen.dart';
 import 'package:ulearn/features/notifications/notifications_screen.dart';
 import 'package:ulearn/features/profile/profile_screen.dart';
 import 'package:ulearn/features/rankings/rankings_screen.dart';
+import 'package:ulearn/features/store/store_screen.dart';
 import 'package:ulearn/features/subscriptions/subscriptions_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -19,7 +20,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
 
-  static const _titles = ['U Learn', 'Courses', 'Rankings', 'Subscribe', 'Profile'];
+  static const _titles = ['U Learn', 'Courses', 'Store', 'Ranks', 'Subscribe', 'Profile'];
 
   @override
   Widget build(BuildContext context) {
@@ -27,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final pages = [
       _HomeTab(name: auth.user?.fullLegalName),
       const CoursesScreen(),
+      const StoreScreen(),
       const RankingsScreen(),
       const SubscriptionsScreen(),
       const ProfileScreen(),
@@ -79,6 +81,7 @@ class _HomeScreenState extends State<HomeScreen> {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.menu_book_outlined), label: 'Courses'),
+          NavigationDestination(icon: Icon(Icons.storefront_outlined), label: 'Store'),
           NavigationDestination(icon: Icon(Icons.leaderboard_outlined), label: 'Ranks'),
           NavigationDestination(icon: Icon(Icons.card_membership_outlined), label: 'Subscribe'),
           NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profile'),

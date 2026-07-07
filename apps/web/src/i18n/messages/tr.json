@@ -21,7 +21,10 @@
     "logs": "Denetim Kayıtları",
     "complaints": "Şikayetler",
     "devices": "Cihazlar",
-    "support": "Destek"
+    "support": "Destek",
+    "store": "Kurs Mağazası",
+    "myCourses": "Kurslarım",
+    "courseReview": "Kurs İncelemesi"
   },
   "auth": {
     "phone": "Telefon Numarası",
@@ -161,7 +164,18 @@
     "complaintSubmitted": "Şikayet gönderildi — en kısa sürede inceleyeceğiz",
     "myComplaints": "Şikayetlerim",
     "noComplaints": "Bildirilen şikayet yok",
-    "resolution": "Karar"
+    "resolution": "Karar",
+    "storeTitle": "Kurs Mağazası",
+    "storeDescription": "Öğretmenlerimizden ücretli kurslar — yönetim tarafından incelenmiş ve onaylanmış",
+    "storeEmpty": "Henüz kurs yok",
+    "storeEmptyHint": "Öğretmen kursları onaylandıktan sonra burada görünecek.",
+    "buyCourse": "Kursu Satın Al",
+    "purchased": "Satın Alındı",
+    "purchasePending": "Ödeme onayı bekleniyor",
+    "purchaseRequested": "Satın alma talebi gönderildi — ödemenizi kısa süre içinde onaylayacağız",
+    "purchaseAlreadyRequested": "Bu kursu zaten talep ettiniz",
+    "enrolled": "kayıtlı",
+    "lessonsWord": "ders"
   },
   "quiz": {
     "questions": "Sorular",
