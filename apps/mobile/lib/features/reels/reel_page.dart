@@ -12,6 +12,7 @@ class ReelPage extends StatefulWidget {
     required this.onLike,
     required this.onComment,
     this.onTeacherTap,
+    this.onReport,
   });
 
   final Map<String, dynamic> video;
@@ -19,6 +20,7 @@ class ReelPage extends StatefulWidget {
   final VoidCallback onLike;
   final VoidCallback onComment;
   final VoidCallback? onTeacherTap;
+  final VoidCallback? onReport;
 
   @override
   State<ReelPage> createState() => _ReelPageState();
@@ -212,6 +214,14 @@ class _ReelPageState extends State<ReelPage> with SingleTickerProviderStateMixin
                   onTap: widget.onComment,
                 ),
                 const SizedBox(height: 18),
+                if (widget.onReport != null)
+                  _ActionButton(
+                    icon: Icons.flag_outlined,
+                    label: 'Report',
+                    color: Colors.orangeAccent,
+                    onTap: widget.onReport!,
+                  ),
+                if (widget.onReport != null) const SizedBox(height: 18),
                 _ActionButton(
                   icon: _muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
                   label: _muted ? 'Off' : 'Sound',

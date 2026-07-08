@@ -18,8 +18,9 @@ fi
 
 PODS_CHECK="ios/Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
 FIREBASE_CHECK="ios/Pods/FirebaseCore/FirebaseCore/Sources/Public/FirebaseCore/FIRApp.h"
+GOOGLEUTILS_CHECK="ios/Pods/GoogleUtilities/GoogleUtilities/AppDelegateSwizzler/Public/GoogleUtilities/GULAppDelegateSwizzler.h"
 
-if [ ! -f "$PODS_CHECK" ] || [ ! -f "$FIREBASE_CHECK" ]; then
+if [ ! -f "$PODS_CHECK" ] || [ ! -f "$FIREBASE_CHECK" ] || [ ! -f "$GOOGLEUTILS_CHECK" ]; then
   echo "CocoaPods incomplete or corrupted — reinstalling..."
   rm -rf ios/Pods ios/Podfile.lock ios/.symlinks
   flutter pub get

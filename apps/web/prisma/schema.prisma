@@ -202,6 +202,7 @@ model User {
   courseLessonProgress  CourseLessonProgress[]
   shortVideoLikes       ShortVideoLike[]
   shortVideoComments    ShortVideoComment[]
+  contentReports        ContentReport[]
   adLikes              AdLike[]
   stageChangeRequests  StageChangeRequest[]  @relation("StageRequests")
 
@@ -485,6 +486,51 @@ model ShortVideoComment {
 
   @@index([videoId, createdAt])
   @@index([userId])
+}
+
+enum ContentReportTargetType {
+  SHORT_VIDEO
+  STORE_COURSE
+  STORE_LESSON
+}
+
+enum ContentReportReason {
+  INAPPROPRIATE
+  SPAM
+  HARASSMENT
+  COPYRIGHT
+  VIOLENCE
+  MISLEADING
+  OTHER
+}
+
+enum ContentReportStatus {
+  PENDING
+  REVIEWED
+  DISMISSED
+  ACTION_TAKEN
+}
+
+/// User-submitted report on platform content (reels, courses, lessons).
+model ContentReport {
+  id           String                @id @default(cuid())
+  reporterId   String
+  targetType   ContentReportTargetType
+  targetId     String
+  reason       ContentReportReason
+  details      String
+  status       ContentReportStatus   @default(PENDING)
+  adminNotes   String?
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  reporter User @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@unique([reporterId, targetType, targetId])
+  @@index([status])
+  @@index([targetType, targetId])
 }
 
 /// A student's purchase of a teacher course. Revenue split is snapshotted

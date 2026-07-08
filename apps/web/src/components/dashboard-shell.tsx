@@ -7,7 +7,7 @@ import { ToastProvider } from "@/components/overlay";
 import { ULearnLogo } from "@/components/ulearn-logo";
 import { cn } from "@/lib/utils";
 
-export type NavItem = { href: string; label: string };
+export type NavItem = { href: string; label: string; badge?: number };
 
 export function DashboardShell({
   locale,
@@ -45,9 +45,14 @@ export function DashboardShell({
               <Link
                 key={item.href}
                 href={item.href}
-                className={cn("sidebar-link", active && "active")}
+                className={cn("sidebar-link flex items-center justify-between gap-2", active && "active")}
               >
-                {item.label}
+                <span>{item.label}</span>
+                {item.badge != null && item.badge > 0 && (
+                  <span className="min-w-[1.25rem] rounded-full bg-danger px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-white">
+                    {item.badge > 99 ? "99+" : item.badge}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -76,9 +81,14 @@ export function DashboardShell({
             <Link
               key={item.href}
               href={item.href}
-              className="whitespace-nowrap rounded-lg px-3 py-1.5 text-sm text-muted hover:bg-white/5"
+              className="flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm text-muted hover:bg-white/5"
             >
               {item.label}
+              {item.badge != null && item.badge > 0 && (
+                <span className="rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  {item.badge > 99 ? "99+" : item.badge}
+                </span>
+              )}
             </Link>
           ))}
         </nav>

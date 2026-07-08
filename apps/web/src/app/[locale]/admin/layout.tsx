@@ -1,4 +1,4 @@
-import { DashboardShell } from "@/components/dashboard-shell";
+import { AdminDashboardShell } from "@/components/admin-dashboard-shell";
 import { getDictionary } from "@/i18n/config";
 import type { ReactNode } from "react";
 
@@ -14,26 +14,28 @@ export default async function AdminLayout({
   const base = `/${locale}/admin`;
 
   return (
-    <DashboardShell
+    <AdminDashboardShell
       locale={locale}
       title="Admin"
       nav={[
         { href: base, label: t.nav.dashboard },
-        { href: `${base}/users`, label: t.nav.users },
+        { href: `${base}/users`, label: t.nav.users, countKey: "users" },
         { href: `${base}/teachers`, label: t.nav.teachers },
         { href: `${base}/courses`, label: t.nav.courses },
-        { href: `${base}/course-review`, label: t.nav.courseReview },
-        { href: `${base}/stage-requests`, label: t.nav.stageRequests },
+        { href: `${base}/course-review`, label: t.nav.courseReview, countKey: "courseReview" },
+        { href: `${base}/short-videos`, label: t.nav.shortVideos, countKey: "shortVideos" },
+        { href: `${base}/stage-requests`, label: t.nav.stageRequests, countKey: "stageRequests" },
         { href: `${base}/ads`, label: t.nav.ads },
-        { href: `${base}/subscriptions`, label: t.nav.subscriptions },
+        { href: `${base}/subscriptions`, label: t.nav.subscriptions, countKey: "subscriptions" },
         { href: `${base}/notifications`, label: t.nav.notifications },
-        { href: `${base}/complaints`, label: t.nav.complaints },
+        { href: `${base}/complaints`, label: t.nav.complaints, countKey: "complaints" },
+        { href: `${base}/content-reports`, label: t.nav.contentReports, countKey: "contentReports" },
         { href: `${base}/analytics`, label: t.nav.analytics },
         { href: `${base}/logs`, label: t.nav.logs },
         { href: `${base}/settings`, label: t.nav.settings },
       ]}
     >
       {children}
-    </DashboardShell>
+    </AdminDashboardShell>
   );
 }

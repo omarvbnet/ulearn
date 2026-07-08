@@ -6,6 +6,7 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
+import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
 
@@ -752,10 +753,10 @@ class _AdsCarouselState extends State<_AdsCarousel> {
                       fit: StackFit.expand,
                       children: [
                         if (imageUrl.isNotEmpty)
-                          Image.network(
-                            ApiClient.absoluteUrl(imageUrl),
+                          CachedImage(
+                            url: imageUrl,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => const _CoverFallback(),
+                            error: const _CoverFallback(),
                           )
                         else
                           const _CoverFallback(),
@@ -936,12 +937,11 @@ class CourseCard extends StatelessWidget {
                   fit: StackFit.expand,
                   children: [
                     if (thumbnail != null && thumbnail.isNotEmpty)
-                      Image.network(
-                        ApiClient.absoluteUrl(thumbnail),
+                      CachedImage(
+                        url: thumbnail,
                         fit: BoxFit.cover,
-                        loadingBuilder: (context, child, progress) =>
-                            progress == null ? child : const _CoverFallback(),
-                        errorBuilder: (_, _, _) => const _CoverFallback(),
+                        placeholder: const _CoverFallback(),
+                        error: const _CoverFallback(),
                       )
                     else
                       const _CoverFallback(),

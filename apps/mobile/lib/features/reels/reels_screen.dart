@@ -8,6 +8,7 @@ import 'package:ulearn/features/reels/reel_page.dart';
 import 'package:ulearn/features/reels/reel_comments_sheet.dart';
 import 'package:ulearn/features/notifications/notifications_screen.dart';
 import 'package:ulearn/features/reels/teacher_profile_screen.dart';
+import 'package:ulearn/features/report/report_content_sheet.dart';
 
 /// Vertical short-video feed (reels) with likes and comments.
 class ReelsScreen extends StatefulWidget {
@@ -142,6 +143,17 @@ class _ReelsScreenState extends State<ReelsScreen> {
     );
   }
 
+  Future<void> _reportVideo(Map<String, dynamic> video) async {
+    final id = video['id']?.toString();
+    if (id == null) return;
+    await ReportContentSheet.show(
+      context,
+      targetType: 'SHORT_VIDEO',
+      targetId: id,
+      contentTitle: video['title']?.toString() ?? 'Reel',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -216,6 +228,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
                 onLike: () => _toggleLike(index),
                 onComment: () => _openComments(index),
                 onTeacherTap: () => _openTeacherProfile(video),
+                onReport: () => _reportVideo(video),
               );
             },
           ),

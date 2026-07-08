@@ -54,6 +54,17 @@ class AppTheme {
           ),
           labelStyle: const TextStyle(color: muted),
         ),
+        listTileTheme: const ListTileThemeData(
+          textColor: foreground,
+          iconColor: accent,
+        ),
+        textTheme: const TextTheme(
+          bodyLarge: TextStyle(color: foreground),
+          bodyMedium: TextStyle(color: foreground),
+          bodySmall: TextStyle(color: muted),
+          titleMedium: TextStyle(color: foreground, fontWeight: FontWeight.w600),
+          titleSmall: TextStyle(color: foreground),
+        ),
         cardTheme: CardThemeData(
           color: card,
           shape: RoundedRectangleBorder(

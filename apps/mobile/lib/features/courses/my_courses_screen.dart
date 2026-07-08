@@ -5,6 +5,7 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
+import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
@@ -242,11 +243,10 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                                             height: 130,
                                             width: double.infinity,
                                             child: thumb != null && thumb.isNotEmpty
-                                                ? Image.network(
-                                                    ApiClient.absoluteUrl(thumb),
+                                                ? CachedImage(
+                                                    url: thumb,
                                                     fit: BoxFit.cover,
-                                                    errorBuilder: (_, _, _) =>
-                                                        _CoverFallback(title: title),
+                                                    error: _CoverFallback(title: title),
                                                   )
                                                 : _CoverFallback(title: title),
                                           ),

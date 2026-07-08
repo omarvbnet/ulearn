@@ -10,6 +10,7 @@ import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/store/course_inline_player.dart';
 import 'package:ulearn/features/store/lesson_qa_section.dart';
 import 'package:ulearn/features/quiz/quiz_screen.dart';
+import 'package:ulearn/features/report/report_content_sheet.dart';
 
 /// Store course detail with inline free-video playback, smart lesson covers,
 /// fullscreen casting watermark, and per-video Q&A.
@@ -51,6 +52,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   void _selectInitialLesson(List<Map<String, dynamic>> lessons, bool unlocked) {
+    for (final l in lessons) {
+      if (_canWatch(l, unlocked) && l['isCompleted'] != true && l['completed'] != true) {
+        _activeLesson = l;
+        return;
+      }
+    }
     for (final l in lessons) {
       if (_canWatch(l, unlocked)) {
         _activeLesson = l;
@@ -214,6 +221,49 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     setState(() => _activeLesson = lesson);
   }
 
+  Map<String, dynamic>? _nextWatchableLesson(
+    List<Map<String, dynamic>> lessons,
+    bool unlocked, {
+    required Map<String, dynamic> current,
+  }) {
+    final currentId = current['id']?.toString();
+    final idx = lessons.indexWhere((l) => l['id']?.toString() == currentId);
+    if (idx < 0) return null;
+    for (var i = idx + 1; i < lessons.length; i++) {
+      if (_canWatch(lessons[i], unlocked)) return lessons[i];
+    }
+    return null;
+  }
+
+  void _onLessonCompleted(Map<String, dynamic> lesson) {
+    final lessons =
+        ((_course?['lessons'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+    final unlocked = _purchased ||
+        _course?['purchaseStatus'] == 'PAID' ||
+        ((_course?['price'] as num?)?.toDouble() ?? 0) <= 0;
+
+    setState(() {
+      lesson['isCompleted'] = true;
+      lesson['completed'] = true;
+      lesson['progressPct'] = 100;
+    });
+
+    final next = _nextWatchableLesson(lessons, unlocked, current: lesson);
+    if (next == null) return;
+
+    Future.delayed(const Duration(milliseconds: 900), () {
+      if (!mounted) return;
+      setState(() => _activeLesson = next);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Up next: ${next['title'] ?? 'Lesson'}'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -281,6 +331,16 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       appBar: AppBar(
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
+          IconButton(
+            tooltip: 'Report course',
+            icon: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
+            onPressed: () => ReportContentSheet.show(
+              context,
+              targetType: 'STORE_COURSE',
+              targetId: widget.courseId,
+              contentTitle: title,
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: FavoriteButton(
@@ -300,12 +360,36 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               url: ApiClient.absoluteUrl(activeUrl),
               title: active?['title']?.toString() ?? 'Lesson',
               lessonId: activeId,
+              onCompleted: active != null ? () => _onLessonCompleted(active) : null,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Text(
               active?['title']?.toString() ?? '',
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.foreground,
+                height: 1.3,
+              ),
             ),
+            if (active?['isCompleted'] == true || active?['completed'] == true)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  children: [
+                    Icon(Icons.check_circle_rounded, size: 16, color: Colors.greenAccent.withValues(alpha: 0.9)),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Completed',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.greenAccent.withValues(alpha: 0.9),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             const SizedBox(height: 16),
           ] else if (!unlocked) ...[
             Container(
@@ -419,10 +503,28 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               children: [
                 const Text(
                   'Videos',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.foreground,
+                  ),
                 ),
                 const SizedBox(width: 8),
-                Text('${lessons.length}', style: const TextStyle(color: AppTheme.muted)),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${lessons.length}',
+                    style: const TextStyle(
+                      color: AppTheme.accent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
                 const Spacer(),
                 if (!unlocked)
                   const Text(
@@ -432,112 +534,188 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           ...lessons.asMap().entries.map((e) {
             final lesson = e.value;
             final canWatch = _canWatch(lesson, unlocked);
             final isPreview = lesson['isFreePreview'] == true;
             final isActive = activeId == lesson['id']?.toString();
+            final isCompleted = lesson['isCompleted'] == true || lesson['completed'] == true;
+            final duration = (lesson['durationSec'] as num?)?.toInt() ?? 0;
+            final title = lesson['title']?.toString() ?? 'Lesson';
 
             return StaggeredItem(
               index: e.key + 4,
               child: Container(
-                margin: const EdgeInsets.only(bottom: 10),
+                margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
-                  color: isActive ? AppTheme.card : AppTheme.background,
-                  borderRadius: BorderRadius.circular(14),
+                  color: AppTheme.card,
+                  borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                     color: isActive
-                        ? AppTheme.accent.withValues(alpha: 0.5)
-                        : canWatch
-                            ? AppTheme.cardBorder
-                            : AppTheme.cardBorder.withValues(alpha: 0.6),
+                        ? AppTheme.accent.withValues(alpha: 0.55)
+                        : AppTheme.cardBorder,
+                    width: isActive ? 1.5 : 1,
                   ),
+                  boxShadow: isActive
+                      ? [
+                          BoxShadow(
+                            color: AppTheme.accent.withValues(alpha: 0.12),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ]
+                      : null,
                 ),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(14),
-                  onTap: () => _selectLesson(lesson, unlocked),
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Row(
-                      children: [
-                        LessonCover(
-                          lesson: lesson,
-                          width: 112,
-                          height: 64,
-                          active: isActive,
-                          showPlay: canWatch,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '${e.key + 1}. ${lesson['title'] ?? 'Lesson'}',
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                                  color: canWatch ? AppTheme.foreground : AppTheme.muted,
-                                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () => _selectLesson(lesson, unlocked),
+                    child: IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Container(
+                            width: 4,
+                            decoration: BoxDecoration(
+                              color: isActive
+                                  ? AppTheme.accent
+                                  : isCompleted
+                                      ? Colors.greenAccent.withValues(alpha: 0.7)
+                                      : Colors.transparent,
+                              borderRadius: const BorderRadius.horizontal(
+                                left: Radius.circular(16),
                               ),
-                              const SizedBox(height: 6),
-                              Row(
+                            ),
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
+                              child: Row(
                                 children: [
-                                  if (isPreview && !unlocked)
-                                    Container(
-                                      margin: const EdgeInsets.only(right: 8),
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 7, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: Colors.green.withValues(alpha: 0.15),
-                                        borderRadius: BorderRadius.circular(8),
+                                  LessonCover(
+                                    lesson: lesson,
+                                    width: 100,
+                                    height: 58,
+                                    active: isActive,
+                                    showPlay: canWatch,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Text(
+                                          '${e.key + 1}. $title',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 14.5,
+                                            fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+                                            color: canWatch
+                                                ? AppTheme.foreground
+                                                : AppTheme.muted.withValues(alpha: 0.85),
+                                            height: 1.25,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Row(
+                                          children: [
+                                            if (isCompleted) ...[
+                                              Icon(
+                                                Icons.check_circle_rounded,
+                                                size: 14,
+                                                color: Colors.greenAccent.withValues(alpha: 0.95),
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                'Done',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.greenAccent.withValues(alpha: 0.95),
+                                                ),
+                                              ),
+                                              if (duration > 0) const SizedBox(width: 8),
+                                            ],
+                                            if (duration > 0)
+                                              Text(
+                                                formatDuration(duration),
+                                                style: const TextStyle(
+                                                  fontSize: 11.5,
+                                                  color: AppTheme.muted,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            if (isPreview && !unlocked) ...[
+                                              const SizedBox(width: 8),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(
+                                                  horizontal: 6,
+                                                  vertical: 2,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.green.withValues(alpha: 0.15),
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
+                                                child: const Text(
+                                                  'FREE',
+                                                  style: TextStyle(
+                                                    fontSize: 9,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.greenAccent,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                            if (!canWatch) ...[
+                                              const SizedBox(width: 6),
+                                              Icon(
+                                                Icons.lock_outline,
+                                                size: 13,
+                                                color: AppTheme.muted.withValues(alpha: 0.7),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      ReactionButton(
+                                        icon: Icons.thumb_up_outlined,
+                                        activeIcon: Icons.thumb_up,
+                                        active: lesson['likedByMe'] == true,
+                                        activeColor: AppTheme.accent,
+                                        count: (lesson['likes'] as num?)?.toInt() ?? 0,
+                                        onTap: () => _toggleLessonLike(lesson),
                                       ),
-                                      child: const Text(
-                                        'FREE',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.greenAccent,
+                                      const SizedBox(height: 4),
+                                      GestureDetector(
+                                        onTap: () => _toggleLessonFavorite(lesson),
+                                        child: Icon(
+                                          lesson['favoritedByMe'] == true
+                                              ? Icons.favorite
+                                              : Icons.favorite_border,
+                                          size: 17,
+                                          color: lesson['favoritedByMe'] == true
+                                              ? Colors.redAccent
+                                              : AppTheme.muted,
                                         ),
                                       ),
-                                    ),
-                                  if (!canWatch)
-                                    const Icon(Icons.lock_outline,
-                                        size: 14, color: AppTheme.muted),
+                                    ],
+                                  ),
+                                  const SizedBox(width: 4),
                                 ],
                               ),
-                            ],
+                            ),
                           ),
-                        ),
-                        Column(
-                          children: [
-                            ReactionButton(
-                              icon: Icons.thumb_up_outlined,
-                              activeIcon: Icons.thumb_up,
-                              active: lesson['likedByMe'] == true,
-                              activeColor: AppTheme.accent,
-                              count: (lesson['likes'] as num?)?.toInt() ?? 0,
-                              onTap: () => _toggleLessonLike(lesson),
-                            ),
-                            const SizedBox(height: 6),
-                            GestureDetector(
-                              onTap: () => _toggleLessonFavorite(lesson),
-                              child: Icon(
-                                lesson['favoritedByMe'] == true
-                                    ? Icons.favorite
-                                    : Icons.favorite_border,
-                                size: 18,
-                                color: lesson['favoritedByMe'] == true
-                                    ? Colors.redAccent
-                                    : AppTheme.muted,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -576,7 +754,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                   ),
                   child: ListTile(
                     leading: const Icon(Icons.quiz_outlined, color: AppTheme.accent),
-                    title: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    title: Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AppTheme.foreground, fontWeight: FontWeight.w600),
+                    ),
                     subtitle: Text(
                       '$qCount questions · pass ${(quiz['passPercentage'] as num?)?.toInt() ?? 50}%',
                       style: const TextStyle(fontSize: 12, color: AppTheme.muted),

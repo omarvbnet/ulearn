@@ -74,6 +74,17 @@ export async function GET(
   const favCounts = new Map(favGroups.map((g) => [g.lessonId, g._count]));
   const favSet = new Set(myLessonFavs.map((f) => f.lessonId));
 
+  const progressRows = await prisma.courseLessonProgress.findMany({
+    where: { userId, lessonId: { in: lessonIds } },
+    select: {
+      lessonId: true,
+      isCompleted: true,
+      completionPct: true,
+      positionSec: true,
+    },
+  });
+  const progressMap = new Map(progressRows.map((p) => [p.lessonId, p]));
+
   const lessons = await Promise.all(
     course.lessons.map(async (l) => {
       const canWatch = purchased || l.isFreePreview || course.price <= 0;
@@ -97,6 +108,9 @@ export async function GET(
         likedByMe: likedSet.has(l.id),
         favoritesCount: favCounts.get(l.id) ?? 0,
         favoritedByMe: favSet.has(l.id),
+        isCompleted: progressMap.get(l.id)?.isCompleted ?? false,
+        progressPct: progressMap.get(l.id)?.completionPct ?? 0,
+        watchPositionSec: progressMap.get(l.id)?.positionSec ?? 0,
       };
     })
   );

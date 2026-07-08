@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 
@@ -48,7 +49,7 @@ class ProfileAvatar extends StatelessWidget {
         gradient: resolved == null ? AppTheme.gradient : null,
         image: resolved != null
             ? DecorationImage(
-                image: NetworkImage(resolved),
+                image: cachedImageProvider(resolved),
                 fit: BoxFit.cover,
               )
             : null,

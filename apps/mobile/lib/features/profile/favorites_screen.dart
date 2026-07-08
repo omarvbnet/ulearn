@@ -4,6 +4,7 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
+import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
@@ -217,10 +218,10 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                           width: 84,
                           height: 56,
                           child: thumbnail != null && thumbnail.isNotEmpty
-                              ? Image.network(
-                                  ApiClient.absoluteUrl(thumbnail),
+                              ? CachedImage(
+                                  url: thumbnail,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) => const _VideoThumbFallback(),
+                                  error: const _VideoThumbFallback(),
                                 )
                               : const _VideoThumbFallback(),
                         ),

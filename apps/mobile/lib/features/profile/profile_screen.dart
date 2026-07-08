@@ -8,6 +8,8 @@ import 'package:ulearn/features/profile/favorites_screen.dart';
 import 'package:ulearn/features/profile/profile_avatar.dart';
 import 'package:ulearn/features/profile/profile_photo_service.dart';
 import 'package:ulearn/features/profile/stage_request_screen.dart';
+import 'package:ulearn/features/rankings/rankings_screen.dart';
+import 'package:ulearn/features/report/my_reports_screen.dart';
 import 'package:ulearn/features/store/teacher_studio_screen.dart';
 import 'package:ulearn/features/subscriptions/subscriptions_screen.dart';
 
@@ -166,6 +168,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const SizedBox(height: 16),
         StaggeredItem(
           index: 2,
+          child: Card(
+            child: ListTile(
+              leading: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
+              title: const Text('My Reports'),
+              subtitle: const Text(
+                'Content you reported for review',
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
+              ),
+              trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const MyReportsScreen()),
+              ),
+            ),
+          ),
+        ),
+        StaggeredItem(
+          index: 3,
+          child: Card(
+            child: ListTile(
+              leading: const Icon(Icons.leaderboard_outlined, color: AppTheme.primary),
+              title: const Text('Rankings'),
+              subtitle: const Text(
+                'Leaderboard and top learners',
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
+              ),
+              trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => Scaffold(
+                    appBar: AppBar(title: const Text('Rankings')),
+                    body: const RankingsScreen(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        StaggeredItem(
+          index: 4,
           child: Card(
             child: ListTile(
               leading: const Icon(Icons.favorite_outline, color: Colors.redAccent),

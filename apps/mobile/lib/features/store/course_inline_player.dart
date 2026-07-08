@@ -10,7 +10,7 @@ import 'package:ulearn/features/video/video_protection.dart';
 import 'package:video_player/video_player.dart';
 
 /// Inline / fullscreen course video player with brand logo, cast watermark,
-/// and standard transport controls.
+/// completion tracking, and standard transport controls.
 class CourseInlinePlayer extends StatefulWidget {
   const CourseInlinePlayer({
     super.key,
@@ -18,12 +18,14 @@ class CourseInlinePlayer extends StatefulWidget {
     required this.title,
     this.lessonId,
     this.autoPlay = true,
+    this.onCompleted,
   });
 
   final String url;
   final String title;
   final String? lessonId;
   final bool autoPlay;
+  final VoidCallback? onCompleted;
 
   @override
   State<CourseInlinePlayer> createState() => _CourseInlinePlayerState();
@@ -38,11 +40,33 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   bool _showControls = true;
   Timer? _progressTimer;
   bool _completionSaved = false;
+  bool _showCompleteFlash = false;
 
   @override
   void initState() {
     super.initState();
     _init();
+  }
+
+  @override
+  void didUpdateWidget(CourseInlinePlayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url || oldWidget.lessonId != widget.lessonId) {
+      _progressTimer?.cancel();
+      _controller?.removeListener(_onControllerTick);
+      _controller?.dispose();
+      _controller = null;
+      _completionSaved = false;
+      _showCompleteFlash = false;
+      _loading = true;
+      _error = null;
+      _init();
+    }
+  }
+
+  void _onControllerTick() {
+    if (mounted) setState(() {});
+    _onPlaybackUpdate();
   }
 
   void _onPlaybackUpdate() {
@@ -54,7 +78,14 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     final nearEnd = v.isCompleted || v.position.inSeconds >= duration - 2;
     if (nearEnd) {
       _completionSaved = true;
-      _saveProgress(completed: true);
+      _saveProgress(completed: true).then((_) {
+        if (!mounted) return;
+        setState(() => _showCompleteFlash = true);
+        widget.onCompleted?.call();
+        Future.delayed(const Duration(milliseconds: 1400), () {
+          if (mounted) setState(() => _showCompleteFlash = false);
+        });
+      });
     }
   }
 
@@ -83,7 +114,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
 
   Future<void> _init() async {
     final auth = context.read<AuthProvider>();
-    _protection = VideoProtectionController(
+    _protection ??= VideoProtectionController(
       studentName: auth.user?.fullLegalName ?? 'Student',
       userId: auth.user?.id ?? 'unknown',
       phone: auth.user?.phone ?? '',
@@ -97,10 +128,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       await _controller!.initialize();
       if (!mounted) return;
       if (widget.autoPlay) await _controller!.play();
-      _controller!.addListener(() {
-        if (mounted) setState(() {});
-        _onPlaybackUpdate();
-      });
+      _controller!.addListener(_onControllerTick);
       setState(() => _loading = false);
       _startProgressTimer();
     } catch (_) {
@@ -116,6 +144,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   void dispose() {
     _progressTimer?.cancel();
     _saveProgress();
+    _controller?.removeListener(_onControllerTick);
     _controller?.dispose();
     _protection?.disable();
     super.dispose();
@@ -185,6 +214,39 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
                       _controller!.setPlaybackSpeed(s);
                     },
                     onFullscreen: _enterFullscreen,
+                  ),
+                ),
+                AnimatedOpacity(
+                  opacity: _showCompleteFlash ? 1 : 0,
+                  duration: const Duration(milliseconds: 280),
+                  child: IgnorePointer(
+                    child: Container(
+                      color: Colors.black54,
+                      alignment: Alignment.center,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.6)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.check_circle_rounded, color: Colors.greenAccent),
+                            SizedBox(width: 10),
+                            Text(
+                              'Completed',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ],

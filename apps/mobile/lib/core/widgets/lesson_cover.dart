@@ -1,6 +1,6 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 
@@ -40,10 +40,10 @@ class LessonCover extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             if (thumb != null && thumb.isNotEmpty)
-              Image.network(
-                ApiClient.absoluteUrl(thumb),
+              CachedImage(
+                url: thumb,
                 fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => _ProceduralCover(id: id, title: title),
+                error: _ProceduralCover(id: id, title: title),
               )
             else
               _ProceduralCover(id: id, title: title),
