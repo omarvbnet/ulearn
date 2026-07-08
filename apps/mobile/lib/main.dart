@@ -8,6 +8,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/features/auth/login_screen.dart';
 import 'package:ulearn/features/home/home_screen.dart';
 import 'package:ulearn/features/auth/pending_screen.dart';
+import 'package:ulearn/features/splash/splash_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -54,27 +55,53 @@ class ULearnApp extends StatelessWidget {
   }
 }
 
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  /// Keep the splash up long enough for the logo draw-in to finish.
+  static const _minSplash = Duration(milliseconds: 2600);
+  bool _splashDone = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(_minSplash, () {
+      if (mounted) setState(() => _splashDone = true);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
 
-    if (auth.loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: AppTheme.accent)),
-      );
+    final Widget child;
+    if (auth.loading || !_splashDone) {
+      child = const SplashScreen();
+    } else if (!auth.isAuthenticated) {
+      child = const LoginScreen();
+    } else if (auth.user?.status == 'PENDING') {
+      child = const PendingScreen();
+    } else {
+      child = const HomeScreen();
     }
 
-    if (!auth.isAuthenticated) {
-      return const LoginScreen();
-    }
-
-    if (auth.user?.status == 'PENDING') {
-      return const PendingScreen();
-    }
-
-    return const HomeScreen();
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 600),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (widget, animation) => FadeTransition(
+        opacity: animation,
+        child: ScaleTransition(
+          scale: Tween(begin: 1.02, end: 1.0).animate(animation),
+          child: widget,
+        ),
+      ),
+      child: KeyedSubtree(key: ValueKey(child.runtimeType), child: child),
+    );
   }
 }

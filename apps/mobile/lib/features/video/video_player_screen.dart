@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/quiz/quiz_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
 import 'package:video_player/video_player.dart';
@@ -151,7 +152,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
+          ? const SkeletonVideoPlayer()
           : _error != null
               ? Center(
                   child: Padding(

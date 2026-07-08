@@ -115,6 +115,7 @@ model Country {
   notifications      Notification[]
   introOutros        IntroOutro[]
   settings           SystemSetting[]
+  advertisements     Advertisement[]
 
   @@index([deletedAt])
 }
@@ -189,6 +190,12 @@ model User {
   complaints           Complaint[]           @relation("StudentComplaints")
   complaintsHandled    Complaint[]           @relation("HandledComplaints")
   coursePurchases      CoursePurchase[]
+  courseReactions      CourseReaction[]
+  courseFavorites      CourseFavorite[]
+  lessonLikes          CourseLessonLike[]
+  lessonFavorites      CourseLessonFavorite[]
+  adLikes              AdLike[]
+  stageChangeRequests  StageChangeRequest[]  @relation("StageRequests")
 
   @@index([role, status])
   @@index([countryId])
@@ -293,6 +300,7 @@ model Course {
   reviewedById  String?
   reviewedAt    DateTime?
   closedByLevel Boolean      @default(false)
+  viewCount     Int          @default(0)
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
   deletedAt     DateTime?
@@ -302,6 +310,8 @@ model Course {
   subject   Subject          @relation(fields: [subjectId], references: [id])
   lessons   CourseLesson[]
   purchases CoursePurchase[]
+  reactions CourseReaction[]
+  favorites CourseFavorite[]
 
   @@index([teacherId])
   @@index([stageId])
@@ -322,7 +332,9 @@ model CourseLesson {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course    Course                 @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  likes     CourseLessonLike[]
+  favorites CourseLessonFavorite[]
 
   @@index([courseId])
 }
@@ -349,6 +361,139 @@ model CoursePurchase {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([courseId, userId])
+  @@index([userId])
+  @@index([status])
+}
+
+enum ReactionType {
+  LIKE
+  DISLIKE
+}
+
+/// Student like/dislike on a store course. One reaction per user per course.
+model CourseReaction {
+  id        String       @id @default(cuid())
+  courseId  String
+  userId    String
+  type      ReactionType
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, userId])
+  @@index([courseId, type])
+}
+
+/// Student bookmark on a store course, shown in the profile favorites.
+model CourseFavorite {
+  id        String   @id @default(cuid())
+  courseId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, userId])
+  @@index([userId])
+}
+
+/// Student like on an individual course video.
+model CourseLessonLike {
+  id        String   @id @default(cuid())
+  lessonId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  lesson CourseLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([lessonId, userId])
+  @@index([lessonId])
+}
+
+/// Student bookmark on an individual course video, shown in the profile favorites.
+model CourseLessonFavorite {
+  id        String   @id @default(cuid())
+  lessonId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  lesson CourseLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([lessonId, userId])
+  @@index([userId])
+}
+
+/// Promotional banner shown on the mobile home screen.
+model Advertisement {
+  id        String    @id @default(cuid())
+  countryId String?
+  titleEn   String?
+  titleAr   String?
+  titleKu   String?
+  titleTr   String?
+  imageKey  String?
+  imageUrl  String
+  linkUrl   String?
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  startsAt  DateTime?
+  endsAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  country Country? @relation(fields: [countryId], references: [id])
+  likes   AdLike[]
+
+  @@index([isActive, sortOrder])
+  @@index([deletedAt])
+}
+
+model AdLike {
+  id        String   @id @default(cuid())
+  adId      String
+  userId    String
+  createdAt DateTime @default(now())
+
+  ad   Advertisement @relation(fields: [adId], references: [id], onDelete: Cascade)
+  user User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([adId, userId])
+  @@index([adId])
+}
+
+enum StageRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Student request to move to a different educational stage.
+/// Requires a certificate attachment and admin approval.
+model StageChangeRequest {
+  id               String             @id @default(cuid())
+  userId           String
+  currentStageId   String?
+  requestedStageId String
+  certificateKey   String?
+  certificateUrl   String?
+  note             String?
+  status           StageRequestStatus @default(PENDING)
+  reviewNotes      String?
+  reviewedById     String?
+  reviewedAt       DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  user           User              @relation("StageRequests", fields: [userId], references: [id], onDelete: Cascade)
+  currentStage   EducationalStage? @relation("StageRequestCurrent", fields: [currentStageId], references: [id])
+  requestedStage EducationalStage  @relation("StageRequestRequested", fields: [requestedStageId], references: [id])
+
   @@index([userId])
   @@index([status])
 }
@@ -473,6 +618,8 @@ model EducationalStage {
   packages         SubscriptionPackage[]
   studentProfiles  StudentProfile[]
   courses          Course[]
+  stageRequestsFrom StageChangeRequest[] @relation("StageRequestCurrent")
+  stageRequestsTo   StageChangeRequest[] @relation("StageRequestRequested")
 
   @@index([countryId])
   @@index([deletedAt])

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/widgets/ulearn_logo.dart';
 
 class PendingScreen extends StatelessWidget {
   const PendingScreen({super.key});
@@ -16,7 +17,7 @@ class PendingScreen extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Image.asset('assets/images/logo.png', width: 80),
+                const PulsingULearnLogo(size: 96),
                 const SizedBox(height: 24),
                 const Text(
                   'Account Under Review',

@@ -20,8 +20,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _parentPhone = TextEditingController();
   final _email = TextEditingController();
   String _gender = 'MALE';
+  List<Map<String, dynamic>> _stages = [];
+  String? _stageId;
   bool _loading = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStages();
+  }
+
+  Future<void> _loadStages() async {
+    try {
+      final data = await context.read<ApiClient>().get('/api/stages');
+      if (!mounted) return;
+      setState(() {
+        _stages =
+            ((data['stages'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+      });
+    } catch (_) {}
+  }
 
   @override
   void dispose() {
@@ -60,6 +79,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (_type == 'STUDENT') {
         payload['parentPhone'] = _parentPhone.text.trim();
+        if (_stageId != null) payload['educationalStageId'] = _stageId;
       }
 
       final data = await api.post('/api/auth/register', payload);
@@ -119,6 +139,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
               keyboardType: TextInputType.phone,
               textDirection: TextDirection.ltr,
               decoration: const InputDecoration(labelText: 'Parent Phone'),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _stageId,
+              items: _stages
+                  .map((s) => DropdownMenuItem(
+                        value: s['id'].toString(),
+                        child: Text(
+                          (s['nameAr']?.toString().isNotEmpty ?? false)
+                              ? s['nameAr'].toString()
+                              : s['nameEn']?.toString() ?? '',
+                        ),
+                      ))
+                  .toList(),
+              onChanged: (v) => setState(() => _stageId = v),
+              decoration: const InputDecoration(labelText: 'Educational Stage'),
             ),
           ],
           const SizedBox(height: 24),

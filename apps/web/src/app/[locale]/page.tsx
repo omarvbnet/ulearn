@@ -1,8 +1,8 @@
-import Image from "next/image";
 import Link from "next/link";
 import { getDictionary } from "@/i18n/config";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { Button } from "@/components/ui";
+import { ULearnLogo } from "@/components/ulearn-logo";
 
 export default async function LandingPage({
   params,
@@ -16,7 +16,7 @@ export default async function LandingPage({
     <div className="relative min-h-screen overflow-hidden">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
         <div className="flex items-center gap-3">
-          <Image src="/logo.png" alt="U Learn" width={48} height={48} className="rounded-lg" />
+          <ULearnLogo size={48} />
           <span className="text-xl font-bold glow-text">{t.brand}</span>
         </div>
         <div className="flex items-center gap-3">
@@ -30,12 +30,9 @@ export default async function LandingPage({
       <main className="mx-auto flex max-w-6xl flex-col items-center px-6 pb-24 pt-12 text-center">
         <div className="relative mb-8">
           <div className="absolute inset-0 rounded-full bg-primary/20 blur-3xl" />
-          <Image
-            src="/logo.png"
-            alt="U Learn"
-            width={200}
-            height={200}
-            priority
+          <ULearnLogo
+            size={200}
+            animated
             className="relative drop-shadow-[0_0_40px_rgba(160,32,240,0.45)]"
           />
         </div>

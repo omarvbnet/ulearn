@@ -365,17 +365,49 @@ export class TeacherCourseService {
   // ── Student browse & purchase ───────────────────────────────
 
   /** Courses visible to students: approved, active teacher, level >= GOOD. */
-  static async listPublishedCourses(filter?: { stageId?: string; subjectId?: string }) {
+  static async listPublishedCourses(filter?: {
+    stageId?: string;
+    subjectId?: string;
+    q?: string;
+    levels?: TeacherLevel[];
+  }) {
+    const q = filter?.q?.trim();
     return prisma.course.findMany({
       where: {
         status: "APPROVED",
         deletedAt: null,
         ...(filter?.stageId ? { stageId: filter.stageId } : {}),
         ...(filter?.subjectId ? { subjectId: filter.subjectId } : {}),
+        // Free-text search across course titles, teacher names and video titles.
+        ...(q
+          ? {
+              OR: [
+                { titleEn: { contains: q, mode: "insensitive" as const } },
+                { titleAr: { contains: q, mode: "insensitive" as const } },
+                { titleKu: { contains: q, mode: "insensitive" as const } },
+                { titleTr: { contains: q, mode: "insensitive" as const } },
+                { description: { contains: q, mode: "insensitive" as const } },
+                {
+                  teacher: {
+                    user: {
+                      fullLegalName: { contains: q, mode: "insensitive" as const },
+                    },
+                  },
+                },
+                {
+                  lessons: {
+                    some: { title: { contains: q, mode: "insensitive" as const } },
+                  },
+                },
+              ],
+            }
+          : {}),
         teacher: {
           isActive: true,
           deletedAt: null,
-          level: { not: "NEEDS_IMPROVEMENT" },
+          level: filter?.levels?.length
+            ? { in: filter.levels.filter((l) => l !== "NEEDS_IMPROVEMENT") }
+            : { not: "NEEDS_IMPROVEMENT" },
           user: { status: "APPROVED", deletedAt: null },
         },
       },
@@ -392,6 +424,85 @@ export class TeacherCourseService {
         },
         _count: { select: { purchases: { where: { status: "PAID" } } } },
       },
+    });
+  }
+
+  /**
+   * Adds per-user, per-course engagement data (reactions, favorites, teacher
+   * rating, purchase status, duration totals) to a list of published courses.
+   */
+  static async enrichCoursesForUser(
+    courses: Awaited<ReturnType<typeof TeacherCourseService.listPublishedCourses>>,
+    userId: string
+  ) {
+    const courseIds = courses.map((c) => c.id);
+    const teacherIds = [...new Set(courses.map((c) => c.teacher.id))];
+
+    const [reactionGroups, myReactions, favoriteGroups, myFavorites, ratingGroups, purchases] =
+      await Promise.all([
+        prisma.courseReaction.groupBy({
+          by: ["courseId", "type"],
+          where: { courseId: { in: courseIds } },
+          _count: true,
+        }),
+        prisma.courseReaction.findMany({
+          where: { userId, courseId: { in: courseIds } },
+          select: { courseId: true, type: true },
+        }),
+        prisma.courseFavorite.groupBy({
+          by: ["courseId"],
+          where: { courseId: { in: courseIds } },
+          _count: true,
+        }),
+        prisma.courseFavorite.findMany({
+          where: { userId, courseId: { in: courseIds } },
+          select: { courseId: true },
+        }),
+        prisma.teacherRating.groupBy({
+          by: ["teacherId"],
+          where: { teacherId: { in: teacherIds } },
+          _avg: { rating: true },
+          _count: true,
+        }),
+        prisma.coursePurchase.findMany({
+          where: { userId, courseId: { in: courseIds } },
+          select: { courseId: true, status: true },
+        }),
+      ]);
+
+    const reactions = new Map<string, { likes: number; dislikes: number }>();
+    for (const g of reactionGroups) {
+      const entry = reactions.get(g.courseId) ?? { likes: 0, dislikes: 0 };
+      if (g.type === "LIKE") entry.likes = g._count;
+      else entry.dislikes = g._count;
+      reactions.set(g.courseId, entry);
+    }
+    const mine = new Map(myReactions.map((r) => [r.courseId, r.type]));
+    const favorites = new Map(favoriteGroups.map((f) => [f.courseId, f._count]));
+    const myFavs = new Set(myFavorites.map((f) => f.courseId));
+    const ratings = new Map(
+      ratingGroups.map((r) => [r.teacherId, { avg: r._avg.rating ?? 0, count: r._count }])
+    );
+    const purchaseByCourse = new Map(purchases.map((p) => [p.courseId, p.status]));
+
+    return courses.map((c) => {
+      const r = reactions.get(c.id) ?? { likes: 0, dislikes: 0 };
+      const rating = ratings.get(c.teacher.id) ?? { avg: 0, count: 0 };
+      const totalDurationSec = c.lessons.reduce((s, l) => s + (l.durationSec ?? 0), 0);
+      return {
+        ...c,
+        likes: r.likes,
+        dislikes: r.dislikes,
+        myReaction: mine.get(c.id) ?? null,
+        favorites: favorites.get(c.id) ?? 0,
+        favoritedByMe: myFavs.has(c.id),
+        teacherRating: Math.round(rating.avg * 10) / 10,
+        teacherRatingCount: rating.count,
+        totalDurationSec,
+        lessonsCount: c.lessons.length,
+        freePreviewCount: c.lessons.filter((l) => l.isFreePreview).length,
+        purchaseStatus: purchaseByCourse.get(c.id) ?? null,
+      };
     });
   }
 

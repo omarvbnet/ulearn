@@ -1,10 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button, Card, Input } from "@/components/ui";
 import { LanguageSwitcher } from "@/components/language-switcher";
+import { ULearnLogo } from "@/components/ulearn-logo";
 import { useT } from "@/i18n/client";
 
 export default function LoginPage() {
@@ -96,7 +96,7 @@ export default function LoginPage() {
 
       <Card className="w-full max-w-md">
         <div className="mb-8 flex flex-col items-center text-center">
-          <Image src="/logo.png" alt="U Learn" width={80} height={80} className="mb-4" />
+          <ULearnLogo size={80} animated className="mb-4" />
           <h1 className="text-2xl font-bold glow-text">{t.brand}</h1>
           <p className="mt-2 text-sm text-muted">{t.auth.whatsappAuth}</p>
         </div>

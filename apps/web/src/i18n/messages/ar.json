@@ -24,7 +24,9 @@
     "support": "الدعم",
     "store": "متجر الدورات",
     "myCourses": "دوراتي",
-    "courseReview": "مراجعة الدورات"
+    "courseReview": "مراجعة الدورات",
+    "stageRequests": "طلبات تغيير المرحلة",
+    "ads": "الإعلانات"
   },
   "auth": {
     "phone": "رقم الهاتف",

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/widgets/skeleton.dart';
 
 /// Paid teacher courses store. Purchases are requested in-app and
 /// unlocked once the admin confirms the payment.
@@ -70,7 +71,7 @@ class _StoreScreenState extends State<StoreScreen> {
   Widget build(BuildContext context) {
     final courses = _courses;
     if (courses == null) {
-      return const Center(child: CircularProgressIndicator());
+      return SkeletonList(itemBuilder: (_) => const SkeletonTextCard());
     }
     if (courses.isEmpty) {
       return const Center(

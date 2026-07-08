@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
+import 'package:ulearn/features/profile/favorites_screen.dart';
+import 'package:ulearn/features/profile/stage_request_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -62,12 +64,62 @@ class ProfileScreen extends StatelessWidget {
               _InfoRow(icon: Icons.badge_outlined, label: 'Role', value: _roleLabel(user.role)),
               _InfoRow(icon: Icons.verified_outlined, label: 'Status', value: user.status),
               _InfoRow(icon: Icons.language_outlined, label: 'Language', value: user.locale),
+              if (user.role == 'STUDENT')
+                _InfoRow(
+                  icon: Icons.school_outlined,
+                  label: 'Stage',
+                  value: user.stage?.nameFor(user.locale) ?? 'Not set',
+                ),
             ],
           ),
         ),
         const SizedBox(height: 16),
         StaggeredItem(
           index: 2,
+          child: Card(
+            child: ListTile(
+              leading: const Icon(Icons.favorite_outline, color: Colors.redAccent),
+              title: const Text('My Favorites'),
+              subtitle: const Text(
+                'Saved courses and videos',
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
+              ),
+              trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const FavoritesScreen()),
+              ),
+            ),
+          ),
+        ),
+        if (user.role == 'STUDENT') ...[
+          const SizedBox(height: 16),
+          StaggeredItem(
+            index: 3,
+            child: Card(
+              child: ListTile(
+                leading: const Icon(Icons.swap_vert_rounded, color: AppTheme.accent),
+                title: const Text('Change stage'),
+                subtitle: const Text(
+                  'Request a move with your certificate',
+                  style: TextStyle(color: AppTheme.muted, fontSize: 12),
+                ),
+                trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const StageRequestScreen()),
+                  );
+                  // Stage may have changed after an approved request.
+                  if (context.mounted) {
+                    await context.read<AuthProvider>().bootstrap();
+                  }
+                },
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 16),
+        StaggeredItem(
+          index: 4,
           child: Card(
             child: ListTile(
               leading: const Icon(Icons.logout, color: Colors.redAccent),

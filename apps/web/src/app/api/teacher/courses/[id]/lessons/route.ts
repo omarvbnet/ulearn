@@ -32,6 +32,16 @@ export async function POST(
   const parsed = lessonSchema.safeParse(await request.json());
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
+  // Students may sample at most 2 free preview videos per paid course.
+  if (parsed.data.isFreePreview) {
+    const previews = await prisma.courseLesson.count({
+      where: { courseId: id, isFreePreview: true },
+    });
+    if (previews >= 2) {
+      return error("A course can have at most 2 free preview lessons", 400, "FREE_PREVIEW_LIMIT");
+    }
+  }
+
   const lesson = await prisma.courseLesson.create({
     data: { courseId: id, ...parsed.data },
   });

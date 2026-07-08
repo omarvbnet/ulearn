@@ -24,7 +24,9 @@
     "support": "Destek",
     "store": "Kurs Mağazası",
     "myCourses": "Kurslarım",
-    "courseReview": "Kurs İncelemesi"
+    "courseReview": "Kurs İncelemesi",
+    "stageRequests": "Aşama Talepleri",
+    "ads": "Reklamlar"
   },
   "auth": {
     "phone": "Telefon Numarası",

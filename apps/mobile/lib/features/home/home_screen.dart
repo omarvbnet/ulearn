@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:ulearn/core/api/api_client.dart';
-import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/courses/courses_screen.dart';
+import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/notifications/notifications_screen.dart';
 import 'package:ulearn/features/profile/profile_screen.dart';
 import 'package:ulearn/features/rankings/rankings_screen.dart';
@@ -24,14 +23,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final pages = [
-      _HomeTab(name: auth.user?.fullLegalName),
-      const CoursesScreen(),
-      const StoreScreen(),
-      const RankingsScreen(),
-      const SubscriptionsScreen(),
-      const ProfileScreen(),
+    const pages = [
+      HomeFeed(),
+      CoursesScreen(),
+      StoreScreen(),
+      RankingsScreen(),
+      SubscriptionsScreen(),
+      ProfileScreen(),
     ];
 
     return Scaffold(
@@ -39,7 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Image.asset('assets/images/logo.png', width: 28, height: 28),
+            const ULearnLogo(size: 28),
             const SizedBox(width: 8),
             Text(_titles[_index]),
           ],
@@ -91,68 +89,3 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _HomeTab extends StatefulWidget {
-  const _HomeTab({this.name});
-  final String? name;
-
-  @override
-  State<_HomeTab> createState() => _HomeTabState();
-}
-
-class _HomeTabState extends State<_HomeTab> {
-  List<dynamic> _subjects = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final data = await context.read<ApiClient>().get('/api/courses');
-      setState(() => _subjects = data['subjects'] as List<dynamic>? ?? []);
-    } catch (_) {}
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Text(
-          'Welcome${widget.name != null ? ', ${widget.name}' : ''}',
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        const Text('Continue learning', style: TextStyle(color: AppTheme.muted)),
-        const SizedBox(height: 20),
-        ..._subjects.map((s) {
-          final subject = s as Map<String, dynamic>;
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            child: ListTile(
-              title: Text(subject['nameEn']?.toString() ?? 'Subject'),
-              subtitle: Text(
-                '${(subject['chapters'] as List?)?.length ?? 0} chapters',
-                style: const TextStyle(color: AppTheme.muted),
-              ),
-              trailing: const Icon(Icons.chevron_right, color: AppTheme.accent),
-            ),
-          );
-        }),
-        if (_subjects.isEmpty)
-          const Card(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                'No courses yet. Free lessons unlock after approval.',
-                style: TextStyle(color: AppTheme.muted),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}

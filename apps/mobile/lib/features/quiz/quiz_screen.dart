@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
+import 'package:ulearn/core/widgets/skeleton.dart';
 
 class QuizScreen extends StatefulWidget {
   const QuizScreen({super.key, required this.quizId, required this.title});
@@ -101,7 +102,29 @@ class _QuizScreenState extends State<QuizScreen> {
               ),
             )
           : _quiz == null
-              ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
+              ? Skeleton(
+                  child: ListView(
+                    physics: const NeverScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(20),
+                    children: const [
+                      SkeletonLine(width: 180, height: 16),
+                      SizedBox(height: 12),
+                      SkeletonLine(width: 260, height: 11),
+                      SizedBox(height: 6),
+                      SkeletonLine(width: 220, height: 11),
+                      SizedBox(height: 28),
+                      SkeletonBox(height: 56, radius: 14),
+                      SizedBox(height: 12),
+                      SkeletonBox(height: 56, radius: 14),
+                      SizedBox(height: 12),
+                      SkeletonBox(height: 56, radius: 14),
+                      SizedBox(height: 12),
+                      SkeletonBox(height: 56, radius: 14),
+                      SizedBox(height: 28),
+                      SkeletonBox(height: 48, radius: 12),
+                    ],
+                  ),
+                )
               : _result != null
                   ? _ResultView(result: _result!, quiz: _quiz!)
                   : !_started

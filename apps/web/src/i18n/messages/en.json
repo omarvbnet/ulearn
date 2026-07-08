@@ -24,7 +24,9 @@
     "support": "Support",
     "store": "Course Store",
     "myCourses": "My Courses",
-    "courseReview": "Course Review"
+    "courseReview": "Course Review",
+    "stageRequests": "Stage Requests",
+    "ads": "Advertisements"
   },
   "auth": {
     "phone": "Mobile Number",

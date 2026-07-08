@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
+import 'package:ulearn/core/widgets/skeleton.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -49,7 +50,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator(color: AppTheme.accent));
+      return SkeletonList(
+        count: 7,
+        itemBuilder: (_) => const SkeletonListTile(hasTrailing: false),
+      );
     }
 
     if (_items.isEmpty) {

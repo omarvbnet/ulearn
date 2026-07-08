@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   },
   description:
     "U Learn – Professional educational platform for students and experience certificates.",
-  icons: { icon: "/logo.png" },
+  icons: { icon: "/logo.svg" },
 };
 
 export default function RootLayout({

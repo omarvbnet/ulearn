@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
+import 'package:ulearn/core/widgets/skeleton.dart';
 
 class RankingsScreen extends StatefulWidget {
   const RankingsScreen({super.key});
@@ -41,7 +42,10 @@ class _RankingsScreenState extends State<RankingsScreen>
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator(color: AppTheme.accent));
+      return SkeletonList(
+        count: 8,
+        itemBuilder: (_) => const SkeletonListTile(),
+      );
     }
 
     return Column(

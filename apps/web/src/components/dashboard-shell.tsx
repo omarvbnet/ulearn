@@ -1,10 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ToastProvider } from "@/components/overlay";
+import { ULearnLogo } from "@/components/ulearn-logo";
 import { cn } from "@/lib/utils";
 
 export type NavItem = { href: string; label: string };
@@ -32,7 +32,7 @@ export function DashboardShell({
     <div className="flex min-h-screen">
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-e border-card-border bg-card/80 p-4 backdrop-blur lg:flex">
         <div className="mb-8 flex items-center gap-3 px-2">
-          <Image src="/logo.png" alt="U Learn" width={40} height={40} />
+          <ULearnLogo size={40} />
           <div>
             <p className="font-bold glow-text">U Learn</p>
             <p className="text-xs text-muted">{title}</p>
@@ -63,7 +63,7 @@ export function DashboardShell({
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-card-border px-4 py-3 lg:px-8">
           <div className="flex items-center gap-3 lg:hidden">
-            <Image src="/logo.png" alt="U Learn" width={32} height={32} />
+            <ULearnLogo size={32} />
             <span className="font-semibold">{title}</span>
           </div>
           <div className="ms-auto flex items-center gap-3">

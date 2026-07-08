@@ -81,7 +81,13 @@ export async function getCurrentUser() {
   const user = await prisma.user.findFirst({
     where: { id: session.userId, deletedAt: null },
     include: {
-      studentProfile: true,
+      studentProfile: {
+        include: {
+          educationalStage: {
+            select: { id: true, nameEn: true, nameAr: true, nameKu: true, nameTr: true },
+          },
+        },
+      },
       certificateProfile: true,
       teacherProfile: { include: { subjects: true } },
       country: true,

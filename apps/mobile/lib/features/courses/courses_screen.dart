@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/video/video_player_screen.dart';
 
 class CoursesScreen extends StatefulWidget {
@@ -36,7 +37,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator(color: AppTheme.accent));
+      return SkeletonList(itemBuilder: (_) => const SkeletonTextCard());
     }
 
     return ListView.builder(

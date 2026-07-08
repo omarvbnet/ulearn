@@ -1,10 +1,11 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class ApiClient {
   /// Production API. For local development override with:
-  /// flutter run --dart-define=API_BASE_URL=http://<your-mac-ip>:3000
+  /// flutter run --dart-define=API_BASE_URL=http://[your-mac-ip]:3000
   static const baseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'https://ulearn.usmart-iot.com',
@@ -25,6 +26,10 @@ class ApiClient {
       await _storage.write(key: 'session_token', value: token);
     }
   }
+
+  /// Server-relative URLs (e.g. `/uploads/...`) need the API origin prefixed.
+  static String absoluteUrl(String url) =>
+      url.startsWith('http') ? url : '$baseUrl$url';
 
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
@@ -52,6 +57,25 @@ class ApiClient {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);
     }
     return data;
+  }
+
+  /// Raw binary PUT used for presigned/direct file uploads.
+  /// [url] may be absolute (R2 presigned) or server-relative (dev fallback).
+  Future<void> putBytes(String url, Uint8List bytes, String contentType) async {
+    final target = Uri.parse(absoluteUrl(url));
+    final needsAuth = !url.startsWith('http');
+    final res = await http.put(
+      target,
+      headers: {
+        'Content-Type': contentType,
+        if (needsAuth && _token != null) 'Authorization': 'Bearer $_token',
+        if (needsAuth && _token != null) 'Cookie': 'ulearn_session=$_token',
+      },
+      body: bytes,
+    );
+    if (res.statusCode >= 400) {
+      throw ApiException('Upload failed', res.statusCode);
+    }
   }
 }
 

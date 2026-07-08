@@ -1,5 +1,5 @@
 import { CertificateService } from "@/services/certificate.service";
-import Image from "next/image";
+import { ULearnLogo } from "@/components/ulearn-logo";
 
 export default async function VerifyCertificatePage({
   params,
@@ -12,7 +12,7 @@ export default async function VerifyCertificatePage({
   return (
     <div className="flex min-h-screen items-center justify-center bg-grid px-4">
       <div className="card w-full max-w-lg p-8 text-center">
-        <Image src="/logo.png" alt="U Learn" width={64} height={64} className="mx-auto mb-4" />
+        <ULearnLogo size={64} className="mx-auto mb-4" />
         <h1 className="text-xl font-bold">Certificate Verification</h1>
         {cert ? (
           <div className="mt-6 space-y-2 text-start text-sm">

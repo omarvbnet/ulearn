@@ -10,6 +10,7 @@ export async function GET(
 ) {
   const auth = await requireAuth();
   if (auth.error) return auth.error;
+  const userId = auth.session.userId;
 
   const { id } = await params;
   const course = await prisma.course.findFirst({
@@ -25,18 +26,62 @@ export async function GET(
   });
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
-  const purchased = await TeacherCourseService.hasPurchased(id, auth.session.userId);
+  const lessonIds = course.lessons.map((l) => l.id);
+  const [purchased, myFavorite, favoriteCount, likeGroups, myLikes, favGroups, myLessonFavs] =
+    await Promise.all([
+      TeacherCourseService.hasPurchased(id, userId),
+      prisma.courseFavorite.findUnique({
+        where: { courseId_userId: { courseId: id, userId } },
+      }),
+      prisma.courseFavorite.count({ where: { courseId: id } }),
+      prisma.courseLessonLike.groupBy({
+        by: ["lessonId"],
+        where: { lessonId: { in: lessonIds } },
+        _count: true,
+      }),
+      prisma.courseLessonLike.findMany({
+        where: { userId, lessonId: { in: lessonIds } },
+        select: { lessonId: true },
+      }),
+      prisma.courseLessonFavorite.groupBy({
+        by: ["lessonId"],
+        where: { lessonId: { in: lessonIds } },
+        _count: true,
+      }),
+      prisma.courseLessonFavorite.findMany({
+        where: { userId, lessonId: { in: lessonIds } },
+        select: { lessonId: true },
+      }),
+    ]);
+
+  const likeCounts = new Map(likeGroups.map((g) => [g.lessonId, g._count]));
+  const likedSet = new Set(myLikes.map((l) => l.lessonId));
+  const favCounts = new Map(favGroups.map((g) => [g.lessonId, g._count]));
+  const favSet = new Set(myLessonFavs.map((f) => f.lessonId));
 
   const lessons = await Promise.all(
     course.lessons.map(async (l) => {
-      const canWatch = purchased || l.isFreePreview;
+      const canWatch = purchased || l.isFreePreview || course.price <= 0;
       let fileUrl = canWatch ? l.fileUrl : null;
       if (canWatch && l.fileKey && !fileUrl) {
         fileUrl = await getDownloadUrl(l.fileKey).catch(() => null);
       }
-      return { ...l, fileKey: undefined, fileUrl };
+      return {
+        ...l,
+        fileKey: undefined,
+        fileUrl,
+        likes: likeCounts.get(l.id) ?? 0,
+        likedByMe: likedSet.has(l.id),
+        favoritesCount: favCounts.get(l.id) ?? 0,
+        favoritedByMe: favSet.has(l.id),
+      };
     })
   );
 
-  return json({ course: { ...course, lessons }, purchased });
+  return json({
+    course: { ...course, lessons },
+    purchased,
+    favorites: favoriteCount,
+    favoritedByMe: Boolean(myFavorite),
+  });
 }
