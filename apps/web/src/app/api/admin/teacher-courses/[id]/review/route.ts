@@ -26,7 +26,16 @@ export async function POST(
     decision,
     notes
   );
-  if (!result.success) return error(result.error, 400, result.error);
+  if (!result.success) {
+    if (result.error === "INSUFFICIENT_QUIZZES" && "required" in result) {
+      return error(
+        `Course needs at least ${result.required} quizzes (currently ${result.current})`,
+        422,
+        "INSUFFICIENT_QUIZZES"
+      );
+    }
+    return error(result.error, 400, result.error);
+  }
 
   return json({ course: result.course });
 }

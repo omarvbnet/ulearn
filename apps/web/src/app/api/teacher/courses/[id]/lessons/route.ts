@@ -12,6 +12,8 @@ const lessonSchema = z.object({
   title: z.string().min(1),
   fileKey: z.string().optional(),
   fileUrl: z.string().optional(),
+  thumbnailKey: z.string().optional(),
+  thumbnailUrl: z.string().optional(),
   durationSec: z.number().int().optional(),
   sortOrder: z.number().int().optional(),
   isFreePreview: z.boolean().optional(),

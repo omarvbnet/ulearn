@@ -1,18 +1,26 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { notifyTeacherVideoLike } from "@/services/engagement-notifications.service";
+import { getCurrentUser } from "@/lib/auth/session";
 
 /** Toggle a like on an individual course video. */
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["STUDENT", "CERTIFICATE_USER"]);
+  const auth = await requireAuth(["STUDENT", "CERTIFICATE_USER", "TEACHER"]);
   if (auth.error) return auth.error;
 
   const { id } = await params;
   const lesson = await prisma.courseLesson.findFirst({
     where: { id, course: { status: "APPROVED", deletedAt: null } },
-    select: { id: true },
+    select: {
+      id: true,
+      title: true,
+      course: {
+        select: { teacher: { select: { userId: true } } },
+      },
+    },
   });
   if (!lesson) return error("Lesson not found", 404, "NOT_FOUND");
 
@@ -25,6 +33,15 @@ export async function POST(
     await prisma.courseLessonLike.delete({ where: { id: existing.id } });
   } else {
     await prisma.courseLessonLike.create({ data: { lessonId: id, userId } });
+    const teacherUserId = lesson.course.teacher.userId;
+    if (teacherUserId !== userId) {
+      const liker = await getCurrentUser();
+      await notifyTeacherVideoLike({
+        teacherUserId,
+        lessonTitle: lesson.title,
+        likerName: liker?.fullLegalName ?? "Someone",
+      });
+    }
   }
 
   const likes = await prisma.courseLessonLike.count({ where: { lessonId: id } });

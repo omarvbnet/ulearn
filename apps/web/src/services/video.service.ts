@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { computeVideoCompletion } from "@/lib/video-progress.util";
 import { CourseService } from "@/services/course.service";
 
 export class VideoService {
@@ -8,6 +9,7 @@ export class VideoService {
     positionSec: number;
     durationSec: number;
     watchedDeltaSec?: number;
+    completed?: boolean;
   }) {
     const lesson = await prisma.lesson.findUnique({
       where: { id: params.lessonId },
@@ -27,11 +29,11 @@ export class VideoService {
       return { success: false as const, error: "NO_ACCESS" };
     }
 
-    const completionPct =
-      params.durationSec > 0
-        ? Math.min(100, (params.positionSec / params.durationSec) * 100)
-        : 0;
-    const isCompleted = completionPct >= 90;
+    const { completionPct, isCompleted, positionSec } = computeVideoCompletion({
+      positionSec: params.positionSec,
+      durationSec: params.durationSec,
+      completed: params.completed,
+    });
 
     const progress = await prisma.videoProgress.upsert({
       where: {
@@ -40,7 +42,7 @@ export class VideoService {
       create: {
         userId: params.userId,
         lessonId: params.lessonId,
-        positionSec: params.positionSec,
+        positionSec,
         durationSec: params.durationSec,
         completionPct,
         isCompleted,
@@ -48,7 +50,7 @@ export class VideoService {
         lastWatchedAt: new Date(),
       },
       update: {
-        positionSec: params.positionSec,
+        positionSec,
         durationSec: params.durationSec,
         completionPct,
         isCompleted,

@@ -64,6 +64,7 @@ enum QuizType {
   LESSON
   CHAPTER
   SUBJECT_FINAL
+  COURSE
 }
 
 enum QuestionType {
@@ -150,6 +151,8 @@ model User {
   phone           String     @unique
   email           String?
   fullLegalName   String?
+  profilePhotoKey String?
+  profilePhotoUrl String?
   gender          Gender?
   nationalId      String?
   nationalIdImage String?
@@ -194,6 +197,11 @@ model User {
   courseFavorites      CourseFavorite[]
   lessonLikes          CourseLessonLike[]
   lessonFavorites      CourseLessonFavorite[]
+  courseLessonQuestions CourseLessonQuestion[] @relation("courseLessonQuestions")
+  courseLessonAnswers   CourseLessonAnswer[]   @relation("courseLessonAnswers")
+  courseLessonProgress  CourseLessonProgress[]
+  shortVideoLikes       ShortVideoLike[]
+  shortVideoComments    ShortVideoComment[]
   adLikes              AdLike[]
   stageChangeRequests  StageChangeRequest[]  @relation("StageRequests")
 
@@ -261,6 +269,7 @@ model TeacherProfile {
   ratings   TeacherRating[]
   complaints Complaint[]
   courses   Course[]
+  shortVideos TeacherShortVideo[]
 
   @@index([countryId])
   @@index([deletedAt])
@@ -312,6 +321,7 @@ model Course {
   purchases CoursePurchase[]
   reactions CourseReaction[]
   favorites CourseFavorite[]
+  quizzes   Quiz[]
 
   @@index([teacherId])
   @@index([stageId])
@@ -326,6 +336,8 @@ model CourseLesson {
   title         String
   fileKey       String?
   fileUrl       String?
+  thumbnailKey  String?
+  thumbnailUrl  String?
   durationSec   Int?
   sortOrder     Int      @default(0)
   isFreePreview Boolean  @default(false)
@@ -335,8 +347,144 @@ model CourseLesson {
   course    Course                 @relation(fields: [courseId], references: [id], onDelete: Cascade)
   likes     CourseLessonLike[]
   favorites CourseLessonFavorite[]
+  questions CourseLessonQuestion[]
+  progress  CourseLessonProgress[]
+  updates   CourseLessonUpdateRequest[]
 
   @@index([courseId])
+}
+
+/// Student Q&A on a store-course lesson (curriculum lessons have their
+/// own LessonQuestion/LessonAnswer models).
+model CourseLessonQuestion {
+  id        String   @id @default(cuid())
+  lessonId  String
+  userId    String
+  body      String
+  createdAt DateTime @default(now())
+
+  lesson  CourseLesson         @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  user    User                 @relation("courseLessonQuestions", fields: [userId], references: [id], onDelete: Cascade)
+  answers CourseLessonAnswer[]
+
+  @@index([lessonId])
+}
+
+model CourseLessonAnswer {
+  id         String   @id @default(cuid())
+  questionId String
+  userId     String
+  body       String
+  createdAt  DateTime @default(now())
+
+  question CourseLessonQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  user     User                 @relation("courseLessonAnswers", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+}
+
+/// Watch progress for store-course videos.
+model CourseLessonProgress {
+  id            String   @id @default(cuid())
+  userId        String
+  lessonId      String
+  positionSec   Int      @default(0)
+  durationSec   Int      @default(0)
+  completionPct Float    @default(0)
+  isCompleted   Boolean  @default(false)
+  lastWatchedAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson CourseLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@index([userId])
+  @@index([lessonId])
+}
+
+enum LessonUpdateStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Pending lesson media edits on live courses — admin must approve first.
+model CourseLessonUpdateRequest {
+  id           String             @id @default(cuid())
+  lessonId     String
+  teacherId    String
+  title        String?
+  fileKey      String?
+  fileUrl      String?
+  thumbnailKey String?
+  thumbnailUrl String?
+  durationSec  Int?
+  status       LessonUpdateStatus @default(PENDING)
+  reviewNotes  String?
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  lesson CourseLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([lessonId])
+  @@index([status])
+}
+
+/// Teacher short-form videos (reels-style).
+model TeacherShortVideo {
+  id           String       @id @default(cuid())
+  teacherId    String
+  title        String
+  fileKey      String?
+  fileUrl      String?
+  thumbnailUrl String?
+  durationSec  Int?
+  status       CourseStatus @default(PENDING_REVIEW)
+  reviewNotes  String?
+  reviewedAt   DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+
+  teacher TeacherProfile  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  likes    ShortVideoLike[]
+  comments ShortVideoComment[]
+
+  @@index([teacherId])
+  @@index([status])
+}
+
+model ShortVideoLike {
+  id        String   @id @default(cuid())
+  videoId   String
+  userId    String
+  createdAt DateTime @default(now())
+
+  video TeacherShortVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  user  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([videoId, userId])
+  @@index([videoId])
+}
+
+model ShortVideoComment {
+  id        String    @id @default(cuid())
+  videoId   String
+  userId    String
+  body      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  video TeacherShortVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  user  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([videoId, createdAt])
+  @@index([userId])
 }
 
 /// A student's purchase of a teacher course. Revenue split is snapshotted
@@ -881,6 +1029,7 @@ model Quiz {
   lessonId        String?
   chapterId       String?
   subjectId       String?
+  courseId        String?
   titleEn         String
   titleAr         String
   titleKu         String
@@ -897,12 +1046,14 @@ model Quiz {
   lesson    Lesson?       @relation(fields: [lessonId], references: [id])
   chapter   Chapter?      @relation(fields: [chapterId], references: [id])
   subject   Subject?      @relation(fields: [subjectId], references: [id])
+  course    Course?       @relation(fields: [courseId], references: [id], onDelete: Cascade)
   questions QuizQuestion[]
   attempts  QuizAttempt[]
 
   @@index([lessonId])
   @@index([chapterId])
   @@index([subjectId])
+  @@index([courseId])
   @@index([deletedAt])
 }
 

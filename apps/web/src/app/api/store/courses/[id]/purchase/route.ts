@@ -6,7 +6,7 @@ export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["STUDENT", "CERTIFICATE_USER"]);
+  const auth = await requireAuth(["STUDENT", "CERTIFICATE_USER", "TEACHER"]);
   if (auth.error) return auth.error;
 
   const { id } = await params;

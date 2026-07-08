@@ -27,6 +27,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   VideoPlayerController? _controller;
   VideoProtectionController? _protection;
   Timer? _progressTimer;
+  bool _completionSaved = false;
   bool _loading = true;
   String? _error;
   bool _hasAccess = false;
@@ -43,7 +44,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     final auth = context.read<AuthProvider>();
     _protection = VideoProtectionController(
       studentName: auth.user?.fullLegalName ?? 'Student',
-      nationalId: '***',
+      userId: auth.user?.id ?? 'unknown',
       phone: auth.user?.phone ?? '',
     );
     _protection!.addListener(() {
@@ -94,6 +95,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       }
       await _controller!.play();
 
+      _controller!.addListener(_onPlaybackUpdate);
       _progressTimer = Timer.periodic(const Duration(seconds: 10), (_) => _saveProgress());
 
       setState(() => _loading = false);
@@ -106,21 +108,38 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
   }
 
-  Future<void> _saveProgress() async {
+  void _onPlaybackUpdate() {
+    final c = _controller;
+    if (c == null || !c.value.isInitialized || _completionSaved) return;
+    final v = c.value;
+    final duration = v.duration.inSeconds;
+    if (duration <= 0) return;
+    final nearEnd = v.isCompleted || v.position.inSeconds >= duration - 2;
+    if (nearEnd) {
+      _completionSaved = true;
+      _saveProgress(completed: true);
+    }
+  }
+
+  Future<void> _saveProgress({bool completed = false}) async {
     final c = _controller;
     if (c == null || !c.value.isInitialized) return;
     try {
+      final duration = c.value.duration.inSeconds;
+      final position = completed && duration > 0 ? duration : c.value.position.inSeconds;
       await context.read<ApiClient>().post('/api/video/progress', {
         'lessonId': widget.lessonId,
-        'positionSec': c.value.position.inSeconds,
-        'durationSec': c.value.duration.inSeconds,
+        'positionSec': position,
+        'durationSec': duration,
         'watchedDeltaSec': 10,
+        if (completed) 'completed': true,
       });
     } catch (_) {}
   }
 
   @override
   void dispose() {
+    _controller?.removeListener(_onPlaybackUpdate);
     _progressTimer?.cancel();
     _saveProgress();
     _controller?.dispose();

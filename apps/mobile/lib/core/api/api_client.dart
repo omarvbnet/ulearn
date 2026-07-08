@@ -59,6 +59,28 @@ class ApiClient {
     return data;
   }
 
+  Future<Map<String, dynamic>> patch(String path, Map<String, dynamic> body) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers,
+      body: jsonEncode(body),
+    );
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode >= 400) {
+      throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);
+    }
+    return data;
+  }
+
+  Future<Map<String, dynamic>> delete(String path) async {
+    final res = await http.delete(Uri.parse('$baseUrl$path'), headers: _headers);
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode >= 400) {
+      throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);
+    }
+    return data;
+  }
+
   /// Raw binary PUT used for presigned/direct file uploads.
   /// [url] may be absolute (R2 presigned) or server-relative (dev fallback).
   Future<void> putBytes(String url, Uint8List bytes, String contentType) async {

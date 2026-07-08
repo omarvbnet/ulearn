@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
-import 'package:ulearn/features/courses/courses_screen.dart';
+import 'package:ulearn/features/courses/my_courses_screen.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/notifications/notifications_screen.dart';
 import 'package:ulearn/features/profile/profile_screen.dart';
 import 'package:ulearn/features/rankings/rankings_screen.dart';
 import 'package:ulearn/features/store/store_screen.dart';
-import 'package:ulearn/features/subscriptions/subscriptions_screen.dart';
+import 'package:ulearn/features/reels/reels_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,21 +19,26 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
 
-  static const _titles = ['U Learn', 'Courses', 'Store', 'Ranks', 'Subscribe', 'Profile'];
+  static const _titles = ['U Learn', 'My Courses', 'Store', 'Ranks', 'Reels', 'Profile'];
 
   @override
   Widget build(BuildContext context) {
+    final isReels = _index == 4;
+
     const pages = [
       HomeFeed(),
-      CoursesScreen(),
+      MyCoursesScreen(),
       StoreScreen(),
       RankingsScreen(),
-      SubscriptionsScreen(),
+      ReelsScreen(),
       ProfileScreen(),
     ];
 
     return Scaffold(
-      appBar: AppBar(
+      extendBodyBehindAppBar: isReels,
+      appBar: isReels
+          ? null
+          : AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -78,10 +83,10 @@ class _HomeScreenState extends State<HomeScreen> {
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.menu_book_outlined), label: 'Courses'),
+          NavigationDestination(icon: Icon(Icons.play_lesson_outlined), label: 'My Courses'),
           NavigationDestination(icon: Icon(Icons.storefront_outlined), label: 'Store'),
           NavigationDestination(icon: Icon(Icons.leaderboard_outlined), label: 'Ranks'),
-          NavigationDestination(icon: Icon(Icons.card_membership_outlined), label: 'Subscribe'),
+          NavigationDestination(icon: Icon(Icons.movie_outlined), label: 'Reels'),
           NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profile'),
         ],
       ),

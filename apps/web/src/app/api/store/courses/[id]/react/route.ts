@@ -1,15 +1,17 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { notifyTeacherCourseLike } from "@/services/engagement-notifications.service";
+import { getCurrentUser } from "@/lib/auth/session";
 import { z } from "zod";
 
 const schema = z.object({ type: z.enum(["LIKE", "DISLIKE"]).nullable() });
 
-/** Student: like/dislike a store course. Sending the same type again (or null) clears it. */
+/** Like/dislike a store course. Teachers may react too. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["STUDENT", "CERTIFICATE_USER"]);
+  const auth = await requireAuth(["STUDENT", "CERTIFICATE_USER", "TEACHER"]);
   if (auth.error) return auth.error;
 
   const { id } = await params;
@@ -18,22 +20,23 @@ export async function POST(
 
   const course = await prisma.course.findFirst({
     where: { id, status: "APPROVED", deletedAt: null },
-    select: { id: true },
+    select: {
+      id: true,
+      titleEn: true,
+      teacher: { select: { userId: true } },
+    },
   });
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
   const userId = auth.session.userId;
   const type = parsed.data.type;
-
   const existing = await prisma.courseReaction.findUnique({
     where: { courseId_userId: { courseId: id, userId } },
   });
 
   let myReaction: "LIKE" | "DISLIKE" | null = null;
   if (type === null || existing?.type === type) {
-    if (existing) {
-      await prisma.courseReaction.delete({ where: { id: existing.id } });
-    }
+    if (existing) await prisma.courseReaction.delete({ where: { id: existing.id } });
   } else {
     await prisma.courseReaction.upsert({
       where: { courseId_userId: { courseId: id, userId } },
@@ -41,6 +44,14 @@ export async function POST(
       update: { type },
     });
     myReaction = type;
+    if (type === "LIKE" && course.teacher.userId !== userId) {
+      const liker = await getCurrentUser();
+      await notifyTeacherCourseLike({
+        teacherUserId: course.teacher.userId,
+        courseTitle: course.titleEn,
+        likerName: liker?.fullLegalName ?? "Someone",
+      });
+    }
   }
 
   const groups = await prisma.courseReaction.groupBy({

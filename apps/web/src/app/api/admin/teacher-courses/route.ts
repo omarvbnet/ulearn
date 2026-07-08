@@ -26,7 +26,12 @@ export async function GET(request: Request) {
       stage: { select: { nameEn: true } },
       subject: { select: { nameEn: true } },
       lessons: { select: { id: true, title: true, durationSec: true } },
-      _count: { select: { purchases: { where: { status: "PAID" } } } },
+      _count: {
+        select: {
+          purchases: { where: { status: "PAID" } },
+          quizzes: { where: { deletedAt: null } },
+        },
+      },
     },
   });
 

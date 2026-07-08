@@ -35,7 +35,7 @@ class _CourseVideoScreenState extends State<CourseVideoScreen> {
     final auth = context.read<AuthProvider>();
     _protection = VideoProtectionController(
       studentName: auth.user?.fullLegalName ?? 'Student',
-      nationalId: '***',
+      userId: auth.user?.id ?? 'unknown',
       phone: auth.user?.phone ?? '',
     );
     _protection!.addListener(() {

@@ -42,6 +42,7 @@ class UserModel {
   final String id;
   final String phone;
   final String? fullLegalName;
+  final String? profilePhotoUrl;
   final String role;
   final String status;
   final String locale;
@@ -51,6 +52,7 @@ class UserModel {
     required this.id,
     required this.phone,
     this.fullLegalName,
+    this.profilePhotoUrl,
     required this.role,
     required this.status,
     required this.locale,
@@ -64,6 +66,7 @@ class UserModel {
       id: json['id'] as String,
       phone: json['phone'] as String,
       fullLegalName: json['fullLegalName'] as String?,
+      profilePhotoUrl: json['profilePhotoUrl'] as String?,
       role: json['role'] as String,
       status: json['status'] as String,
       locale: json['locale'] as String? ?? 'AR',
@@ -145,5 +148,17 @@ class AuthProvider extends ChangeNotifier {
     await _api.setToken(null);
     user = null;
     notifyListeners();
+  }
+
+  void applyUser(Map<String, dynamic> json) {
+    user = UserModel.fromJson(json);
+    notifyListeners();
+  }
+
+  Future<void> refreshUser() async {
+    try {
+      final data = await _api.get('/api/auth/me');
+      applyUser(data['user'] as Map<String, dynamic>);
+    } catch (_) {}
   }
 }

@@ -7,10 +7,11 @@ const schema = z.object({
   positionSec: z.number().min(0),
   durationSec: z.number().min(0),
   watchedDeltaSec: z.number().min(0).optional(),
+  completed: z.boolean().optional(),
 });
 
 export async function POST(request: Request) {
-  const auth = await requireAuth(["STUDENT", "CERTIFICATE_USER"]);
+  const auth = await requireAuth();
   if (auth.error) return auth.error;
 
   const body = await request.json();

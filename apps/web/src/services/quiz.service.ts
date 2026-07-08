@@ -18,6 +18,21 @@ export class QuizService {
     });
     if (!quiz) return { success: false as const, error: "NOT_FOUND" };
 
+    if (quiz.courseId) {
+      const course = await prisma.course.findFirst({
+        where: { id: quiz.courseId, deletedAt: null, status: "APPROVED" },
+        select: { price: true },
+      });
+      if (!course) return { success: false as const, error: "NOT_FOUND" };
+
+      const purchased = await prisma.coursePurchase.findFirst({
+        where: { courseId: quiz.courseId, userId, status: "PAID" },
+      });
+      if (!purchased && course.price > 0) {
+        return { success: false as const, error: "NO_ACCESS" };
+      }
+    }
+
     const attempts = await prisma.quizAttempt.count({
       where: { quizId, userId, completedAt: { not: null } },
     });
@@ -71,6 +86,21 @@ export class QuizService {
       include: { questions: { where: { deletedAt: null } } },
     });
     if (!quiz) return { success: false as const, error: "NOT_FOUND" };
+
+    if (quiz.courseId) {
+      const course = await prisma.course.findFirst({
+        where: { id: quiz.courseId, deletedAt: null, status: "APPROVED" },
+        select: { price: true },
+      });
+      if (!course) return { success: false as const, error: "NOT_FOUND" };
+
+      const purchased = await prisma.coursePurchase.findFirst({
+        where: { courseId: quiz.courseId, userId: params.userId, status: "PAID" },
+      });
+      if (!purchased && course.price > 0) {
+        return { success: false as const, error: "NO_ACCESS" };
+      }
+    }
 
     const attempts = await prisma.quizAttempt.count({
       where: { quizId: params.quizId, userId: params.userId, completedAt: { not: null } },

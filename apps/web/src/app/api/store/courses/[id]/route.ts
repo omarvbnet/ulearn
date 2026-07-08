@@ -26,6 +26,21 @@ export async function GET(
   });
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
+  const quizzes = await prisma.quiz.findMany({
+    where: { courseId: id, deletedAt: null, isActive: true },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      titleEn: true,
+      titleAr: true,
+      titleKu: true,
+      titleTr: true,
+      passPercentage: true,
+      maxAttempts: true,
+      _count: { select: { questions: true } },
+    },
+  });
+
   const lessonIds = course.lessons.map((l) => l.id);
   const [purchased, myFavorite, favoriteCount, likeGroups, myLikes, favGroups, myLessonFavs] =
     await Promise.all([
@@ -66,10 +81,18 @@ export async function GET(
       if (canWatch && l.fileKey && !fileUrl) {
         fileUrl = await getDownloadUrl(l.fileKey).catch(() => null);
       }
+      // Covers are shown for every lesson (locked ones included).
+      let thumbnailUrl = l.thumbnailUrl;
+      if (!thumbnailUrl && l.thumbnailKey) {
+        thumbnailUrl = await getDownloadUrl(l.thumbnailKey).catch(() => null);
+      }
       return {
         ...l,
         fileKey: undefined,
+        thumbnailKey: undefined,
         fileUrl,
+        thumbnailUrl,
+        canWatch,
         likes: likeCounts.get(l.id) ?? 0,
         likedByMe: likedSet.has(l.id),
         favoritesCount: favCounts.get(l.id) ?? 0,
@@ -80,6 +103,7 @@ export async function GET(
 
   return json({
     course: { ...course, lessons },
+    quizzes,
     purchased,
     favorites: favoriteCount,
     favoritedByMe: Boolean(myFavorite),

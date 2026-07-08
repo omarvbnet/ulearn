@@ -6,6 +6,9 @@ import type { CourseStatus, TeacherLevel } from "@prisma/client";
 /** Minimum student ratings before the level changes automatically. */
 const MIN_RATINGS_FOR_AUTO_LEVEL = 5;
 
+/** Each store course must have at least this many quizzes before going live. */
+export const MIN_COURSE_QUIZZES = 2;
+
 /** Platform deduction (%) per teacher level — admin-configurable in settings. */
 export const DEDUCTION_SETTING_KEYS: Record<
   Exclude<TeacherLevel, "NEEDS_IMPROVEMENT">,
@@ -270,7 +273,22 @@ export class TeacherCourseService {
         stage: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
         subject: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
         lessons: { orderBy: { sortOrder: "asc" } },
-        _count: { select: { purchases: { where: { status: "PAID" } } } },
+        _count: {
+          select: {
+            purchases: { where: { status: "PAID" } },
+            quizzes: { where: { deletedAt: null } },
+          },
+        },
+      },
+    });
+  }
+
+  static async countValidCourseQuizzes(courseId: string) {
+    return prisma.quiz.count({
+      where: {
+        courseId,
+        deletedAt: null,
+        questions: { some: { deletedAt: null } },
       },
     });
   }
@@ -310,6 +328,15 @@ export class TeacherCourseService {
     if (decision === "APPROVED") {
       if (!course.teacher.isActive) {
         return { success: false as const, error: "TEACHER_BLOCKED" };
+      }
+      const quizCount = await this.countValidCourseQuizzes(courseId);
+      if (quizCount < MIN_COURSE_QUIZZES) {
+        return {
+          success: false as const,
+          error: "INSUFFICIENT_QUIZZES",
+          required: MIN_COURSE_QUIZZES,
+          current: quizCount,
+        };
       }
       if (course.teacher.level === "NEEDS_IMPROVEMENT") {
         status = "CLOSED";
@@ -368,6 +395,7 @@ export class TeacherCourseService {
   static async listPublishedCourses(filter?: {
     stageId?: string;
     subjectId?: string;
+    teacherId?: string;
     q?: string;
     levels?: TeacherLevel[];
   }) {
@@ -378,6 +406,7 @@ export class TeacherCourseService {
         deletedAt: null,
         ...(filter?.stageId ? { stageId: filter.stageId } : {}),
         ...(filter?.subjectId ? { subjectId: filter.subjectId } : {}),
+        ...(filter?.teacherId ? { teacherId: filter.teacherId } : {}),
         // Free-text search across course titles, teacher names and video titles.
         ...(q
           ? {
@@ -425,6 +454,66 @@ export class TeacherCourseService {
         _count: { select: { purchases: { where: { status: "PAID" } } } },
       },
     });
+  }
+
+  /** Public teacher profile with live store courses for students. */
+  static async getTeacherStoreProfile(teacherId: string, userId: string) {
+    const teacher = await prisma.teacherProfile.findFirst({
+      where: {
+        id: teacherId,
+        deletedAt: null,
+        isActive: true,
+        level: { not: "NEEDS_IMPROVEMENT" },
+        user: { status: "APPROVED", deletedAt: null },
+      },
+      include: {
+        user: { select: { fullLegalName: true, profilePhotoUrl: true } },
+        subjects: {
+          include: {
+            subject: {
+              select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true },
+            },
+          },
+        },
+        _count: {
+          select: {
+            courses: { where: { status: "APPROVED", deletedAt: null } },
+            shortVideos: { where: { status: "APPROVED", deletedAt: null } },
+          },
+        },
+      },
+    });
+    if (!teacher) return { success: false as const, error: "NOT_FOUND" as const };
+
+    const courses = await this.listPublishedCourses({ teacherId });
+    const enriched = await this.enrichCoursesForUser(courses, userId);
+
+    const ratingAgg = await prisma.teacherRating.aggregate({
+      where: { teacherId },
+      _avg: { rating: true },
+      _count: true,
+    });
+
+    return {
+      success: true as const,
+      teacher: {
+        id: teacher.id,
+        name: teacher.user.fullLegalName,
+        profilePhotoUrl: teacher.user.profilePhotoUrl,
+        bio: teacher.bio,
+        level: teacher.level,
+        specializations: teacher.specializations,
+        subjects: teacher.subjects.map((s) => s.subject),
+        liveCoursesCount: teacher._count.courses,
+        reelsCount: teacher._count.shortVideos,
+        rating:
+          ratingAgg._avg.rating != null
+            ? Math.round(ratingAgg._avg.rating * 10) / 10
+            : null,
+        ratingCount: ratingAgg._count,
+      },
+      courses: enriched,
+    };
   }
 
   /**

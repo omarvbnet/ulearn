@@ -22,7 +22,7 @@ type Course = {
   stage: { nameEn: string };
   subject: { nameEn: string };
   lessons: { id: string; title: string; durationSec: number | null }[];
-  _count: { purchases: number };
+  _count: { purchases: number; quizzes: number };
 };
 
 type Purchase = {
@@ -38,6 +38,25 @@ type Purchase = {
   };
 };
 
+type LessonUpdate = {
+  id: string;
+  title: string | null;
+  fileUrl: string | null;
+  thumbnailUrl: string | null;
+  status: string;
+  createdAt: string;
+  lesson: {
+    id: string;
+    title: string;
+    fileUrl: string | null;
+    course: {
+      id: string;
+      titleEn: string;
+      teacher: { user: { fullLegalName: string | null; phone: string } };
+    };
+  };
+};
+
 const LEVEL_BADGE: Record<string, "APPROVED" | "PENDING" | "SUSPENDED"> = {
   MASTER: "APPROVED",
   EXCELLENT: "APPROVED",
@@ -50,19 +69,28 @@ export function CourseReviewClient() {
   const [tab, setTab] = useState("PENDING_REVIEW");
   const [courses, setCourses] = useState<Course[] | null>(null);
   const [purchases, setPurchases] = useState<Purchase[] | null>(null);
+  const [lessonUpdates, setLessonUpdates] = useState<LessonUpdate[] | null>(null);
   const [selected, setSelected] = useState<Course | null>(null);
+  const [selectedUpdate, setSelectedUpdate] = useState<LessonUpdate | null>(null);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
 
   const loadCourses = useCallback(() => {
     setCourses(null);
+    setPurchases(null);
+    setLessonUpdates(null);
+    if (tab === "VIDEO_UPDATES") {
+      fetch("/api/admin/lesson-updates?status=PENDING")
+        .then((r) => (r.ok ? r.json() : { requests: [] }))
+        .then((d) => setLessonUpdates(d.requests || []));
+      return;
+    }
     const qs = tab === "PURCHASES" ? "" : `?status=${tab}`;
     if (tab !== "PURCHASES") {
       fetch(`/api/admin/teacher-courses${qs}`)
         .then((r) => (r.ok ? r.json() : { courses: [] }))
         .then((d) => setCourses(d.courses || []));
     } else {
-      setPurchases(null);
       fetch("/api/admin/course-purchases?status=PENDING")
         .then((r) => (r.ok ? r.json() : { purchases: [] }))
         .then((d) => setPurchases(d.purchases || []));
@@ -87,7 +115,37 @@ export function CourseReviewClient() {
       loadCourses();
     } else {
       const d = await res.json().catch(() => ({}));
-      toast(d.error === "TEACHER_BLOCKED" ? "Teacher account is blocked" : "Failed", "error");
+      toast(
+        d.code === "TEACHER_BLOCKED"
+          ? "Teacher account is blocked"
+          : d.code === "INSUFFICIENT_QUIZZES"
+            ? d.error || "Course needs at least 2 quizzes before approval"
+            : "Failed",
+        "error"
+      );
+    }
+  }
+
+  async function reviewUpdate(decision: "APPROVED" | "REJECTED") {
+    if (!selectedUpdate) return;
+    setBusy(true);
+    const res = await fetch(`/api/admin/lesson-updates/${selectedUpdate.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, notes: notes || undefined }),
+    });
+    setBusy(false);
+    if (res.ok) {
+      toast(
+        decision === "APPROVED"
+          ? "Update approved — subscribers notified"
+          : "Update rejected"
+      );
+      setSelectedUpdate(null);
+      setNotes("");
+      loadCourses();
+    } else {
+      toast("Failed", "error");
     }
   }
 
@@ -115,6 +173,7 @@ export function CourseReviewClient() {
       <Tabs
         tabs={[
           { id: "PENDING_REVIEW", label: "Pending Review" },
+          { id: "VIDEO_UPDATES", label: "Video Updates" },
           { id: "APPROVED", label: "Live" },
           { id: "REJECTED", label: "Rejected" },
           { id: "CLOSED", label: "Closed" },
@@ -125,7 +184,43 @@ export function CourseReviewClient() {
       />
 
       <div className="mt-6">
-        {tab === "PURCHASES" ? (
+        {tab === "VIDEO_UPDATES" ? (
+          lessonUpdates === null ? (
+            <SkeletonRows rows={3} />
+          ) : lessonUpdates.length === 0 ? (
+            <EmptyState title="No pending video updates" />
+          ) : (
+            <div className="stagger space-y-3">
+              {lessonUpdates.map((u) => (
+                <Card
+                  key={u.id}
+                  className="card-hover cursor-pointer"
+                  onClick={() => {
+                    setSelectedUpdate(u);
+                    setNotes("");
+                  }}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold">
+                        {u.title ?? u.lesson.title}
+                      </p>
+                      <p className="mt-1 text-sm text-muted">
+                        {u.lesson.course.titleEn} · was &quot;{u.lesson.title}&quot;
+                      </p>
+                    </div>
+                    <Badge status="PENDING">Pending</Badge>
+                  </div>
+                  <p className="mt-2 text-xs text-muted">
+                    {u.lesson.course.teacher.user.fullLegalName} ·{" "}
+                    <span dir="ltr">{u.lesson.course.teacher.user.phone}</span> ·{" "}
+                    {new Date(u.createdAt).toLocaleString()}
+                  </p>
+                </Card>
+              ))}
+            </div>
+          )
+        ) : tab === "PURCHASES" ? (
           purchases === null ? (
             <SkeletonRows rows={3} />
           ) : purchases.length === 0 ? (
@@ -179,7 +274,7 @@ export function CourseReviewClient() {
                     <p className="font-semibold">{c.titleEn}</p>
                     <p className="mt-1 text-sm text-muted">
                       {c.subject.nameEn} · {c.stage.nameEn} · {c.lessons.length} lessons ·{" "}
-                      {c._count.purchases} sales
+                      {c._count.quizzes ?? 0} quizzes · {c._count.purchases} sales
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -201,6 +296,46 @@ export function CourseReviewClient() {
           </div>
         )}
       </div>
+
+      {selectedUpdate && (
+        <Modal
+          open
+          onClose={() => setSelectedUpdate(null)}
+          title={selectedUpdate.title ?? selectedUpdate.lesson.title}
+          wide
+        >
+          <div className="space-y-4">
+            <div className="text-sm text-muted">
+              <p>Course: {selectedUpdate.lesson.course.titleEn}</p>
+              <p>
+                Teacher: {selectedUpdate.lesson.course.teacher.user.fullLegalName}
+              </p>
+              <p>Current title: {selectedUpdate.lesson.title}</p>
+              {selectedUpdate.title && (
+                <p>New title: {selectedUpdate.title}</p>
+              )}
+            </div>
+            {(selectedUpdate.fileUrl || selectedUpdate.lesson.fileUrl) && (
+              <p className="text-sm">
+                {selectedUpdate.fileUrl ? "New video uploaded" : "No media change"}
+              </p>
+            )}
+            <Textarea
+              label="Review notes (optional)"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+            <div className="flex gap-3">
+              <Button disabled={busy} onClick={() => reviewUpdate("APPROVED")}>
+                Approve & Notify Subscribers
+              </Button>
+              <Button variant="danger" disabled={busy} onClick={() => reviewUpdate("REJECTED")}>
+                Reject
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {selected && (
         <Modal open onClose={() => setSelected(null)} title={selected.titleEn} wide>
