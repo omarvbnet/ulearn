@@ -55,6 +55,7 @@ export class ShortVideoService {
       page.map(async (v) => ({
         id: v.id,
         title: v.title,
+        description: v.description,
         fileUrl: await resolveVideoUrl(v.fileKey, v.fileUrl),
         thumbnailUrl: v.thumbnailUrl,
         durationSec: v.durationSec,

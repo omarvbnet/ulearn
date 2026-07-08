@@ -440,6 +440,7 @@ model TeacherShortVideo {
   id           String       @id @default(cuid())
   teacherId    String
   title        String
+  description  String?
   fileKey      String?
   fileUrl      String?
   thumbnailUrl String?

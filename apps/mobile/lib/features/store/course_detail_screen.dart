@@ -11,6 +11,7 @@ import 'package:ulearn/features/store/course_inline_player.dart';
 import 'package:ulearn/features/store/lesson_qa_section.dart';
 import 'package:ulearn/features/quiz/quiz_screen.dart';
 import 'package:ulearn/features/report/report_content_sheet.dart';
+import 'package:ulearn/features/store/teacher_studio_screen.dart';
 
 /// Store course detail with inline free-video playback, smart lesson covers,
 /// fullscreen casting watermark, and per-video Q&A.
@@ -34,6 +35,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   bool _purchased = false;
   bool _buying = false;
   bool _favorited = false;
+  bool _isOwnCourse = false;
   List<Map<String, dynamic>> _quizzes = [];
   String? _error;
 
@@ -93,6 +95,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       setState(() {
         _course = {...?_course, ...course};
         _purchased = purchased;
+        _isOwnCourse = data['isOwnCourse'] == true;
         _favorited = data['favoritedByMe'] == true;
         _quizzes = quizzes;
         _error = null;
@@ -240,7 +243,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         ((_course?['lessons'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
     final unlocked = _purchased ||
         _course?['purchaseStatus'] == 'PAID' ||
-        ((_course?['price'] as num?)?.toDouble() ?? 0) <= 0;
+        ((_course?['price'] as num?)?.toDouble() ?? 0) <= 0 ||
+        _isOwnCourse;
 
     setState(() {
       lesson['isCompleted'] = true;
@@ -322,7 +326,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       0,
       (s, l) => s + ((l['durationSec'] as num?)?.toInt() ?? 0),
     );
-    final unlocked = _purchased || purchaseStatus == 'PAID' || isFree;
+    final unlocked = _purchased || purchaseStatus == 'PAID' || isFree || _isOwnCourse;
     final active = _activeLesson;
     final activeUrl = active?['fileUrl']?.toString();
     final activeId = active?['id']?.toString();
@@ -331,16 +335,17 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       appBar: AppBar(
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
-          IconButton(
-            tooltip: 'Report course',
-            icon: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
-            onPressed: () => ReportContentSheet.show(
-              context,
-              targetType: 'STORE_COURSE',
-              targetId: widget.courseId,
-              contentTitle: title,
+          if (!_isOwnCourse)
+            IconButton(
+              tooltip: 'Report course',
+              icon: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
+              onPressed: () => ReportContentSheet.show(
+                context,
+                targetType: 'STORE_COURSE',
+                targetId: widget.courseId,
+                contentTitle: title,
+              ),
             ),
-          ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: FavoriteButton(
@@ -354,6 +359,62 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
         children: [
+          if (_isOwnCourse) ...[
+            StaggeredItem(
+              index: 0,
+              child: Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 12),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primary.withValues(alpha: 0.22),
+                      AppTheme.card,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.accent.withValues(alpha: 0.35)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.school_outlined, color: AppTheme.accent),
+                        SizedBox(width: 8),
+                        Text(
+                          'Your course',
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Status: ${course['status']?.toString().replaceAll('_', ' ') ?? 'Live'} · '
+                      '$lessons.length videos · $views views',
+                      style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const TeacherStudioScreen()),
+                            ),
+                            icon: const Icon(Icons.video_call_outlined, size: 18),
+                            label: const Text('Manage in Studio'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           if (activeUrl != null && activeUrl.isNotEmpty) ...[
             CourseInlinePlayer(
               key: ValueKey(activeUrl),

@@ -17,7 +17,7 @@ export async function GET(
     where: { id, status: "APPROVED", deletedAt: null },
     include: {
       teacher: {
-        select: { id: true, level: true, user: { select: { fullLegalName: true } } },
+        select: { id: true, level: true, userId: true, user: { select: { fullLegalName: true } } },
       },
       stage: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
       subject: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
@@ -74,6 +74,9 @@ export async function GET(
   const favCounts = new Map(favGroups.map((g) => [g.lessonId, g._count]));
   const favSet = new Set(myLessonFavs.map((f) => f.lessonId));
 
+  const isOwnCourse = course.teacher.userId === userId;
+  const hasAccess = purchased || isOwnCourse || course.price <= 0;
+
   const progressRows = await prisma.courseLessonProgress.findMany({
     where: { userId, lessonId: { in: lessonIds } },
     select: {
@@ -87,7 +90,7 @@ export async function GET(
 
   const lessons = await Promise.all(
     course.lessons.map(async (l) => {
-      const canWatch = purchased || l.isFreePreview || course.price <= 0;
+      const canWatch = hasAccess || l.isFreePreview;
       let fileUrl = canWatch ? l.fileUrl : null;
       if (canWatch && l.fileKey && !fileUrl) {
         fileUrl = await getDownloadUrl(l.fileKey).catch(() => null);
@@ -119,6 +122,7 @@ export async function GET(
     course: { ...course, lessons },
     quizzes,
     purchased,
+    isOwnCourse,
     favorites: favoriteCount,
     favoritedByMe: Boolean(myFavorite),
   });

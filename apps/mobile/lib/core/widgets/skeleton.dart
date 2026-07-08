@@ -269,6 +269,60 @@ class SkeletonList extends StatelessWidget {
   }
 }
 
+/// Full-screen reel placeholder while the feed loads.
+class SkeletonReelFeed extends StatelessWidget {
+  const SkeletonReelFeed({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.of(context).padding.bottom + 88;
+
+    return ColoredBox(
+      color: Colors.black,
+      child: Skeleton(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const SkeletonBox(height: double.infinity, radius: 0),
+            Positioned(
+              right: 14,
+              bottom: bottom + 40,
+              child: Column(
+                children: const [
+                  SkeletonCircle(size: 48),
+                  SizedBox(height: 22),
+                  SkeletonCircle(size: 44),
+                  SizedBox(height: 18),
+                  SkeletonCircle(size: 44),
+                  SizedBox(height: 18),
+                  SkeletonCircle(size: 44),
+                ],
+              ),
+            ),
+            Positioned(
+              left: 16,
+              right: 80,
+              bottom: bottom,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  SkeletonLine(width: 160, height: 14),
+                  SizedBox(height: 10),
+                  SkeletonLine(width: 240, height: 12),
+                  SizedBox(height: 8),
+                  SkeletonLine(width: 200, height: 12),
+                  SizedBox(height: 14),
+                  SkeletonBox(width: 140, height: 28, radius: 20),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Video player placeholder: 16:9 dark stage with a play circle,
 /// followed by title/meta lines.
 class SkeletonVideoPlayer extends StatelessWidget {

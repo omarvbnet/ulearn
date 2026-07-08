@@ -1,10 +1,13 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:video_compress/video_compress.dart';
 
-/// Teacher mobile studio: upload course videos and short videos.
+/// Teacher mobile studio: upload course videos and short videos with compression.
 class TeacherStudioScreen extends StatefulWidget {
   const TeacherStudioScreen({super.key});
 
@@ -17,8 +20,10 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   List<Map<String, dynamic>> _shorts = [];
   String? _courseId;
   final _titleCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
   bool _loading = true;
   bool _uploading = false;
+  String? _uploadStatus;
 
   @override
   void initState() {
@@ -29,20 +34,22 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   @override
   void dispose() {
     _titleCtrl.dispose();
+    _descCtrl.dispose();
+    VideoCompress.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
     try {
-      final [coursesRes, shortsRes] = await Future.wait([
+      final results = await Future.wait([
         context.read<ApiClient>().get('/api/teacher/courses'),
         context.read<ApiClient>().get('/api/teacher/short-videos'),
       ]);
       if (!mounted) return;
       setState(() {
-        _courses = ((coursesRes['courses'] as List<dynamic>?) ?? [])
+        _courses = ((results[0]['courses'] as List<dynamic>?) ?? [])
             .cast<Map<String, dynamic>>();
-        _shorts = ((shortsRes['videos'] as List<dynamic>?) ?? [])
+        _shorts = ((results[1]['videos'] as List<dynamic>?) ?? [])
             .cast<Map<String, dynamic>>();
         _courseId ??= _courses.isNotEmpty ? _courses.first['id']?.toString() : null;
         _loading = false;
@@ -52,16 +59,34 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     }
   }
 
+  Future<File?> _compressVideo(String sourcePath) async {
+    setState(() => _uploadStatus = 'Compressing video…');
+    try {
+      final info = await VideoCompress.compressVideo(
+        sourcePath,
+        quality: VideoQuality.MediumQuality,
+        includeAudio: true,
+        deleteOrigin: false,
+      );
+      if (info?.path != null) return File(info!.path!);
+    } catch (_) {}
+    return File(sourcePath);
+  }
+
   Future<Map<String, String>?> _uploadFile(
-    PlatformFile file, {
+    File file, {
     required String category,
     required String folder,
   }) async {
     final api = context.read<ApiClient>();
+    final bytes = await file.readAsBytes();
+    final name = file.path.split(Platform.pathSeparator).last;
+
+    setState(() => _uploadStatus = 'Uploading…');
     final presign = await api.post('/api/admin/uploads', {
-      'filename': file.name,
-      'contentType': file.extension == 'mp4' ? 'video/mp4' : 'video/*',
-      'size': file.size,
+      'filename': name.endsWith('.mp4') ? name : '$name.mp4',
+      'contentType': 'video/mp4',
+      'size': bytes.length,
       'category': category,
       'folder': folder,
     });
@@ -70,27 +95,38 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     final publicUrl = presign['publicUrl']?.toString();
     if (uploadUrl == null || key == null) return null;
 
-    await api.putBytes(
-      uploadUrl,
-      file.bytes!,
-      file.extension == 'mp4' ? 'video/mp4' : 'video/mp4',
-    );
+    await api.putBytes(uploadUrl, bytes, 'video/mp4');
     return {'key': key, 'url': publicUrl ?? uploadUrl};
+  }
+
+  Future<File?> _pickAndCompressVideo() async {
+    final pick = await FilePicker.pickFiles(type: FileType.video);
+    if (pick == null || pick.files.isEmpty) return null;
+
+    final file = pick.files.first;
+    if (file.path != null) return _compressVideo(file.path!);
+
+    if (file.bytes != null) {
+      final temp = File('${Directory.systemTemp.path}/ulearn_upload_${DateTime.now().millisecondsSinceEpoch}.mp4');
+      await temp.writeAsBytes(file.bytes!);
+      return _compressVideo(temp.path);
+    }
+    return null;
   }
 
   Future<void> _uploadCourseVideo() async {
     if (_courseId == null || _titleCtrl.text.trim().isEmpty) return;
-    final pick = await FilePicker.pickFiles(
-      type: FileType.video,
-      withData: true,
-    );
-    if (pick == null || pick.files.isEmpty || pick.files.first.bytes == null) return;
 
-    setState(() => _uploading = true);
+    setState(() {
+      _uploading = true;
+      _uploadStatus = 'Preparing…';
+    });
     try {
-      final file = pick.files.first;
+      final compressed = await _pickAndCompressVideo();
+      if (compressed == null) return;
+
       final uploaded = await _uploadFile(
-        file,
+        compressed,
         category: 'video',
         folder: 'teacher-courses',
       );
@@ -116,23 +152,29 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
         SnackBar(content: Text(e.toString())),
       );
     } finally {
-      if (mounted) setState(() => _uploading = false);
+      if (mounted) {
+        setState(() {
+          _uploading = false;
+          _uploadStatus = null;
+        });
+      }
+      await VideoCompress.deleteAllCache();
     }
   }
 
   Future<void> _uploadShort() async {
     if (_titleCtrl.text.trim().isEmpty) return;
-    final pick = await FilePicker.pickFiles(
-      type: FileType.video,
-      withData: true,
-    );
-    if (pick == null || pick.files.isEmpty || pick.files.first.bytes == null) return;
 
-    setState(() => _uploading = true);
+    setState(() {
+      _uploading = true;
+      _uploadStatus = 'Preparing…';
+    });
     try {
-      final file = pick.files.first;
+      final compressed = await _pickAndCompressVideo();
+      if (compressed == null) return;
+
       final uploaded = await _uploadFile(
-        file,
+        compressed,
         category: 'video',
         folder: 'teacher-shorts',
       );
@@ -140,11 +182,13 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
 
       await context.read<ApiClient>().post('/api/teacher/short-videos', {
         'title': _titleCtrl.text.trim(),
+        if (_descCtrl.text.trim().isNotEmpty) 'description': _descCtrl.text.trim(),
         'fileKey': uploaded['key'],
         'fileUrl': uploaded['url'],
       });
       if (!mounted) return;
       _titleCtrl.clear();
+      _descCtrl.clear();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Short video submitted for review')),
       );
@@ -153,7 +197,13 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {
-      if (mounted) setState(() => _uploading = false);
+      if (mounted) {
+        setState(() {
+          _uploading = false;
+          _uploadStatus = null;
+        });
+      }
+      await VideoCompress.deleteAllCache();
     }
   }
 
@@ -177,7 +227,9 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                 children: [
                   _UploadTab(
                     titleCtrl: _titleCtrl,
+                    descCtrl: null,
                     uploading: _uploading,
+                    uploadStatus: _uploadStatus,
                     courses: _courses,
                     courseId: _courseId,
                     onCourse: (id) => setState(() => _courseId = id),
@@ -185,7 +237,9 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                   ),
                   _UploadTab(
                     titleCtrl: _titleCtrl,
+                    descCtrl: _descCtrl,
                     uploading: _uploading,
+                    uploadStatus: _uploadStatus,
                     courses: const [],
                     courseId: null,
                     onCourse: (_) {},
@@ -203,7 +257,9 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
 class _UploadTab extends StatelessWidget {
   const _UploadTab({
     required this.titleCtrl,
+    required this.descCtrl,
     required this.uploading,
+    required this.uploadStatus,
     required this.courses,
     required this.courseId,
     required this.onCourse,
@@ -213,7 +269,9 @@ class _UploadTab extends StatelessWidget {
   });
 
   final TextEditingController titleCtrl;
+  final TextEditingController? descCtrl;
   final bool uploading;
+  final String? uploadStatus;
   final List<Map<String, dynamic>> courses;
   final String? courseId;
   final ValueChanged<String?> onCourse;
@@ -229,17 +287,32 @@ class _UploadTab extends StatelessWidget {
         TextField(
           controller: titleCtrl,
           decoration: InputDecoration(
-            labelText: isShort ? 'Short video title' : 'Lesson title',
+            labelText: isShort ? 'Title' : 'Lesson title',
           ),
         ),
+        if (isShort && descCtrl != null) ...[
+          const SizedBox(height: 14),
+          TextField(
+            controller: descCtrl,
+            maxLines: 3,
+            maxLength: 500,
+            decoration: const InputDecoration(
+              labelText: 'Description (shown on Reels)',
+              hintText: 'What is this video about?',
+              alignLabelWithHint: true,
+            ),
+          ),
+        ],
         if (!isShort) ...[
           const SizedBox(height: 16),
           if (courses.isEmpty)
-            const Text('Create a course on the web teacher portal first.',
-                style: TextStyle(color: AppTheme.muted))
+            const Text(
+              'Create a course on the web teacher portal first.',
+              style: TextStyle(color: AppTheme.muted),
+            )
           else
             DropdownButtonFormField<String>(
-              value: courseId,
+              initialValue: courseId,
               decoration: const InputDecoration(labelText: 'Course'),
               items: courses
                   .map((c) => DropdownMenuItem(
@@ -250,6 +323,27 @@ class _UploadTab extends StatelessWidget {
               onChanged: onCourse,
             ),
         ],
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.cardBorder),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.compress_outlined, color: AppTheme.accent, size: 20),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Videos are compressed automatically before upload to save data and load faster.',
+                  style: TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.35),
+                ),
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: 20),
         FilledButton.icon(
           onPressed: uploading ? null : onUpload,
@@ -260,15 +354,32 @@ class _UploadTab extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
               : const Icon(Icons.upload_file),
-          label: Text(uploading ? 'Uploading…' : 'Pick & upload video'),
+          label: Text(uploading ? (uploadStatus ?? 'Working…') : 'Pick & upload video'),
         ),
         if (isShort && shorts.isNotEmpty) ...[
           const SizedBox(height: 24),
           const Text('Your short videos', style: TextStyle(fontWeight: FontWeight.bold)),
-          ...shorts.map((s) => ListTile(
+          ...shorts.map((s) {
+            final status = s['status']?.toString() ?? '';
+            return Card(
+              margin: const EdgeInsets.only(top: 8),
+              child: ListTile(
                 title: Text(s['title']?.toString() ?? ''),
-                trailing: Text(s['status']?.toString() ?? '', style: const TextStyle(fontSize: 12)),
-              )),
+                subtitle: s['description'] != null
+                    ? Text(
+                        s['description'].toString(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                      )
+                    : null,
+                trailing: Chip(
+                  label: Text(status.replaceAll('_', ' '), style: const TextStyle(fontSize: 10)),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            );
+          }),
         ],
       ],
     );

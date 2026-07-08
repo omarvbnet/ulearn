@@ -4,6 +4,7 @@ import { z } from "zod";
 
 const schema = z.object({
   title: z.string().min(1),
+  description: z.string().max(500).optional(),
   fileKey: z.string().optional(),
   fileUrl: z.string().optional(),
   thumbnailUrl: z.string().optional(),

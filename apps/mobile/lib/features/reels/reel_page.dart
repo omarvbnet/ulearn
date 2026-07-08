@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/video/reel_video_cache.dart';
+import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/profile/profile_avatar.dart';
 import 'package:video_player/video_player.dart';
 
@@ -12,7 +15,8 @@ class ReelPage extends StatefulWidget {
     required this.onLike,
     required this.onComment,
     this.onTeacherTap,
-    this.onReport,
+    this.onMore,
+    this.bottomInset = 88,
   });
 
   final Map<String, dynamic> video;
@@ -20,17 +24,21 @@ class ReelPage extends StatefulWidget {
   final VoidCallback onLike;
   final VoidCallback onComment;
   final VoidCallback? onTeacherTap;
-  final VoidCallback? onReport;
+  final VoidCallback? onMore;
+  final double bottomInset;
 
   @override
   State<ReelPage> createState() => _ReelPageState();
 }
 
-class _ReelPageState extends State<ReelPage> with SingleTickerProviderStateMixin {
+class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
   VideoPlayerController? _controller;
   bool _initializing = true;
   bool _muted = false;
+  bool _showMuteHint = false;
   late final AnimationController _likePulse;
+  late final AnimationController _heartBurst;
+  bool _showHeartBurst = false;
 
   @override
   void initState() {
@@ -41,6 +49,14 @@ class _ReelPageState extends State<ReelPage> with SingleTickerProviderStateMixin
       lowerBound: 0.85,
       upperBound: 1.25,
     );
+    _heartBurst = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..addStatusListener((s) {
+        if (s == AnimationStatus.completed && mounted) {
+          setState(() => _showHeartBurst = false);
+        }
+      });
     _initVideo();
   }
 
@@ -52,6 +68,12 @@ class _ReelPageState extends State<ReelPage> with SingleTickerProviderStateMixin
     } else if (!widget.active && oldWidget.active) {
       _controller?.pause();
     }
+    if (oldWidget.video['id'] != widget.video['id']) {
+      _controller?.dispose();
+      _controller = null;
+      _initializing = true;
+      _initVideo();
+    }
   }
 
   Future<void> _initVideo() async {
@@ -61,9 +83,10 @@ class _ReelPageState extends State<ReelPage> with SingleTickerProviderStateMixin
       return;
     }
     try {
-      final c = VideoPlayerController.networkUrl(Uri.parse(url));
+      final c = await ReelVideoCache.createController(url);
       await c.initialize();
       c.setLooping(true);
+      c.setVolume(_muted ? 0 : 1);
       if (widget.active) await c.play();
       if (!mounted) {
         c.dispose();
@@ -81,23 +104,29 @@ class _ReelPageState extends State<ReelPage> with SingleTickerProviderStateMixin
   @override
   void dispose() {
     _likePulse.dispose();
+    _heartBurst.dispose();
     _controller?.dispose();
     super.dispose();
   }
 
-  void _togglePlay() {
-    final c = _controller;
-    if (c == null) return;
-    if (c.value.isPlaying) {
-      c.pause();
-    } else {
-      c.play();
-    }
-    setState(() {});
+  void _toggleMute() {
+    setState(() {
+      _muted = !_muted;
+      _showMuteHint = true;
+      _controller?.setVolume(_muted ? 0 : 1);
+    });
+    Future.delayed(const Duration(milliseconds: 900), () {
+      if (mounted) setState(() => _showMuteHint = false);
+    });
   }
 
-  void _handleLike() {
+  void _handleLike({bool burst = false}) {
+    HapticFeedback.lightImpact();
     _likePulse.forward(from: 0).then((_) => _likePulse.reverse());
+    if (burst) {
+      setState(() => _showHeartBurst = true);
+      _heartBurst.forward(from: 0);
+    }
     widget.onLike();
   }
 
@@ -107,24 +136,37 @@ class _ReelPageState extends State<ReelPage> with SingleTickerProviderStateMixin
     return '$n';
   }
 
+  String _teacherName(Map<String, dynamic> teacher) {
+    final direct = teacher['name']?.toString();
+    if (direct != null && direct.trim().isNotEmpty) return direct.trim();
+    final user = teacher['user'] as Map<String, dynamic>?;
+    final legal = user?['fullLegalName']?.toString();
+    if (legal != null && legal.trim().isNotEmpty) return legal.trim();
+    return 'Teacher';
+  }
+
   @override
   Widget build(BuildContext context) {
     final teacher = widget.video['teacher'] as Map<String, dynamic>? ?? {};
-    final name = teacher['name']?.toString() ?? 'Teacher';
+    final name = _teacherName(teacher);
     final level = teacher['level']?.toString() ?? '';
     final teacherPhoto = teacher['profilePhotoUrl']?.toString();
-    final title = widget.video['title']?.toString() ?? '';
+    final title = widget.video['title']?.toString().trim() ?? '';
+    final description = widget.video['description']?.toString().trim() ?? '';
+    final caption = description.isNotEmpty ? description : title;
     final likes = (widget.video['likes'] as num?)?.toInt() ?? 0;
     final comments = (widget.video['commentCount'] as num?)?.toInt() ?? 0;
     final liked = widget.video['likedByMe'] == true;
+    final bottom = widget.bottomInset;
 
     return GestureDetector(
-      onTap: _togglePlay,
+      onTap: _toggleMute,
+      onDoubleTap: () => _handleLike(burst: true),
       child: Stack(
         fit: StackFit.expand,
         children: [
           if (_initializing)
-            const Center(child: CircularProgressIndicator(color: AppTheme.accent))
+            const SkeletonReelPage()
           else if (_controller != null && _controller!.value.isInitialized)
             FittedBox(
               fit: BoxFit.cover,
@@ -152,157 +194,212 @@ class _ReelPageState extends State<ReelPage> with SingleTickerProviderStateMixin
               ),
             ),
 
-          // Cinematic vignette
+          // Readability gradients
           DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  Colors.black.withValues(alpha: 0.55),
+                  Colors.black.withValues(alpha: 0.35),
                   Colors.transparent,
                   Colors.transparent,
-                  Colors.black.withValues(alpha: 0.75),
+                  Colors.black.withValues(alpha: 0.82),
                 ],
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                stops: const [0, 0.2, 0.65, 1],
+                stops: const [0, 0.18, 0.55, 1],
               ),
             ),
           ),
 
-          // Play/pause hint
-          if (_controller != null && !_controller!.value.isPlaying)
+          // Double-tap heart burst
+          if (_showHeartBurst)
             Center(
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.black45,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white24),
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.4, end: 1.15).animate(
+                  CurvedAnimation(parent: _heartBurst, curve: Curves.easeOutBack),
                 ),
-                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 42),
+                child: FadeTransition(
+                  opacity: Tween<double>(begin: 1, end: 0).animate(
+                    CurvedAnimation(
+                      parent: _heartBurst,
+                      curve: const Interval(0.35, 1, curve: Curves.easeOut),
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.favorite_rounded,
+                    size: 96,
+                    color: Colors.redAccent.withValues(alpha: 0.92),
+                  ),
+                ),
               ),
             ),
 
+          // Mute hint
+          AnimatedOpacity(
+            opacity: _showMuteHint ? 1 : 0,
+            duration: const Duration(milliseconds: 200),
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Icon(
+                  _muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                  color: Colors.white,
+                  size: 32,
+                ),
+              ),
+            ),
+          ),
+
           // Right action rail
           Positioned(
-            right: 12,
-            bottom: 120,
+            right: 10,
+            bottom: bottom + 24,
             child: Column(
               children: [
                 GestureDetector(
                   onTap: widget.onTeacherTap,
-                  child: ProfileAvatar(
-                    name: name,
-                    photoUrl: teacherPhoto,
-                    size: 48,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                    child: ProfileAvatar(name: name, photoUrl: teacherPhoto, size: 46),
                   ),
                 ),
-                const SizedBox(height: 22),
+                const SizedBox(height: 20),
                 ScaleTransition(
                   scale: _likePulse,
                   child: _ActionButton(
-                    icon: liked ? Icons.favorite : Icons.favorite_border,
+                    icon: liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
                     label: _formatCount(likes),
                     color: liked ? Colors.redAccent : Colors.white,
-                    onTap: _handleLike,
+                    onTap: () => _handleLike(),
                   ),
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 16),
                 _ActionButton(
-                  icon: Icons.mode_comment_outlined,
+                  icon: Icons.mode_comment_rounded,
                   label: _formatCount(comments),
                   onTap: widget.onComment,
                 ),
-                const SizedBox(height: 18),
-                if (widget.onReport != null)
+                if (widget.onMore != null) ...[
+                  const SizedBox(height: 16),
                   _ActionButton(
-                    icon: Icons.flag_outlined,
-                    label: 'Report',
-                    color: Colors.orangeAccent,
-                    onTap: widget.onReport!,
+                    icon: Icons.more_horiz_rounded,
+                    label: 'More',
+                    onTap: widget.onMore!,
                   ),
-                if (widget.onReport != null) const SizedBox(height: 18),
-                _ActionButton(
-                  icon: _muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                  label: _muted ? 'Off' : 'Sound',
-                  onTap: () {
-                    setState(() => _muted = !_muted);
-                    _controller?.setVolume(_muted ? 0 : 1);
-                  },
-                ),
+                ],
               ],
             ),
           ),
 
-          // Bottom info
+          // Bottom caption block — above tab bar
           Positioned(
-            left: 16,
-            right: 72,
-            bottom: 28,
+            left: 14,
+            right: 76,
+            bottom: bottom,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    GestureDetector(
-                      onTap: widget.onTeacherTap,
-                      behavior: HitTestBehavior.opaque,
-                      child: Text(
-                        name,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ),
-                    if (level.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withValues(alpha: 0.55),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
+                GestureDetector(
+                  onTap: widget.onTeacherTap,
+                  behavior: HitTestBehavior.opaque,
+                  child: Row(
+                    children: [
+                      Flexible(
                         child: Text(
-                          level.replaceAll('_', ' '),
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                            shadows: [
+                              Shadow(color: Colors.black54, blurRadius: 8),
+                            ],
+                          ),
                         ),
                       ),
+                      if (level.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.65),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            level.replaceAll('_', ' '),
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    height: 1.35,
-                    fontWeight: FontWeight.w500,
                   ),
                 ),
+                if (title.isNotEmpty && description.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+                    ),
+                  ),
+                ],
+                if (caption.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    caption,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.95),
+                      fontSize: 13.5,
+                      height: 1.35,
+                      fontWeight: FontWeight.w400,
+                      shadows: const [Shadow(color: Colors.black87, blurRadius: 10)],
+                    ),
+                  ),
+                ],
                 if (widget.onTeacherTap != null) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   GestureDetector(
                     onTap: widget.onTeacherTap,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white24),
+                        color: Colors.white.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: Colors.white30),
                       ),
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.storefront_outlined, color: AppTheme.accent, size: 14),
+                          Icon(Icons.storefront_outlined, color: AppTheme.accent, size: 15),
                           SizedBox(width: 6),
                           Text(
-                            'View live courses',
-                            style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                            'View courses',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ],
                       ),
@@ -313,6 +410,21 @@ class _ReelPageState extends State<ReelPage> with SingleTickerProviderStateMixin
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class SkeletonReelPage extends StatelessWidget {
+  const SkeletonReelPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Skeleton(
+      child: Container(
+        color: AppTheme.card,
+        alignment: Alignment.center,
+        child: const SkeletonCircle(size: 56),
       ),
     );
   }
@@ -341,16 +453,21 @@ class _ActionButton extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.35),
+              color: Colors.black.withValues(alpha: 0.38),
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.white12),
+              border: Border.all(color: Colors.white10),
             ),
-            child: Icon(icon, color: color, size: 28),
+            child: Icon(icon, color: color, size: 26),
           ),
           const SizedBox(height: 4),
           Text(
             label,
-            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
+            ),
           ),
         ],
       ),

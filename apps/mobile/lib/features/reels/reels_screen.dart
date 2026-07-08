@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/video/reel_video_cache.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/reels/reel_page.dart';
@@ -25,6 +26,8 @@ class _ReelsScreenState extends State<ReelsScreen> {
   bool _loadingMore = false;
   String? _nextCursor;
   int _currentIndex = 0;
+
+  static const _bottomInset = 88.0;
 
   @override
   void initState() {
@@ -50,13 +53,23 @@ class _ReelsScreenState extends State<ReelsScreen> {
     try {
       final data = await context.read<ApiClient>().get('/api/store/short-videos?limit=12');
       if (!mounted) return;
+      final videos = ((data['videos'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
       setState(() {
-        _videos = ((data['videos'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+        _videos = videos;
         _nextCursor = data['nextCursor']?.toString();
         _loading = false;
       });
+      _prefetchAround(0);
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _prefetchAround(int index) {
+    for (final i in [index, index + 1]) {
+      if (i < 0 || i >= _videos.length) continue;
+      final url = _videos[i]['fileUrl']?.toString();
+      if (url != null && url.isNotEmpty) ReelVideoCache.prefetch(url);
     }
   }
 
@@ -80,6 +93,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
 
   void _onPageChanged(int index) {
     setState(() => _currentIndex = index);
+    _prefetchAround(index);
     if (index >= _videos.length - 3) _loadMore();
   }
 
@@ -154,13 +168,43 @@ class _ReelsScreenState extends State<ReelsScreen> {
     );
   }
 
+  void _openMoreMenu(Map<String, dynamic> video) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
+              title: const Text('Report content'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _reportVideo(video);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_outline, color: AppTheme.accent),
+              title: const Text('View teacher profile'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openTeacherProfile(video);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const ColoredBox(
-        color: Colors.black,
-        child: Center(child: SkeletonBox(width: 120, height: 120, radius: 16)),
-      );
+      return const SkeletonReelFeed();
     }
 
     if (_videos.isEmpty) {
@@ -200,7 +244,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
                   children: [
                     ULearnLogo(size: 28),
                     SizedBox(width: 8),
-                    Text('Reels', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                    Text('Reels', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white)),
                   ],
                 ),
               ),
@@ -225,10 +269,11 @@ class _ReelsScreenState extends State<ReelsScreen> {
                 key: ValueKey(video['id']),
                 video: video,
                 active: index == _currentIndex,
+                bottomInset: _bottomInset,
                 onLike: () => _toggleLike(index),
                 onComment: () => _openComments(index),
                 onTeacherTap: () => _openTeacherProfile(video),
-                onReport: () => _reportVideo(video),
+                onMore: () => _openMoreMenu(video),
               );
             },
           ),
