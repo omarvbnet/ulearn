@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { IRAQ_EDUCATIONAL_STAGES, IRAQ_PROVINCES } from "./iraq-data";
 
 const prisma = new PrismaClient();
 
@@ -13,22 +14,23 @@ async function main() {
       nameAr: "العراق",
       nameKu: "عێراق",
       nameTr: "Irak",
-      provinces: {
-        create: [
-          { nameEn: "Baghdad", nameAr: "بغداد", nameKu: "بەغدا", nameTr: "Bağdat" },
-          { nameEn: "Erbil", nameAr: "أربيل", nameKu: "هەولێر", nameTr: "Erbil" },
-          { nameEn: "Basra", nameAr: "البصرة", nameKu: "بەسرە", nameTr: "Basra" },
-          { nameEn: "Sulaymaniyah", nameAr: "السليمانية", nameKu: "سلێمانی", nameTr: "Süleymaniye" },
-        ],
-      },
     },
-    include: { provinces: true },
   });
 
-  const provinces =
-    iraq.provinces?.length > 0
-      ? iraq.provinces
-      : await prisma.province.findMany({ where: { countryId: iraq.id } });
+  for (const p of IRAQ_PROVINCES) {
+    const existing = await prisma.province.findFirst({
+      where: { countryId: iraq.id, nameEn: p.nameEn, deletedAt: null },
+    });
+    if (!existing) {
+      await prisma.province.create({
+        data: { countryId: iraq.id, ...p },
+      });
+    }
+  }
+
+  const provinces = await prisma.province.findMany({
+    where: { countryId: iraq.id, deletedAt: null },
+  });
   const baghdad = provinces.find((p) => p.nameEn === "Baghdad") ?? provinces[0];
   const erbil = provinces.find((p) => p.nameEn === "Erbil") ?? provinces[0];
 
@@ -50,20 +52,38 @@ async function main() {
     },
   });
 
-  /* ── Educational structure ─────────────────────── */
+  /* ── Educational structure (Iraq K-12 stages) ─── */
+  for (const s of IRAQ_EDUCATIONAL_STAGES) {
+    const existing = await prisma.educationalStage.findFirst({
+      where: { countryId: iraq.id, nameAr: s.nameAr, deletedAt: null },
+    });
+    if (existing) {
+      await prisma.educationalStage.update({
+        where: { id: existing.id },
+        data: {
+          nameEn: s.nameEn,
+          nameKu: s.nameKu,
+          nameTr: s.nameTr,
+          sortOrder: s.sortOrder,
+          isActive: true,
+        },
+      });
+    } else {
+      await prisma.educationalStage.create({
+        data: { countryId: iraq.id, ...s },
+      });
+    }
+  }
+
   let stage = await prisma.educationalStage.findFirst({
-    where: { countryId: iraq.id, nameEn: "Secondary School" },
+    where: { countryId: iraq.id, sortOrder: 10 },
   });
-  stage ??= await prisma.educationalStage.create({
-    data: {
-      countryId: iraq.id,
-      nameEn: "Secondary School",
-      nameAr: "المرحلة الثانوية",
-      nameKu: "قۆناغی ناوەندی",
-      nameTr: "Ortaokul",
-      sortOrder: 1,
-    },
+  stage ??= await prisma.educationalStage.findFirst({
+    where: { countryId: iraq.id, deletedAt: null },
+    orderBy: { sortOrder: "asc" },
   });
+
+  if (!stage) throw new Error("No educational stage found for Iraq seed");
 
   let subject = await prisma.subject.findFirst({
     where: { countryId: iraq.id, nameEn: "Mathematics" },

@@ -16,12 +16,13 @@ export interface RegisterStudentInput {
   provinceId: string;
   email?: string;
   nationalId: string;
-  nationalIdImage?: string;
+  nationalIdImage: string;
   parentPhone: string;
+  parentEmail?: string;
   latitude?: number;
   longitude?: number;
   locationLabel?: string;
-  educationalStageId?: string;
+  educationalStageId: string;
   grade?: string;
   schoolUniversity?: string;
   locale?: Locale;
@@ -35,7 +36,7 @@ export interface RegisterCertificateInput {
   provinceId: string;
   email?: string;
   nationalId: string;
-  nationalIdImage?: string;
+  nationalIdImage: string;
   latitude?: number;
   longitude?: number;
   locationLabel?: string;
@@ -204,6 +205,7 @@ export class AuthService {
         nationalId: input.nationalId,
         nationalIdImage: input.nationalIdImage,
         parentPhone: input.parentPhone,
+        parentEmail: input.parentEmail,
         latitude: input.latitude,
         longitude: input.longitude,
         locationLabel: input.locationLabel,

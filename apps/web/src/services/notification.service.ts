@@ -48,7 +48,11 @@ export class NotificationService {
     }
 
     if (user.email) {
-      await this.sendEmail(user.email, title, body);
+      await this.sendEmail(
+        user.email,
+        title,
+        `<div style="font-family:sans-serif;padding:24px"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p></div>`
+      );
     }
   }
 
@@ -95,7 +99,11 @@ export class NotificationService {
       }
 
       if (params.channels.includes("EMAIL") && user.email) {
-        await this.sendEmail(user.email, title, body);
+        await this.sendEmail(
+          user.email,
+          title,
+          `<div style="font-family:sans-serif;padding:24px"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p></div>`
+        );
       }
     }
 
@@ -171,8 +179,94 @@ export class NotificationService {
       from: process.env.EMAIL_FROM || "U Learn <noreply@ulearn.app>",
       to,
       subject,
-      html: `<div style="font-family:sans-serif;padding:24px"><h2>${subject}</h2><p>${html}</p></div>`,
+      html,
     });
+  }
+
+  /** Branded quiz result email to a student's parent. */
+  static async notifyParentQuizResult(params: {
+    userId: string;
+    quizTitle: string;
+    percentage: number;
+    passed: boolean;
+    passPercentage: number;
+    timeSpentSec?: number;
+    score: number;
+    maxScore: number;
+  }) {
+    const student = await prisma.user.findUnique({
+      where: { id: params.userId },
+      select: {
+        fullLegalName: true,
+        parentEmail: true,
+        locale: true,
+      },
+    });
+    if (!student?.parentEmail) return;
+
+    const locale = student.locale;
+    const name = student.fullLegalName ?? "Student";
+    const pct = Math.round(params.percentage);
+    const time = formatQuizTime(params.timeSpentSec);
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://ulearn.usmart-iot.com";
+    const logoUrl = `${appUrl}/logo.svg`;
+
+    const copy = quizParentCopy(locale, {
+      name,
+      quizTitle: params.quizTitle,
+      pct,
+      passed: params.passed,
+      passPct: Math.round(params.passPercentage),
+      time,
+      score: params.score,
+      maxScore: params.maxScore,
+    });
+
+    const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"/></head>
+<body style="margin:0;padding:0;background:#050510;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#050510;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="100%" style="max-width:520px;background:#0c0c1a;border-radius:16px;border:1px solid #1a1a35;overflow:hidden;">
+        <tr>
+          <td style="padding:28px 28px 16px;text-align:center;background:linear-gradient(135deg,#a020f0,#00e5ff);">
+            <img src="${logoUrl}" alt="U Learn" width="72" height="72" style="border-radius:14px;margin-bottom:12px;" />
+            <h1 style="margin:0;color:#fff;font-size:22px;font-weight:700;">U Learn</h1>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:28px;">
+            <h2 style="margin:0 0 12px;color:#e8f4ff;font-size:18px;">${copy.subject}</h2>
+            <p style="margin:0 0 20px;color:#8b9bb4;line-height:1.6;font-size:15px;">${copy.intro}</p>
+            <table width="100%" style="background:#050510;border-radius:12px;border:1px solid #1a1a35;margin-bottom:20px;">
+              <tr>
+                <td style="padding:16px 20px;">
+                  <p style="margin:0 0 8px;color:#8b9bb4;font-size:13px;">${copy.quizLabel}</p>
+                  <p style="margin:0 0 16px;color:#e8f4ff;font-size:16px;font-weight:600;">${escapeHtml(params.quizTitle)}</p>
+                  <p style="margin:0 0 4px;color:#8b9bb4;font-size:13px;">${copy.scoreLabel}</p>
+                  <p style="margin:0 0 16px;color:${params.passed ? "#38ef7d" : "#ff6b6b"};font-size:28px;font-weight:800;">${pct}%</p>
+                  <p style="margin:0 0 4px;color:#8b9bb4;font-size:13px;">${copy.timeLabel}</p>
+                  <p style="margin:0;color:#e8f4ff;font-size:15px;">${time}</p>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:0;color:#e8f4ff;line-height:1.65;font-size:15px;">${copy.message}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:16px 28px 24px;text-align:center;color:#8b9bb4;font-size:12px;">
+            ${copy.footer}
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    await this.sendEmail(student.parentEmail, copy.subject, html);
   }
 
   static async getUserNotifications(userId: string, limit = 50) {
@@ -189,4 +283,80 @@ export class NotificationService {
       data: { isRead: true },
     });
   }
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function formatQuizTime(sec?: number) {
+  if (sec == null || sec <= 0) return "—";
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m ${s.toString().padStart(2, "0")}s`;
+}
+
+function quizParentCopy(
+  locale: Locale,
+  p: {
+    name: string;
+    quizTitle: string;
+    pct: number;
+    passed: boolean;
+    passPct: number;
+    time: string;
+    score: number;
+    maxScore: number;
+  }
+) {
+  const en = {
+    subject: p.passed ? "Great news — quiz passed!" : "Quiz result — room to improve",
+    intro: `${p.name} completed a quiz on U Learn.`,
+    quizLabel: "Quiz",
+    scoreLabel: "Score",
+    timeLabel: "Time taken",
+    message: p.passed
+      ? `Congratulations! ${p.name} scored ${p.pct}% (pass mark: ${p.passPct}%). Excellent work — encourage them to keep learning and exploring more lessons.`
+      : `${p.name} scored ${p.pct}% (pass mark: ${p.passPct}%). Please encourage them to review the lesson material and try again. Every attempt builds stronger understanding.`,
+    footer: "U Learn — empowering students to learn smarter.",
+  };
+  const ar = {
+    subject: p.passed ? "أخبار رائعة — نجح في الاختبار!" : "نتيجة الاختبار — فرصة للتحسين",
+    intro: `أكمل ${p.name} اختباراً على منصة U Learn.`,
+    quizLabel: "الاختبار",
+    scoreLabel: "الدرجة",
+    timeLabel: "الوقت المستغرق",
+    message: p.passed
+      ? `تهانينا! حصل ${p.name} على ${p.pct}% (درجة النجاح: ${p.passPct}%). عمل ممتاز — شجّعوه على مواصلة التعلم.`
+      : `حصل ${p.name} على ${p.pct}% (درجة النجاح: ${p.passPct}%). يُرجى تشجيعه على مراجعة الدروس والمحاولة مرة أخرى.`,
+    footer: "U Learn — منصة تعليمية ذكية.",
+  };
+  const ku = {
+    subject: p.passed ? "هەواڵی خۆش — تاقیکردنەوە سەرکەوت!" : "ئەنجامی تاقیکردنەوە — دەرفەتی باشترکردن",
+    intro: `${p.name} تاقیکردنەوەیەکی تەواو کرد لە U Learn.`,
+    quizLabel: "تاقیکردنەوە",
+    scoreLabel: "نمرە",
+    timeLabel: "کاتی بەسەربردراو",
+    message: p.passed
+      ? `پیرۆزە! ${p.name} ${p.pct}% وەرگرت (نمرەی سەرکەوتن: ${p.passPct}%). کارێکی نایاب — هانی بدەن بەردەوام بێت لە فێربوون.`
+      : `${p.name} ${p.pct}% وەرگرت (نمرەی سەرکەوتن: ${p.passPct}%). تکایە هانی بدەن وانەکان بپشکنێتەوە و دووبارە هەوڵ بدات.`,
+    footer: "U Learn — پلاتفۆرمی فێربوونی زیرەک.",
+  };
+  const tr = {
+    subject: p.passed ? "Harika haber — sınav geçildi!" : "Sınav sonucu — gelişim fırsatı",
+    intro: `${p.name}, U Learn'de bir sınavı tamamladı.`,
+    quizLabel: "Sınav",
+    scoreLabel: "Puan",
+    timeLabel: "Süre",
+    message: p.passed
+      ? `Tebrikler! ${p.name} %${p.pct} aldı (geçme notu: %${p.passPct}). Harika bir başarı — öğrenmeye devam etmesini teşvik edin.`
+      : `${p.name} %${p.pct} aldı (geçme notu: %${p.passPct}). Dersleri tekrar gözden geçirmesini ve yeniden denemesini teşvik edin.`,
+    footer: "U Learn — akıllı öğrenme platformu.",
+  };
+  const map = { EN: en, AR: ar, KU: ku, TR: tr };
+  return map[locale] ?? en;
 }

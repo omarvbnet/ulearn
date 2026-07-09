@@ -104,8 +104,13 @@ class _StoreScreenState extends State<StoreScreen> {
           final level = teacher?['level']?.toString();
           final lessonsCount = (c['lessonsCount'] as num?)?.toInt() ??
               ((c['lessons'] as List?)?.length ?? 0);
-          final totalSec = (c['totalDurationSec'] as num?)?.toInt() ?? 0;
+          final totalSec = (c['totalDurationSec'] as num?)?.toInt() ??
+              (((c['lessons'] as List<dynamic>?) ?? []).fold<int>(
+                0,
+                (s, l) => s + (((l as Map)['durationSec'] as num?)?.toInt() ?? 0),
+              ));
           final status = c['purchaseStatus']?.toString();
+          final isOwnCourse = c['isOwnCourse'] == true;
           final id = c['id'].toString();
           final title = localizedText(c, locale);
           final thumbnail = c['thumbnail']?.toString();
@@ -224,6 +229,10 @@ class _StoreScreenState extends State<StoreScreen> {
                             'PENDING' => const Chip(
                                 label: Text('Awaiting payment confirmation'),
                                 avatar: Icon(Icons.hourglass_top, size: 18),
+                              ),
+                            _ when isOwnCourse => const Chip(
+                                label: Text('Your course'),
+                                avatar: Icon(Icons.school_outlined, size: 18, color: AppTheme.accent),
                               ),
                             _ => FilledButton(
                                 onPressed: _busyId == id

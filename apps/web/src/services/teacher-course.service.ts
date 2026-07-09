@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getDownloadUrl } from "@/lib/r2";
 import { LoggingService } from "@/services/logging.service";
 import { NotificationService } from "@/services/notification.service";
 import type { CourseStatus, TeacherLevel } from "@prisma/client";
@@ -443,13 +444,21 @@ export class TeacherCourseService {
       orderBy: { createdAt: "desc" },
       include: {
         teacher: {
-          select: { id: true, level: true, user: { select: { fullLegalName: true } } },
+          select: { id: true, level: true, userId: true, user: { select: { fullLegalName: true } } },
         },
         stage: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
         subject: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
         lessons: {
           orderBy: { sortOrder: "asc" },
-          select: { id: true, title: true, durationSec: true, isFreePreview: true },
+          select: {
+            id: true,
+            title: true,
+            durationSec: true,
+            isFreePreview: true,
+            thumbnailUrl: true,
+            thumbnailKey: true,
+            sortOrder: true,
+          },
         },
         _count: { select: { purchases: { where: { status: "PAID" } } } },
       },
@@ -467,7 +476,7 @@ export class TeacherCourseService {
         user: { status: "APPROVED", deletedAt: null },
       },
       include: {
-        user: { select: { fullLegalName: true, profilePhotoUrl: true } },
+        user: { select: { fullLegalName: true, profilePhotoUrl: true, profileCoverPreset: true } },
         subjects: {
           include: {
             subject: {
@@ -504,6 +513,7 @@ export class TeacherCourseService {
         userId: teacher.userId,
         name: teacher.user.fullLegalName,
         profilePhotoUrl: teacher.user.profilePhotoUrl,
+        profileCoverPreset: teacher.user.profileCoverPreset,
         bio: teacher.bio,
         level: teacher.level,
         specializations: teacher.specializations,
@@ -531,9 +541,17 @@ export class TeacherCourseService {
   ) {
     const courseIds = courses.map((c) => c.id);
     const teacherIds = [...new Set(courses.map((c) => c.teacher.id))];
+    const allLessonIds = courses.flatMap((c) => c.lessons.map((l) => l.id));
 
-    const [reactionGroups, myReactions, favoriteGroups, myFavorites, ratingGroups, purchases] =
-      await Promise.all([
+    const [
+      reactionGroups,
+      myReactions,
+      favoriteGroups,
+      myFavorites,
+      ratingGroups,
+      purchases,
+      durationGroups,
+    ] = await Promise.all([
         prisma.courseReaction.groupBy({
           by: ["courseId", "type"],
           where: { courseId: { in: courseIds } },
@@ -562,6 +580,13 @@ export class TeacherCourseService {
           where: { userId, courseId: { in: courseIds } },
           select: { courseId: true, status: true },
         }),
+        allLessonIds.length
+          ? prisma.courseLessonProgress.groupBy({
+              by: ["lessonId"],
+              where: { lessonId: { in: allLessonIds }, durationSec: { gt: 0 } },
+              _max: { durationSec: true },
+            })
+          : Promise.resolve([]),
       ]);
 
     const reactions = new Map<string, { likes: number; dislikes: number }>();
@@ -578,33 +603,70 @@ export class TeacherCourseService {
       ratingGroups.map((r) => [r.teacherId, { avg: r._avg.rating ?? 0, count: r._count }])
     );
     const purchaseByCourse = new Map(purchases.map((p) => [p.courseId, p.status]));
+    const watchedDuration = new Map(
+      durationGroups.map((g) => [g.lessonId, g._max.durationSec ?? 0])
+    );
 
-    return courses.map((c) => {
-      const r = reactions.get(c.id) ?? { likes: 0, dislikes: 0 };
-      const rating = ratings.get(c.teacher.id) ?? { avg: 0, count: 0 };
-      const totalDurationSec = c.lessons.reduce((s, l) => s + (l.durationSec ?? 0), 0);
-      return {
-        ...c,
-        likes: r.likes,
-        dislikes: r.dislikes,
-        myReaction: mine.get(c.id) ?? null,
-        favorites: favorites.get(c.id) ?? 0,
-        favoritedByMe: myFavs.has(c.id),
-        teacherRating: Math.round(rating.avg * 10) / 10,
-        teacherRatingCount: rating.count,
-        totalDurationSec,
-        lessonsCount: c.lessons.length,
-        freePreviewCount: c.lessons.filter((l) => l.isFreePreview).length,
-        purchaseStatus: purchaseByCourse.get(c.id) ?? null,
-      };
-    });
+    const thumbKeyCache = new Map<string, string>();
+    async function resolveThumbUrl(
+      url: string | null | undefined,
+      key: string | null | undefined
+    ) {
+      if (url) return url;
+      if (!key) return null;
+      const cached = thumbKeyCache.get(key);
+      if (cached) return cached;
+      const resolved = await getDownloadUrl(key).catch(() => null);
+      if (resolved) thumbKeyCache.set(key, resolved);
+      return resolved;
+    }
+
+    return Promise.all(
+      courses.map(async (c) => {
+        const r = reactions.get(c.id) ?? { likes: 0, dislikes: 0 };
+        const rating = ratings.get(c.teacher.id) ?? { avg: 0, count: 0 };
+        const lessons = c.lessons.map((l) => ({
+          ...l,
+          durationSec: l.durationSec ?? watchedDuration.get(l.id) ?? null,
+        }));
+        const totalDurationSec = lessons.reduce((s, l) => s + (l.durationSec ?? 0), 0);
+
+        const firstLesson = lessons[0];
+        let thumbnail = c.thumbnail;
+        if (!thumbnail && firstLesson) {
+          thumbnail = await resolveThumbUrl(firstLesson.thumbnailUrl, firstLesson.thumbnailKey);
+        }
+
+        return {
+          ...c,
+          lessons,
+          thumbnail,
+          likes: r.likes,
+          dislikes: r.dislikes,
+          myReaction: mine.get(c.id) ?? null,
+          favorites: favorites.get(c.id) ?? 0,
+          favoritedByMe: myFavs.has(c.id),
+          teacherRating: Math.round(rating.avg * 10) / 10,
+          teacherRatingCount: rating.count,
+          totalDurationSec,
+          lessonsCount: lessons.length,
+          freePreviewCount: lessons.filter((l) => l.isFreePreview).length,
+          purchaseStatus: purchaseByCourse.get(c.id) ?? null,
+          isOwnCourse: c.teacher.userId === userId,
+        };
+      })
+    );
   }
 
   static async requestPurchase(courseId: string, userId: string) {
     const course = await prisma.course.findFirst({
       where: { id: courseId, status: "APPROVED", deletedAt: null },
+      include: { teacher: { select: { userId: true } } },
     });
     if (!course) return { success: false as const, error: "COURSE_NOT_AVAILABLE" };
+    if (course.teacher.userId === userId) {
+      return { success: false as const, error: "OWN_COURSE" };
+    }
 
     const existing = await prisma.coursePurchase.findUnique({
       where: { courseId_userId: { courseId, userId } },

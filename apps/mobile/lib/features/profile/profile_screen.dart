@@ -10,6 +10,7 @@ import 'package:ulearn/features/profile/profile_photo_service.dart';
 import 'package:ulearn/features/profile/stage_request_screen.dart';
 import 'package:ulearn/features/rankings/rankings_screen.dart';
 import 'package:ulearn/features/report/my_reports_screen.dart';
+import 'package:ulearn/core/widgets/teacher_cover_presets.dart';
 import 'package:ulearn/features/store/teacher_studio_screen.dart';
 import 'package:ulearn/features/subscriptions/subscriptions_screen.dart';
 
@@ -22,6 +23,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _uploadingPhoto = false;
+  bool _savingCover = false;
 
   bool get _canEditPhoto {
     final role = context.read<AuthProvider>().user?.role;
@@ -111,6 +113,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _saveCoverPreset(int preset) async {
+    if (_savingCover) return;
+    setState(() => _savingCover = true);
+    try {
+      final data = await context.read<ApiClient>().patch('/api/profile/cover', {
+        'preset': preset,
+      });
+      if (!mounted) return;
+      context.read<AuthProvider>().applyUser(data['user'] as Map<String, dynamic>);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile cover updated')),
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save cover')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingCover = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -148,9 +173,54 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
         ),
+        if (user.role == 'TEACHER') ...[
+          const SizedBox(height: 20),
+          StaggeredItem(
+            index: 1,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Text(
+                      'Profile cover',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    if (_savingCover) ...[
+                      const SizedBox(width: 10),
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accent),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Choose a banner for your public teacher profile',
+                  style: TextStyle(color: AppTheme.muted.withValues(alpha: 0.9), fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: TeacherCoverBanner(
+                    preset: user.profileCoverPreset,
+                    height: 100,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TeacherCoverPicker(
+                  selected: user.profileCoverPreset,
+                  onSelected: _saveCoverPreset,
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 28),
         StaggeredItem(
-          index: 1,
+          index: 2,
           child: _InfoCard(
             children: [
               _InfoRow(icon: Icons.badge_outlined, label: 'Role', value: _roleLabel(user.role)),

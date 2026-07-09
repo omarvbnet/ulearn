@@ -260,7 +260,9 @@ export class MyCoursesService {
   }) {
     const lesson = await prisma.courseLesson.findFirst({
       where: { id: input.lessonId, course: { deletedAt: null } },
-      include: { course: { select: { id: true, price: true } } },
+      include: {
+        course: { select: { id: true, price: true, teacher: { select: { userId: true } } } },
+      },
     });
     if (!lesson) return { success: false as const, error: "NOT_FOUND" };
 
@@ -271,8 +273,9 @@ export class MyCoursesService {
         status: "PAID",
       },
     });
+    const isOwner = lesson.course.teacher.userId === input.userId;
     const isFree = lesson.course.price <= 0 || lesson.isFreePreview;
-    if (!purchased && !isFree) {
+    if (!purchased && !isFree && !isOwner) {
       return { success: false as const, error: "NO_ACCESS" };
     }
 
@@ -300,6 +303,14 @@ export class MyCoursesService {
         lastWatchedAt: new Date(),
       },
     });
+
+    // Backfill lesson duration when missing (fixes course total time on cards).
+    if (input.durationSec > 0 && (!lesson.durationSec || lesson.durationSec < input.durationSec)) {
+      await prisma.courseLesson.update({
+        where: { id: input.lessonId },
+        data: { durationSec: input.durationSec },
+      });
+    }
 
     return { success: true as const, progress: row };
   }

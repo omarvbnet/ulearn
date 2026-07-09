@@ -8,6 +8,7 @@ import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/profile/profile_avatar.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
+import 'package:ulearn/core/widgets/teacher_cover_presets.dart';
 import 'package:ulearn/features/reels/teacher_reels_viewer.dart';
 
 /// Teacher public profile from reels — live courses available to purchase.
@@ -113,17 +114,8 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                           background: Stack(
                             fit: StackFit.expand,
                             children: [
-                              DecoratedBox(
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      AppTheme.primary.withValues(alpha: 0.55),
-                                      AppTheme.background,
-                                    ],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ),
-                                ),
+                              TeacherCoverBanner(
+                                preset: (_teacher!['profileCoverPreset'] as num?)?.toInt(),
                               ),
                               Positioned(
                                 bottom: 24,
@@ -404,6 +396,7 @@ class _CourseCard extends StatelessWidget {
     final price = course['price'];
     final currency = course['currency']?.toString() ?? 'IQD';
     final status = course['purchaseStatus']?.toString();
+    final isOwnCourse = course['isOwnCourse'] == true;
     final lessons = (course['lessonsCount'] as num?)?.toInt() ??
         ((course['lessons'] as List?)?.length ?? 0);
     final duration = formatDuration((course['totalDurationSec'] as num?)?.toInt() ?? 0);
@@ -469,14 +462,19 @@ class _CourseCard extends StatelessWidget {
                   width: double.infinity,
                   child: switch (status) {
                     'PAID' => FilledButton.icon(
-                        onPressed: null,
-                        icon: const Icon(Icons.check_circle_outline, size: 18),
+                        onPressed: onOpen,
+                        icon: const Icon(Icons.play_circle_outline, size: 18),
                         label: const Text('Subscribed — watch in My Courses'),
                       ),
                     'PENDING' => OutlinedButton.icon(
                         onPressed: null,
                         icon: const Icon(Icons.hourglass_top, size: 18),
                         label: const Text('Awaiting payment confirmation'),
+                      ),
+                    _ when isOwnCourse => OutlinedButton.icon(
+                        onPressed: onOpen,
+                        icon: const Icon(Icons.school_outlined, size: 18),
+                        label: const Text('Your course — open'),
                       ),
                     _ => FilledButton(
                         onPressed: busy

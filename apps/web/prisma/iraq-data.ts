@@ -1,0 +1,40 @@
+/** Iraq governorates and Iraqi K-12 / secondary stages for seeding. */
+
+export const IRAQ_PROVINCES = [
+  { nameEn: "Baghdad", nameAr: "بغداد", nameKu: "بەغدا", nameTr: "Bağdat" },
+  { nameEn: "Basra", nameAr: "البصرة", nameKu: "بەسرە", nameTr: "Basra" },
+  { nameEn: "Nineveh", nameAr: "نينوى", nameKu: "نەینەوا", nameTr: "Ninova" },
+  { nameEn: "Erbil", nameAr: "أربيل", nameKu: "هەولێر", nameTr: "Erbil" },
+  { nameEn: "Sulaymaniyah", nameAr: "السليمانية", nameKu: "سلێمانی", nameTr: "Süleymaniye" },
+  { nameEn: "Duhok", nameAr: "دهوك", nameKu: "دهۆک", nameTr: "Duhok" },
+  { nameEn: "Kirkuk", nameAr: "كركوك", nameKu: "کەرکووک", nameTr: "Kerkük" },
+  { nameEn: "Anbar", nameAr: "الأنبار", nameKu: "ئەنبار", nameTr: "Anbar" },
+  { nameEn: "Diyala", nameAr: "ديالى", nameKu: "دیالە", nameTr: "Diyala" },
+  { nameEn: "Saladin", nameAr: "صلاح الدين", nameKu: "سەلاحەدین", nameTr: "Selahaddin" },
+  { nameEn: "Babil", nameAr: "بابل", nameKu: "بابل", nameTr: "Babil" },
+  { nameEn: "Karbala", nameAr: "كربلاء", nameKu: "کەربەلا", nameTr: "Kerbela" },
+  { nameEn: "Najaf", nameAr: "النجف", nameKu: "نەجەف", nameTr: "Necef" },
+  { nameEn: "Wasit", nameAr: "واسط", nameKu: "واسیت", nameTr: "Vasıt" },
+  { nameEn: "Maysan", nameAr: "ميسان", nameKu: "مەیسان", nameTr: "Maysan" },
+  { nameEn: "Dhi Qar", nameAr: "ذي قار", nameKu: "ذی قار", nameTr: "Zi Kar" },
+  { nameEn: "Muthanna", nameAr: "المثنى", nameKu: "موسنە", nameTr: "Muthanna" },
+  { nameEn: "Qadisiyyah", nameAr: "القادسية", nameKu: "قادسیە", nameTr: "Kadisiye" },
+] as const;
+
+export const IRAQ_EDUCATIONAL_STAGES = [
+  { nameEn: "1st Primary", nameAr: "الأول ابتدائي", nameKu: "یەکەم ئابتدایی", nameTr: "1. İlkokul", sortOrder: 1 },
+  { nameEn: "2nd Primary", nameAr: "الثاني ابتدائي", nameKu: "دووەم ئابتدایی", nameTr: "2. İlkokul", sortOrder: 2 },
+  { nameEn: "3rd Primary", nameAr: "الثالث ابتدائي", nameKu: "سێیەم ئابتدایی", nameTr: "3. İlkokul", sortOrder: 3 },
+  { nameEn: "4th Primary", nameAr: "الرابع ابتدائي", nameKu: "چوارەم ئابتدایی", nameTr: "4. İlkokul", sortOrder: 4 },
+  { nameEn: "5th Primary", nameAr: "الخامس ابتدائي", nameKu: "پێنجەم ئابتدایی", nameTr: "5. İlkokul", sortOrder: 5 },
+  { nameEn: "6th Primary", nameAr: "السادس ابتدائي", nameKu: "شەشەم ئابتدایی", nameTr: "6. İlkokul", sortOrder: 6 },
+  { nameEn: "1st Intermediate", nameAr: "الاول متوسط", nameKu: "یەکەم ناوەندی", nameTr: "1. Ortaokul", sortOrder: 7 },
+  { nameEn: "2nd Intermediate", nameAr: "الثاني متوسط", nameKu: "دووەم ناوەندی", nameTr: "2. Ortaokul", sortOrder: 8 },
+  { nameEn: "3rd Intermediate", nameAr: "الثالث متوسط", nameKu: "سێیەم ناوەندی", nameTr: "3. Ortaokul", sortOrder: 9 },
+  { nameEn: "4th Scientific", nameAr: "الرابع العلمي", nameKu: "چوارەم زانستی", nameTr: "4. Fen Lisesi", sortOrder: 10 },
+  { nameEn: "5th Scientific", nameAr: "الخامس العلمي", nameKu: "پێنجەم زانستی", nameTr: "5. Fen Lisesi", sortOrder: 11 },
+  { nameEn: "6th Scientific", nameAr: "السادس العلمي", nameKu: "شەشەم زانستی", nameTr: "6. Fen Lisesi", sortOrder: 12 },
+  { nameEn: "4th Literary", nameAr: "الرابع ادبي", nameKu: "چوارەم ئەدەبی", nameTr: "4. Edebiyat", sortOrder: 13 },
+  { nameEn: "5th Literary", nameAr: "الخامس ادبي", nameKu: "پێنجەم ئەدەبی", nameTr: "5. Edebiyat", sortOrder: 14 },
+  { nameEn: "6th Literary", nameAr: "السادس ادبي", nameKu: "شەشەم ئەدەبی", nameTr: "6. Edebiyat", sortOrder: 15 },
+] as const;

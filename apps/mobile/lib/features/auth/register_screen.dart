@@ -1,3 +1,7 @@
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
@@ -18,68 +22,172 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _name = TextEditingController();
   final _nationalId = TextEditingController();
   final _parentPhone = TextEditingController();
+  final _parentEmail = TextEditingController();
   final _email = TextEditingController();
   String _gender = 'MALE';
+  List<Map<String, dynamic>> _countries = [];
+  List<Map<String, dynamic>> _provinces = [];
   List<Map<String, dynamic>> _stages = [];
+  String? _countryId;
+  String? _provinceId;
   String? _stageId;
+  String? _nationalIdImageUrl;
+  String? _idFileName;
   bool _loading = false;
+  bool _uploadingId = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadStages();
+    _loadCountries();
   }
 
-  Future<void> _loadStages() async {
+  Future<void> _loadCountries() async {
     try {
-      final data = await context.read<ApiClient>().get('/api/stages');
+      final data = await context.read<ApiClient>().get('/api/countries');
       if (!mounted) return;
+      final countries =
+          ((data['countries'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
       setState(() {
-        _stages =
-            ((data['stages'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+        _countries = countries;
+        _countryId ??= countries.isNotEmpty ? countries.first['id']?.toString() : null;
+        _onCountryChanged(_countryId, reloadStages: true);
       });
     } catch (_) {}
   }
 
-  @override
-  void dispose() {
-    _name.dispose();
-    _nationalId.dispose();
-    _parentPhone.dispose();
-    _email.dispose();
-    super.dispose();
+  void _onCountryChanged(String? countryId, {bool reloadStages = false}) {
+    final country = _countries.cast<Map<String, dynamic>?>().firstWhere(
+          (c) => c?['id']?.toString() == countryId,
+          orElse: () => null,
+        );
+    final provinces =
+        ((country?['provinces'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+    setState(() {
+      _countryId = countryId;
+      _provinces = provinces;
+      _provinceId = provinces.isNotEmpty ? provinces.first['id']?.toString() : null;
+    });
+    if (reloadStages && countryId != null) _loadStages(countryId);
+  }
+
+  Future<void> _loadStages(String countryId) async {
+    try {
+      final data = await context.read<ApiClient>().get('/api/stages?countryId=$countryId');
+      if (!mounted) return;
+      setState(() {
+        _stages =
+            ((data['stages'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+        _stageId = null;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _pickIdImage() async {
+    final pick = await FilePicker.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
+    if (pick == null || pick.files.isEmpty) return;
+
+    final file = pick.files.first;
+    Uint8List? bytes = file.bytes;
+    if (bytes == null && file.path != null) {
+      bytes = await File(file.path!).readAsBytes();
+    }
+    if (bytes == null) return;
+
+    setState(() {
+      _uploadingId = true;
+      _idFileName = file.name;
+    });
+
+    try {
+      final api = context.read<ApiClient>();
+      final ext = file.extension?.toLowerCase() ?? 'jpg';
+      final contentType = ext == 'png'
+          ? 'image/png'
+          : ext == 'webp'
+              ? 'image/webp'
+              : 'image/jpeg';
+
+      final presign = await api.post('/api/auth/register/upload', {
+        'phone': widget.phone,
+        'filename': file.name,
+        'contentType': contentType,
+        'size': bytes.length,
+      });
+
+      final uploadUrl = presign['uploadUrl']?.toString();
+      final publicUrl = presign['publicUrl']?.toString();
+      if (uploadUrl == null) throw Exception('Upload setup failed');
+
+      await api.putBytes(uploadUrl, bytes, contentType);
+      if (!mounted) return;
+      setState(() => _nationalIdImageUrl = publicUrl ?? uploadUrl);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not upload ID: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingId = false);
+    }
+  }
+
+  String _stageLabel(Map<String, dynamic> s) {
+    final ar = s['nameAr']?.toString();
+    if (ar != null && ar.isNotEmpty) return ar;
+    return s['nameEn']?.toString() ?? 'Stage';
+  }
+
+  String _provinceLabel(Map<String, dynamic> p) {
+    final ar = p['nameAr']?.toString();
+    if (ar != null && ar.isNotEmpty) return ar;
+    return p['nameEn']?.toString() ?? 'Province';
   }
 
   Future<void> _submit() async {
+    if (_countryId == null || _provinceId == null) {
+      setState(() => _error = 'Please select country and province');
+      return;
+    }
+    if (_nationalIdImageUrl == null) {
+      setState(() => _error = 'Please attach your national ID image');
+      return;
+    }
+    if (_type == 'STUDENT' && (_stageId == null || _stageId!.isEmpty)) {
+      setState(() => _error = 'Please select your educational stage');
+      return;
+    }
+
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final api = context.read<ApiClient>();
-      final countries = await api.get('/api/countries');
-      final list = countries['countries'] as List<dynamic>;
-      if (list.isEmpty) throw Exception('No countries configured');
-      final country = list.first as Map<String, dynamic>;
-      final provinces = country['provinces'] as List<dynamic>;
-      if (provinces.isEmpty) throw Exception('No provinces configured');
-
       final payload = <String, dynamic>{
         'type': _type,
         'phone': widget.phone,
         'fullLegalName': _name.text.trim(),
         'gender': _gender,
-        'countryId': country['id'],
-        'provinceId': (provinces.first as Map)['id'],
+        'countryId': _countryId,
+        'provinceId': _provinceId,
         'nationalId': _nationalId.text.trim(),
+        'nationalIdImage': _nationalIdImageUrl,
         'email': _email.text.trim().isEmpty ? null : _email.text.trim(),
         'locale': 'AR',
       };
 
       if (_type == 'STUDENT') {
         payload['parentPhone'] = _parentPhone.text.trim();
-        if (_stageId != null) payload['educationalStageId'] = _stageId;
+        if (_parentEmail.text.trim().isNotEmpty) {
+          payload['parentEmail'] = _parentEmail.text.trim();
+        }
+        payload['educationalStageId'] = _stageId;
       }
 
       final data = await api.post('/api/auth/register', payload);
@@ -95,6 +203,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
     } finally {
       setState(() => _loading = false);
     }
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _nationalId.dispose();
+    _parentPhone.dispose();
+    _parentEmail.dispose();
+    _email.dispose();
+    super.dispose();
   }
 
   @override
@@ -131,9 +249,59 @@ class _RegisterScreenState extends State<RegisterScreen> {
           const SizedBox(height: 12),
           TextField(controller: _nationalId, decoration: const InputDecoration(labelText: 'National ID')),
           const SizedBox(height: 12),
-          TextField(controller: _email, decoration: const InputDecoration(labelText: 'Email')),
+          if (_countries.isNotEmpty)
+            DropdownButtonFormField<String>(
+              initialValue: _countryId,
+              items: _countries
+                  .map((c) => DropdownMenuItem(
+                        value: c['id']?.toString(),
+                        child: Text(c['nameAr']?.toString() ?? c['nameEn']?.toString() ?? 'Country'),
+                      ))
+                  .toList(),
+              onChanged: (v) => _onCountryChanged(v, reloadStages: true),
+              decoration: const InputDecoration(labelText: 'Country'),
+            ),
+          const SizedBox(height: 12),
+          if (_provinces.isNotEmpty)
+            DropdownButtonFormField<String>(
+              initialValue: _provinceId,
+              items: _provinces
+                  .map((p) => DropdownMenuItem(
+                        value: p['id']?.toString(),
+                        child: Text(_provinceLabel(p)),
+                      ))
+                  .toList(),
+              onChanged: (v) => setState(() => _provinceId = v),
+              decoration: const InputDecoration(labelText: 'Province'),
+            ),
+          const SizedBox(height: 12),
+          TextField(controller: _email, decoration: const InputDecoration(labelText: 'Email (optional)')),
+          const SizedBox(height: 16),
+          const Text('National ID photo', style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _uploadingId ? null : _pickIdImage,
+            icon: _uploadingId
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.badge_outlined),
+            label: Text(_idFileName ?? 'Attach ID image'),
+          ),
+          if (_nationalIdImageUrl != null) ...[
+            const SizedBox(height: 6),
+            const Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.greenAccent, size: 16),
+                SizedBox(width: 6),
+                Text('ID uploaded', style: TextStyle(color: Colors.greenAccent, fontSize: 12)),
+              ],
+            ),
+          ],
           if (_type == 'STUDENT') ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             TextField(
               controller: _parentPhone,
               keyboardType: TextInputType.phone,
@@ -141,20 +309,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
               decoration: const InputDecoration(labelText: 'Parent Phone'),
             ),
             const SizedBox(height: 12),
+            TextField(
+              controller: _parentEmail,
+              keyboardType: TextInputType.emailAddress,
+              textDirection: TextDirection.ltr,
+              decoration: const InputDecoration(
+                labelText: 'Parent Email (for quiz results)',
+                hintText: 'optional',
+              ),
+            ),
+            const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: _stageId,
               items: _stages
                   .map((s) => DropdownMenuItem(
                         value: s['id'].toString(),
-                        child: Text(
-                          (s['nameAr']?.toString().isNotEmpty ?? false)
-                              ? s['nameAr'].toString()
-                              : s['nameEn']?.toString() ?? '',
-                        ),
+                        child: Text(_stageLabel(s)),
                       ))
                   .toList(),
               onChanged: (v) => setState(() => _stageId = v),
-              decoration: const InputDecoration(labelText: 'Educational Stage'),
+              decoration: const InputDecoration(labelText: 'Educational Stage *'),
             ),
           ],
           const SizedBox(height: 24),

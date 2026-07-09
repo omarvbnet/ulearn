@@ -908,7 +908,12 @@ class CourseCard extends StatelessWidget {
     final currency = course['currency']?.toString() ?? 'IQD';
     final isFree = price <= 0;
     final purchaseStatus = course['purchaseStatus']?.toString();
-    final totalSec = (course['totalDurationSec'] as num?)?.toInt() ?? 0;
+    final isOwnCourse = course['isOwnCourse'] == true;
+    final totalSec = (course['totalDurationSec'] as num?)?.toInt() ??
+        (((course['lessons'] as List<dynamic>?) ?? []).fold<int>(
+          0,
+          (s, l) => s + (((l as Map)['durationSec'] as num?)?.toInt() ?? 0),
+        ));
     final lessonsCount = (course['lessonsCount'] as num?)?.toInt() ??
         ((course['lessons'] as List?)?.length ?? 0);
     final previews = (course['freePreviewCount'] as num?)?.toInt() ?? 0;
@@ -1139,8 +1144,8 @@ class CourseCard extends StatelessWidget {
                         ),
                     ],
                   ),
-                  // Subscribe button for unpurchased paid courses.
-                  if (!isFree && purchaseStatus != 'PAID') ...[
+                  // Subscribe button for unpurchased paid courses (not for course owners).
+                  if (!isFree && purchaseStatus != 'PAID' && !isOwnCourse) ...[
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,

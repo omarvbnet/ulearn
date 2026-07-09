@@ -86,7 +86,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       final course = data['course'] as Map<String, dynamic>;
       final purchased = data['purchased'] == true;
       final price = (course['price'] as num?)?.toDouble() ?? 0;
-      final unlocked = purchased || course['purchaseStatus'] == 'PAID' || price <= 0;
+      final isOwn = data['isOwnCourse'] == true;
+      final unlocked = purchased || course['purchaseStatus'] == 'PAID' || price <= 0 || isOwn;
       final lessons =
           ((course['lessons'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
       final quizzes =
@@ -95,7 +96,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       setState(() {
         _course = {...?_course, ...course};
         _purchased = purchased;
-        _isOwnCourse = data['isOwnCourse'] == true;
+        _isOwnCourse = isOwn;
         _favorited = data['favoritedByMe'] == true;
         _quizzes = quizzes;
         _error = null;
@@ -238,6 +239,58 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     return null;
   }
 
+  Map<String, dynamic>? _quizAfterLesson(String? lessonId) {
+    if (lessonId == null) return null;
+    for (final q in _quizzes) {
+      if (q['afterLessonId']?.toString() == lessonId) return q;
+    }
+    return null;
+  }
+
+  void _openQuiz(Map<String, dynamic> quiz) {
+    final locale = context.read<AuthProvider>().user?.locale ?? 'AR';
+    final title = localizedText(quiz, locale);
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => QuizScreen(
+          quizId: quiz['id'].toString(),
+          title: title,
+        ),
+      ),
+    );
+  }
+
+  List<({bool isQuiz, Map<String, dynamic> data, int? lessonIndex})> _courseTimeline(
+    List<Map<String, dynamic>> lessons,
+  ) {
+    final byAfter = <String, List<Map<String, dynamic>>>{};
+    final endQuizzes = <Map<String, dynamic>>[];
+    for (final q in _quizzes) {
+      final after = q['afterLessonId']?.toString();
+      if (after != null && after.isNotEmpty) {
+        byAfter.putIfAbsent(after, () => []).add(q);
+      } else {
+        endQuizzes.add(q);
+      }
+    }
+
+    final items = <({bool isQuiz, Map<String, dynamic> data, int? lessonIndex})>[];
+    for (var i = 0; i < lessons.length; i++) {
+      final lesson = lessons[i];
+      items.add((isQuiz: false, data: lesson, lessonIndex: i));
+      final lid = lesson['id']?.toString();
+      if (lid != null) {
+        for (final q in byAfter[lid] ?? []) {
+          items.add((isQuiz: true, data: q, lessonIndex: null));
+        }
+      }
+    }
+    for (final q in endQuizzes) {
+      items.add((isQuiz: true, data: q, lessonIndex: null));
+    }
+    return items;
+  }
+
   void _onLessonCompleted(Map<String, dynamic> lesson) {
     final lessons =
         ((_course?['lessons'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
@@ -251,6 +304,43 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       lesson['completed'] = true;
       lesson['progressPct'] = 100;
     });
+
+    final quiz = _quizAfterLesson(lesson['id']?.toString());
+    if (quiz != null) {
+      final locale = context.read<AuthProvider>().user?.locale ?? 'AR';
+      final quizTitle = localizedText(quiz, locale);
+      Future.delayed(const Duration(milliseconds: 700), () {
+        if (!mounted) return;
+        showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppTheme.card,
+            title: const Text('Video completed'),
+            content: Text('Ready for "$quizTitle"?'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  final next = _nextWatchableLesson(lessons, unlocked, current: lesson);
+                  if (next != null && mounted) {
+                    setState(() => _activeLesson = next);
+                  }
+                },
+                child: const Text('Later'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _openQuiz(quiz);
+                },
+                child: const Text('Go to quiz'),
+              ),
+            ],
+          ),
+        );
+      });
+      return;
+    }
 
     final next = _nextWatchableLesson(lessons, unlocked, current: lesson);
     if (next == null) return;
@@ -640,8 +730,47 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          ...lessons.asMap().entries.map((e) {
-            final lesson = e.value;
+          ..._courseTimeline(lessons).asMap().entries.map((e) {
+            final item = e.value;
+            if (item.isQuiz) {
+              if (!unlocked) return const SizedBox.shrink();
+              final quiz = item.data;
+              final locale = context.read<AuthProvider>().user?.locale ?? 'AR';
+              final title = localizedText(quiz, locale);
+              final qCount = (quiz['_count']?['questions'] as num?)?.toInt() ?? 0;
+              return StaggeredItem(
+                index: e.key + 4,
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.card,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppTheme.accent.withValues(alpha: 0.35)),
+                  ),
+                  child: ListTile(
+                    leading: const Icon(Icons.quiz_outlined, color: AppTheme.accent),
+                    title: Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppTheme.foreground,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    subtitle: Text(
+                      '$qCount questions · pass ${(quiz['passPercentage'] as num?)?.toInt() ?? 50}%',
+                      style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                    ),
+                    trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+                    onTap: () => _openQuiz(quiz),
+                  ),
+                ),
+              );
+            }
+
+            final lesson = item.data;
+            final lessonIndex = item.lessonIndex ?? 0;
             final canWatch = _canWatch(lesson, unlocked);
             final isPreview = lesson['isFreePreview'] == true;
             final isActive = activeId == lesson['id']?.toString();
@@ -649,12 +778,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
             final progressPct =
                 ((lesson['progressPct'] as num?)?.toDouble() ?? 0).clamp(0.0, 100.0);
             final duration = (lesson['durationSec'] as num?)?.toInt() ?? 0;
-            final title = _lessonTitle(lesson, e.key);
+            final title = _lessonTitle(lesson, lessonIndex);
 
             return StaggeredItem(
               index: e.key + 4,
               child: _LessonVideoCard(
-                index: e.key,
+                index: lessonIndex,
                 title: title,
                 lesson: lesson,
                 canWatch: canWatch,
@@ -670,62 +799,6 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               ),
             );
           }),
-          if (unlocked && _quizzes.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            StaggeredItem(
-              index: lessons.length + 4,
-              child: Row(
-                children: [
-                  const Text(
-                    'Quizzes',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(width: 8),
-                  Text('${_quizzes.length}', style: const TextStyle(color: AppTheme.muted)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            ..._quizzes.asMap().entries.map((e) {
-              final quiz = e.value;
-              final locale = context.read<AuthProvider>().user?.locale ?? 'AR';
-              final title = localizedText(quiz, locale);
-              final qCount = (quiz['_count']?['questions'] as num?)?.toInt() ?? 0;
-              return StaggeredItem(
-                index: e.key + lessons.length + 5,
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  decoration: BoxDecoration(
-                    color: AppTheme.card,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppTheme.cardBorder),
-                  ),
-                  child: ListTile(
-                    leading: const Icon(Icons.quiz_outlined, color: AppTheme.accent),
-                    title: Text(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppTheme.foreground, fontWeight: FontWeight.w600),
-                    ),
-                    subtitle: Text(
-                      '$qCount questions · pass ${(quiz['passPercentage'] as num?)?.toInt() ?? 50}%',
-                      style: const TextStyle(fontSize: 12, color: AppTheme.muted),
-                    ),
-                    trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => QuizScreen(
-                          quizId: quiz['id'].toString(),
-                          title: title,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            }),
-          ],
           if (activeId != null) ...[
             const SizedBox(height: 20),
             LessonQASection(key: ValueKey(activeId), lessonId: activeId),
@@ -858,8 +931,9 @@ class _LessonVideoCard extends StatelessWidget {
               children: [
                 LessonCover(
                   lesson: lesson,
-                  width: 88,
-                  height: 50,
+                  index: index,
+                  width: 100,
+                  height: 56,
                   borderRadius: 8,
                   active: isActive,
                   showPlay: canWatch,
@@ -902,7 +976,10 @@ class _LessonVideoCard extends StatelessWidget {
                           const SizedBox(width: 4),
                           Flexible(
                             child: Text(
-                              statusLabel,
+                              [
+                                statusLabel,
+                                if (duration > 0) formatDuration(duration),
+                              ].join(' · '),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(

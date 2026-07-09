@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:video_compress/video_compress.dart';
+import 'package:video_player/video_player.dart';
 
 /// Pick or generate video cover images and read duration metadata.
 class VideoCoverHelper {
@@ -36,14 +37,35 @@ class VideoCoverHelper {
     }
   }
 
+  /// Reads duration in seconds — tries video_player first, then video_compress.
   static Future<int?> videoDurationSec(String videoPath) async {
+    final fromPlayer = await _durationFromPlayer(videoPath);
+    if (fromPlayer != null && fromPlayer > 0) return fromPlayer;
+
     try {
       final info = await VideoCompress.getMediaInfo(videoPath);
-      final ms = info.duration ?? 0;
-      if (ms <= 0) return null;
-      return (ms / 1000).round();
+      final raw = info.duration ?? 0;
+      if (raw <= 0) return null;
+      // video_compress returns ms on most platforms; values under ~3h are often seconds.
+      if (raw > 100_000) return (raw / 1000).round();
+      if (raw > 300) return (raw / 1000).round();
+      return raw.round();
     } catch (_) {
       return null;
+    }
+  }
+
+  static Future<int?> _durationFromPlayer(String videoPath) async {
+    VideoPlayerController? controller;
+    try {
+      controller = VideoPlayerController.file(File(videoPath));
+      await controller.initialize();
+      final sec = controller.value.duration.inSeconds;
+      return sec > 0 ? sec : null;
+    } catch (_) {
+      return null;
+    } finally {
+      await controller?.dispose();
     }
   }
 }

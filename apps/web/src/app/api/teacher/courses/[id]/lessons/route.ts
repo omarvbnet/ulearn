@@ -48,6 +48,13 @@ export async function POST(
     data: { courseId: id, ...parsed.data },
   });
 
+  if (!course.thumbnail && parsed.data.thumbnailUrl) {
+    await prisma.course.update({
+      where: { id },
+      data: { thumbnail: parsed.data.thumbnailUrl },
+    });
+  }
+
   return json({ lesson }, 201);
 }
 

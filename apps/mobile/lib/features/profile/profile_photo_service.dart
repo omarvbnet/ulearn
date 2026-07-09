@@ -42,7 +42,7 @@ class ProfilePhotoService {
 
     return api.patch('/api/profile/photo', {
       'profilePhotoKey': key,
-      'profilePhotoUrl': ?publicUrl,
+      if (publicUrl != null) 'profilePhotoUrl': publicUrl,
     });
   }
 

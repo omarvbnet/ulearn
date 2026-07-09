@@ -43,6 +43,7 @@ class UserModel {
   final String phone;
   final String? fullLegalName;
   final String? profilePhotoUrl;
+  final int? profileCoverPreset;
   final String role;
   final String status;
   final String locale;
@@ -53,6 +54,7 @@ class UserModel {
     required this.phone,
     this.fullLegalName,
     this.profilePhotoUrl,
+    this.profileCoverPreset,
     required this.role,
     required this.status,
     required this.locale,
@@ -67,6 +69,7 @@ class UserModel {
       phone: json['phone'] as String,
       fullLegalName: json['fullLegalName'] as String?,
       profilePhotoUrl: json['profilePhotoUrl'] as String?,
+      profileCoverPreset: (json['profileCoverPreset'] as num?)?.toInt(),
       role: json['role'] as String,
       status: json['status'] as String,
       locale: json['locale'] as String? ?? 'AR',

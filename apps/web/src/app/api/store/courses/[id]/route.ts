@@ -28,7 +28,7 @@ export async function GET(
 
   const quizzes = await prisma.quiz.findMany({
     where: { courseId: id, deletedAt: null, isActive: true },
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ afterLessonId: "asc" }, { createdAt: "asc" }],
     select: {
       id: true,
       titleEn: true,
@@ -37,6 +37,7 @@ export async function GET(
       titleTr: true,
       passPercentage: true,
       maxAttempts: true,
+      afterLessonId: true,
       _count: { select: { questions: true } },
     },
   });
@@ -88,6 +89,17 @@ export async function GET(
   });
   const progressMap = new Map(progressRows.map((p) => [p.lessonId, p]));
 
+  const durationBackfill = lessonIds.length
+    ? await prisma.courseLessonProgress.groupBy({
+        by: ["lessonId"],
+        where: { lessonId: { in: lessonIds }, durationSec: { gt: 0 } },
+        _max: { durationSec: true },
+      })
+    : [];
+  const watchedDuration = new Map(
+    durationBackfill.map((g) => [g.lessonId, g._max.durationSec ?? 0])
+  );
+
   const lessons = await Promise.all(
     course.lessons.map(async (l) => {
       const canWatch = hasAccess || l.isFreePreview;
@@ -100,8 +112,10 @@ export async function GET(
       if (!thumbnailUrl && l.thumbnailKey) {
         thumbnailUrl = await getDownloadUrl(l.thumbnailKey).catch(() => null);
       }
+      const durationSec = l.durationSec ?? watchedDuration.get(l.id) ?? null;
       return {
         ...l,
+        durationSec,
         fileKey: undefined,
         thumbnailKey: undefined,
         fileUrl,

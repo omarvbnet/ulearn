@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { NotificationService } from "@/services/notification.service";
 import type { Prisma } from "@prisma/client";
 
 function shuffle<T>(arr: T[]): T[] {
@@ -141,6 +142,17 @@ export class QuizService {
       create: { userId: params.userId, date: today, quizzesTaken: 1 },
       update: { quizzesTaken: { increment: 1 } },
     });
+
+    void NotificationService.notifyParentQuizResult({
+      userId: params.userId,
+      quizTitle: quiz.titleEn,
+      percentage,
+      passed,
+      passPercentage: quiz.passPercentage,
+      timeSpentSec: params.timeSpentSec,
+      score,
+      maxScore,
+    }).catch(() => {});
 
     return { success: true as const, attempt };
   }

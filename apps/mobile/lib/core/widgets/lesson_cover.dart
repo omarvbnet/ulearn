@@ -1,7 +1,8 @@
 import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
-import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 
 /// Smart lesson cover: uses a server thumbnail when available, otherwise
@@ -15,6 +16,7 @@ class LessonCover extends StatelessWidget {
     this.borderRadius = 10,
     this.showPlay = true,
     this.active = false,
+    this.index,
   });
 
   final Map<String, dynamic> lesson;
@@ -23,13 +25,16 @@ class LessonCover extends StatelessWidget {
   final double borderRadius;
   final bool showPlay;
   final bool active;
+  final int? index;
 
   @override
   Widget build(BuildContext context) {
-    final thumb = lesson['thumbnailUrl']?.toString();
+    final thumb = lesson['thumbnailUrl']?.toString().trim();
     final duration = (lesson['durationSec'] as num?)?.toInt();
-    final title = lesson['title']?.toString() ?? 'Lesson';
-    final id = lesson['id']?.toString() ?? title;
+    final title = lesson['title']?.toString().trim();
+    final displayTitle = (title != null && title.isNotEmpty) ? title : 'Lesson';
+    final id = lesson['id']?.toString() ?? displayTitle;
+    final hasThumb = thumb != null && thumb.isNotEmpty;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
@@ -39,64 +44,86 @@ class LessonCover extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (thumb != null && thumb.isNotEmpty)
+            if (hasThumb)
               CachedImage(
                 url: thumb,
                 fit: BoxFit.cover,
-                placeholder: _ProceduralCover(id: id, title: title),
-                error: _ProceduralCover(id: id, title: title),
+                width: width,
+                height: height,
+                placeholder: _ProceduralCover(id: id, title: displayTitle, index: index),
+                error: _ProceduralCover(id: id, title: displayTitle, index: index),
               )
             else
-              _ProceduralCover(id: id, title: title),
+              _ProceduralCover(id: id, title: displayTitle, index: index),
             DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    Colors.black.withValues(alpha: 0.05),
-                    Colors.black.withValues(alpha: 0.55),
+                    Colors.black.withValues(alpha: 0.08),
+                    Colors.black.withValues(alpha: 0.45),
                   ],
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                 ),
               ),
             ),
+            if (index != null)
+              Positioned(
+                left: 5,
+                top: 4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Text(
+                    '${index! + 1}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
             if (showPlay)
               Center(
                 child: Container(
-                  width: 32,
-                  height: 32,
+                  width: 30,
+                  height: 30,
                   decoration: BoxDecoration(
                     color: active
                         ? AppTheme.accent.withValues(alpha: 0.95)
-                        : Colors.white.withValues(alpha: 0.18),
+                        : Colors.white.withValues(alpha: 0.22),
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: active ? AppTheme.accent : Colors.white54,
+                      color: active ? AppTheme.accent : Colors.white70,
                       width: active ? 2 : 1,
                     ),
                   ),
                   child: Icon(
                     active ? Icons.pause_rounded : Icons.play_arrow_rounded,
                     color: Colors.white,
-                    size: 20,
+                    size: 18,
                   ),
                 ),
               ),
             if (duration != null && duration > 0)
               Positioned(
-                right: 6,
-                bottom: 5,
+                right: 5,
+                bottom: 4,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.72),
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(5),
                   ),
                   child: Text(
                     formatDuration(duration),
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 10,
+                      fontSize: 9,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -119,17 +146,30 @@ class LessonCover extends StatelessWidget {
 }
 
 class _ProceduralCover extends StatelessWidget {
-  const _ProceduralCover({required this.id, required this.title});
+  const _ProceduralCover({
+    required this.id,
+    required this.title,
+    this.index,
+  });
 
   final String id;
   final String title;
+  final int? index;
 
   @override
   Widget build(BuildContext context) {
-    final hash = id.hashCode.abs();
-    final c1 = Color(0xFF600000 + (hash % 0x40) * 0x10000 + (hash % 0x80) * 0x100);
-    final c2 = Color(0xFF002040 + (hash % 0x60) * 0x100 + (hash % 0x40));
-    final c3 = Color(0xFF200040 + (hash % 0x50) * 0x10000);
+    final hash = (id.hashCode.abs() + (index ?? 0) * 17);
+    final palette = [
+      AppTheme.primary,
+      AppTheme.accent,
+      const Color(0xFF6B21FF),
+      const Color(0xFF00C9FF),
+      const Color(0xFFFF6B6B),
+      const Color(0xFF38EF7D),
+    ];
+    final c1 = palette[hash % palette.length];
+    final c2 = palette[(hash + 2) % palette.length];
+    final c3 = palette[(hash + 4) % palette.length];
 
     return CustomPaint(
       painter: _CoverPainter(
@@ -161,42 +201,42 @@ class _CoverPainter extends CustomPainter {
         ..shader = ui.Gradient.linear(
           Offset.zero,
           Offset(size.width, size.height),
-          colors,
+          colors.map((c) => c.withValues(alpha: 0.92)).toList(),
         ),
     );
 
     final ring = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2
-      ..color = Colors.white.withValues(alpha: 0.08);
-    for (var i = 0; i < 5; i++) {
-      final r = 18.0 + i * 14 + (seed % 7);
+      ..color = Colors.white.withValues(alpha: 0.18);
+    for (var i = 0; i < 4; i++) {
+      final r = 14.0 + i * 10 + (seed % 5);
       canvas.drawCircle(
-        Offset(size.width * 0.78, size.height * 0.28),
+        Offset(size.width * 0.78, size.height * 0.32),
         r,
         ring,
       );
     }
 
-    final px = Paint()..color = Colors.white.withValues(alpha: 0.12);
-    for (var i = 0; i < 8; i++) {
+    final px = Paint()..color = Colors.white.withValues(alpha: 0.2);
+    for (var i = 0; i < 6; i++) {
       final x = (seed + i * 37) % size.width.toInt();
       final y = (seed + i * 53) % size.height.toInt();
-      canvas.drawRect(Rect.fromLTWH(x.toDouble(), y.toDouble(), 4, 4), px);
+      canvas.drawRect(Rect.fromLTWH(x.toDouble(), y.toDouble(), 3, 3), px);
     }
 
     final tp = TextPainter(
       text: TextSpan(
         text: label,
         style: TextStyle(
-          color: Colors.white.withValues(alpha: 0.22),
-          fontSize: size.height * 0.55,
+          color: Colors.white.withValues(alpha: 0.35),
+          fontSize: size.height * 0.5,
           fontWeight: FontWeight.w900,
         ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-    tp.paint(canvas, Offset(size.width - tp.width - 8, size.height - tp.height + 4));
+    tp.paint(canvas, Offset(size.width - tp.width - 6, size.height - tp.height + 2));
   }
 
   @override

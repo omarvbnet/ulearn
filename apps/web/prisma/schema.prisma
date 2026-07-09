@@ -153,10 +153,13 @@ model User {
   fullLegalName   String?
   profilePhotoKey String?
   profilePhotoUrl String?
+  /// Teacher profile banner preset (0–11), rendered client-side.
+  profileCoverPreset Int?
   gender          Gender?
   nationalId      String?
   nationalIdImage String?
   parentPhone     String?
+  parentEmail     String?
   latitude        Float?
   longitude       Float?
   locationLabel   String?
@@ -351,6 +354,7 @@ model CourseLesson {
   questions CourseLessonQuestion[]
   progress  CourseLessonProgress[]
   updates   CourseLessonUpdateRequest[]
+  quizzesAfter Quiz[] @relation("QuizAfterLesson")
 
   @@index([courseId])
 }
@@ -1083,6 +1087,8 @@ model Quiz {
   chapterId       String?
   subjectId       String?
   courseId        String?
+  /// Store-course quiz placed after a specific lesson video.
+  afterLessonId   String?
   titleEn         String
   titleAr         String
   titleKu         String
@@ -1100,6 +1106,7 @@ model Quiz {
   chapter   Chapter?      @relation(fields: [chapterId], references: [id])
   subject   Subject?      @relation(fields: [subjectId], references: [id])
   course    Course?       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  afterLesson CourseLesson? @relation("QuizAfterLesson", fields: [afterLessonId], references: [id], onDelete: SetNull)
   questions QuizQuestion[]
   attempts  QuizAttempt[]
 
@@ -1107,6 +1114,7 @@ model Quiz {
   @@index([chapterId])
   @@index([subjectId])
   @@index([courseId])
+  @@index([afterLessonId])
   @@index([deletedAt])
 }
 

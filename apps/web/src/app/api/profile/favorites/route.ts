@@ -29,13 +29,21 @@ export async function GET() {
       where: { id: { in: courseIds }, status: "APPROVED", deletedAt: null },
       include: {
         teacher: {
-          select: { id: true, level: true, user: { select: { fullLegalName: true } } },
+          select: { id: true, level: true, userId: true, user: { select: { fullLegalName: true } } },
         },
         stage: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
         subject: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
         lessons: {
           orderBy: { sortOrder: "asc" },
-          select: { id: true, title: true, durationSec: true, isFreePreview: true },
+          select: {
+            id: true,
+            title: true,
+            durationSec: true,
+            isFreePreview: true,
+            thumbnailUrl: true,
+            thumbnailKey: true,
+            sortOrder: true,
+          },
         },
         _count: { select: { purchases: { where: { status: "PAID" } } } },
       },

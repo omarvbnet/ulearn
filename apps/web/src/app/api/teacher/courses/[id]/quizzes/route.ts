@@ -25,6 +25,7 @@ const createSchema = z.object({
   titleAr: z.string().optional(),
   titleKu: z.string().optional(),
   titleTr: z.string().optional(),
+  afterLessonId: z.string().optional(),
   timeLimitSec: z.number().int().positive().optional(),
   maxAttempts: z.number().int().positive().optional(),
   passPercentage: z.number().min(0).max(100).optional(),
@@ -67,10 +68,19 @@ export async function POST(
   const parsed = createSchema.safeParse(await request.json());
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
-  const { questions, ...meta } = parsed.data;
+  const { questions, afterLessonId, ...meta } = parsed.data;
+
+  if (afterLessonId) {
+    const lesson = await prisma.courseLesson.findFirst({
+      where: { id: afterLessonId, courseId: id },
+    });
+    if (!lesson) return error("afterLessonId is not in this course", 422, "VALIDATION");
+  }
+
   const quiz = await QuizService.createQuiz({
     type: "COURSE",
     course: { connect: { id } },
+    ...(afterLessonId ? { afterLesson: { connect: { id: afterLessonId } } } : {}),
     titleEn: meta.titleEn,
     titleAr: meta.titleAr || meta.titleEn,
     titleKu: meta.titleKu || meta.titleEn,

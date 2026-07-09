@@ -11,16 +11,27 @@ type Country = {
   provinces: { id: string; nameEn: string; nameAr: string }[];
 };
 
+type Stage = {
+  id: string;
+  nameEn: string;
+  nameAr: string;
+};
+
 function RegisterForm() {
   const { locale } = useParams<{ locale: string }>();
   const searchParams = useSearchParams();
   const router = useRouter();
   const phone = searchParams.get("phone") || "";
+  const isAr = locale === "ar" || locale === "ku";
 
   const [type, setType] = useState<"STUDENT" | "CERTIFICATE">("STUDENT");
   const [countries, setCountries] = useState<Country[]>([]);
+  const [stages, setStages] = useState<Stage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [uploadingId, setUploadingId] = useState(false);
   const [error, setError] = useState("");
+  const [nationalIdImage, setNationalIdImage] = useState("");
+  const [idFileName, setIdFileName] = useState("");
   const [form, setForm] = useState({
     fullLegalName: "",
     gender: "MALE",
@@ -29,6 +40,8 @@ function RegisterForm() {
     email: "",
     nationalId: "",
     parentPhone: "",
+    parentEmail: "",
+    educationalStageId: "",
     grade: "",
     schoolUniversity: "",
     educationalQualification: "",
@@ -39,9 +52,23 @@ function RegisterForm() {
   useEffect(() => {
     fetch("/api/countries")
       .then((r) => r.json())
-      .then((d) => setCountries(d.countries || []))
+      .then((d) => {
+        const list = d.countries || [];
+        setCountries(list);
+        if (list[0]?.id) {
+          setForm((f) => ({ ...f, countryId: list[0].id }));
+        }
+      })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!form.countryId) return;
+    fetch(`/api/stages?countryId=${form.countryId}`)
+      .then((r) => r.json())
+      .then((d) => setStages(d.stages || []))
+      .catch(() => setStages([]));
+  }, [form.countryId]);
 
   const provinces =
     countries.find((c) => c.id === form.countryId)?.provinces ?? [];
@@ -50,8 +77,50 @@ function RegisterForm() {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  async function uploadId(file: File) {
+    setUploadingId(true);
+    setError("");
+    try {
+      const presignRes = await fetch("/api/auth/register/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone,
+          filename: file.name,
+          contentType: file.type || "image/jpeg",
+          size: file.size,
+        }),
+      });
+      const presign = await presignRes.json();
+      if (!presignRes.ok) throw new Error(presign.error || "Upload failed");
+
+      const putRes = await fetch(presign.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "image/jpeg" },
+        body: file,
+      });
+      if (!putRes.ok) throw new Error("Upload failed");
+
+      setNationalIdImage(presign.publicUrl || presign.uploadUrl);
+      setIdFileName(file.name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ID upload failed");
+    } finally {
+      setUploadingId(false);
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!nationalIdImage) {
+      setError("Please attach your national ID image");
+      return;
+    }
+    if (type === "STUDENT" && !form.educationalStageId) {
+      setError("Please select your educational stage");
+      return;
+    }
+
     setLoading(true);
     setError("");
     try {
@@ -61,6 +130,9 @@ function RegisterForm() {
               type,
               phone,
               ...form,
+              nationalIdImage,
+              email: form.email || undefined,
+              parentEmail: form.parentEmail || undefined,
               locale: locale.toUpperCase(),
             }
           : {
@@ -72,6 +144,7 @@ function RegisterForm() {
               provinceId: form.provinceId,
               email: form.email || undefined,
               nationalId: form.nationalId,
+              nationalIdImage,
               educationalQualification: form.educationalQualification,
               specialization: form.specialization,
               occupation: form.occupation,
@@ -147,13 +220,14 @@ function RegisterForm() {
             onChange={(e) => {
               set("countryId", e.target.value);
               set("provinceId", "");
+              set("educationalStageId", "");
             }}
             required
           >
             <option value="">Select country</option>
             {countries.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.nameEn}
+                {isAr ? c.nameAr : c.nameEn}
               </option>
             ))}
           </Select>
@@ -166,7 +240,7 @@ function RegisterForm() {
             <option value="">Select province</option>
             {provinces.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.nameEn}
+                {isAr ? p.nameAr : p.nameEn}
               </option>
             ))}
           </Select>
@@ -179,6 +253,23 @@ function RegisterForm() {
             />
           </div>
 
+          <div className="sm:col-span-2">
+            <label className="mb-2 block text-sm font-medium">National ID Image *</label>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="block w-full text-sm text-muted file:me-4 file:rounded-lg file:border-0 file:bg-primary/20 file:px-4 file:py-2 file:text-sm file:font-medium"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) uploadId(file);
+              }}
+            />
+            {uploadingId && <p className="mt-2 text-sm text-muted">Uploading…</p>}
+            {nationalIdImage && (
+              <p className="mt-2 text-sm text-green-400">✓ {idFileName || "ID uploaded"}</p>
+            )}
+          </div>
+
           {type === "STUDENT" ? (
             <>
               <Input
@@ -188,6 +279,28 @@ function RegisterForm() {
                 required
                 dir="ltr"
               />
+              <Input
+                label="Parent Email (quiz results)"
+                type="email"
+                value={form.parentEmail}
+                onChange={(e) => set("parentEmail", e.target.value)}
+                dir="ltr"
+              />
+              <div className="sm:col-span-2">
+                <Select
+                  label="Educational Stage *"
+                  value={form.educationalStageId}
+                  onChange={(e) => set("educationalStageId", e.target.value)}
+                  required
+                >
+                  <option value="">Select stage</option>
+                  {stages.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {isAr ? s.nameAr : s.nameEn}
+                    </option>
+                  ))}
+                </Select>
+              </div>
               <Input
                 label="Grade"
                 value={form.grade}
@@ -228,7 +341,7 @@ function RegisterForm() {
           )}
 
           <div className="sm:col-span-2">
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" className="w-full" disabled={loading || uploadingId}>
               {loading ? "Submitting..." : "Submit Registration"}
             </Button>
           </div>

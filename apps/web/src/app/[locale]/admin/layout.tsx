@@ -22,6 +22,7 @@ export default async function AdminLayout({
         { href: `${base}/users`, label: t.nav.users, countKey: "users" },
         { href: `${base}/teachers`, label: t.nav.teachers },
         { href: `${base}/courses`, label: t.nav.courses },
+        { href: `${base}/geography`, label: "Countries & Provinces" },
         { href: `${base}/course-review`, label: t.nav.courseReview, countKey: "courseReview" },
         { href: `${base}/short-videos`, label: t.nav.shortVideos, countKey: "shortVideos" },
         { href: `${base}/stage-requests`, label: t.nav.stageRequests, countKey: "stageRequests" },

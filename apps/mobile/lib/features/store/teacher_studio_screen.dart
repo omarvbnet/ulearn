@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/media/video_cover_helper.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/features/store/teacher_quiz_tab.dart';
 import 'package:video_compress/video_compress.dart';
 
 const _compressPrefKey = 'teacher_compress_before_upload';
@@ -234,6 +235,14 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       final uploaded = await _uploadVideoFile(videoFile, 'teacher-courses');
       if (uploaded == null) throw Exception('Upload failed');
 
+      if (_pendingCover == null) {
+        setState(() => _uploadStatus = 'Generating cover…');
+        _pendingCover = await VideoCoverHelper.thumbnailFromVideo(videoFile.path);
+      }
+      if (_pendingDurationSec == null || _pendingDurationSec! <= 0) {
+        _pendingDurationSec = await VideoCoverHelper.videoDurationSec(videoFile.path);
+      }
+
       final cover = await _uploadCoverIfAny('teacher-covers');
 
       await context.read<ApiClient>().post(
@@ -284,6 +293,14 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       final uploaded = await _uploadVideoFile(videoFile, 'teacher-shorts');
       if (uploaded == null) throw Exception('Upload failed');
 
+      if (_pendingCover == null) {
+        setState(() => _uploadStatus = 'Generating cover…');
+        _pendingCover = await VideoCoverHelper.thumbnailFromVideo(videoFile.path);
+      }
+      if (_pendingDurationSec == null || _pendingDurationSec! <= 0) {
+        _pendingDurationSec = await VideoCoverHelper.videoDurationSec(videoFile.path);
+      }
+
       final cover = await _uploadCoverIfAny('teacher-shorts-covers');
 
       await context.read<ApiClient>().post('/api/teacher/short-videos', {
@@ -319,13 +336,14 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Teacher Studio'),
           bottom: const TabBar(
             tabs: [
               Tab(text: 'Course Video'),
+              Tab(text: 'Quiz'),
               Tab(text: 'Short Video'),
             ],
           ),
@@ -353,6 +371,11 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                     onUpload: _uploadCourseVideo,
                     compressBeforeUpload: _compressBeforeUpload,
                     onCompressChanged: _setCompressBeforeUpload,
+                  ),
+                  TeacherQuizTab(
+                    courses: _courses,
+                    courseId: _courseId,
+                    onCourseChanged: (id) => setState(() => _courseId = id),
                   ),
                   _UploadTab(
                     titleCtrl: _titleCtrl,

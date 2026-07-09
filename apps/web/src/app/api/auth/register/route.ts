@@ -10,7 +10,7 @@ const baseSchema = z.object({
   provinceId: z.string(),
   email: z.string().email().optional(),
   nationalId: z.string().min(3),
-  nationalIdImage: z.string().optional(),
+  nationalIdImage: z.string().min(1),
   latitude: z.number().optional(),
   longitude: z.number().optional(),
   locationLabel: z.string().optional(),
@@ -20,7 +20,8 @@ const baseSchema = z.object({
 const studentSchema = baseSchema.extend({
   type: z.literal("STUDENT"),
   parentPhone: z.string().min(8),
-  educationalStageId: z.string().optional(),
+  parentEmail: z.string().email().optional(),
+  educationalStageId: z.string().min(1),
   grade: z.string().optional(),
   schoolUniversity: z.string().optional(),
 });

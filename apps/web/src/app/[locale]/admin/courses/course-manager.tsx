@@ -44,6 +44,10 @@ type Subject = {
 type Stage = {
   id: string;
   nameEn: string;
+  nameAr: string;
+  nameKu: string;
+  nameTr: string;
+  sortOrder: number;
   isActive: boolean;
   country: { id: string; nameEn: string; code: string };
   subjects: Subject[];
@@ -53,6 +57,7 @@ type Country = { id: string; nameEn: string; code: string };
 
 type ModalState =
   | { kind: "stage" }
+  | { kind: "editStage"; stage: Stage }
   | { kind: "subject"; stageId: string; countryId: string }
   | { kind: "chapter"; subjectId: string }
   | { kind: "lesson"; chapterId: string }
@@ -186,6 +191,7 @@ export function CourseManager() {
                 <RowActions
                   onAdd={() => setModal({ kind: "subject", stageId: stage.id, countryId: stage.country.id })}
                   addLabel="+ Subject"
+                  onEdit={() => setModal({ kind: "editStage", stage })}
                   onDelete={() => remove("stage", stage.id, stage.nameEn)}
                 />
               </div>
@@ -294,6 +300,9 @@ export function CourseManager() {
       {modal?.kind === "stage" && (
         <StageModal countries={countries} saving={saving} setSaving={setSaving} onDone={() => { setModal(null); load(); }} onClose={() => setModal(null)} toast={toast} />
       )}
+      {modal?.kind === "editStage" && (
+        <EditStageModal stage={modal.stage} saving={saving} setSaving={setSaving} onDone={() => { setModal(null); load(); }} onClose={() => setModal(null)} toast={toast} />
+      )}
       {modal?.kind === "subject" && (
         <SubjectModal stageId={modal.stageId} countryId={modal.countryId} saving={saving} setSaving={setSaving} onDone={() => { setModal(null); load(); }} onClose={() => setModal(null)} toast={toast} />
       )}
@@ -332,12 +341,17 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
-function RowActions({ onAdd, addLabel, onDelete }: { onAdd: () => void; addLabel: string; onDelete: () => void }) {
+function RowActions({ onAdd, addLabel, onEdit, onDelete }: { onAdd: () => void; addLabel: string; onEdit?: () => void; onDelete: () => void }) {
   return (
     <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
       <button onClick={onAdd} className="rounded-lg px-2 py-1 text-xs font-medium text-accent transition hover:bg-accent/10">
         {addLabel}
       </button>
+      {onEdit && (
+        <button onClick={onEdit} className="rounded-lg px-2 py-1 text-xs font-medium text-muted transition hover:bg-white/5" aria-label="Edit">
+          ✎
+        </button>
+      )}
       <button onClick={onDelete} className="rounded-lg px-2 py-1 text-xs text-danger transition hover:bg-danger/10" aria-label="Delete">
         ✕
       </button>
@@ -365,11 +379,12 @@ async function post(endpoint: string, payload: unknown) {
 function StageModal({ countries, saving, setSaving, onDone, onClose, toast }: ModalCommon & { countries: Country[] }) {
   const [names, setNames] = useState(emptyNames);
   const [countryId, setCountryId] = useState(countries[0]?.id ?? "");
+  const [sortOrder, setSortOrder] = useState("0");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    const ok = await post("/api/admin/stages", { ...names, countryId });
+    const ok = await post("/api/admin/stages", { ...names, countryId, sortOrder: Number(sortOrder) || 0 });
     setSaving(false);
     if (ok) { toast("Stage created"); onDone(); } else toast("Failed to create stage", "error");
   }
@@ -381,7 +396,45 @@ function StageModal({ countries, saving, setSaving, onDone, onClose, toast }: Mo
           {countries.map((c) => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
         </Select>
         <NameFields value={names} onChange={setNames} />
+        <Input label="Sort order" type="number" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} />
         <Button type="submit" disabled={saving} className="w-full">{saving ? "Saving…" : "Create Stage"}</Button>
+      </form>
+    </Modal>
+  );
+}
+
+function EditStageModal({ stage, saving, setSaving, onDone, onClose, toast }: ModalCommon & { stage: Stage }) {
+  const [names, setNames] = useState({
+    nameEn: stage.nameEn,
+    nameAr: stage.nameAr,
+    nameKu: stage.nameKu,
+    nameTr: stage.nameTr,
+  });
+  const [sortOrder, setSortOrder] = useState(String(stage.sortOrder));
+  const [isActive, setIsActive] = useState(stage.isActive);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    const res = await fetch(`/api/admin/stages/${stage.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...names, sortOrder: Number(sortOrder) || 0, isActive }),
+    });
+    setSaving(false);
+    if (res.ok) { toast("Stage updated"); onDone(); } else toast("Failed to update stage", "error");
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Edit Educational Stage">
+      <form onSubmit={submit} className="space-y-4">
+        <NameFields value={names} onChange={setNames} />
+        <Input label="Sort order" type="number" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} />
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+          Active
+        </label>
+        <Button type="submit" disabled={saving} className="w-full">{saving ? "Saving…" : "Save changes"}</Button>
       </form>
     </Modal>
   );
