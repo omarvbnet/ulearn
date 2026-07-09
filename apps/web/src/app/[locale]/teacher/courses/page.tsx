@@ -975,7 +975,7 @@ function QuizzesModal({ course, onClose, onChanged, toast }: {
 
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold">Questions ({questions.length})</h3>
-            <Button type="button" variant="outline" size="sm" onClick={addQuestion}>
+            <Button type="button" variant="outline" className="!px-3 !py-1.5 text-xs" onClick={addQuestion}>
               Add question
             </Button>
           </div>
