@@ -6,7 +6,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/reel_video_cache.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
-import 'package:ulearn/features/reels/reel_page.dart';
+import 'package:ulearn/features/reels/reel_slot.dart';
 import 'package:ulearn/features/reels/reel_comments_sheet.dart';
 import 'package:ulearn/features/notifications/notifications_screen.dart';
 import 'package:ulearn/features/reels/teacher_profile_screen.dart';
@@ -24,6 +24,8 @@ class ReelsScreen extends StatefulWidget {
 
 class _ReelsScreenState extends State<ReelsScreen> {
   final _pageCtrl = PageController();
+  final _activeIndex = ValueNotifier(0);
+  final _playbackActive = ValueNotifier(true);
   List<Map<String, dynamic>> _videos = [];
   bool _loading = true;
   bool _loadingMore = false;
@@ -33,35 +35,44 @@ class _ReelsScreenState extends State<ReelsScreen> {
 
   static const _bottomInset = 116.0;
 
-  bool get _playbackActive => widget.isTabActive && _routeVisible;
-
   @override
   void initState() {
     super.initState();
+    _syncPlayback();
     _load();
+  }
+
+  void _syncPlayback() {
+    _playbackActive.value = widget.isTabActive && _routeVisible;
   }
 
   @override
   void didUpdateWidget(ReelsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.isTabActive != widget.isTabActive && !widget.isTabActive) {
-      setState(() {});
+    if (oldWidget.isTabActive != widget.isTabActive) {
+      _syncPlayback();
     }
   }
 
   @override
   void dispose() {
     _pageCtrl.dispose();
-    ReelVideoCache.disposeAll();
+    _activeIndex.dispose();
+    _playbackActive.dispose();
+    ReelVideoCache.releaseWarm();
     super.dispose();
   }
 
   Future<T?> _pauseForNavigation<T>(Future<T?> Function() action) async {
-    setState(() => _routeVisible = false);
+    _routeVisible = false;
+    _syncPlayback();
     try {
       return await action();
     } finally {
-      if (mounted) setState(() => _routeVisible = true);
+      if (mounted) {
+        _routeVisible = true;
+        _syncPlayback();
+      }
     }
   }
 
@@ -73,6 +84,10 @@ class _ReelsScreenState extends State<ReelsScreen> {
         _nextCursor = null;
         _currentIndex = 0;
       });
+      _activeIndex.value = 0;
+      if (_pageCtrl.hasClients) {
+        _pageCtrl.jumpToPage(0);
+      }
     }
     try {
       final data = await context.read<ApiClient>().get('/api/store/short-videos?limit=12');
@@ -83,6 +98,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
         _nextCursor = data['nextCursor']?.toString();
         _loading = false;
       });
+      _activeIndex.value = 0;
       _prefetchAround(0);
     } catch (_) {
       if (mounted) setState(() => _loading = false);
@@ -124,7 +140,8 @@ class _ReelsScreenState extends State<ReelsScreen> {
   }
 
   void _onPageChanged(int index) {
-    setState(() => _currentIndex = index);
+    _currentIndex = index;
+    _activeIndex.value = index;
     _prefetchAround(index);
     if (index >= _videos.length - 3) _loadMore();
   }
@@ -233,8 +250,12 @@ class _ReelsScreenState extends State<ReelsScreen> {
           _currentIndex -= 1;
         }
       });
+      _activeIndex.value = _videos.isEmpty ? 0 : _currentIndex;
       if (_videos.isNotEmpty && _pageCtrl.hasClients) {
-        _pageCtrl.jumpToPage(_currentIndex.clamp(0, _videos.length - 1));
+        final target = _currentIndex.clamp(0, _videos.length - 1);
+        if (_pageCtrl.page?.round() != target) {
+          _pageCtrl.jumpToPage(target);
+        }
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -365,15 +386,18 @@ class _ReelsScreenState extends State<ReelsScreen> {
           PageView.builder(
             controller: _pageCtrl,
             scrollDirection: Axis.vertical,
-            allowImplicitScrolling: false,
+            physics: const PageScrollPhysics(parent: ClampingScrollPhysics()),
+            allowImplicitScrolling: true,
             onPageChanged: _onPageChanged,
             itemCount: _videos.length,
             itemBuilder: (context, index) {
               final video = _videos[index];
-              return ReelPage(
+              return ReelSlot(
                 key: ValueKey(video['id']),
+                index: index,
+                activeIndex: _activeIndex,
+                playbackActive: _playbackActive,
                 video: video,
-                active: _playbackActive && index == _currentIndex,
                 bottomInset: _bottomInset,
                 onLike: () => _toggleLike(index),
                 onComment: () => _openComments(index),

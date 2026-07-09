@@ -916,6 +916,9 @@ class CourseCard extends StatelessWidget {
         ));
     final lessonsCount = (course['lessonsCount'] as num?)?.toInt() ??
         ((course['lessons'] as List?)?.length ?? 0);
+    final subscribers = (course['subscribersCount'] as num?)?.toInt() ??
+        ((course['_count'] as Map?)?['purchases'] as num?)?.toInt() ??
+        0;
     final previews = (course['freePreviewCount'] as num?)?.toInt() ?? 0;
     final thumbnail = course['thumbnail']?.toString();
     final id = course['id'].toString();
@@ -978,6 +981,18 @@ class CourseCard extends StatelessWidget {
                         label: '$lessonsCount lessons',
                       ),
                     ),
+                    if (subscribers > 0)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 10,
+                        child: Center(
+                          child: _CoverChip(
+                            icon: Icons.people_outline,
+                            label: '${formatCount(subscribers)} subs',
+                          ),
+                        ),
+                      ),
                     Positioned(
                       right: 10,
                       top: 10,
@@ -1105,6 +1120,13 @@ class CourseCard extends StatelessWidget {
                       const SizedBox(width: 4),
                       Text(
                         formatCount(views),
+                        style: const TextStyle(fontSize: 12.5, color: AppTheme.muted),
+                      ),
+                      const SizedBox(width: 14),
+                      const Icon(Icons.people_outline, size: 17, color: AppTheme.muted),
+                      const SizedBox(width: 4),
+                      Text(
+                        formatCount(subscribers),
                         style: const TextStyle(fontSize: 12.5, color: AppTheme.muted),
                       ),
                       const SizedBox(width: 14),

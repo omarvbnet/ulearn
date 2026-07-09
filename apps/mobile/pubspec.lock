@@ -376,6 +376,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  flutter_to_airplay:
+    dependency: "direct main"
+    description:
+      name: flutter_to_airplay
+      sha256: e71e7cbdf363c3f9686625f68b14e57497b507ef72d54016c14ccdffd3e4305d
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
   flutter_web_plugins:
     dependency: transitive
     description: flutter

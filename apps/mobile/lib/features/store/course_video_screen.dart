@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
+import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
 import 'package:video_player/video_player.dart';
 
@@ -35,7 +36,7 @@ class _CourseVideoScreenState extends State<CourseVideoScreen> {
     final auth = context.read<AuthProvider>();
     _protection = VideoProtectionController(
       studentName: auth.user?.fullLegalName ?? 'Student',
-      userId: auth.user?.id ?? 'unknown',
+      nationalId: auth.user?.nationalId ?? '',
       phone: auth.user?.phone ?? '',
     );
     _protection!.addListener(() {
@@ -85,6 +86,7 @@ class _CourseVideoScreenState extends State<CourseVideoScreen> {
                       ),
                     ),
                     if (_protection != null) DynamicWatermark(controller: _protection!),
+                    if (_protection != null) CastingIdentityBanner(controller: _protection!),
                     if (_protection != null)
                       ScreenshotBlockOverlay(visible: _protection!.screenshotBlocked),
                     Positioned(
@@ -128,6 +130,26 @@ class _CourseVideoScreenState extends State<CourseVideoScreen> {
                                       '${_speed}x',
                                       style: const TextStyle(color: Colors.white),
                                     ),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'Cast to TV',
+                                  icon: Icon(
+                                    _protection!.isCasting
+                                        ? Icons.cast_connected
+                                        : Icons.cast_outlined,
+                                    color: _protection!.isCasting
+                                        ? AppTheme.accent
+                                        : Colors.white,
+                                  ),
+                                  onPressed: () => openCourseCastScreen(
+                                    context,
+                                    url: widget.url,
+                                    title: widget.title,
+                                    protection: _protection!,
+                                    positionMs: _controller!.value.position.inMilliseconds,
+                                    onPause: () => _controller!.pause(),
+                                    onResume: () => _controller!.play(),
                                   ),
                                 ),
                               ],

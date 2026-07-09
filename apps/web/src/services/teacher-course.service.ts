@@ -506,6 +506,30 @@ export class TeacherCourseService {
     const { ShortVideoService } = await import("@/services/short-video.service");
     const shortVideos = await ShortVideoService.listForTeacher(teacherId, userId);
 
+    const courseIds = courses.map((c) => c.id);
+    const [subscriptionsCount, courseLikes, lessonLikes, shortLikes] = await Promise.all([
+      courseIds.length
+        ? prisma.coursePurchase.count({
+            where: { courseId: { in: courseIds }, status: "PAID" },
+          })
+        : Promise.resolve(0),
+      courseIds.length
+        ? prisma.courseReaction.count({
+            where: { courseId: { in: courseIds }, type: "LIKE" },
+          })
+        : Promise.resolve(0),
+      courseIds.length
+        ? prisma.courseLessonLike.count({
+            where: { lesson: { courseId: { in: courseIds } } },
+          })
+        : Promise.resolve(0),
+      prisma.shortVideoLike.count({
+        where: {
+          video: { teacherId, deletedAt: null, status: "APPROVED" },
+        },
+      }),
+    ]);
+
     return {
       success: true as const,
       teacher: {
@@ -520,6 +544,11 @@ export class TeacherCourseService {
         subjects: teacher.subjects.map((s) => s.subject),
         liveCoursesCount: teacher._count.courses,
         reelsCount: teacher._count.shortVideos,
+        subscriptionsCount,
+        totalLikesCount: courseLikes + lessonLikes + shortLikes,
+        courseLikesCount: courseLikes,
+        lessonLikesCount: lessonLikes,
+        shortVideoLikesCount: shortLikes,
         rating:
           ratingAgg._avg.rating != null
             ? Math.round(ratingAgg._avg.rating * 10) / 10
@@ -653,6 +682,7 @@ export class TeacherCourseService {
           freePreviewCount: lessons.filter((l) => l.isFreePreview).length,
           purchaseStatus: purchaseByCourse.get(c.id) ?? null,
           isOwnCourse: c.teacher.userId === userId,
+          subscribersCount: c._count.purchases,
         };
       })
     );

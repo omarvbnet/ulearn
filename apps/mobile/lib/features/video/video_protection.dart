@@ -7,16 +7,16 @@ import 'package:screen_protector/screen_protector.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 
 /// Video protection: screen capture hardening, casting awareness, and a
-/// moving viewer watermark (name + user id) when casting to another screen.
+/// moving viewer watermark (name + national ID) during playback and casting.
 class VideoProtectionController {
   VideoProtectionController({
     required this.studentName,
-    required this.userId,
-    required this.phone,
+    required this.nationalId,
+    this.phone = '',
   });
 
   final String studentName;
-  final String userId;
+  final String nationalId;
   final String phone;
 
   bool isCasting = false;
@@ -69,8 +69,9 @@ class VideoProtectionController {
     }
   }
 
-  /// Toggle when the learner casts / mirrors to another display.
+  /// Called when a cast session starts or stops on an external screen.
   void setCasting(bool casting) {
+    if (isCasting == casting) return;
     isCasting = casting;
     if (casting) _startWatermarkMotion();
     _notify();
@@ -96,18 +97,28 @@ class VideoProtectionController {
     });
   }
 
-  String get watermarkText => '$studentName · ID: ${userId.substring(0, 8)}';
+  String get watermarkText {
+    final id = nationalId.trim();
+    if (id.isEmpty) return studentName;
+    return '$studentName · ID: $id';
+  }
 }
 
-/// Moving watermark — visible while casting.
+/// Moving watermark — always visible on course videos; stronger while casting.
 class DynamicWatermark extends StatelessWidget {
-  const DynamicWatermark({super.key, required this.controller});
+  const DynamicWatermark({
+    super.key,
+    required this.controller,
+    this.prominent = false,
+  });
 
   final VideoProtectionController controller;
+  final bool prominent;
 
   @override
   Widget build(BuildContext context) {
-    if (!controller.isCasting) return const SizedBox.shrink();
+    final casting = controller.isCasting;
+    final opacity = casting || prominent ? 0.72 : 0.38;
 
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 1800),
@@ -116,23 +127,72 @@ class DynamicWatermark extends StatelessWidget {
       top: controller.watermarkOffset.dy,
       child: IgnorePointer(
         child: Opacity(
-          opacity: 0.42,
+          opacity: opacity,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
               color: Colors.black54,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.white24),
+              border: Border.all(
+                color: casting ? Colors.amber.withValues(alpha: 0.65) : Colors.white24,
+              ),
             ),
             child: Text(
               controller.watermarkText,
-              style: const TextStyle(
+              style: TextStyle(
                 color: Colors.white,
-                fontSize: 11,
+                fontSize: casting ? 12 : 11,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.3,
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Fixed banner shown while casting so the viewer ID stays visible on the phone.
+class CastingIdentityBanner extends StatelessWidget {
+  const CastingIdentityBanner({super.key, required this.controller});
+
+  final VideoProtectionController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!controller.isCasting) return const SizedBox.shrink();
+
+    return Positioned(
+      left: 12,
+      right: 12,
+      top: 12,
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.amber.withValues(alpha: 0.55)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.cast_connected, color: Colors.amber, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Casting · ${controller.watermarkText}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    height: 1.25,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),

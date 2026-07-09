@@ -6,6 +6,7 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
+import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
 import 'package:video_player/video_player.dart';
 
@@ -116,7 +117,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     final auth = context.read<AuthProvider>();
     _protection ??= VideoProtectionController(
       studentName: auth.user?.fullLegalName ?? 'Student',
-      userId: auth.user?.id ?? 'unknown',
+      nationalId: auth.user?.nationalId ?? '',
       phone: auth.user?.phone ?? '',
     )..addListener(() {
         if (mounted) setState(() {});
@@ -140,6 +141,21 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     }
   }
 
+  Future<void> _openCast() async {
+    if (_controller == null || _protection == null) return;
+    await openCourseCastScreen(
+      context,
+      url: widget.url,
+      title: widget.title,
+      protection: _protection!,
+      positionMs: _controller!.value.position.inMilliseconds,
+      onPause: () => _controller?.pause(),
+      onResume: () {
+        if (widget.autoPlay) _controller?.play();
+      },
+    );
+  }
+
   @override
   void dispose() {
     _progressTimer?.cancel();
@@ -160,6 +176,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
           protection: _protection!,
           title: widget.title,
           speed: _speed,
+          videoUrl: widget.url,
           onSpeed: (s) => setState(() {
             _speed = s;
             _controller!.setPlaybackSpeed(s);
@@ -200,6 +217,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
                 Center(child: VideoPlayer(_controller!)),
                 if (_protection != null) const VideoBrandLogo(markSize: 24),
                 if (_protection != null) DynamicWatermark(controller: _protection!),
+                if (_protection != null) CastingIdentityBanner(controller: _protection!),
                 if (_protection != null)
                   ScreenshotBlockOverlay(visible: _protection!.screenshotBlocked),
                 AnimatedOpacity(
@@ -214,6 +232,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
                       _controller!.setPlaybackSpeed(s);
                     },
                     onFullscreen: _enterFullscreen,
+                    onCast: _openCast,
                   ),
                 ),
                 AnimatedOpacity(
@@ -265,6 +284,7 @@ class _ControlsOverlay extends StatelessWidget {
     required this.speed,
     required this.onSpeed,
     required this.onFullscreen,
+    required this.onCast,
   });
 
   final VideoPlayerController controller;
@@ -272,6 +292,7 @@ class _ControlsOverlay extends StatelessWidget {
   final double speed;
   final ValueChanged<double> onSpeed;
   final VoidCallback onFullscreen;
+  final VoidCallback onCast;
 
   @override
   Widget build(BuildContext context) {
@@ -320,15 +341,14 @@ class _ControlsOverlay extends StatelessWidget {
                       const Spacer(),
                       if (protection != null)
                         IconButton(
-                          tooltip: protection!.isCasting ? 'Casting on' : 'Cast to screen',
+                          tooltip: protection!.isCasting ? 'Casting' : 'Cast to TV',
                           icon: Icon(
                             protection!.isCasting
                                 ? Icons.cast_connected
                                 : Icons.cast_outlined,
                             color: protection!.isCasting ? AppTheme.accent : Colors.white70,
                           ),
-                          onPressed: () =>
-                              protection!.setCasting(!protection!.isCasting),
+                          onPressed: onCast,
                         ),
                       IconButton(
                         icon: const Icon(Icons.fullscreen, color: Colors.white),
@@ -353,6 +373,7 @@ class _FullscreenPlayer extends StatefulWidget {
     required this.title,
     required this.speed,
     required this.onSpeed,
+    required this.videoUrl,
   });
 
   final VideoPlayerController controller;
@@ -360,6 +381,7 @@ class _FullscreenPlayer extends StatefulWidget {
   final String title;
   final double speed;
   final ValueChanged<double> onSpeed;
+  final String videoUrl;
 
   @override
   State<_FullscreenPlayer> createState() => _FullscreenPlayerState();
@@ -410,7 +432,8 @@ class _FullscreenPlayerState extends State<_FullscreenPlayer> {
                 ),
               ),
               const VideoBrandLogo(markSize: 26),
-              DynamicWatermark(controller: widget.protection),
+              DynamicWatermark(controller: widget.protection, prominent: true),
+              CastingIdentityBanner(controller: widget.protection),
               ScreenshotBlockOverlay(visible: widget.protection.screenshotBlocked),
               AnimatedOpacity(
                 opacity: _showControls ? 1 : 0,
@@ -434,8 +457,15 @@ class _FullscreenPlayerState extends State<_FullscreenPlayer> {
                                 ? AppTheme.accent
                                 : Colors.white70,
                           ),
-                          onPressed: () => widget.protection
-                              .setCasting(!widget.protection.isCasting),
+                          onPressed: () => openCourseCastScreen(
+                            context,
+                            url: widget.videoUrl,
+                            title: widget.title,
+                            protection: widget.protection,
+                            positionMs: widget.controller.value.position.inMilliseconds,
+                            onPause: () => widget.controller.pause(),
+                            onResume: () => widget.controller.play(),
+                          ),
                         ),
                       ],
                     ),

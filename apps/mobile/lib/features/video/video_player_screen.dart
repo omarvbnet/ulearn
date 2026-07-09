@@ -6,6 +6,7 @@ import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/quiz/quiz_screen.dart';
+import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
 import 'package:video_player/video_player.dart';
 
@@ -33,6 +34,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   bool _hasAccess = false;
   double _speed = 1.0;
   List<Map<String, dynamic>> _quizzes = [];
+  String? _videoUrl;
 
   @override
   void initState() {
@@ -44,7 +46,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     final auth = context.read<AuthProvider>();
     _protection = VideoProtectionController(
       studentName: auth.user?.fullLegalName ?? 'Student',
-      userId: auth.user?.id ?? 'unknown',
+      nationalId: auth.user?.nationalId ?? '',
       phone: auth.user?.phone ?? '',
     );
     _protection!.addListener(() {
@@ -87,6 +89,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         return;
       }
 
+      _videoUrl = url;
       _controller = VideoPlayerController.networkUrl(Uri.parse(url));
       await _controller!.initialize();
       if (!mounted) return;
@@ -192,6 +195,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                       ),
                     ),
                     if (_protection != null) DynamicWatermark(controller: _protection!),
+                    if (_protection != null) CastingIdentityBanner(controller: _protection!),
                     if (_protection != null)
                       ScreenshotBlockOverlay(visible: _protection!.screenshotBlocked),
                     Positioned(
@@ -200,6 +204,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                       bottom: 0,
                       child: _Controls(
                         controller: _controller!,
+                        protection: _protection,
+                        videoUrl: _videoUrl,
+                        title: widget.title,
                         speed: _speed,
                         onSpeed: (s) {
                           setState(() => _speed = s);
@@ -216,11 +223,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 class _Controls extends StatelessWidget {
   const _Controls({
     required this.controller,
+    required this.protection,
+    required this.videoUrl,
+    required this.title,
     required this.speed,
     required this.onSpeed,
   });
 
   final VideoPlayerController controller;
+  final VideoProtectionController? protection;
+  final String? videoUrl;
+  final String title;
   final double speed;
   final ValueChanged<double> onSpeed;
 
@@ -256,6 +269,23 @@ class _Controls extends StatelessWidget {
                 ),
               ),
               const Spacer(),
+              if (protection != null && videoUrl != null)
+                IconButton(
+                  tooltip: 'Cast to TV',
+                  icon: Icon(
+                    protection!.isCasting ? Icons.cast_connected : Icons.cast_outlined,
+                    color: protection!.isCasting ? AppTheme.accent : Colors.white,
+                  ),
+                  onPressed: () => openCourseCastScreen(
+                    context,
+                    url: videoUrl!,
+                    title: title,
+                    protection: protection!,
+                    positionMs: controller.value.position.inMilliseconds,
+                    onPause: () => controller.pause(),
+                    onResume: () => controller.play(),
+                  ),
+                ),
               IconButton(
                 icon: const Icon(Icons.fullscreen, color: Colors.white),
                 onPressed: () {},

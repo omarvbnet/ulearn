@@ -104,6 +104,9 @@ class _StoreScreenState extends State<StoreScreen> {
           final level = teacher?['level']?.toString();
           final lessonsCount = (c['lessonsCount'] as num?)?.toInt() ??
               ((c['lessons'] as List?)?.length ?? 0);
+          final subscribers = (c['subscribersCount'] as num?)?.toInt() ??
+              ((c['_count'] as Map?)?['purchases'] as num?)?.toInt() ??
+              0;
           final totalSec = (c['totalDurationSec'] as num?)?.toInt() ??
               (((c['lessons'] as List<dynamic>?) ?? []).fold<int>(
                 0,
@@ -176,6 +179,18 @@ class _StoreScreenState extends State<StoreScreen> {
                             label: '$lessonsCount videos',
                           ),
                         ),
+                        if (subscribers > 0)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 8,
+                            child: Center(
+                              child: _MetaChip(
+                                icon: Icons.people_outline,
+                                label: '${formatCount(subscribers)} subs',
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -209,6 +224,19 @@ class _StoreScreenState extends State<StoreScreen> {
                           '$teacherName ${_levelStars(level)}',
                           style: const TextStyle(color: AppTheme.muted, fontSize: 13),
                         ),
+                        if (subscribers > 0) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const Icon(Icons.people_outline, size: 14, color: AppTheme.muted),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${formatCount(subscribers)} subscriber${subscribers == 1 ? '' : 's'}',
+                                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ],
                         if (c['description'] != null) ...[
                           const SizedBox(height: 6),
                           Text(

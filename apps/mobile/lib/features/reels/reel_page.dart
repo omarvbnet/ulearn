@@ -44,15 +44,8 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
   bool _showHeartBurst = false;
   bool _viewRecorded = false;
   bool _scrubMode = false;
-
-  void _onVideoTick() {
-    if (_scrubMode && mounted) setState(() {});
-  }
-
-  void _attachListener(VideoPlayerController c) {
-    c.removeListener(_onVideoTick);
-    c.addListener(_onVideoTick);
-  }
+  int _initGeneration = 0;
+  bool _disposed = false;
 
   Future<void> _recordViewIfNeeded() async {
     if (_viewRecorded || !widget.active || !mounted) return;
@@ -94,18 +87,31 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     if (url != null && url.isNotEmpty) ReelVideoCache.prefetch(url);
   }
 
+  void _resumePlayback() {
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) return;
+    try {
+      c.setVolume(_muted ? 0 : 1);
+      if (!_scrubMode) c.play();
+    } catch (_) {
+      _releaseVideo(stash: false);
+      if (mounted) {
+        setState(() => _initializing = true);
+        _initVideo();
+      }
+    }
+  }
+
   void _releaseVideo({bool stash = false}) {
+    _initGeneration++;
     final c = _controller;
     if (c == null) return;
     final url = widget.video['fileUrl']?.toString();
-    c.removeListener(_onVideoTick);
-    c.pause();
-    c.setVolume(0);
     _controller = null;
-    if (stash && url != null && url.isNotEmpty) {
+    if (stash && url != null && url.isNotEmpty && !_disposed) {
       ReelVideoCache.stash(url, c);
     } else {
-      c.dispose();
+      ReelVideoCache.releaseController(c);
     }
   }
 
@@ -116,11 +122,10 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
       if (_controller == null) {
         setState(() => _initializing = true);
         _initVideo();
-      } else {
-        _controller?.setVolume(_muted ? 0 : 1);
-        if (!_scrubMode) _controller?.play();
-        _recordViewIfNeeded();
-      }
+    } else {
+      _resumePlayback();
+      _recordViewIfNeeded();
+    }
     } else if (!widget.active && oldWidget.active) {
       _scrubMode = false;
       _releaseVideo(stash: true);
@@ -141,41 +146,69 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
   }
 
   Future<void> _initVideo() async {
+    final gen = ++_initGeneration;
     final url = widget.video['fileUrl']?.toString();
     if (url == null || url.isEmpty) {
-      if (mounted) setState(() => _initializing = false);
+      if (mounted && gen == _initGeneration) {
+        setState(() => _initializing = false);
+      }
       return;
     }
     if (!widget.active) {
       _prefetchSelf();
-      if (mounted) setState(() => _initializing = false);
+      if (mounted && gen == _initGeneration) {
+        setState(() => _initializing = false);
+      }
       return;
     }
+
+    VideoPlayerController? c;
     try {
-      final c = await ReelVideoCache.createController(url);
-      await c.initialize();
-      c.setLooping(true);
-      c.setVolume(_muted ? 0 : 1);
-      if (widget.active) {
-        await c.play();
-        _recordViewIfNeeded();
-      }
-      if (!mounted) {
-        c.dispose();
+      c = await ReelVideoCache.createController(url);
+      if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
+        await ReelVideoCache.releaseController(c);
         return;
       }
+
+      await c.initialize();
+      if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
+        await ReelVideoCache.releaseController(c);
+        return;
+      }
+      if (c.value.hasError) {
+        await ReelVideoCache.releaseController(c);
+        if (mounted && gen == _initGeneration) {
+          setState(() => _initializing = false);
+        }
+        return;
+      }
+
+      c.setLooping(true);
+      c.setVolume(_muted ? 0 : 1);
+      await c.play();
+      _recordViewIfNeeded();
+
+      if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
+        await ReelVideoCache.releaseController(c);
+        return;
+      }
+
       setState(() {
         _controller = c;
         _initializing = false;
       });
-      _attachListener(c);
     } catch (_) {
-      if (mounted) setState(() => _initializing = false);
+      if (c != null) await ReelVideoCache.releaseController(c);
+      if (mounted && gen == _initGeneration) {
+        setState(() => _initializing = false);
+      }
     }
   }
 
   @override
   void dispose() {
+    _disposed = true;
+    _initGeneration++;
     _releaseVideo(stash: false);
     _likePulse.dispose();
     _heartBurst.dispose();
@@ -231,7 +264,6 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     if (target < Duration.zero) target = Duration.zero;
     if (target > max) target = max;
     c.seekTo(target);
-    setState(() {});
   }
 
   void _seekToFraction(double fraction) {
@@ -240,7 +272,6 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     final max = c.value.duration;
     if (max <= Duration.zero) return;
     c.seekTo(Duration(milliseconds: (max.inMilliseconds * fraction).round()));
-    setState(() {});
   }
 
   String _formatTime(Duration d) {
@@ -399,13 +430,16 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
               left: 16,
               right: 16,
               bottom: bottom + 8,
-              child: _ReelScrubBar(
-                controller: _controller!,
-                onSeek: _seekToFraction,
-                onBack: () => _seekRelative(-10),
-                onForward: () => _seekRelative(10),
-                onPlay: () => _exitScrubMode(resume: true),
-                formatTime: _formatTime,
+              child: AnimatedBuilder(
+                animation: _controller!,
+                builder: (context, _) => _ReelScrubBar(
+                  controller: _controller!,
+                  onSeek: _seekToFraction,
+                  onBack: () => _seekRelative(-10),
+                  onForward: () => _seekRelative(10),
+                  onPlay: () => _exitScrubMode(resume: true),
+                  formatTime: _formatTime,
+                ),
               ),
             ),
 

@@ -137,8 +137,18 @@ export async function GET(
     0
   );
 
+  const subscribersCount = await prisma.coursePurchase.count({
+    where: { courseId: id, status: "PAID" },
+  });
+
   return json({
-    course: { ...course, lessons, totalDurationSec, lessonsCount: lessons.length },
+    course: {
+      ...course,
+      lessons,
+      totalDurationSec,
+      lessonsCount: lessons.length,
+      subscribersCount,
+    },
     quizzes,
     purchased,
     isOwnCourse,

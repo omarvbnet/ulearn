@@ -4,7 +4,7 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/reel_video_cache.dart';
 import 'package:ulearn/features/reels/reel_comments_sheet.dart';
-import 'package:ulearn/features/reels/reel_page.dart';
+import 'package:ulearn/features/reels/reel_slot.dart';
 import 'package:ulearn/features/reels/teacher_profile_screen.dart';
 import 'package:ulearn/features/report/report_content_sheet.dart';
 
@@ -29,6 +29,8 @@ class TeacherReelsViewer extends StatefulWidget {
 
 class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
   late final PageController _pageCtrl;
+  late final ValueNotifier<int> _activeIndex;
+  late final ValueNotifier<bool> _playbackActive;
   late List<Map<String, dynamic>> _videos;
   int _currentIndex = 0;
 
@@ -36,15 +38,20 @@ class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
   void initState() {
     super.initState();
     _videos = List<Map<String, dynamic>>.from(widget.videos);
-    _currentIndex = widget.initialIndex.clamp(0, _videos.length - 1);
+    _currentIndex = _videos.isEmpty ? 0 : widget.initialIndex.clamp(0, _videos.length - 1);
+    _activeIndex = ValueNotifier(_currentIndex);
+    _playbackActive = ValueNotifier(true);
     _pageCtrl = PageController(initialPage: _currentIndex);
-    _prefetchAround(_currentIndex);
+    if (_videos.isNotEmpty) _prefetchAround(_currentIndex);
   }
 
   @override
   void dispose() {
+    _playbackActive.value = false;
     _pageCtrl.dispose();
-    ReelVideoCache.disposeAll();
+    _activeIndex.dispose();
+    _playbackActive.dispose();
+    ReelVideoCache.releaseWarm();
     super.dispose();
   }
 
@@ -90,6 +97,7 @@ class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
 
   void _openComments(int index) {
     final video = _videos[index];
+    _playbackActive.value = false;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -102,7 +110,9 @@ class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
           if (mounted) setState(() => video['commentCount'] = count);
         },
       ),
-    );
+    ).whenComplete(() {
+      if (mounted) _playbackActive.value = true;
+    });
   }
 
   void _openTeacherProfile(Map<String, dynamic> video) {
@@ -110,6 +120,7 @@ class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
     final teacherId = widget.teacherId ?? teacher['id']?.toString();
     if (teacherId == null) return;
 
+    _playbackActive.value = false;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => TeacherProfileScreen(
@@ -152,6 +163,16 @@ class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
 
   @override
   Widget build(BuildContext context) {
+    if (_videos.isEmpty) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(backgroundColor: Colors.transparent),
+        body: const Center(
+          child: Text('No reels available', style: TextStyle(color: Colors.white70)),
+        ),
+      );
+    }
+
     final bottomInset = MediaQuery.paddingOf(context).bottom + 20;
 
     return Scaffold(
@@ -161,17 +182,22 @@ class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
           PageView.builder(
             controller: _pageCtrl,
             scrollDirection: Axis.vertical,
+            physics: const PageScrollPhysics(parent: ClampingScrollPhysics()),
+            allowImplicitScrolling: true,
             onPageChanged: (index) {
-              setState(() => _currentIndex = index);
+              _currentIndex = index;
+              _activeIndex.value = index;
               _prefetchAround(index);
             },
             itemCount: _videos.length,
             itemBuilder: (context, index) {
               final video = _videos[index];
-              return ReelPage(
+              return ReelSlot(
                 key: ValueKey(video['id']),
+                index: index,
+                activeIndex: _activeIndex,
+                playbackActive: _playbackActive,
                 video: video,
-                active: index == _currentIndex,
                 bottomInset: bottomInset,
                 onLike: () => _toggleLike(index),
                 onComment: () => _openComments(index),

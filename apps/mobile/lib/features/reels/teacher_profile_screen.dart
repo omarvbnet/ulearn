@@ -320,20 +320,47 @@ class _StatsRow extends StatelessWidget {
 
   final Map<String, dynamic> teacher;
 
+  String _fmt(num? n) {
+    final v = (n ?? 0).toInt();
+    if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)}M';
+    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}K';
+    return '$v';
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
       children: [
-        _StatChip(
-          icon: Icons.play_lesson_outlined,
-          label: '${teacher['liveCoursesCount'] ?? 0}',
-          caption: 'Courses',
+        Row(
+          children: [
+            _StatChip(
+              icon: Icons.play_lesson_outlined,
+              label: '${teacher['liveCoursesCount'] ?? 0}',
+              caption: 'Courses',
+            ),
+            const SizedBox(width: 10),
+            _StatChip(
+              icon: Icons.movie_outlined,
+              label: '${teacher['reelsCount'] ?? 0}',
+              caption: 'Reels',
+            ),
+          ],
         ),
-        const SizedBox(width: 10),
-        _StatChip(
-          icon: Icons.movie_outlined,
-          label: '${teacher['reelsCount'] ?? 0}',
-          caption: 'Reels',
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            _StatChip(
+              icon: Icons.people_outline,
+              label: _fmt(teacher['subscriptionsCount'] as num?),
+              caption: 'Subscriptions',
+            ),
+            const SizedBox(width: 10),
+            _StatChip(
+              icon: Icons.favorite_outline,
+              label: _fmt(teacher['totalLikesCount'] as num?),
+              caption: 'Total likes',
+            ),
+          ],
         ),
       ],
     );
@@ -399,6 +426,9 @@ class _CourseCard extends StatelessWidget {
     final isOwnCourse = course['isOwnCourse'] == true;
     final lessons = (course['lessonsCount'] as num?)?.toInt() ??
         ((course['lessons'] as List?)?.length ?? 0);
+    final subscribers = (course['subscribersCount'] as num?)?.toInt() ??
+        ((course['_count'] as Map?)?['purchases'] as num?)?.toInt() ??
+        0;
     final duration = formatDuration((course['totalDurationSec'] as num?)?.toInt() ?? 0);
     final subject = course['subject'] as Map<String, dynamic>?;
     final stage = course['stage'] as Map<String, dynamic>?;
@@ -445,6 +475,7 @@ class _CourseCard extends StatelessWidget {
                     if (stage != null) localizedText(stage, locale, prefix: 'name'),
                     '$lessons lessons',
                     duration,
+                    if (subscribers > 0) '$subscribers subscribers',
                   ].where((s) => s.isNotEmpty).join(' · '),
                   style: const TextStyle(color: AppTheme.muted, fontSize: 12),
                 ),

@@ -42,6 +42,7 @@ class UserModel {
   final String id;
   final String phone;
   final String? fullLegalName;
+  final String? nationalId;
   final String? profilePhotoUrl;
   final int? profileCoverPreset;
   final String role;
@@ -53,6 +54,7 @@ class UserModel {
     required this.id,
     required this.phone,
     this.fullLegalName,
+    this.nationalId,
     this.profilePhotoUrl,
     this.profileCoverPreset,
     required this.role,
@@ -68,6 +70,7 @@ class UserModel {
       id: json['id'] as String,
       phone: json['phone'] as String,
       fullLegalName: json['fullLegalName'] as String?,
+      nationalId: json['nationalId'] as String?,
       profilePhotoUrl: json['profilePhotoUrl'] as String?,
       profileCoverPreset: (json['profileCoverPreset'] as num?)?.toInt(),
       role: json['role'] as String,
