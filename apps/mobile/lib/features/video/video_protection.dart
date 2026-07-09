@@ -49,8 +49,8 @@ class VideoProtectionController {
     }
   }
 
-  /// True when identity overlays should be visible (cast, mirror, or record).
-  bool get showIdentityOverlay => isCasting || isScreenCaptured;
+  /// True when identity overlays should be visible (only while casting).
+  bool get showIdentityOverlay => isCasting;
 
   Future<void> enable() async {
     try {
@@ -126,14 +126,17 @@ class VideoProtectionController {
   void setCasting(bool casting) {
     if (isCasting == casting) return;
     isCasting = casting;
-    if (casting || isScreenCaptured) _startWatermarkMotion();
+    if (casting) {
+      _startWatermarkMotion();
+    } else {
+      _watermarkTimer?.cancel();
+    }
     _notify();
   }
 
   void setScreenCaptured(bool captured) {
     if (isScreenCaptured == captured) return;
     isScreenCaptured = captured;
-    if (captured || isCasting) _startWatermarkMotion();
     _notify();
   }
 
@@ -173,7 +176,7 @@ class VideoProtectionController {
   }
 }
 
-/// Moving watermark — visible while casting, mirroring, or screen recording.
+/// Moving watermark — visible only while casting to an external device.
 class DynamicWatermark extends StatelessWidget {
   const DynamicWatermark({
     super.key,
@@ -315,7 +318,7 @@ class ScreenshotBlockOverlay extends StatelessWidget {
   }
 }
 
-/// Persistent viewer stamp on the video frame (visible when mirrored / cast).
+/// Persistent viewer stamp on the video frame while casting.
 class PlaybackViewerStamp extends StatelessWidget {
   const PlaybackViewerStamp({super.key, required this.controller});
 
@@ -323,8 +326,10 @@ class PlaybackViewerStamp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!controller.isCasting) return const SizedBox.shrink();
+
     final text = controller.watermarkText;
-    if (text.isEmpty || text == 'Viewer') return const SizedBox.shrink();
+    if (text.isEmpty) return const SizedBox.shrink();
 
     return Positioned(
       left: 8,
@@ -358,6 +363,137 @@ class PlaybackViewerStamp extends StatelessWidget {
   }
 }
 
+/// Large footer panel so viewer identity stays visible on the cast screen.
+class CastingIdentityFooter extends StatelessWidget {
+  const CastingIdentityFooter({super.key, required this.controller});
+
+  final VideoProtectionController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!controller.isCasting) return const SizedBox.shrink();
+
+    final text = controller.watermarkText;
+    if (text.isEmpty) return const SizedBox.shrink();
+
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: IgnorePointer(
+        child: Container(
+          width: double.infinity,
+          padding: EdgeInsets.fromLTRB(
+            16,
+            14,
+            16,
+            14 + MediaQuery.paddingOf(context).bottom,
+          ),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.transparent,
+                Colors.black.withValues(alpha: 0.85),
+              ],
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cast_connected, color: Colors.amber, size: 22),
+              const SizedBox(height: 6),
+              Text(
+                'Casting as',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.75),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                text,
+                textAlign: TextAlign.center,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.amber,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  height: 1.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Rebuilds cast overlays when protection state or watermark position changes.
+class VideoProtectionOverlay extends StatefulWidget {
+  const VideoProtectionOverlay({
+    super.key,
+    required this.controller,
+    required this.child,
+    this.showFooter = false,
+    this.showBrandLogo = true,
+  });
+
+  final VideoProtectionController controller;
+  final Widget child;
+  final bool showFooter;
+  final bool showBrandLogo;
+
+  @override
+  State<VideoProtectionOverlay> createState() => _VideoProtectionOverlayState();
+}
+
+class _VideoProtectionOverlayState extends State<VideoProtectionOverlay> {
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_repaint);
+  }
+
+  @override
+  void didUpdateWidget(VideoProtectionOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_repaint);
+      widget.controller.addListener(_repaint);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_repaint);
+    super.dispose();
+  }
+
+  void _repaint() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        widget.child,
+        if (widget.showBrandLogo) const VideoBrandLogo(markSize: 24),
+        PlaybackViewerStamp(controller: widget.controller),
+        DynamicWatermark(controller: widget.controller),
+        CastingIdentityBanner(controller: widget.controller),
+        if (widget.showFooter) CastingIdentityFooter(controller: widget.controller),
+      ],
+    );
+  }
+}
+
 /// Builds or refreshes protection identity from the signed-in user.
 VideoProtectionController videoProtectionFromAuth({
   required AuthProvider auth,
@@ -378,15 +514,21 @@ Future<void> ensureFreshProtectionIdentity(
   VideoProtectionController protection,
   String fallbackName,
 ) async {
-  if (auth.user?.nationalId == null || auth.user!.nationalId!.trim().isEmpty) {
+  final user = auth.user;
+  final missingIdentity = user == null ||
+      user.fullLegalName == null ||
+      user.fullLegalName!.trim().isEmpty ||
+      user.nationalId == null ||
+      user.nationalId!.trim().isEmpty;
+  if (missingIdentity) {
     await auth.refreshUser();
   }
-  final user = auth.user;
+  final refreshed = auth.user;
   protection.updateIdentity(
-    studentName: user?.fullLegalName?.trim().isNotEmpty == true
-        ? user!.fullLegalName!.trim()
+    studentName: refreshed?.fullLegalName?.trim().isNotEmpty == true
+        ? refreshed!.fullLegalName!.trim()
         : fallbackName,
-    nationalId: user?.nationalId?.trim() ?? '',
-    phone: user?.phone.trim() ?? '',
+    nationalId: refreshed?.nationalId?.trim() ?? '',
+    phone: refreshed?.phone.trim() ?? '',
   );
 }

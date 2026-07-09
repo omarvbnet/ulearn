@@ -15,8 +15,11 @@ class CastOptionsProvider : OptionsProvider {
         val mediaOptions = CastMediaOptions.Builder()
             .setNotificationOptions(notificationOptions)
             .build()
+        val receiverAppId = BuildConfig.CAST_RECEIVER_APP_ID.ifBlank {
+            com.google.android.gms.cast.CastMediaControlIntent.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID
+        }
         return CastOptions.Builder()
-            .setReceiverApplicationId(com.google.android.gms.cast.CastMediaControlIntent.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID)
+            .setReceiverApplicationId(receiverAppId)
             .setCastMediaOptions(mediaOptions)
             .build()
     }

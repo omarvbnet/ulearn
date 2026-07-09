@@ -54,8 +54,15 @@ class MainActivity : FlutterActivity() {
                         }
                         val title = call.argument<String>("title") ?: "U Learn"
                         val watermark = call.argument<String>("watermark") ?: ""
+                        val watermarkVttUrl = call.argument<String>("watermarkVttUrl")
                         val positionMs = call.argument<Int>("positionMs") ?: 0
-                        val ok = manager?.castVideo(url, title, watermark, positionMs) == true
+                        val ok = manager?.castVideo(
+                            url,
+                            title,
+                            watermark,
+                            positionMs,
+                            watermarkVttUrl,
+                        ) == true
                         result.success(ok)
                     }
                     "showDevicePicker" -> {

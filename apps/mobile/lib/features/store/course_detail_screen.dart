@@ -109,6 +109,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           ...course,
           'lessons': lessons,
           'materials': materials,
+          'favorites': data['favorites'] ?? course['favorites'],
         };
         _purchased = purchased;
         _isOwnCourse = isOwn;
@@ -482,13 +483,47 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   Widget _buildSelectedTabContent({
+    required Map<String, dynamic> course,
     required List<Map<String, dynamic>> lessons,
     required bool unlocked,
     required String? activeId,
     required dynamic l10n,
     required Map<String, dynamic>? active,
+    required String teacherName,
+    required double rating,
+    required int views,
+    required int subscribers,
+    required int totalSec,
+    required int likes,
+    required int dislikes,
+    required String? myReaction,
+    required String? description,
+    required Map<String, dynamic>? teacher,
+    required VoidCallback onTeacherTap,
   }) {
     if (_selectedTab == 0) {
+      return _CourseDetailsTab(
+        course: course,
+        teacherName: teacherName,
+        rating: rating,
+        views: views,
+        subscribers: subscribers,
+        totalSec: totalSec,
+        likes: likes,
+        dislikes: dislikes,
+        myReaction: myReaction,
+        description: description,
+        lessons: lessons,
+        quizzes: _quizzes,
+        unlocked: unlocked,
+        completion: _completion,
+        reacting: _reacting,
+        onTeacherTap: onTeacherTap,
+        onReact: _react,
+        l10n: l10n,
+      );
+    }
+    if (_selectedTab == 1) {
       final items = _buildVideosQuizzesTab(
         lessons: lessons,
         unlocked: unlocked,
@@ -500,7 +535,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         children: items,
       );
     }
-    if (_selectedTab == 1) {
+    if (_selectedTab == 2) {
       return _CourseQATab(
         lessons: lessons,
         activeLesson: active,
@@ -519,28 +554,19 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
 
   Widget _buildCourseHeader({
     required Map<String, dynamic> course,
-    required String title,
-    required String teacherName,
-    required double rating,
-    required int views,
-    required int subscribers,
-    required int totalSec,
-    required int likes,
-    required int dislikes,
-    required String? myReaction,
-    required String? description,
     required List<Map<String, dynamic>> lessons,
     required bool unlocked,
     required Map<String, dynamic>? active,
     required String? activeUrl,
     required String? activeId,
-    required Map<String, dynamic>? teacher,
-    required VoidCallback onTeacherTap,
+    required int views,
+    required int subscribers,
     required dynamic l10n,
   }) {
-    return SingleChildScrollView(
+    return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (_isOwnCourse) ...[
@@ -665,129 +691,6 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           ],
           StaggeredItem(
             index: 0,
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: onTeacherTap,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 38,
-                        height: 38,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: AppTheme.gradient,
-                        ),
-                        child: Center(
-                          child: Text(
-                            teacherName.isNotEmpty ? teacherName[0].toUpperCase() : '?',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    teacherName,
-                                    style: const TextStyle(fontWeight: FontWeight.w600),
-                                  ),
-                                ),
-                                Text(
-                                  l10n.t('mobile.reels.viewTeacher'),
-                                  style: const TextStyle(
-                                    fontSize: 11.5,
-                                    color: AppTheme.accent,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(width: 2),
-                                const Icon(
-                                  Icons.chevron_right_rounded,
-                                  size: 18,
-                                  color: AppTheme.accent,
-                                ),
-                              ],
-                            ),
-                            Row(
-                              children: [
-                                const Icon(Icons.star_rounded, size: 15, color: Colors.amber),
-                                const SizedBox(width: 3),
-                                Text(
-                                  rating > 0
-                                      ? rating.toStringAsFixed(1)
-                                      : l10n.t('rank.noRankings'),
-                                  style: const TextStyle(fontSize: 12.5, color: AppTheme.muted),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    '${l10n.homeViews(views)} · ${l10n.homeSubscribers(subscribers)} · ${formatDuration(totalSec)}',
-                                    style: const TextStyle(fontSize: 12.5, color: AppTheme.muted),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          StaggeredItem(
-            index: 1,
-            child: Row(
-              children: [
-                ReactionButton(
-                  icon: Icons.thumb_up_outlined,
-                  activeIcon: Icons.thumb_up,
-                  active: myReaction == 'LIKE',
-                  activeColor: AppTheme.accent,
-                  count: likes,
-                  onTap: _reacting ? () {} : () => _react('LIKE'),
-                ),
-                const SizedBox(width: 18),
-                ReactionButton(
-                  icon: Icons.thumb_down_outlined,
-                  activeIcon: Icons.thumb_down,
-                  active: myReaction == 'DISLIKE',
-                  activeColor: Colors.redAccent,
-                  count: dislikes,
-                  onTap: _reacting ? () {} : () => _react('DISLIKE'),
-                ),
-              ],
-            ),
-          ),
-          if (description != null && description.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            StaggeredItem(
-              index: 2,
-              child: Text(
-                description,
-                style: const TextStyle(color: AppTheme.muted, height: 1.5),
-              ),
-            ),
-          ],
-          const SizedBox(height: 16),
-          StaggeredItem(
-            index: 3,
             child: _CourseDetailTabs(
               selected: _selectedTab,
               onSelected: (i) => setState(() => _selectedTab = i),
@@ -797,6 +700,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               l10n: l10n,
             ),
           ),
+          const SizedBox(height: 8),
         ],
       ),
     );
@@ -949,38 +853,38 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       ),
       body: Column(
         children: [
-          Flexible(
-            child: _buildCourseHeader(
-              course: course,
-              title: title,
-              teacherName: teacherName,
-              rating: rating,
-              views: views,
-              subscribers: subscribers,
-              totalSec: totalSec,
-              likes: likes,
-              dislikes: dislikes,
-              myReaction: myReaction,
-              description: description,
-              lessons: lessons,
-              unlocked: unlocked,
-              active: active,
-              activeUrl: activeUrl,
-              activeId: activeId,
-              teacher: teacher,
-              onTeacherTap: () => _openTeacherProfile(teacher, teacherName),
-              l10n: l10n,
-            ),
+          _buildCourseHeader(
+            course: course,
+            lessons: lessons,
+            unlocked: unlocked,
+            active: active,
+            activeUrl: activeUrl,
+            activeId: activeId,
+            views: views,
+            subscribers: subscribers,
+            l10n: l10n,
           ),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: _buildSelectedTabContent(
+                course: course,
                 lessons: lessons,
                 unlocked: unlocked,
                 activeId: activeId,
                 l10n: l10n,
                 active: active,
+                teacherName: teacherName,
+                rating: rating,
+                views: views,
+                subscribers: subscribers,
+                totalSec: totalSec,
+                likes: likes,
+                dislikes: dislikes,
+                myReaction: myReaction,
+                description: description,
+                teacher: teacher,
+                onTeacherTap: () => _openTeacherProfile(teacher, teacherName),
               ),
             ),
           ),
@@ -1265,6 +1169,310 @@ class _ProgressStatChip extends StatelessWidget {
   }
 }
 
+class _CourseDetailsTab extends StatelessWidget {
+  const _CourseDetailsTab({
+    required this.course,
+    required this.teacherName,
+    required this.rating,
+    required this.views,
+    required this.subscribers,
+    required this.totalSec,
+    required this.likes,
+    required this.dislikes,
+    required this.myReaction,
+    required this.description,
+    required this.lessons,
+    required this.quizzes,
+    required this.unlocked,
+    required this.completion,
+    required this.reacting,
+    required this.onTeacherTap,
+    required this.onReact,
+    required this.l10n,
+  });
+
+  final Map<String, dynamic> course;
+  final String teacherName;
+  final double rating;
+  final int views;
+  final int subscribers;
+  final int totalSec;
+  final int likes;
+  final int dislikes;
+  final String? myReaction;
+  final String? description;
+  final List<Map<String, dynamic>> lessons;
+  final List<Map<String, dynamic>> quizzes;
+  final bool unlocked;
+  final Map<String, dynamic>? completion;
+  final bool reacting;
+  final VoidCallback onTeacherTap;
+  final void Function(String type) onReact;
+  final dynamic l10n;
+
+  @override
+  Widget build(BuildContext context) {
+    final courseRating = (course['courseRating'] as num?)?.toDouble();
+    final courseRatingCount = (course['courseRatingCount'] as num?)?.toInt() ?? 0;
+    final favorites = (course['favorites'] as num?)?.toInt() ?? 0;
+    final completedLessons = lessons.where((l) {
+      if (l['isCompleted'] == true || l['completed'] == true) return true;
+      return ((l['progressPct'] as num?)?.toDouble() ?? 0) >= 90;
+    }).length;
+    final passedQuizzes = unlocked
+        ? quizzes.where((q) => q['passedByMe'] == true).length
+        : 0;
+    final myRating = (completion?['myRating'] as num?)?.toInt();
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 16),
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: onTeacherTap,
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppTheme.card,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppTheme.cardBorder),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: AppTheme.gradient,
+                    ),
+                    child: Center(
+                      child: Text(
+                        teacherName.isNotEmpty ? teacherName[0].toUpperCase() : '?',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          teacherName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.star_rounded, size: 16, color: Colors.amber),
+                            const SizedBox(width: 4),
+                            Text(
+                              rating > 0
+                                  ? rating.toStringAsFixed(1)
+                                  : l10n.t('rank.noRankings'),
+                              style: const TextStyle(fontSize: 13, color: AppTheme.muted),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    l10n.t('mobile.reels.viewTeacher'),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.accent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded, size: 20, color: AppTheme.accent),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          l10n.t('mobile.store.courseStats'),
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _DetailStatChip(
+              icon: Icons.visibility_outlined,
+              label: l10n.homeViews(views),
+            ),
+            _DetailStatChip(
+              icon: Icons.people_outline_rounded,
+              label: l10n.homeSubscribers(subscribers),
+            ),
+            _DetailStatChip(
+              icon: Icons.schedule_rounded,
+              label: formatDuration(totalSec),
+            ),
+            if (courseRating != null && courseRatingCount > 0)
+              _DetailStatChip(
+                icon: Icons.star_outline_rounded,
+                label:
+                    '${courseRating.toStringAsFixed(1)} (${l10n.t('mobile.store.courseRatingLabel')})',
+              ),
+            if (favorites > 0)
+              _DetailStatChip(
+                icon: Icons.bookmark_outline_rounded,
+                label: '$favorites',
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            ReactionButton(
+              icon: Icons.thumb_up_outlined,
+              activeIcon: Icons.thumb_up,
+              active: myReaction == 'LIKE',
+              activeColor: AppTheme.accent,
+              count: likes,
+              onTap: reacting ? () {} : () => onReact('LIKE'),
+            ),
+            const SizedBox(width: 18),
+            ReactionButton(
+              icon: Icons.thumb_down_outlined,
+              activeIcon: Icons.thumb_down,
+              active: myReaction == 'DISLIKE',
+              activeColor: Colors.redAccent,
+              count: dislikes,
+              onTap: reacting ? () {} : () => onReact('DISLIKE'),
+            ),
+          ],
+        ),
+        if (unlocked && (completedLessons > 0 || quizzes.isNotEmpty)) ...[
+          const SizedBox(height: 18),
+          Text(
+            l10n.t('mobile.store.yourResults'),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppTheme.primary.withValues(alpha: 0.15),
+                  AppTheme.card,
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppTheme.cardBorder),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.play_lesson_outlined, size: 18, color: AppTheme.accent),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$completedLessons/${lessons.length} ${l10n.t('student.videos')}',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+                if (quizzes.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.quiz_outlined, size: 18, color: AppTheme.accent),
+                      const SizedBox(width: 8),
+                      Text(
+                        l10n.t('mobile.store.quizzesPassed', {
+                          'passed': '$passedQuizzes',
+                          'total': '${quizzes.length}',
+                        }),
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ],
+                if (myRating != null) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.star_rounded, size: 18, color: Colors.amber),
+                      const SizedBox(width: 8),
+                      Text(
+                        l10n.t('mobile.store.yourRating', {'rating': '$myRating'}),
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 18),
+        Text(
+          l10n.t('mobile.store.about'),
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          description != null && description!.isNotEmpty
+              ? description!
+              : l10n.t('mobile.store.noDescription'),
+          style: const TextStyle(color: AppTheme.muted, height: 1.5, fontSize: 13.5),
+        ),
+      ],
+    );
+  }
+}
+
+class _DetailStatChip extends StatelessWidget {
+  const _DetailStatChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.cardBorder),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: AppTheme.accent),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CourseDetailTabs extends StatelessWidget {
   const _CourseDetailTabs({
     required this.selected,
@@ -1285,6 +1493,11 @@ class _CourseDetailTabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tabs = [
+      (
+        icon: Icons.info_outline_rounded,
+        short: l10n.t('mobile.store.tabShortDetails'),
+        count: null,
+      ),
       (
         icon: Icons.play_lesson_rounded,
         short: l10n.t('mobile.store.tabShortCurriculum'),

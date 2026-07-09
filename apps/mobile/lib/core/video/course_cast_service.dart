@@ -43,6 +43,7 @@ class CourseCastService {
     required String url,
     required String title,
     required String watermark,
+    String? watermarkVttUrl,
     int positionMs = 0,
   }) async {
     if (Platform.isIOS) return false;
@@ -51,6 +52,7 @@ class CourseCastService {
         'url': url,
         'title': title,
         'watermark': watermark,
+        if (watermarkVttUrl != null) 'watermarkVttUrl': watermarkVttUrl,
         'positionMs': positionMs,
       });
       return ok == true;

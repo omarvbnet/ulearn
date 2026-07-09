@@ -254,7 +254,6 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
               children: [
                 Center(child: VideoPlayer(_controller!)),
                 if (_protection != null) const VideoBrandLogo(markSize: 24),
-                if (_protection != null) PlaybackViewerStamp(controller: _protection!),
                 if (_protection != null) DynamicWatermark(controller: _protection!),
                 if (_protection != null) CastingIdentityBanner(controller: _protection!),
                 if (_protection != null)
@@ -474,7 +473,6 @@ class _FullscreenPlayerState extends State<_FullscreenPlayer> {
                 ),
               ),
               const VideoBrandLogo(markSize: 26),
-              PlaybackViewerStamp(controller: widget.protection),
               DynamicWatermark(controller: widget.protection),
               CastingIdentityBanner(controller: widget.protection),
               ScreenshotBlockOverlay(visible: widget.protection.screenshotBlocked),

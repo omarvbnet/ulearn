@@ -3,10 +3,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_to_airplay/flutter_to_airplay.dart';
 import 'package:provider/provider.dart';
+import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/course_cast_service.dart';
+import 'package:ulearn/features/video/native_airplay_player.dart';
 import 'package:ulearn/features/video/video_protection.dart';
 
 /// Full-screen cast experience: native AirPlay (iOS) or Chromecast (Android)
@@ -39,7 +41,12 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
   @override
   void initState() {
     super.initState();
+    widget.protection.addListener(_repaint);
     _prepareCast();
+  }
+
+  void _repaint() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _prepareCast() async {
@@ -51,17 +58,30 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
       l10n.t('mobile.roles.student'),
     );
     if (!mounted) return;
-    widget.protection.setCasting(true);
-    if (Platform.isAndroid) {
-      _castSub = CourseCastService.castingStream.listen((casting) {
-        if (!mounted) return;
-        widget.protection.setCasting(casting);
-        setState(() {});
-      });
-      await _startAndroidCast();
-    } else {
+
+    if (Platform.isIOS) {
+      widget.protection.setCasting(true);
       setState(() {});
+      return;
     }
+
+    _castSub = CourseCastService.castingStream.listen((casting) {
+      if (!mounted) return;
+      widget.protection.setCasting(casting);
+      setState(() {});
+    });
+
+    final alreadyCasting = await CourseCastService.isCasting;
+    if (alreadyCasting) {
+      widget.protection.setCasting(true);
+    }
+    if (!mounted) return;
+    await _startAndroidCast();
+  }
+
+  String get _watermarkVttUrl {
+    final text = widget.protection.watermarkText;
+    return '${ApiClient.baseUrl}/api/cast/watermark?text=${Uri.encodeComponent(text)}';
   }
 
   Future<void> _startAndroidCast() async {
@@ -74,6 +94,7 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
       url: widget.url,
       title: widget.title,
       watermark: widget.protection.watermarkText,
+      watermarkVttUrl: _watermarkVttUrl,
       positionMs: widget.positionMs,
     );
     if (!mounted) return;
@@ -99,6 +120,7 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
 
   @override
   void dispose() {
+    widget.protection.removeListener(_repaint);
     _castSub?.cancel();
     if (Platform.isAndroid) {
       CourseCastService.stopCast();
@@ -110,6 +132,7 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final casting = widget.protection.isCasting;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -130,50 +153,54 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
           ),
         ],
       ),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (Platform.isIOS)
-            FlutterAVPlayerView(urlString: widget.url)
-          else
-            _AndroidCastPanel(
-              busy: _androidBusy,
-              message: _message,
-              watermark: widget.protection.watermarkText,
-              onPickDevice: () => CourseCastService.showDevicePicker(),
-            ),
-          const VideoBrandLogo(markSize: 24),
-          PlaybackViewerStamp(controller: widget.protection),
-          DynamicWatermark(controller: widget.protection),
-          CastingIdentityBanner(controller: widget.protection),
-          if (Platform.isIOS)
-            Positioned(
-              right: 16,
-              bottom: 24 + MediaQuery.paddingOf(context).bottom,
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AirPlayRoutePickerView(
-                      tintColor: Colors.white,
-                      activeTintColor: AppTheme.accent,
-                      backgroundColor: Colors.transparent,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      l10n.t('mobile.cast.airplay'),
-                      style: const TextStyle(color: Colors.white70, fontSize: 11),
-                    ),
-                  ],
+      body: VideoProtectionOverlay(
+        controller: widget.protection,
+        showFooter: true,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (Platform.isIOS)
+              NativeAirPlayPlayer(
+                key: ValueKey(widget.protection.watermarkText),
+                url: widget.url,
+                watermark: widget.protection.watermarkText,
+              )
+            else
+              _AndroidCastPanel(
+                busy: _androidBusy,
+                message: _message,
+                watermark: casting ? widget.protection.watermarkText : null,
+                onPickDevice: () => CourseCastService.showDevicePicker(),
+              ),
+            if (Platform.isIOS)
+              Positioned(
+                right: 16,
+                bottom: 24 + MediaQuery.paddingOf(context).bottom,
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AirPlayRoutePickerView(
+                        tintColor: Colors.white,
+                        activeTintColor: AppTheme.accent,
+                        backgroundColor: Colors.transparent,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        l10n.t('mobile.cast.airplay'),
+                        style: const TextStyle(color: Colors.white70, fontSize: 11),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -189,7 +216,7 @@ class _AndroidCastPanel extends StatelessWidget {
 
   final bool busy;
   final String? message;
-  final String watermark;
+  final String? watermark;
   final VoidCallback onPickDevice;
 
   @override
@@ -211,16 +238,18 @@ class _AndroidCastPanel extends StatelessWidget {
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.4),
             ),
-            const SizedBox(height: 12),
-            Text(
-              watermark,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.amber.withValues(alpha: 0.9),
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+            if (watermark != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                watermark!,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.amber.withValues(alpha: 0.9),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
+            ],
             const SizedBox(height: 24),
             FilledButton.icon(
               onPressed: onPickDevice,

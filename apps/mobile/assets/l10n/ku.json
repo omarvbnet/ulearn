@@ -401,6 +401,11 @@
       "selectLessonForQa": "Select a lesson to view or ask questions",
       "durationUnknown": "ماوە —",
       "freePreview": "پێشبینینی بێبەرامبەر",
+      "tabShortDetails": "وردەکاری",
+      "courseStats": "ئامارەکانی کۆرس",
+      "courseRatingLabel": "هەڵسەنگاندنی کۆرس",
+      "yourResults": "پێشکەوتنەکەت",
+      "quizzesPassed": "{passed}/{total} تاقیکردنەوە سەرکەوتوو",
       "tabShortCurriculum": "وانەکان",
       "tabShortQA": "پرسیار",
       "tabShortFiles": "فایل"

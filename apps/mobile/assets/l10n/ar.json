@@ -401,6 +401,11 @@
       "selectLessonForQa": "Select a lesson to view or ask questions",
       "durationUnknown": "المدة —",
       "freePreview": "معاينة مجانية",
+      "tabShortDetails": "التفاصيل",
+      "courseStats": "إحصائيات الدورة",
+      "courseRatingLabel": "تقييم الدورة",
+      "yourResults": "تقدمك",
+      "quizzesPassed": "{passed}/{total} اختبارات ناجحة",
       "tabShortCurriculum": "الدروس",
       "tabShortQA": "أسئلة",
       "tabShortFiles": "ملفات"

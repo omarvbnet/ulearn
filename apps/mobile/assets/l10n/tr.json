@@ -401,6 +401,11 @@
       "selectLessonForQa": "Select a lesson to view or ask questions",
       "durationUnknown": "Süre —",
       "freePreview": "Ücretsiz önizleme",
+      "tabShortDetails": "Detaylar",
+      "courseStats": "Kurs istatistikleri",
+      "courseRatingLabel": "Kurs puanı",
+      "yourResults": "İlerlemeniz",
+      "quizzesPassed": "{passed}/{total} sınav geçildi",
       "tabShortCurriculum": "Dersler",
       "tabShortQA": "S&C",
       "tabShortFiles": "Dosya"

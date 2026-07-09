@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>U Learn Cast Receiver</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    cast-media-player {
+      --progress-color: #7c3aed;
+      --splash-image: none;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+  <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+</head>
+<body>
+  <cast-media-player id="player"></cast-media-player>
+  <div id="watermark-layer" aria-hidden="true"></div>
+  <script>
+    const context = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
+    const watermarkLayer = document.getElementById('watermark-layer');
+
+    const style = document.createElement('style');
+    style.textContent = `
+      #watermark-layer {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 2147483646;
+      }
+      .wm-banner {
+        position: absolute;
+        left: 3%;
+        right: 3%;
+        padding: 1.2vh 2vw;
+        border-radius: 0.6vh;
+        background: rgba(0, 0, 0, 0.72);
+        border: 0.2vh solid rgba(255, 193, 7, 0.75);
+        color: #ffc107;
+        font-size: 3.6vh;
+        font-weight: 700;
+        text-align: center;
+        text-shadow: 0 0.2vh 0.8vh rgba(0, 0, 0, 0.9);
+        line-height: 1.25;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .wm-top { top: 4%; }
+      .wm-bottom { bottom: 8%; }
+      .wm-center {
+        top: 50%;
+        transform: translateY(-50%);
+        opacity: 0.55;
+        font-size: 4.2vh;
+      }
+    `;
+    document.head.appendChild(style);
+
+    function clearWatermarks() {
+      watermarkLayer.innerHTML = '';
+    }
+
+    function showWatermarks(text) {
+      clearWatermarks();
+      if (!text) return;
+      const positions = ['wm-top', 'wm-bottom', 'wm-center'];
+      positions.forEach((cls) => {
+        const el = document.createElement('div');
+        el.className = 'wm-banner ' + cls;
+        el.textContent = text;
+        watermarkLayer.appendChild(el);
+      });
+    }
+
+    playerManager.setMessageInterceptor(
+      cast.framework.messages.MessageType.LOAD,
+      (loadRequestData) => {
+        const watermark =
+          (loadRequestData.media && loadRequestData.media.customData &&
+            loadRequestData.media.customData.watermark) ||
+          (loadRequestData.media && loadRequestData.media.metadata &&
+            loadRequestData.media.metadata.subtitle) ||
+          '';
+        showWatermarks(watermark);
+        return loadRequestData;
+      }
+    );
+
+    playerManager.addEventListener(
+      cast.framework.events.EventType.MEDIA_FINISHED,
+      () => clearWatermarks()
+    );
+
+    context.start({ disableIdleTimeout: true });
+  </script>
+</body>
+</html>

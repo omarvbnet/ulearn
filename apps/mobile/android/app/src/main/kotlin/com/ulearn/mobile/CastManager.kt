@@ -4,6 +4,8 @@ import android.app.Activity
 import android.util.Log
 import com.google.android.gms.cast.MediaInfo
 import com.google.android.gms.cast.MediaMetadata
+import com.google.android.gms.cast.MediaStatus
+import com.google.android.gms.cast.MediaTrack
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.SessionManager
@@ -11,6 +13,7 @@ import com.google.android.gms.cast.framework.SessionManagerListener
 import com.google.android.gms.cast.framework.media.RemoteMediaClient
 import androidx.mediarouter.app.MediaRouteChooserDialog
 import io.flutter.plugin.common.EventChannel
+import org.json.JSONObject
 
 class CastManager(
     private val activity: Activity,
@@ -21,7 +24,9 @@ class CastManager(
     private var pendingUrl: String? = null
     private var pendingTitle: String? = null
     private var pendingWatermark: String? = null
+    private var pendingWatermarkVttUrl: String? = null
     private var pendingPositionMs: Int = 0
+    private var mediaCallback: RemoteMediaClient.Callback? = null
 
     private val sessionListener = object : SessionManagerListener<CastSession> {
         override fun onSessionStarting(session: CastSession) = Unit
@@ -66,6 +71,7 @@ class CastManager(
             sessionManager()?.removeSessionManagerListener(sessionListener, CastSession::class.java)
         } catch (_: Exception) {
         }
+        mediaCallback = null
     }
 
     fun isAvailable(): Boolean = castContext != null
@@ -84,10 +90,17 @@ class CastManager(
         }
     }
 
-    fun castVideo(url: String, title: String, watermark: String, positionMs: Int): Boolean {
+    fun castVideo(
+        url: String,
+        title: String,
+        watermark: String,
+        positionMs: Int,
+        watermarkVttUrl: String? = null,
+    ): Boolean {
         pendingUrl = url
         pendingTitle = title
         pendingWatermark = watermark
+        pendingWatermarkVttUrl = watermarkVttUrl
         pendingPositionMs = positionMs
 
         val session = sessionManager()?.currentCastSession
@@ -114,6 +127,7 @@ class CastManager(
         val url = pendingUrl ?: return
         val title = pendingTitle ?: "U Learn"
         val watermark = pendingWatermark ?: ""
+        val watermarkVttUrl = pendingWatermarkVttUrl
 
         val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE).apply {
             putString(MediaMetadata.KEY_TITLE, title)
@@ -124,26 +138,65 @@ class CastManager(
             }
         }
 
+        val tracks = mutableListOf<MediaTrack>()
+        if (!watermarkVttUrl.isNullOrBlank()) {
+            tracks += MediaTrack.Builder(1, MediaTrack.TYPE_TEXT)
+                .setName("Viewer ID")
+                .setSubtype(MediaTrack.SUBTYPE_CAPTIONS)
+                .setContentId(watermarkVttUrl)
+                .setContentType("text/vtt")
+                .setLanguage("en-US")
+                .build()
+        }
+
         val contentType = when {
             url.contains(".m3u8", ignoreCase = true) -> "application/x-mpegURL"
             url.contains(".mpd", ignoreCase = true) -> "application/dash+xml"
             else -> "video/mp4"
         }
 
-        val mediaInfo = MediaInfo.Builder(url)
+        val customData = JSONObject().apply {
+            put("watermark", watermark)
+        }.toString()
+
+        val mediaInfoBuilder = MediaInfo.Builder(url)
             .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
             .setContentType(contentType)
             .setMetadata(metadata)
-            .build()
+            .setCustomData(customData)
 
+        if (tracks.isNotEmpty()) {
+            mediaInfoBuilder.setMediaTracks(tracks)
+        }
+
+        val mediaInfo = mediaInfoBuilder.build()
         val client: RemoteMediaClient = session.remoteMediaClient ?: return
-        client.load(
-            com.google.android.gms.cast.MediaLoadRequestData.Builder()
-                .setMediaInfo(mediaInfo)
-                .setAutoplay(true)
-                .setCurrentTime(pendingPositionMs.toLong())
-                .build(),
-        )
+
+        mediaCallback?.let { client.unregisterCallback(it) }
+        mediaCallback = object : RemoteMediaClient.Callback() {
+            override fun onStatusUpdated() {
+                val status = client.mediaStatus ?: return
+                if (tracks.isEmpty()) return
+                val playing = status.playerState == MediaStatus.PLAYER_STATE_PLAYING ||
+                    status.playerState == MediaStatus.PLAYER_STATE_BUFFERING ||
+                    status.playerState == MediaStatus.PLAYER_STATE_PAUSED
+                if (playing) {
+                    client.setActiveMediaTracks(longArrayOf(1))
+                }
+            }
+        }
+        client.registerCallback(mediaCallback!!)
+
+        val loadBuilder = com.google.android.gms.cast.MediaLoadRequestData.Builder()
+            .setMediaInfo(mediaInfo)
+            .setAutoplay(true)
+            .setCurrentTime(pendingPositionMs.toLong())
+
+        if (tracks.isNotEmpty()) {
+            loadBuilder.setActiveTrackIds(longArrayOf(1))
+        }
+
+        client.load(loadBuilder.build())
         onCastingChanged(true)
     }
 }
