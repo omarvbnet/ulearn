@@ -337,10 +337,11 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     final description = course['description']?.toString();
     final lessons =
         ((course['lessons'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
-    final totalSec = lessons.fold<int>(
-      0,
-      (s, l) => s + ((l['durationSec'] as num?)?.toInt() ?? 0),
-    );
+    final totalSec = (course['totalDurationSec'] as num?)?.toInt() ??
+        lessons.fold<int>(
+          0,
+          (s, l) => s + ((l['durationSec'] as num?)?.toInt() ?? 0),
+        );
     final unlocked = _purchased || purchaseStatus == 'PAID' || isFree || _isOwnCourse;
     final active = _activeLesson;
     final activeUrl = active?['fileUrl']?.toString();
@@ -790,7 +791,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 }
 
-/// Professional lesson row with visible title, status chip, and progress.
+/// Compact lesson row: cover + title + duration + status.
 class _LessonVideoCard extends StatelessWidget {
   const _LessonVideoCard({
     required this.index,
@@ -825,293 +826,163 @@ class _LessonVideoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final inProgress = !isCompleted && progressPct > 0 && canWatch;
+    final statusLabel = isCompleted
+        ? 'Completed'
+        : inProgress
+            ? '${progressPct.round()}%'
+            : canWatch
+                ? 'Not started'
+                : 'Locked';
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
         color: AppTheme.card,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isActive
-              ? AppTheme.accent.withValues(alpha: 0.6)
+              ? AppTheme.accent.withValues(alpha: 0.55)
               : isCompleted
-                  ? Colors.greenAccent.withValues(alpha: 0.25)
+                  ? Colors.greenAccent.withValues(alpha: 0.2)
                   : AppTheme.cardBorder,
-          width: isActive ? 1.5 : 1,
         ),
-        boxShadow: isActive
-            ? [
-                BoxShadow(
-                  color: AppTheme.accent.withValues(alpha: 0.14),
-                  blurRadius: 14,
-                  offset: const Offset(0, 4),
-                ),
-              ]
-            : null,
       ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(12),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: Row(
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        LessonCover(
-                          lesson: lesson,
-                          width: 118,
-                          height: 68,
-                          active: isActive,
-                          showPlay: canWatch,
+                LessonCover(
+                  lesson: lesson,
+                  width: 88,
+                  height: 50,
+                  borderRadius: 8,
+                  active: isActive,
+                  showPlay: canWatch,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${index + 1}. $title',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
+                          color: AppTheme.foreground,
+                          height: 1.25,
                         ),
-                        Positioned(
-                          left: -6,
-                          top: -6,
-                          child: Container(
-                            width: 24,
-                            height: 24,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: isCompleted
-                                  ? Colors.greenAccent.withValues(alpha: 0.95)
-                                  : isActive
-                                      ? AppTheme.accent
-                                      : AppTheme.background,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: isCompleted || isActive
-                                    ? Colors.transparent
-                                    : AppTheme.cardBorder,
-                              ),
-                            ),
-                            child: isCompleted
-                                ? const Icon(Icons.check, size: 14, color: Colors.black87)
-                                : Text(
-                                    '${index + 1}',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w800,
-                                      color: isActive ? Colors.black : AppTheme.foreground,
-                                    ),
-                                  ),
-                          ),
-                        ),
-                        if (isActive)
-                          Positioned(
-                            right: 6,
-                            top: 6,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: AppTheme.accent.withValues(alpha: 0.92),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                'PLAYING',
-                                style: TextStyle(
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.black,
-                                  letterSpacing: 0.4,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
                         children: [
-                          Text(
-                            title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: isActive ? FontWeight.w800 : FontWeight.w700,
-                              color: canWatch ? AppTheme.foreground : AppTheme.muted,
-                              height: 1.3,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              _StatusChip(
-                                label: isCompleted
-                                    ? 'Completed'
-                                    : inProgress
-                                        ? '${progressPct.round()}% watched'
-                                        : canWatch
-                                            ? 'Not started'
-                                            : 'Locked',
-                                icon: isCompleted
-                                    ? Icons.check_circle_rounded
-                                    : inProgress
+                          Icon(
+                            isCompleted
+                                ? Icons.check_circle_rounded
+                                : isActive
+                                    ? Icons.play_circle_filled
+                                    : canWatch
                                         ? Icons.play_circle_outline
-                                        : canWatch
-                                            ? Icons.radio_button_unchecked
-                                            : Icons.lock_outline,
+                                        : Icons.lock_outline,
+                            size: 13,
+                            color: isCompleted
+                                ? Colors.greenAccent
+                                : isActive
+                                    ? AppTheme.accent
+                                    : AppTheme.muted,
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              statusLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11,
                                 color: isCompleted
                                     ? Colors.greenAccent
-                                    : inProgress
-                                        ? AppTheme.accent
-                                        : canWatch
-                                            ? AppTheme.muted
-                                            : AppTheme.muted.withValues(alpha: 0.7),
+                                    : AppTheme.muted,
+                                fontWeight: FontWeight.w500,
                               ),
-                              if (duration > 0)
-                                _StatusChip(
-                                  label: formatDuration(duration),
-                                  icon: Icons.schedule_rounded,
-                                  color: AppTheme.muted,
-                                  filled: false,
-                                ),
-                              if (showFreeBadge)
-                                const _StatusChip(
-                                  label: 'Free preview',
-                                  icon: Icons.lock_open_rounded,
-                                  color: Colors.greenAccent,
-                                ),
-                            ],
+                            ),
                           ),
+                          if (showFreeBadge) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              'FREE',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.greenAccent.withValues(alpha: 0.9),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
-                    ),
-                  ],
-                ),
-                if (inProgress) ...[
-                  const SizedBox(height: 10),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: progressPct / 100,
-                      minHeight: 4,
-                      backgroundColor: AppTheme.cardBorder,
-                      color: AppTheme.accent,
-                    ),
+                      if (inProgress) ...[
+                        const SizedBox(height: 5),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(2),
+                          child: LinearProgressIndicator(
+                            value: progressPct / 100,
+                            minHeight: 3,
+                            backgroundColor: AppTheme.cardBorder,
+                            color: AppTheme.accent,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                ],
-                const SizedBox(height: 10),
-                Row(
+                ),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    ReactionButton(
-                      icon: Icons.thumb_up_outlined,
-                      activeIcon: Icons.thumb_up,
-                      active: lesson['likedByMe'] == true,
-                      activeColor: AppTheme.accent,
-                      count: (lesson['likes'] as num?)?.toInt() ?? 0,
+                    InkWell(
                       onTap: onLike,
+                      borderRadius: BorderRadius.circular(20),
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(
+                          lesson['likedByMe'] == true
+                              ? Icons.thumb_up
+                              : Icons.thumb_up_outlined,
+                          size: 16,
+                          color: lesson['likedByMe'] == true
+                              ? AppTheme.accent
+                              : AppTheme.muted,
+                        ),
+                      ),
                     ),
-                    const SizedBox(width: 16),
-                    GestureDetector(
+                    InkWell(
                       onTap: onFavorite,
-                      behavior: HitTestBehavior.opaque,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            lesson['favoritedByMe'] == true
-                                ? Icons.favorite
-                                : Icons.favorite_border,
-                            size: 17,
-                            color: lesson['favoritedByMe'] == true
-                                ? Colors.redAccent
-                                : AppTheme.muted,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Save',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: lesson['favoritedByMe'] == true
-                                  ? Colors.redAccent
-                                  : AppTheme.muted,
-                            ),
-                          ),
-                        ],
+                      borderRadius: BorderRadius.circular(20),
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(
+                          lesson['favoritedByMe'] == true
+                              ? Icons.favorite
+                              : Icons.favorite_border,
+                          size: 16,
+                          color: lesson['favoritedByMe'] == true
+                              ? Colors.redAccent
+                              : AppTheme.muted,
+                        ),
                       ),
                     ),
-                    const Spacer(),
-                    if (canWatch)
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            isActive ? Icons.pause_circle_filled : Icons.play_circle_outline,
-                            size: 18,
-                            color: isActive ? AppTheme.accent : AppTheme.muted,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            isActive ? 'Playing' : 'Play',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: isActive ? AppTheme.accent : AppTheme.muted,
-                            ),
-                          ),
-                        ],
-                      ),
                   ],
                 ),
               ],
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({
-    required this.label,
-    required this.icon,
-    required this.color,
-    this.filled = true,
-  });
-
-  final String label;
-  final IconData icon;
-  final Color color;
-  final bool filled;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: filled ? color.withValues(alpha: 0.12) : Colors.transparent,
-        borderRadius: BorderRadius.circular(20),
-        border: filled ? null : Border.all(color: AppTheme.cardBorder),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: color,
-            ),
-          ),
-        ],
       ),
     );
   }

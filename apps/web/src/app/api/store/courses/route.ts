@@ -19,10 +19,15 @@ export async function GET(request: Request) {
   });
   const byCourse = new Map(purchases.map((p) => [p.courseId, p.status]));
 
+  const enriched = await TeacherCourseService.enrichCoursesForUser(
+    courses,
+    auth.session.userId
+  );
+
   return json({
-    courses: courses.map((c) => ({
+    courses: enriched.map((c) => ({
       ...c,
-      purchaseStatus: byCourse.get(c.id) ?? null,
+      purchaseStatus: byCourse.get(c.id) ?? c.purchaseStatus ?? null,
     })),
   });
 }

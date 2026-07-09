@@ -118,8 +118,13 @@ export async function GET(
     })
   );
 
+  const totalDurationSec = lessons.reduce(
+    (sum, l) => sum + ((l.durationSec as number | null) ?? 0),
+    0
+  );
+
   return json({
-    course: { ...course, lessons },
+    course: { ...course, lessons, totalDurationSec, lessonsCount: lessons.length },
     quizzes,
     purchased,
     isOwnCourse,

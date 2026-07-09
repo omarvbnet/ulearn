@@ -43,6 +43,7 @@ class LessonCover extends StatelessWidget {
               CachedImage(
                 url: thumb,
                 fit: BoxFit.cover,
+                placeholder: _ProceduralCover(id: id, title: title),
                 error: _ProceduralCover(id: id, title: title),
               )
             else

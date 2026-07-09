@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/media/video_cover_helper.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:video_compress/video_compress.dart';
 
@@ -28,6 +30,10 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   bool _uploading = false;
   String? _uploadStatus;
   bool _compressBeforeUpload = true;
+
+  File? _pendingVideo;
+  File? _pendingCover;
+  int? _pendingDurationSec;
 
   @override
   void initState() {
@@ -54,6 +60,16 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     _descCtrl.dispose();
     VideoCompress.dispose();
     super.dispose();
+  }
+
+  void _clearCover() => setState(() => _pendingCover = null);
+
+  void _clearPendingMedia() {
+    setState(() {
+      _pendingVideo = null;
+      _pendingCover = null;
+      _pendingDurationSec = null;
+    });
   }
 
   Future<void> _load() async {
@@ -90,19 +106,18 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     return File(sourcePath);
   }
 
-  Future<Map<String, String>?> _uploadFile(
-    File file, {
+  Future<Map<String, String>?> _uploadBytes(
+    List<int> bytes,
+    String filename,
+    String contentType, {
     required String category,
     required String folder,
   }) async {
     final api = context.read<ApiClient>();
-    final bytes = await file.readAsBytes();
-    final name = file.path.split(Platform.pathSeparator).last;
-
     setState(() => _uploadStatus = 'Uploading…');
     final presign = await api.post('/api/admin/uploads', {
-      'filename': name.endsWith('.mp4') ? name : '$name.mp4',
-      'contentType': 'video/mp4',
+      'filename': filename,
+      'contentType': contentType,
       'size': bytes.length,
       'category': category,
       'folder': folder,
@@ -112,32 +127,97 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     final publicUrl = presign['publicUrl']?.toString();
     if (uploadUrl == null || key == null) return null;
 
-    await api.putBytes(uploadUrl, bytes, 'video/mp4');
+    await api.putBytes(uploadUrl, Uint8List.fromList(bytes), contentType);
     return {'key': key, 'url': publicUrl ?? uploadUrl};
   }
 
-  Future<File?> _pickVideoFile() async {
-    final pick = await FilePicker.pickFiles(type: FileType.video);
-    if (pick == null || pick.files.isEmpty) return null;
-
-    final file = pick.files.first;
-    if (file.path != null) return File(file.path!);
-
-    if (file.bytes != null) {
-      final temp = File(
-        '${Directory.systemTemp.path}/ulearn_upload_${DateTime.now().millisecondsSinceEpoch}.mp4',
-      );
-      await temp.writeAsBytes(file.bytes!);
-      return temp;
-    }
-    return null;
+  Future<Map<String, String>?> _uploadVideoFile(File file, String folder) async {
+    final bytes = await file.readAsBytes();
+    final name = file.path.split(Platform.pathSeparator).last;
+    return _uploadBytes(
+      bytes,
+      name.endsWith('.mp4') ? name : '$name.mp4',
+      'video/mp4',
+      category: 'video',
+      folder: folder,
+    );
   }
 
-  Future<File?> _pickVideoForUpload() async {
-    final source = await _pickVideoFile();
-    if (source == null) return null;
-    if (!_compressBeforeUpload) return source;
-    return _compressVideo(source.path);
+  Future<Map<String, String>?> _uploadCoverFile(File file, String folder) async {
+    final bytes = await file.readAsBytes();
+    final ext = file.path.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+    return _uploadBytes(
+      bytes,
+      'cover_${DateTime.now().millisecondsSinceEpoch}.$ext',
+      ext == 'png' ? 'image/png' : 'image/jpeg',
+      category: 'image',
+      folder: folder,
+    );
+  }
+
+  Future<void> _selectVideo() async {
+    final pick = await FilePicker.pickFiles(type: FileType.video);
+    if (pick == null || pick.files.isEmpty) return;
+
+    File? source;
+    final file = pick.files.first;
+    if (file.path != null) {
+      source = File(file.path!);
+    } else if (file.bytes != null) {
+      source = File(
+        '${Directory.systemTemp.path}/ulearn_upload_${DateTime.now().millisecondsSinceEpoch}.mp4',
+      );
+      await source.writeAsBytes(file.bytes!);
+    }
+    if (source == null) return;
+
+    final duration = await VideoCoverHelper.videoDurationSec(source.path);
+    if (!mounted) return;
+    setState(() {
+      _pendingVideo = source;
+      _pendingCover = null;
+      _pendingDurationSec = duration;
+    });
+  }
+
+  Future<void> _pickCoverImage() async {
+    if (_pendingVideo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pick a video first')),
+      );
+      return;
+    }
+    final cover = await VideoCoverHelper.pickCoverImage();
+    if (cover != null && mounted) setState(() => _pendingCover = cover);
+  }
+
+  Future<void> _autoCoverFromVideo() async {
+    if (_pendingVideo == null) return;
+    setState(() => _uploadStatus = 'Generating cover…');
+    final cover = await VideoCoverHelper.thumbnailFromVideo(_pendingVideo!.path);
+    if (mounted) {
+      setState(() {
+        _pendingCover = cover;
+        _uploadStatus = null;
+      });
+    }
+  }
+
+  Future<File?> _prepareVideoForUpload() async {
+    var video = _pendingVideo;
+    if (video == null) {
+      await _selectVideo();
+      video = _pendingVideo;
+    }
+    if (video == null) return null;
+    if (!_compressBeforeUpload) return video;
+    return _compressVideo(video.path);
+  }
+
+  Future<Map<String, String>?> _uploadCoverIfAny(String folder) async {
+    if (_pendingCover == null) return null;
+    setState(() => _uploadStatus = 'Uploading cover…');
+    return _uploadCoverFile(_pendingCover!, folder);
   }
 
   Future<void> _uploadCourseVideo() async {
@@ -148,15 +228,13 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       _uploadStatus = 'Preparing…';
     });
     try {
-      final videoFile = await _pickVideoForUpload();
+      final videoFile = await _prepareVideoForUpload();
       if (videoFile == null) return;
 
-      final uploaded = await _uploadFile(
-        videoFile,
-        category: 'video',
-        folder: 'teacher-courses',
-      );
+      final uploaded = await _uploadVideoFile(videoFile, 'teacher-courses');
       if (uploaded == null) throw Exception('Upload failed');
+
+      final cover = await _uploadCoverIfAny('teacher-covers');
 
       await context.read<ApiClient>().post(
             '/api/teacher/courses/$_courseId/lessons',
@@ -164,10 +242,14 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
               'title': _titleCtrl.text.trim(),
               'fileKey': uploaded['key'],
               'fileUrl': uploaded['url'],
+              if (cover != null) 'thumbnailKey': cover['key'],
+              if (cover != null) 'thumbnailUrl': cover['url'],
+              if (_pendingDurationSec != null) 'durationSec': _pendingDurationSec,
             },
           );
       if (!mounted) return;
       _titleCtrl.clear();
+      _clearPendingMedia();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Video uploaded — pending review if course is live')),
       );
@@ -196,25 +278,26 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       _uploadStatus = 'Preparing…';
     });
     try {
-      final videoFile = await _pickVideoForUpload();
+      final videoFile = await _prepareVideoForUpload();
       if (videoFile == null) return;
 
-      final uploaded = await _uploadFile(
-        videoFile,
-        category: 'video',
-        folder: 'teacher-shorts',
-      );
+      final uploaded = await _uploadVideoFile(videoFile, 'teacher-shorts');
       if (uploaded == null) throw Exception('Upload failed');
+
+      final cover = await _uploadCoverIfAny('teacher-shorts-covers');
 
       await context.read<ApiClient>().post('/api/teacher/short-videos', {
         'title': _titleCtrl.text.trim(),
         if (_descCtrl.text.trim().isNotEmpty) 'description': _descCtrl.text.trim(),
         'fileKey': uploaded['key'],
         'fileUrl': uploaded['url'],
+        if (cover != null) 'thumbnailUrl': cover['url'],
+        if (_pendingDurationSec != null) 'durationSec': _pendingDurationSec,
       });
       if (!mounted) return;
       _titleCtrl.clear();
       _descCtrl.clear();
+      _clearPendingMedia();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Short video submitted for review')),
       );
@@ -259,6 +342,14 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                     courses: _courses,
                     courseId: _courseId,
                     onCourse: (id) => setState(() => _courseId = id),
+                    onSelectVideo: _selectVideo,
+                    onPickCover: _pickCoverImage,
+                    onAutoCover: _autoCoverFromVideo,
+                    onClearCover: _clearCover,
+                    onClearMedia: _clearPendingMedia,
+                    pendingVideo: _pendingVideo,
+                    pendingCover: _pendingCover,
+                    pendingDurationSec: _pendingDurationSec,
                     onUpload: _uploadCourseVideo,
                     compressBeforeUpload: _compressBeforeUpload,
                     onCompressChanged: _setCompressBeforeUpload,
@@ -271,6 +362,14 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                     courses: const [],
                     courseId: null,
                     onCourse: (_) {},
+                    onSelectVideo: _selectVideo,
+                    onPickCover: _pickCoverImage,
+                    onAutoCover: _autoCoverFromVideo,
+                    onClearCover: _clearCover,
+                    onClearMedia: _clearPendingMedia,
+                    pendingVideo: _pendingVideo,
+                    pendingCover: _pendingCover,
+                    pendingDurationSec: _pendingDurationSec,
                     onUpload: _uploadShort,
                     isShort: true,
                     shorts: _shorts,
@@ -293,6 +392,14 @@ class _UploadTab extends StatelessWidget {
     required this.courses,
     required this.courseId,
     required this.onCourse,
+    required this.onSelectVideo,
+    required this.onPickCover,
+    required this.onAutoCover,
+    required this.onClearCover,
+    required this.onClearMedia,
+    required this.pendingVideo,
+    required this.pendingCover,
+    required this.pendingDurationSec,
     required this.onUpload,
     required this.compressBeforeUpload,
     required this.onCompressChanged,
@@ -307,11 +414,24 @@ class _UploadTab extends StatelessWidget {
   final List<Map<String, dynamic>> courses;
   final String? courseId;
   final ValueChanged<String?> onCourse;
+  final VoidCallback onSelectVideo;
+  final VoidCallback onPickCover;
+  final VoidCallback onAutoCover;
+  final VoidCallback onClearCover;
+  final VoidCallback onClearMedia;
+  final File? pendingVideo;
+  final File? pendingCover;
+  final int? pendingDurationSec;
   final VoidCallback onUpload;
   final bool compressBeforeUpload;
   final ValueChanged<bool> onCompressChanged;
   final bool isShort;
   final List<Map<String, dynamic>> shorts;
+
+  String get _videoName {
+    if (pendingVideo == null) return 'No video selected';
+    return pendingVideo!.path.split(Platform.pathSeparator).last;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -357,6 +477,81 @@ class _UploadTab extends StatelessWidget {
               onChanged: onCourse,
             ),
         ],
+        const SizedBox(height: 16),
+        const Text('Video file', style: TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: uploading ? null : onSelectVideo,
+          icon: const Icon(Icons.video_library_outlined),
+          label: Text(pendingVideo == null ? 'Pick video' : 'Change video'),
+        ),
+        if (pendingVideo != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            _videoName,
+            style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+          ),
+          if (pendingDurationSec != null)
+            Text(
+              'Duration: ${pendingDurationSec! ~/ 60}:${(pendingDurationSec! % 60).toString().padLeft(2, '0')}',
+              style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+            ),
+        ],
+        const SizedBox(height: 16),
+        const Text('Cover image (optional)', style: TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        const Text(
+          'Covers load instantly in feeds and course lists.',
+          style: TextStyle(color: AppTheme.muted, fontSize: 12),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: uploading || pendingVideo == null ? null : onPickCover,
+                icon: const Icon(Icons.image_outlined, size: 18),
+                label: const Text('Choose cover'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: uploading || pendingVideo == null ? null : onAutoCover,
+                icon: const Icon(Icons.auto_fix_high_outlined, size: 18),
+                label: const Text('From video'),
+              ),
+            ),
+          ],
+        ),
+        if (pendingCover != null) ...[
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: AspectRatio(
+              aspectRatio: 16 / 9,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.file(pendingCover!, fit: BoxFit.cover),
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: IconButton.filled(
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.black54,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(32, 32),
+                      ),
+                      onPressed: uploading ? null : onClearCover,
+                      icon: const Icon(Icons.close, size: 18),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         Container(
           decoration: BoxDecoration(
@@ -375,8 +570,8 @@ class _UploadTab extends StatelessWidget {
             ),
             subtitle: Text(
               compressBeforeUpload
-                  ? 'Recommended — smaller files load faster in Reels.'
-                  : 'Upload original quality (larger file, slower on mobile data).',
+                  ? 'Recommended — smaller files load faster.'
+                  : 'Upload original quality (larger file).',
               style: const TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.35),
             ),
           ),
@@ -391,7 +586,7 @@ class _UploadTab extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
               : const Icon(Icons.upload_file),
-          label: Text(uploading ? (uploadStatus ?? 'Working…') : 'Pick & upload video'),
+          label: Text(uploading ? (uploadStatus ?? 'Working…') : 'Upload video'),
         ),
         if (isShort && shorts.isNotEmpty) ...[
           const SizedBox(height: 24),
@@ -401,6 +596,18 @@ class _UploadTab extends StatelessWidget {
             return Card(
               margin: const EdgeInsets.only(top: 8),
               child: ListTile(
+                leading: s['thumbnailUrl'] != null
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Image.network(
+                          s['thumbnailUrl'].toString(),
+                          width: 48,
+                          height: 48,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Icon(Icons.movie_outlined),
+                        ),
+                      )
+                    : const Icon(Icons.movie_outlined),
                 title: Text(s['title']?.toString() ?? ''),
                 subtitle: s['description'] != null
                     ? Text(

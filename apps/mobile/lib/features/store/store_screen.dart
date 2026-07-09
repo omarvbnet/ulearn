@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
+import 'package:ulearn/features/home/home_feed.dart';
+import 'package:ulearn/features/store/course_detail_screen.dart';
 
 /// Paid teacher courses store. Purchases are requested in-app and
 /// unlocked once the admin confirms the payment.
@@ -69,6 +73,7 @@ class _StoreScreenState extends State<StoreScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final locale = context.watch<AuthProvider>().user?.locale ?? 'AR';
     final courses = _courses;
     if (courses == null) {
       return SkeletonList(itemBuilder: (_) => const SkeletonTextCard());
@@ -97,71 +102,176 @@ class _StoreScreenState extends State<StoreScreen> {
           final teacherName =
               (teacher?['user'] as Map<String, dynamic>?)?['fullLegalName']?.toString() ?? '';
           final level = teacher?['level']?.toString();
-          final lessons = (c['lessons'] as List?)?.length ?? 0;
+          final lessonsCount = (c['lessonsCount'] as num?)?.toInt() ??
+              ((c['lessons'] as List?)?.length ?? 0);
+          final totalSec = (c['totalDurationSec'] as num?)?.toInt() ?? 0;
           final status = c['purchaseStatus']?.toString();
           final id = c['id'].toString();
+          final title = localizedText(c, locale);
+          final thumbnail = c['thumbnail']?.toString();
 
           return Card(
             margin: const EdgeInsets.only(bottom: 12),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => CourseDetailScreen(
+                    courseId: id,
+                    summary: c,
+                  ),
+                ),
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          c['titleAr']?.toString() ?? c['titleEn']?.toString() ?? 'Course',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  AspectRatio(
+                    aspectRatio: 16 / 8,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (thumbnail != null && thumbnail.isNotEmpty)
+                          CachedImage(url: thumbnail, fit: BoxFit.cover)
+                        else
+                          Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  AppTheme.primary.withValues(alpha: 0.4),
+                                  AppTheme.card,
+                                ],
+                              ),
+                            ),
+                          ),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.transparent,
+                                Colors.black.withValues(alpha: 0.5),
+                              ],
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                            ),
+                          ),
                         ),
-                      ),
-                      Text(
-                        '${c['price']} ${c['currency'] ?? 'IQD'}',
-                        style: const TextStyle(
-                          color: AppTheme.accent,
-                          fontWeight: FontWeight.bold,
+                        Positioned(
+                          left: 10,
+                          bottom: 8,
+                          child: _MetaChip(
+                            icon: Icons.schedule,
+                            label: formatDuration(totalSec),
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '$teacherName ${_levelStars(level)} · $lessons lessons',
-                    style: const TextStyle(color: AppTheme.muted, fontSize: 13),
-                  ),
-                  if (c['description'] != null) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      c['description'].toString(),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+                        Positioned(
+                          right: 10,
+                          bottom: 8,
+                          child: _MetaChip(
+                            icon: Icons.play_circle_outline,
+                            label: '$lessonsCount videos',
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: switch (status) {
-                      'PAID' => const Chip(
-                          label: Text('Purchased'),
-                          avatar: Icon(Icons.check_circle, size: 18, color: Colors.green),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                title,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              '${c['price']} ${c['currency'] ?? 'IQD'}',
+                              style: const TextStyle(
+                                color: AppTheme.accent,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
                         ),
-                      'PENDING' => const Chip(
-                          label: Text('Awaiting payment confirmation'),
-                          avatar: Icon(Icons.hourglass_top, size: 18),
+                        const SizedBox(height: 6),
+                        Text(
+                          '$teacherName ${_levelStars(level)}',
+                          style: const TextStyle(color: AppTheme.muted, fontSize: 13),
                         ),
-                      _ => FilledButton(
-                          onPressed: _busyId == id ? null : () => _buy(id),
-                          child: Text(_busyId == id ? 'Requesting…' : 'Buy Course'),
+                        if (c['description'] != null) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            c['description'].toString(),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: switch (status) {
+                            'PAID' => const Chip(
+                                label: Text('Purchased'),
+                                avatar: Icon(Icons.check_circle, size: 18, color: Colors.green),
+                              ),
+                            'PENDING' => const Chip(
+                                label: Text('Awaiting payment confirmation'),
+                                avatar: Icon(Icons.hourglass_top, size: 18),
+                              ),
+                            _ => FilledButton(
+                                onPressed: _busyId == id
+                                    ? null
+                                    : () {
+                                        _buy(id);
+                                      },
+                                child: Text(_busyId == id ? 'Requesting…' : 'Buy Course'),
+                              ),
+                          },
                         ),
-                    },
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _MetaChip extends StatelessWidget {
+  const _MetaChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: Colors.white),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+          ),
+        ],
       ),
     );
   }

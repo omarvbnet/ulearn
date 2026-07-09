@@ -7,6 +7,7 @@ const schema = z.object({
   description: z.string().max(500).optional(),
   fileKey: z.string().optional(),
   fileUrl: z.string().optional(),
+  thumbnailKey: z.string().optional(),
   thumbnailUrl: z.string().optional(),
   durationSec: z.number().int().optional(),
 });
