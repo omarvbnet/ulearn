@@ -358,7 +358,15 @@
       "noDescription": "No description yet",
       "lessonLocked": "Locked — subscribe to watch",
       "durationLikesSaves": "{duration} · {likes} likes · {saves} saves",
-      "purchaseFailed": "Could not request purchase"
+      "purchaseFailed": "Could not request purchase",
+      "tabCurriculum": "Videolar ve Quizler",
+      "tabQA": "Soru-Cevap",
+      "tabDocuments": "Dosyalar",
+      "noDocuments": "Henüz ek dosya yok",
+      "noDocumentsHint": "Öğretmenler bu kurs için PDF, slayt ve not ekleyebilir.",
+      "documentOpening": "Dosya bağlantısı kopyalandı",
+      "selectLessonForQA": "Soru sormak için bir ders seçin",
+      "noLessonsForQA": "Henüz soru-cevap için ders yok"
     },
     "cast": {
       "title": "Cast to TV",

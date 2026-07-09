@@ -358,7 +358,15 @@
       "noDescription": "لا يوجد وصف بعد",
       "lessonLocked": "مقفل — اشترك للمشاهدة",
       "durationLikesSaves": "{duration} · {likes} إعجاب · {saves} حفظ",
-      "purchaseFailed": "Could not request purchase"
+      "purchaseFailed": "Could not request purchase",
+      "tabCurriculum": "الفيديوهات والاختبارات",
+      "tabQA": "أسئلة وأجوبة",
+      "tabDocuments": "الملفات",
+      "noDocuments": "لا توجد ملفات مرفقة بعد",
+      "noDocumentsHint": "يمكن للمعلّم إرفاق PDF وملاحظات وشرائح لهذه الدورة.",
+      "documentOpening": "تم نسخ رابط الملف",
+      "selectLessonForQA": "اختر درساً لعرض الأسئلة أو طرح سؤال",
+      "noLessonsForQA": "لا توجد دروس للأسئلة والأجوبة بعد"
     },
     "cast": {
       "title": "البث على التلفاز",

@@ -358,7 +358,15 @@
       "noDescription": "No description yet",
       "lessonLocked": "Locked — subscribe to watch",
       "durationLikesSaves": "{duration} · {likes} likes · {saves} saves",
-      "purchaseFailed": "Could not request purchase"
+      "purchaseFailed": "Could not request purchase",
+      "tabCurriculum": "ڤیدیۆ و تاقیکردنەوە",
+      "tabQA": "پرسیار و وەڵام",
+      "tabDocuments": "فایلەکان",
+      "noDocuments": "هێشتا فایلی پاشەکەوتکراو نییە",
+      "noDocumentsHint": "مامۆستا دەتوانێت PDF و تێبینی بۆ ئەم کۆرسە بار بکات.",
+      "documentOpening": "بەستەری فایل کۆپی کرا",
+      "selectLessonForQA": "وانەیەک هەڵبژێرە بۆ پرسیار و وەڵام",
+      "noLessonsForQA": "هێشتا وانە بۆ پرسیار و وەڵام نییە"
     },
     "cast": {
       "title": "Cast to TV",

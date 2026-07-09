@@ -141,6 +141,32 @@ export async function GET(
     where: { courseId: id, status: "PAID" },
   });
 
+  const rawDocuments = await prisma.courseLessonDocument.findMany({
+    where: { courseId: id },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+    include: { lesson: { select: { id: true, title: true } } },
+  });
+
+  const documents = await Promise.all(
+    rawDocuments.map(async (d) => {
+      let fileUrl = hasAccess ? d.fileUrl : null;
+      if (hasAccess && d.fileKey && !fileUrl) {
+        fileUrl = await getDownloadUrl(d.fileKey).catch(() => null);
+      }
+      return {
+        id: d.id,
+        title: d.title,
+        fileName: d.fileName,
+        fileUrl: hasAccess ? fileUrl : null,
+        mimeType: d.mimeType,
+        sizeBytes: d.sizeBytes,
+        lessonId: d.lessonId,
+        lessonTitle: d.lesson?.title ?? null,
+        createdAt: d.createdAt,
+      };
+    })
+  );
+
   return json({
     course: {
       ...course,
@@ -150,6 +176,7 @@ export async function GET(
       subscribersCount,
     },
     quizzes,
+    documents,
     purchased,
     isOwnCourse,
     favorites: favoriteCount,

@@ -18,6 +18,7 @@ dependencies:
   video_player: ^2.9.2
   chewie: ^1.8.5
   intl: ^0.20.2
+  url_launcher: ^6.3.1
   flutter_secure_storage: ^9.2.2
   device_info_plus: ^11.2.0
   firebase_core: ^3.8.1

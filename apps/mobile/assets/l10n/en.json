@@ -358,7 +358,15 @@
       "enrolled": "enrolled",
       "noDescription": "No description yet",
       "lessonLocked": "Locked — subscribe to watch",
-      "durationLikesSaves": "{duration} · {likes} likes · {saves} saves"
+      "durationLikesSaves": "{duration} · {likes} likes · {saves} saves",
+      "tabCurriculum": "Videos & Quizzes",
+      "tabQA": "Q&A",
+      "tabDocuments": "Resources",
+      "noDocuments": "No supplementary files yet",
+      "noDocumentsHint": "Teachers can attach PDFs, slides, and notes for this course.",
+      "documentOpening": "File ready — open from your downloads",
+      "selectLessonForQA": "Select a lesson to view or ask questions",
+      "noLessonsForQA": "No lessons available for Q&A yet"
     },
     "cast": {
       "title": "Cast to TV",
