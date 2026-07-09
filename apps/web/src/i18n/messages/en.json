@@ -28,7 +28,8 @@
     "shortVideos": "Short Videos",
     "contentReports": "Content Reports",
     "stageRequests": "Stage Requests",
-    "ads": "Advertisements"
+    "ads": "Advertisements",
+    "products": "Store Products"
   },
   "auth": {
     "phone": "Mobile Number",

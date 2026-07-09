@@ -46,6 +46,15 @@ class ReelsScreenState extends State<ReelsScreen> {
     super.initState();
     _syncPlayback();
     widget.refreshTrigger?.addListener(_onRefreshTriggered);
+    final cached = _ReelFeedMemoryCache.peek();
+    if (cached != null) {
+      _videos = cached.videos;
+      _nextCursor = cached.nextCursor;
+      _loading = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _prefetchAround(0);
+      });
+    }
     _load();
   }
 
@@ -98,10 +107,10 @@ class ReelsScreenState extends State<ReelsScreen> {
   Future<void> _load({bool refresh = false}) async {
     if (refresh) {
       setState(() {
-        _loading = true;
-        _videos = [];
+        _loading = _videos.isEmpty;
         _nextCursor = null;
         _currentIndex = 0;
+        if (_videos.isEmpty) _videos = [];
       });
       _activeIndex.value = 0;
       if (_pageCtrl.hasClients) {
@@ -118,6 +127,9 @@ class ReelsScreenState extends State<ReelsScreen> {
         _nextCursor = data['nextCursor']?.toString();
         _loading = false;
       });
+      if (videos.isNotEmpty) {
+        _ReelFeedMemoryCache.save(videos, _nextCursor);
+      }
       _activeIndex.value = 0;
       _prefetchAround(0);
       if (refresh && mounted) {
@@ -542,5 +554,21 @@ class ReelsScreenState extends State<ReelsScreen> {
         ],
       ),
     );
+  }
+}
+
+/// In-memory feed so returning to Reels skips the full-screen skeleton.
+class _ReelFeedMemoryCache {
+  static List<Map<String, dynamic>>? _videos;
+  static String? _nextCursor;
+
+  static void save(List<Map<String, dynamic>> videos, String? nextCursor) {
+    _videos = List<Map<String, dynamic>>.from(videos);
+    _nextCursor = nextCursor;
+  }
+
+  static ({List<Map<String, dynamic>> videos, String? nextCursor})? peek() {
+    if (_videos == null || _videos!.isEmpty) return null;
+    return (videos: List<Map<String, dynamic>>.from(_videos!), nextCursor: _nextCursor);
   }
 }

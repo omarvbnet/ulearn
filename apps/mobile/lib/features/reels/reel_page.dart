@@ -38,6 +38,7 @@ class ReelPage extends StatefulWidget {
 class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
   VideoPlayerController? _controller;
   bool _initializing = true;
+  bool _showLoadSkeleton = false;
   bool _muted = false;
   bool _showMuteHint = false;
   late final AnimationController _likePulse;
@@ -97,7 +98,10 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     } catch (_) {
       _releaseVideo(stash: false);
       if (mounted) {
-        setState(() => _initializing = true);
+        setState(() {
+          _initializing = true;
+          _showLoadSkeleton = true;
+        });
         _initVideo();
       }
     }
@@ -121,7 +125,12 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     super.didUpdateWidget(oldWidget);
     if (widget.active && !oldWidget.active) {
       if (_controller == null) {
-        setState(() => _initializing = true);
+        final url = widget.video['fileUrl']?.toString();
+        setState(() {
+          _initializing = true;
+          _showLoadSkeleton =
+              url != null && url.isNotEmpty && !ReelVideoCache.isWarmReady(url);
+        });
         _initVideo();
     } else {
       _resumePlayback();
@@ -137,6 +146,7 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
       _scrubMode = false;
       _releaseVideo(stash: false);
       _initializing = widget.active;
+      _showLoadSkeleton = false;
       if (widget.active) {
         _initVideo();
       } else {
@@ -151,16 +161,27 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     final url = widget.video['fileUrl']?.toString();
     if (url == null || url.isEmpty) {
       if (mounted && gen == _initGeneration) {
-        setState(() => _initializing = false);
+        setState(() {
+          _initializing = false;
+          _showLoadSkeleton = false;
+        });
       }
       return;
     }
     if (!widget.active) {
       _prefetchSelf();
       if (mounted && gen == _initGeneration) {
-        setState(() => _initializing = false);
+        setState(() {
+          _initializing = false;
+          _showLoadSkeleton = false;
+        });
       }
       return;
+    }
+
+    final showSkeleton = await ReelVideoCache.shouldShowLoadSkeleton(url);
+    if (mounted && gen == _initGeneration && widget.active) {
+      setState(() => _showLoadSkeleton = showSkeleton);
     }
 
     VideoPlayerController? c;
@@ -171,7 +192,9 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
         return;
       }
 
-      await c.initialize();
+      if (!c.value.isInitialized) {
+        await c.initialize();
+      }
       if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
         await ReelVideoCache.releaseController(c);
         return;
@@ -179,7 +202,10 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
       if (c.value.hasError) {
         await ReelVideoCache.releaseController(c);
         if (mounted && gen == _initGeneration) {
-          setState(() => _initializing = false);
+          setState(() {
+            _initializing = false;
+            _showLoadSkeleton = false;
+          });
         }
         return;
       }
@@ -197,11 +223,15 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
       setState(() {
         _controller = c;
         _initializing = false;
+        _showLoadSkeleton = false;
       });
     } catch (_) {
       if (c != null) await ReelVideoCache.releaseController(c);
       if (mounted && gen == _initGeneration) {
-        setState(() => _initializing = false);
+        setState(() {
+          _initializing = false;
+          _showLoadSkeleton = false;
+        });
       }
     }
   }
@@ -319,7 +349,7 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
   }
 
   Widget _buildVideoLayer() {
-    if (_initializing && widget.active) {
+    if (_initializing && widget.active && _showLoadSkeleton) {
       return Stack(
         fit: StackFit.expand,
         children: [
@@ -327,6 +357,9 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
           const Center(child: SkeletonCircle(size: 48)),
         ],
       );
+    }
+    if (_initializing && widget.active) {
+      return _buildPoster();
     }
     if (_controller != null && _controller!.value.isInitialized) {
       return RepaintBoundary(

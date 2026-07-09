@@ -5,6 +5,7 @@ type PendingCountsRow = {
   courses: bigint;
   lesson_updates: bigint;
   purchases: bigint;
+  product_purchases: bigint;
   short_videos: bigint;
   stage_requests: bigint;
   subscriptions: bigint;
@@ -28,6 +29,8 @@ export class AdminPendingCountsService {
           WHERE status = 'PENDING') AS lesson_updates,
         (SELECT COUNT(*)::bigint FROM "CoursePurchase"
           WHERE status = 'PENDING') AS purchases,
+        (SELECT COUNT(*)::bigint FROM "ProductPurchase"
+          WHERE status = 'PENDING') AS product_purchases,
         (SELECT COUNT(*)::bigint FROM "TeacherShortVideo"
           WHERE status = 'PENDING_REVIEW' AND "deletedAt" IS NULL) AS short_videos,
         (SELECT COUNT(*)::bigint FROM "StageChangeRequest"
@@ -47,6 +50,7 @@ export class AdminPendingCountsService {
         shortVideos: 0,
         stageRequests: 0,
         subscriptions: 0,
+        products: 0,
         complaints: 0,
         contentReports: 0,
         total: 0,
@@ -58,6 +62,7 @@ export class AdminPendingCountsService {
     const shortVideos = n(row.short_videos);
     const stageRequests = n(row.stage_requests);
     const subscriptions = n(row.subscriptions);
+    const products = n(row.product_purchases);
     const complaints = n(row.complaints);
     const contentReports = n(row.content_reports);
 
@@ -67,6 +72,7 @@ export class AdminPendingCountsService {
       shortVideos,
       stageRequests,
       subscriptions,
+      products,
       complaints,
       contentReports,
       total:
@@ -75,6 +81,7 @@ export class AdminPendingCountsService {
         shortVideos +
         stageRequests +
         subscriptions +
+        products +
         complaints +
         contentReports,
     };

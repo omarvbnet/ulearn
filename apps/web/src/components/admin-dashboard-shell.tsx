@@ -9,6 +9,7 @@ export type PendingCountKey =
   | "shortVideos"
   | "stageRequests"
   | "subscriptions"
+  | "products"
   | "complaints"
   | "contentReports";
 

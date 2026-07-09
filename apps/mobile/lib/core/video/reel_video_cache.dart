@@ -23,6 +23,31 @@ class ReelVideoCache {
 
   static String _resolve(String url) => ApiClient.absoluteUrl(url);
 
+  /// Warm pool already has an initialized controller for this URL.
+  static bool isWarmReady(String url) {
+    final resolved = _resolve(url);
+    final c = _warm[resolved];
+    return c != null && c.value.isInitialized && !c.value.hasError;
+  }
+
+  /// True when the video file is already on disk (no network fetch needed).
+  static Future<bool> isFileCached(String url) async {
+    final resolved = _resolve(url);
+    try {
+      final info = await _manager.getFileFromCache(resolved);
+      if (info == null) return false;
+      return info.file.exists();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Show a loading skeleton only when neither warm nor disk cache is available.
+  static Future<bool> shouldShowLoadSkeleton(String url) async {
+    if (isWarmReady(url)) return false;
+    return !await isFileCached(url);
+  }
+
   /// Download to disk without blocking playback.
   static Future<void> prefetch(String url) {
     final resolved = _resolve(url);

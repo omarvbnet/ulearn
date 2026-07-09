@@ -117,6 +117,7 @@ model Country {
   introOutros        IntroOutro[]
   settings           SystemSetting[]
   advertisements     Advertisement[]
+  products           Product[]
 
   @@index([deletedAt])
 }
@@ -196,6 +197,7 @@ model User {
   complaints           Complaint[]           @relation("StudentComplaints")
   complaintsHandled    Complaint[]           @relation("HandledComplaints")
   coursePurchases      CoursePurchase[]
+  productPurchases     ProductPurchase[]
   courseReactions      CourseReaction[]
   courseFavorites      CourseFavorite[]
   lessonLikes          CourseLessonLike[]
@@ -611,6 +613,81 @@ model CoursePurchase {
   @@unique([courseId, userId])
   @@index([userId])
   @@index([status])
+}
+
+// ─────────────────────────────────────────────
+// Physical product store (admin catalog)
+// ─────────────────────────────────────────────
+
+enum ProductCategory {
+  PINS
+  BOOKS
+  BOARDS
+  SUPPLIES
+  STATIONERY
+  OTHER
+}
+
+/// Admin-managed physical product (pins, books, boards, etc.).
+model Product {
+  id            String          @id @default(cuid())
+  countryId     String?
+  category      ProductCategory
+  nameEn        String
+  nameAr        String?
+  nameKu        String?
+  nameTr        String?
+  descriptionEn String?
+  descriptionAr String?
+  descriptionKu String?
+  descriptionTr String?
+  price         Float
+  currency      String          @default("IQD")
+  imageKey      String?
+  imageUrl      String
+  images        String[]        @default([])
+  stock         Int?
+  sortOrder     Int             @default(0)
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  deletedAt     DateTime?
+
+  country   Country?          @relation(fields: [countryId], references: [id])
+  purchases ProductPurchase[]
+
+  @@index([category, isActive, sortOrder])
+  @@index([deletedAt])
+}
+
+/// Student order request for a physical product (admin confirms payment).
+model ProductPurchase {
+  id           String         @id @default(cuid())
+  productId    String
+  userId       String
+  quantity     Int            @default(1)
+  unitPrice    Float
+  totalPrice   Float
+  currency     String         @default("IQD")
+  status       PurchaseStatus @default(PENDING)
+  notes        String?
+  userPhone    String?
+  userName     String?
+  userLocation String?
+  productName  String
+  productImage String?
+  approvedById String?
+  approvedAt   DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, userId])
+  @@index([userId])
+  @@index([status])
+  @@index([productId])
 }
 
 enum ReactionType {

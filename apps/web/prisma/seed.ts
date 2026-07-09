@@ -536,6 +536,122 @@ async function main() {
     }
   }
 
+  /* ── Store products (sample catalog) ───────────── */
+  const productCount = await prisma.product.count({ where: { deletedAt: null } });
+  if (productCount === 0) {
+    const samples = [
+      {
+        category: "PINS" as const,
+        nameEn: "U Learn Enamel Pin Set",
+        nameAr: "مجموعة دبابيس يو ليرن",
+        nameKu: "سێتی پینەکانی یو لێرن",
+        nameTr: "U Learn Rozet Seti",
+        descriptionEn: "3 premium enamel pins — logo, book, and star designs.",
+        descriptionAr: "٣ دبابيس مينا فاخرة — شعار، كتاب، ونجمة.",
+        price: 5000,
+        imageUrl: "https://images.unsplash.com/photo-1611085583191-a3b181a88401?w=600&h=600&fit=crop",
+        sortOrder: 1,
+      },
+      {
+        category: "BOOKS" as const,
+        nameEn: "Mathematics Formula Handbook",
+        nameAr: "كتيب معادلات الرياضيات",
+        nameKu: "کتێبی فۆرمولەکانی بیرکاری",
+        nameTr: "Matematik Formül El Kitabı",
+        descriptionEn: "Compact A5 reference with all key formulas for high school exams.",
+        descriptionAr: "مرجع A5 مدمج يضم أهم المعادلات لامتحانات المرحلة الثانوية.",
+        price: 12000,
+        imageUrl: "https://images.unsplash.com/photo-1544947950-fa07a98d237f?w=600&h=800&fit=crop",
+        sortOrder: 2,
+        stock: 50,
+      },
+      {
+        category: "BOARDS" as const,
+        nameEn: "Magnetic Study Whiteboard",
+        nameAr: "لوح دراسة مغناطيسي",
+        nameKu: "تەختەی خوێندنی مەگناتیسی",
+        nameTr: "Manyetik Çalışma Tahtası",
+        descriptionEn: "40×30 cm double-sided board with markers and eraser.",
+        descriptionAr: "لوح ٤٠×٣٠ سم وجهين مع أقلام ومساحة.",
+        price: 25000,
+        imageUrl: "https://images.unsplash.com/photo-1588072432836-e100f794f2d8?w=600&h=600&fit=crop",
+        sortOrder: 3,
+        stock: 30,
+      },
+      {
+        category: "BOARDS" as const,
+        nameEn: "Geometry Drawing Board Kit",
+        nameAr: "طقم لوح الرسم الهندسي",
+        nameKu: "کیت تەختەی ڕەسمکردنی ئەندازە",
+        nameTr: "Geometri Çizim Tahtası Seti",
+        descriptionEn: "Includes compass, protractor, rulers, and grid board.",
+        descriptionAr: "يشمل فرجار وزوايا ومساطر ولوح شبكي.",
+        price: 18000,
+        imageUrl: "https://images.unsplash.com/photo-1596495578065-6e0763fa1178?w=600&h=600&fit=crop",
+        sortOrder: 4,
+        stock: 25,
+      },
+      {
+        category: "STATIONERY" as const,
+        nameEn: "Premium Notebook Pack (5)",
+        nameAr: "حزمة دفاتر فاخرة (٥)",
+        nameKu: "پاکێتی تێبینی پڕیمیۆم (٥)",
+        nameTr: "Premium Defter Paketi (5)",
+        descriptionEn: "A5 ruled notebooks with U Learn cover — pack of 5.",
+        descriptionAr: "دفاتر A5 مسطرة بغلاف يو ليرن — عبوة ٥ قطع.",
+        price: 8000,
+        imageUrl: "https://images.unsplash.com/photo-1531346878377-a5be20888e57?w=600&h=600&fit=crop",
+        sortOrder: 5,
+        stock: 100,
+      },
+      {
+        category: "SUPPLIES" as const,
+        nameEn: "Exam Prep Supply Kit",
+        nameAr: "طقم مستلزمات التحضير للامتحان",
+        nameKu: "کیت کەلوپەلی ئامادەکاری تاقیکردنەوە",
+        nameTr: "Sınav Hazırlık Malzeme Seti",
+        descriptionEn: "Pens, highlighters, sticky notes, and index cards.",
+        descriptionAr: "أقلام وهايلايتر وملاحظات لاصقة وبطاقات فهرسة.",
+        price: 15000,
+        imageUrl: "https://images.unsplash.com/photo-1484482180873-7c0aa7736fea?w=600&h=600&fit=crop",
+        sortOrder: 6,
+        stock: 40,
+      },
+      {
+        category: "BOOKS" as const,
+        nameEn: "Biology Illustrated Guide",
+        nameAr: "دليل الأحياء المصور",
+        nameKu: "ڕێبەری وێنەیی بایۆلۆجی",
+        nameTr: "Biyoloji Resimli Rehber",
+        descriptionEn: "Full-color diagrams for cells, organs, and ecosystems.",
+        descriptionAr: "مخططات ملونة للخلايا والأعضاء والنظم البيئية.",
+        price: 22000,
+        imageUrl: "https://images.unsplash.com/photo-1532012197267-da84d127e765?w=600&h=800&fit=crop",
+        sortOrder: 7,
+        stock: 35,
+      },
+      {
+        category: "PINS" as const,
+        nameEn: "Graduation Star Pin",
+        nameAr: "دبوس نجمة التخرج",
+        nameKu: "پینی ئەستێرەی دەرچوون",
+        nameTr: "Mezuniyet Yıldız Rozeti",
+        descriptionEn: "Collectible gold-tone pin for top students.",
+        descriptionAr: "دبوس ذهبي تذكاري للطلاب المتفوقين.",
+        price: 3500,
+        imageUrl: "https://images.unsplash.com/photo-1606760227091-3dd870d9f0c1?w=600&h=600&fit=crop",
+        sortOrder: 8,
+        stock: 200,
+      },
+    ];
+    for (const p of samples) {
+      await prisma.product.create({
+        data: { countryId: iraq.id, currency: "IQD", isActive: true, ...p },
+      });
+    }
+    console.log(`Seeded ${samples.length} store products.`);
+  }
+
   console.log("Seed complete.");
   console.log("Super Admin:      +9647000000001");
   console.log("Teacher:          +9647000000002 (Ahmed Al-Rashid)");

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
@@ -6,10 +8,10 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
-import 'package:ulearn/features/store/course_detail_screen.dart';
+import 'package:ulearn/features/store/product_detail_screen.dart';
 
-/// Paid teacher courses store. Purchases are requested in-app and
-/// unlocked once the admin confirms the payment.
+/// Physical product store — pins, books, boards, and supplies.
+/// Students request orders; admin confirms payment offline.
 class StoreScreen extends StatefulWidget {
   const StoreScreen({super.key});
 
@@ -18,300 +20,342 @@ class StoreScreen extends StatefulWidget {
 }
 
 class _StoreScreenState extends State<StoreScreen> {
-  List<dynamic>? _courses;
-  String? _busyId;
+  List<dynamic>? _products;
+  List<String> _categories = [];
+  String? _selectedCategory;
+  String _sort = 'newest';
+  String? _priceFilter;
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+  Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
+    _searchCtrl.addListener(_onSearchChanged);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      setState(() => _query = _searchCtrl.text.trim());
+      _load();
+    });
   }
 
   Future<void> _load() async {
     try {
-      final data = await context.read<ApiClient>().get('/api/store/courses');
+      final params = <String, String>{'sort': _sort};
+      if (_selectedCategory != null) params['category'] = _selectedCategory!;
+      if (_query.isNotEmpty) params['q'] = _query;
+      final price = _priceFilter;
+      if (price == 'under10') {
+        params['maxPrice'] = '10000';
+      } else if (price == '10to25') {
+        params['minPrice'] = '10000';
+        params['maxPrice'] = '25000';
+      } else if (price == 'over25') {
+        params['minPrice'] = '25000';
+      }
+      final qs = params.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
+      final data = await context.read<ApiClient>().get('/api/store/products?$qs');
       if (!mounted) return;
-      setState(() => _courses = data['courses'] as List<dynamic>? ?? []);
+      setState(() {
+        _products = data['products'] as List<dynamic>? ?? [];
+        _categories = ((data['categories'] as List<dynamic>?) ?? [])
+            .map((c) => c.toString())
+            .toList();
+      });
     } catch (_) {
-      if (mounted) setState(() => _courses = []);
+      if (mounted) setState(() => _products = []);
     }
   }
 
-  Future<void> _buy(String id) async {
-    setState(() => _busyId = id);
-    try {
-      await context.read<ApiClient>().post('/api/store/courses/$id/purchase', {});
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.l10n.t('student.purchaseRequested')),
-        ),
-      );
-      await _load();
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            e.message == 'ALREADY_REQUESTED'
-                ? context.l10n.t('student.purchaseAlreadyRequested')
-                : context.l10n.t('mobile.error.generic'),
-          ),
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _busyId = null);
-    }
+  String _categoryLabel(String cat, dynamic l10n) {
+    return switch (cat) {
+      'PINS' => l10n.t('mobile.products.catPins'),
+      'BOOKS' => l10n.t('mobile.products.catBooks'),
+      'BOARDS' => l10n.t('mobile.products.catBoards'),
+      'SUPPLIES' => l10n.t('mobile.products.catSupplies'),
+      'STATIONERY' => l10n.t('mobile.products.catStationery'),
+      _ => l10n.t('mobile.products.catOther'),
+    };
   }
 
-  String _levelStars(String? level) => switch (level) {
-        'MASTER' => '★★★',
-        'EXCELLENT' => '★★',
-        'GOOD' => '★',
-        _ => '',
-      };
+  String _formatPrice(num price, String currency) {
+    if (price >= 1000) return '${(price / 1000).toStringAsFixed(price % 1000 == 0 ? 0 : 1)}K $currency';
+    return '${price.toStringAsFixed(0)} $currency';
+  }
+
+  Widget _statusChip(String? status, dynamic l10n) {
+    if (status == null) return const SizedBox.shrink();
+    final (label, color) = switch (status) {
+      'PAID' => (l10n.t('mobile.products.ordered'), Colors.green),
+      'PENDING' => (l10n.t('mobile.products.pending'), Colors.orange),
+      _ => (status, AppTheme.muted),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final locale = context.localeCode;
     final l10n = context.l10n;
-    final courses = _courses;
-    if (courses == null) {
+    final products = _products;
+
+    if (products == null) {
       return SkeletonList(itemBuilder: (_) => const SkeletonTextCard());
     }
-    if (courses.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            '${l10n.studentStoreEmpty}\n${l10n.t('student.storeEmptyHint')}',
-            style: const TextStyle(color: AppTheme.muted),
-            textAlign: TextAlign.center,
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: TextField(
+            controller: _searchCtrl,
+            decoration: InputDecoration(
+              hintText: l10n.t('mobile.products.searchHint'),
+              prefixIcon: const Icon(Icons.search, color: AppTheme.muted),
+              suffixIcon: _query.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.close, size: 20),
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        setState(() => _query = '');
+                        _load();
+                      },
+                    )
+                  : null,
+              filled: true,
+              fillColor: AppTheme.card,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
           ),
         ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: courses.length,
-        itemBuilder: (context, i) {
-          final c = courses[i] as Map<String, dynamic>;
-          final teacher = c['teacher'] as Map<String, dynamic>?;
-          final teacherName =
-              (teacher?['user'] as Map<String, dynamic>?)?['fullLegalName']?.toString() ?? '';
-          final level = teacher?['level']?.toString();
-          final lessonsCount = (c['lessonsCount'] as num?)?.toInt() ??
-              ((c['lessons'] as List?)?.length ?? 0);
-          final subscribers = (c['subscribersCount'] as num?)?.toInt() ??
-              ((c['_count'] as Map?)?['purchases'] as num?)?.toInt() ??
-              0;
-          final totalSec = (c['totalDurationSec'] as num?)?.toInt() ??
-              (((c['lessons'] as List<dynamic>?) ?? []).fold<int>(
-                0,
-                (s, l) => s + (((l as Map)['durationSec'] as num?)?.toInt() ?? 0),
-              ));
-          final status = c['purchaseStatus']?.toString();
-          final isOwnCourse = c['isOwnCourse'] == true;
-          final id = c['id'].toString();
-          final title = localizedText(c, locale);
-          final thumbnail = c['thumbnail']?.toString();
-
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => CourseDetailScreen(
-                    courseId: id,
-                    summary: c,
-                  ),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 38,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              _FilterChip(
+                label: l10n.t('mobile.products.all'),
+                selected: _selectedCategory == null,
+                onTap: () {
+                  setState(() => _selectedCategory = null);
+                  _load();
+                },
+              ),
+              ..._categories.map(
+                (c) => _FilterChip(
+                  label: _categoryLabel(c, l10n),
+                  selected: _selectedCategory == c,
+                  onTap: () {
+                    setState(() => _selectedCategory = c);
+                    _load();
+                  },
                 ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AspectRatio(
-                    aspectRatio: 16 / 8,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        if (thumbnail != null && thumbnail.isNotEmpty)
-                          CachedImage(url: thumbnail, fit: BoxFit.cover)
-                        else
-                          Container(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  AppTheme.primary.withValues(alpha: 0.4),
-                                  AppTheme.card,
-                                ],
-                              ),
-                            ),
-                          ),
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                Colors.transparent,
-                                Colors.black.withValues(alpha: 0.5),
-                              ],
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          left: 10,
-                          bottom: 8,
-                          child: _MetaChip(
-                            icon: Icons.schedule,
-                            label: formatDuration(totalSec),
-                          ),
-                        ),
-                        Positioned(
-                          right: 10,
-                          bottom: 8,
-                          child: _MetaChip(
-                            icon: Icons.play_circle_outline,
-                            label: '${l10n.t('student.videos')}: $lessonsCount',
-                          ),
-                        ),
-                        if (subscribers > 0)
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 8,
-                            child: Center(
-                              child: _MetaChip(
-                                icon: Icons.people_outline,
-                                label: l10n.homeSubscribers(subscribers),
-                              ),
-                            ),
-                          ),
-                      ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  initialValue: _sort,
+                  decoration: InputDecoration(
+                    labelText: l10n.t('mobile.products.sort'),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  items: [
+                    DropdownMenuItem(value: 'newest', child: Text(l10n.t('mobile.products.sortNewest'))),
+                    DropdownMenuItem(value: 'popular', child: Text(l10n.t('mobile.products.sortPopular'))),
+                    DropdownMenuItem(value: 'price_asc', child: Text(l10n.t('mobile.products.sortPriceLow'))),
+                    DropdownMenuItem(value: 'price_desc', child: Text(l10n.t('mobile.products.sortPriceHigh'))),
+                  ],
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setState(() => _sort = v);
+                    _load();
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: DropdownButtonFormField<String?>(
+                  initialValue: _priceFilter,
+                  decoration: InputDecoration(
+                    labelText: l10n.t('mobile.products.price'),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  items: [
+                    DropdownMenuItem(value: null, child: Text(l10n.t('mobile.products.all'))),
+                    DropdownMenuItem(value: 'under10', child: Text(l10n.t('mobile.products.priceUnder10'))),
+                    DropdownMenuItem(value: '10to25', child: Text(l10n.t('mobile.products.price10to25'))),
+                    DropdownMenuItem(value: 'over25', child: Text(l10n.t('mobile.products.priceOver25'))),
+                  ],
+                  onChanged: (v) {
+                    setState(() => _priceFilter = v);
+                    _load();
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: products.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      l10n.t('mobile.products.empty'),
+                      style: const TextStyle(color: AppTheme.muted),
+                      textAlign: TextAlign.center,
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                title,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            Text(
-                              '${c['price']} ${c['currency'] ?? 'IQD'}',
-                              style: const TextStyle(
-                                color: AppTheme.accent,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
+                )
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: GridView.builder(
+                    padding: const EdgeInsets.all(16),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      mainAxisSpacing: 12,
+                      crossAxisSpacing: 12,
+                      childAspectRatio: 0.72,
+                    ),
+                    itemCount: products.length,
+                    itemBuilder: (context, i) {
+                      final p = products[i] as Map<String, dynamic>;
+                      final name = p['name']?.toString() ?? localizedText(p, locale, prefix: 'name');
+                      final image = p['imageUrl']?.toString();
+                      final price = (p['price'] as num?)?.toDouble() ?? 0;
+                      final currency = p['currency']?.toString() ?? 'IQD';
+                      final category = p['category']?.toString() ?? '';
+                      final status = p['purchaseStatus']?.toString();
+
+                      return GestureDetector(
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => ProductDetailScreen(productId: p['id'].toString()),
+                          ),
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          '$teacherName ${_levelStars(level)}',
-                          style: const TextStyle(color: AppTheme.muted, fontSize: 13),
-                        ),
-                        if (subscribers > 0) ...[
-                          const SizedBox(height: 4),
-                          Row(
+                        child: Card(
+                          clipBehavior: Clip.antiAlias,
+                          color: AppTheme.card,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              const Icon(Icons.people_outline, size: 14, color: AppTheme.muted),
-                              const SizedBox(width: 4),
-                              Text(
-                                l10n.homeSubscribers(subscribers),
-                                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                              Expanded(
+                                child: image != null && image.isNotEmpty
+                                    ? CachedImage(url: image, fit: BoxFit.cover)
+                                    : Container(
+                                        color: AppTheme.primary.withValues(alpha: 0.1),
+                                        child: const Icon(Icons.shopping_bag_outlined, size: 40, color: AppTheme.muted),
+                                      ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.all(10),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _categoryLabel(category, l10n),
+                                      style: TextStyle(
+                                        color: AppTheme.accent.withValues(alpha: 0.9),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      name,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            _formatPrice(price, currency),
+                                            style: const TextStyle(
+                                              color: AppTheme.accent,
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                        ),
+                                        _statusChip(status, l10n),
+                                      ],
+                                    ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
-                        ],
-                        if (c['description'] != null) ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            c['description'].toString(),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: AppTheme.muted, fontSize: 13),
-                          ),
-                        ],
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: switch (status) {
-                            'PAID' => Chip(
-                                label: Text(l10n.studentPurchased),
-                                avatar: const Icon(Icons.check_circle, size: 18, color: Colors.green),
-                              ),
-                            'PENDING' => Chip(
-                                label: Text(l10n.studentPurchasePending),
-                                avatar: const Icon(Icons.hourglass_top, size: 18),
-                              ),
-                            _ when isOwnCourse => Chip(
-                                label: Text(l10n.storeYourCourse),
-                                avatar: const Icon(Icons.school_outlined, size: 18, color: AppTheme.accent),
-                              ),
-                            _ => FilledButton(
-                                onPressed: _busyId == id
-                                    ? null
-                                    : () {
-                                        _buy(id);
-                                      },
-                                child: Text(
-                                  _busyId == id ? l10n.t('student.issuing') : l10n.studentBuyCourse,
-                                ),
-                              ),
-                          },
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+                ),
+        ),
+      ],
     );
   }
 }
 
-class _MetaChip extends StatelessWidget {
-  const _MetaChip({required this.icon, required this.label});
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({required this.label, required this.selected, required this.onTap});
 
-  final IconData icon;
   final String label;
+  final bool selected;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: Colors.white),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
-          ),
-        ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: FilterChip(
+        label: Text(label, style: TextStyle(fontSize: 12, color: selected ? Colors.white : AppTheme.foreground)),
+        selected: selected,
+        onSelected: (_) => onTap(),
+        selectedColor: AppTheme.accent,
+        backgroundColor: AppTheme.card,
+        checkmarkColor: Colors.white,
+        side: BorderSide(color: selected ? AppTheme.accent : AppTheme.muted.withValues(alpha: 0.3)),
+        padding: const EdgeInsets.symmetric(horizontal: 4),
       ),
     );
   }

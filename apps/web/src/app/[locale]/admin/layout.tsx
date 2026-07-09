@@ -27,6 +27,7 @@ export default async function AdminLayout({
         { href: `${base}/short-videos`, label: t.nav.shortVideos, countKey: "shortVideos" },
         { href: `${base}/stage-requests`, label: t.nav.stageRequests, countKey: "stageRequests" },
         { href: `${base}/ads`, label: t.nav.ads },
+        { href: `${base}/products`, label: t.nav.products, countKey: "products" },
         { href: `${base}/subscriptions`, label: t.nav.subscriptions, countKey: "subscriptions" },
         { href: `${base}/notifications`, label: t.nav.notifications },
         { href: `${base}/complaints`, label: t.nav.complaints, countKey: "complaints" },
