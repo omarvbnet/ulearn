@@ -74,7 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const _TabSafeArea(child: HomeFeed()),
           const _TabSafeArea(child: MyCoursesScreen()),
           const _TabSafeArea(child: StoreScreen()),
-          const ReelsScreen(),
+          ReelsScreen(isTabActive: _index == 3),
           const _TabSafeArea(child: ProfileScreen()),
         ],
       ),

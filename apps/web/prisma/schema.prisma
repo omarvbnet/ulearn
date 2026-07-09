@@ -441,6 +441,7 @@ model TeacherShortVideo {
   teacherId    String
   title        String
   description  String?
+  viewCount    Int          @default(0)
   fileKey      String?
   fileUrl      String?
   thumbnailUrl String?
@@ -477,20 +478,25 @@ model ShortVideoComment {
   id        String    @id @default(cuid())
   videoId   String
   userId    String
+  parentId  String?
   body      String
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  video TeacherShortVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  user  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video   TeacherShortVideo  @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  user    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent  ShortVideoComment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies ShortVideoComment[] @relation("CommentReplies")
 
   @@index([videoId, createdAt])
   @@index([userId])
+  @@index([parentId])
 }
 
 enum ContentReportTargetType {
   SHORT_VIDEO
+  SHORT_VIDEO_COMMENT
   STORE_COURSE
   STORE_LESSON
 }

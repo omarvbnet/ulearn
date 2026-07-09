@@ -4,8 +4,9 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/profile/profile_avatar.dart';
+import 'package:ulearn/features/report/report_content_sheet.dart';
 
-/// Bottom sheet for reel comments with live posting.
+/// Bottom sheet for reel comments with replies and reporting.
 class ReelCommentsSheet extends StatefulWidget {
   const ReelCommentsSheet({
     super.key,
@@ -31,6 +32,7 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
   bool _loading = true;
   bool _posting = false;
   late int _count;
+  Map<String, dynamic>? _replyTo;
 
   @override
   void initState() {
@@ -64,20 +66,60 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
     }
   }
 
+  void _startReply(Map<String, dynamic> comment) {
+    final user = comment['user'] as Map<String, dynamic>? ?? {};
+    setState(() => _replyTo = comment);
+    _inputCtrl.text = '@${user['fullLegalName']?.toString() ?? 'User'} ';
+    _inputCtrl.selection = TextSelection.fromPosition(
+      TextPosition(offset: _inputCtrl.text.length),
+    );
+  }
+
+  void _cancelReply() => setState(() => _replyTo = null);
+
+  Future<void> _reportComment(Map<String, dynamic> comment) async {
+    final id = comment['id']?.toString();
+    if (id == null) return;
+    final body = comment['body']?.toString() ?? 'Comment';
+    await ReportContentSheet.show(
+      context,
+      targetType: 'SHORT_VIDEO_COMMENT',
+      targetId: id,
+      contentTitle: body.length > 60 ? '${body.substring(0, 60)}…' : body,
+    );
+  }
+
   Future<void> _post() async {
     final body = _inputCtrl.text.trim();
     if (body.isEmpty || _posting) return;
     setState(() => _posting = true);
     try {
+      final payload = <String, dynamic>{'body': body};
+      if (_replyTo != null) {
+        payload['parentId'] = _replyTo!['id'];
+      }
       final data = await context.read<ApiClient>().post(
             '/api/store/short-videos/${widget.videoId}/comments',
-            {'body': body},
+            payload,
           );
       if (!mounted) return;
       final comment = data['comment'] as Map<String, dynamic>;
       _inputCtrl.clear();
       setState(() {
-        _comments.add(comment);
+        if (_replyTo != null) {
+          final parentId = _replyTo!['id']?.toString();
+          final idx = _comments.indexWhere((c) => c['id']?.toString() == parentId);
+          if (idx >= 0) {
+            final replies = List<Map<String, dynamic>>.from(
+              (_comments[idx]['replies'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [],
+            );
+            replies.add(comment);
+            _comments[idx]['replies'] = replies;
+          }
+          _replyTo = null;
+        } else {
+          _comments.add(comment);
+        }
         _count = (data['commentCount'] as num?)?.toInt() ?? _count + 1;
         _posting = false;
       });
@@ -195,12 +237,36 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
                             controller: dragCtrl,
                             padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                             itemCount: _comments.length,
-                            itemBuilder: (context, i) => _CommentTile(
+                            itemBuilder: (context, i) => _CommentThread(
                               comment: _comments[i],
                               timeAgo: _timeAgo(_comments[i]['createdAt']?.toString()),
+                              onReply: () => _startReply(_comments[i]),
+                              onReport: () => _reportComment(_comments[i]),
+                              onReportReply: _reportComment,
+                              timeAgoFor: _timeAgo,
                             ),
                           ),
               ),
+              if (_replyTo != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  color: AppTheme.background,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Replying to ${(_replyTo!['user'] as Map?)?['fullLegalName'] ?? 'User'}',
+                          style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: _cancelReply,
+                        child: const Icon(Icons.close, size: 18, color: AppTheme.muted),
+                      ),
+                    ],
+                  ),
+                ),
               Container(
                 padding: EdgeInsets.fromLTRB(14, 10, 14, 12 + bottom),
                 decoration: const BoxDecoration(
@@ -217,7 +283,7 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
                         textInputAction: TextInputAction.send,
                         onSubmitted: (_) => _post(),
                         decoration: InputDecoration(
-                          hintText: 'Add a comment…',
+                          hintText: _replyTo != null ? 'Write a reply…' : 'Add a comment…',
                           filled: true,
                           fillColor: AppTheme.card,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -281,11 +347,70 @@ Widget _commentSkeleton(int _) {
   );
 }
 
-class _CommentTile extends StatelessWidget {
-  const _CommentTile({required this.comment, required this.timeAgo});
+class _CommentThread extends StatelessWidget {
+  const _CommentThread({
+    required this.comment,
+    required this.timeAgo,
+    required this.onReply,
+    required this.onReport,
+    required this.onReportReply,
+    required this.timeAgoFor,
+  });
 
   final Map<String, dynamic> comment;
   final String timeAgo;
+  final VoidCallback onReply;
+  final VoidCallback onReport;
+  final ValueChanged<Map<String, dynamic>> onReportReply;
+  final String Function(String?) timeAgoFor;
+
+  @override
+  Widget build(BuildContext context) {
+    final replies = ((comment['replies'] as List<dynamic>?) ?? [])
+        .cast<Map<String, dynamic>>();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _CommentTile(
+            comment: comment,
+            timeAgo: timeAgo,
+            onReply: onReply,
+            onReport: onReport,
+          ),
+          ...replies.map(
+            (r) => Padding(
+              padding: const EdgeInsets.only(left: 46, top: 10),
+              child: _CommentTile(
+                comment: r,
+                timeAgo: timeAgoFor(r['createdAt']?.toString()),
+                compact: true,
+                onReport: () => onReportReply(r),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommentTile extends StatelessWidget {
+  const _CommentTile({
+    required this.comment,
+    required this.timeAgo,
+    this.onReply,
+    this.onReport,
+    this.compact = false,
+  });
+
+  final Map<String, dynamic> comment;
+  final String timeAgo;
+  final VoidCallback? onReply;
+  final VoidCallback? onReport;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -293,32 +418,86 @@ class _CommentTile extends StatelessWidget {
     final name = user['fullLegalName']?.toString() ?? 'User';
     final body = comment['body']?.toString() ?? '';
     final photoUrl = user['profilePhotoUrl']?.toString();
+    final avatarSize = compact ? 28.0 : 36.0;
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ProfileAvatar(name: name, photoUrl: photoUrl, size: 36),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                    const SizedBox(width: 8),
-                    Text(timeAgo, style: TextStyle(color: AppTheme.muted.withValues(alpha: 0.8), fontSize: 11)),
-                  ],
-                ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ProfileAvatar(name: name, photoUrl: photoUrl, size: avatarSize),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: compact ? 12 : 13,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          timeAgo,
+                          style: TextStyle(
+                            color: AppTheme.muted.withValues(alpha: 0.8),
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (onReport != null)
+                    PopupMenuButton<String>(
+                      padding: EdgeInsets.zero,
+                      icon: Icon(Icons.more_horiz, size: 18, color: AppTheme.muted.withValues(alpha: 0.7)),
+                      onSelected: (value) {
+                        if (value == 'report') onReport!();
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(
+                          value: 'report',
+                          child: Row(
+                            children: [
+                              Icon(Icons.flag_outlined, size: 18, color: Colors.orangeAccent),
+                              SizedBox(width: 8),
+                              Text('Report'),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(body, style: TextStyle(height: 1.4, fontSize: compact ? 13 : 14)),
+              if (onReply != null) ...[
                 const SizedBox(height: 4),
-                Text(body, style: const TextStyle(height: 1.4, fontSize: 14)),
+                GestureDetector(
+                  onTap: onReply,
+                  child: Text(
+                    'Reply',
+                    style: TextStyle(
+                      color: AppTheme.muted.withValues(alpha: 0.9),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ],
-            ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

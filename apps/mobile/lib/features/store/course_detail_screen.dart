@@ -55,7 +55,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
 
   void _selectInitialLesson(List<Map<String, dynamic>> lessons, bool unlocked) {
     for (final l in lessons) {
-      if (_canWatch(l, unlocked) && l['isCompleted'] != true && l['completed'] != true) {
+      if (_canWatch(l, unlocked) && !_isLessonCompleted(l)) {
         _activeLesson = l;
         return;
       }
@@ -268,6 +268,21 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     });
   }
 
+  bool _isLessonCompleted(Map<String, dynamic> lesson) {
+    if (lesson['isCompleted'] == true || lesson['completed'] == true) return true;
+    return ((lesson['progressPct'] as num?)?.toDouble() ?? 0) >= 90;
+  }
+
+  String _lessonTitle(Map<String, dynamic> lesson, int index) {
+    final raw = lesson['title']?.toString().trim();
+    if (raw != null && raw.isNotEmpty) return raw;
+    return 'Video ${index + 1}';
+  }
+
+  int _completedLessonCount(List<Map<String, dynamic>> lessons) {
+    return lessons.where(_isLessonCompleted).length;
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -433,7 +448,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                 height: 1.3,
               ),
             ),
-            if (active?['isCompleted'] == true || active?['completed'] == true)
+            if (active != null && _isLessonCompleted(active))
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Row(
@@ -560,38 +575,66 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           const SizedBox(height: 20),
           StaggeredItem(
             index: 3,
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Videos',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.foreground,
-                  ),
+                Row(
+                  children: [
+                    const Text(
+                      'Videos',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.foreground,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${lessons.length}',
+                        style: const TextStyle(
+                          color: AppTheme.accent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    if (unlocked && lessons.isNotEmpty)
+                      Text(
+                        '${_completedLessonCount(lessons)}/${lessons.length} done',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.greenAccent.withValues(alpha: 0.9),
+                        ),
+                      )
+                    else if (!unlocked)
+                      const Text(
+                        'Free previews play above',
+                        style: TextStyle(fontSize: 12, color: AppTheme.accent),
+                      ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '${lessons.length}',
-                    style: const TextStyle(
-                      color: AppTheme.accent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                if (unlocked && lessons.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: lessons.isEmpty
+                          ? 0
+                          : _completedLessonCount(lessons) / lessons.length,
+                      minHeight: 5,
+                      backgroundColor: AppTheme.cardBorder,
+                      color: Colors.greenAccent,
                     ),
                   ),
-                ),
-                const Spacer(),
-                if (!unlocked)
-                  const Text(
-                    'Free previews play above',
-                    style: TextStyle(fontSize: 12, color: AppTheme.accent),
-                  ),
+                ],
               ],
             ),
           ),
@@ -601,185 +644,28 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
             final canWatch = _canWatch(lesson, unlocked);
             final isPreview = lesson['isFreePreview'] == true;
             final isActive = activeId == lesson['id']?.toString();
-            final isCompleted = lesson['isCompleted'] == true || lesson['completed'] == true;
+            final isCompleted = _isLessonCompleted(lesson);
+            final progressPct =
+                ((lesson['progressPct'] as num?)?.toDouble() ?? 0).clamp(0.0, 100.0);
             final duration = (lesson['durationSec'] as num?)?.toInt() ?? 0;
-            final title = lesson['title']?.toString() ?? 'Lesson';
+            final title = _lessonTitle(lesson, e.key);
 
             return StaggeredItem(
               index: e.key + 4,
-              child: Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                decoration: BoxDecoration(
-                  color: AppTheme.card,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: isActive
-                        ? AppTheme.accent.withValues(alpha: 0.55)
-                        : AppTheme.cardBorder,
-                    width: isActive ? 1.5 : 1,
-                  ),
-                  boxShadow: isActive
-                      ? [
-                          BoxShadow(
-                            color: AppTheme.accent.withValues(alpha: 0.12),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ]
-                      : null,
-                ),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: () => _selectLesson(lesson, unlocked),
-                    child: IntrinsicHeight(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Container(
-                            width: 4,
-                            decoration: BoxDecoration(
-                              color: isActive
-                                  ? AppTheme.accent
-                                  : isCompleted
-                                      ? Colors.greenAccent.withValues(alpha: 0.7)
-                                      : Colors.transparent,
-                              borderRadius: const BorderRadius.horizontal(
-                                left: Radius.circular(16),
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
-                              child: Row(
-                                children: [
-                                  LessonCover(
-                                    lesson: lesson,
-                                    width: 100,
-                                    height: 58,
-                                    active: isActive,
-                                    showPlay: canWatch,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Text(
-                                          '${e.key + 1}. $title',
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            fontSize: 14.5,
-                                            fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
-                                            color: canWatch
-                                                ? AppTheme.foreground
-                                                : AppTheme.muted.withValues(alpha: 0.85),
-                                            height: 1.25,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Row(
-                                          children: [
-                                            if (isCompleted) ...[
-                                              Icon(
-                                                Icons.check_circle_rounded,
-                                                size: 14,
-                                                color: Colors.greenAccent.withValues(alpha: 0.95),
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                'Done',
-                                                style: TextStyle(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: Colors.greenAccent.withValues(alpha: 0.95),
-                                                ),
-                                              ),
-                                              if (duration > 0) const SizedBox(width: 8),
-                                            ],
-                                            if (duration > 0)
-                                              Text(
-                                                formatDuration(duration),
-                                                style: const TextStyle(
-                                                  fontSize: 11.5,
-                                                  color: AppTheme.muted,
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                              ),
-                                            if (isPreview && !unlocked) ...[
-                                              const SizedBox(width: 8),
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(
-                                                  horizontal: 6,
-                                                  vertical: 2,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.green.withValues(alpha: 0.15),
-                                                  borderRadius: BorderRadius.circular(6),
-                                                ),
-                                                child: const Text(
-                                                  'FREE',
-                                                  style: TextStyle(
-                                                    fontSize: 9,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.greenAccent,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                            if (!canWatch) ...[
-                                              const SizedBox(width: 6),
-                                              Icon(
-                                                Icons.lock_outline,
-                                                size: 13,
-                                                color: AppTheme.muted.withValues(alpha: 0.7),
-                                              ),
-                                            ],
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      ReactionButton(
-                                        icon: Icons.thumb_up_outlined,
-                                        activeIcon: Icons.thumb_up,
-                                        active: lesson['likedByMe'] == true,
-                                        activeColor: AppTheme.accent,
-                                        count: (lesson['likes'] as num?)?.toInt() ?? 0,
-                                        onTap: () => _toggleLessonLike(lesson),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      GestureDetector(
-                                        onTap: () => _toggleLessonFavorite(lesson),
-                                        child: Icon(
-                                          lesson['favoritedByMe'] == true
-                                              ? Icons.favorite
-                                              : Icons.favorite_border,
-                                          size: 17,
-                                          color: lesson['favoritedByMe'] == true
-                                              ? Colors.redAccent
-                                              : AppTheme.muted,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(width: 4),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+              child: _LessonVideoCard(
+                index: e.key,
+                title: title,
+                lesson: lesson,
+                canWatch: canWatch,
+                isPreview: isPreview,
+                showFreeBadge: isPreview && !unlocked,
+                isActive: isActive,
+                isCompleted: isCompleted,
+                progressPct: progressPct,
+                duration: duration,
+                onTap: () => _selectLesson(lesson, unlocked),
+                onLike: () => _toggleLessonLike(lesson),
+                onFavorite: () => _toggleLessonFavorite(lesson),
               ),
             );
           }),
@@ -900,6 +786,333 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+/// Professional lesson row with visible title, status chip, and progress.
+class _LessonVideoCard extends StatelessWidget {
+  const _LessonVideoCard({
+    required this.index,
+    required this.title,
+    required this.lesson,
+    required this.canWatch,
+    required this.isPreview,
+    required this.showFreeBadge,
+    required this.isActive,
+    required this.isCompleted,
+    required this.progressPct,
+    required this.duration,
+    required this.onTap,
+    required this.onLike,
+    required this.onFavorite,
+  });
+
+  final int index;
+  final String title;
+  final Map<String, dynamic> lesson;
+  final bool canWatch;
+  final bool isPreview;
+  final bool showFreeBadge;
+  final bool isActive;
+  final bool isCompleted;
+  final double progressPct;
+  final int duration;
+  final VoidCallback onTap;
+  final VoidCallback onLike;
+  final VoidCallback onFavorite;
+
+  @override
+  Widget build(BuildContext context) {
+    final inProgress = !isCompleted && progressPct > 0 && canWatch;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isActive
+              ? AppTheme.accent.withValues(alpha: 0.6)
+              : isCompleted
+                  ? Colors.greenAccent.withValues(alpha: 0.25)
+                  : AppTheme.cardBorder,
+          width: isActive ? 1.5 : 1,
+        ),
+        boxShadow: isActive
+            ? [
+                BoxShadow(
+                  color: AppTheme.accent.withValues(alpha: 0.14),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : null,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        LessonCover(
+                          lesson: lesson,
+                          width: 118,
+                          height: 68,
+                          active: isActive,
+                          showPlay: canWatch,
+                        ),
+                        Positioned(
+                          left: -6,
+                          top: -6,
+                          child: Container(
+                            width: 24,
+                            height: 24,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: isCompleted
+                                  ? Colors.greenAccent.withValues(alpha: 0.95)
+                                  : isActive
+                                      ? AppTheme.accent
+                                      : AppTheme.background,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isCompleted || isActive
+                                    ? Colors.transparent
+                                    : AppTheme.cardBorder,
+                              ),
+                            ),
+                            child: isCompleted
+                                ? const Icon(Icons.check, size: 14, color: Colors.black87)
+                                : Text(
+                                    '${index + 1}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: isActive ? Colors.black : AppTheme.foreground,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                        if (isActive)
+                          Positioned(
+                            right: 6,
+                            top: 6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppTheme.accent.withValues(alpha: 0.92),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                'PLAYING',
+                                style: TextStyle(
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.black,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: isActive ? FontWeight.w800 : FontWeight.w700,
+                              color: canWatch ? AppTheme.foreground : AppTheme.muted,
+                              height: 1.3,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              _StatusChip(
+                                label: isCompleted
+                                    ? 'Completed'
+                                    : inProgress
+                                        ? '${progressPct.round()}% watched'
+                                        : canWatch
+                                            ? 'Not started'
+                                            : 'Locked',
+                                icon: isCompleted
+                                    ? Icons.check_circle_rounded
+                                    : inProgress
+                                        ? Icons.play_circle_outline
+                                        : canWatch
+                                            ? Icons.radio_button_unchecked
+                                            : Icons.lock_outline,
+                                color: isCompleted
+                                    ? Colors.greenAccent
+                                    : inProgress
+                                        ? AppTheme.accent
+                                        : canWatch
+                                            ? AppTheme.muted
+                                            : AppTheme.muted.withValues(alpha: 0.7),
+                              ),
+                              if (duration > 0)
+                                _StatusChip(
+                                  label: formatDuration(duration),
+                                  icon: Icons.schedule_rounded,
+                                  color: AppTheme.muted,
+                                  filled: false,
+                                ),
+                              if (showFreeBadge)
+                                const _StatusChip(
+                                  label: 'Free preview',
+                                  icon: Icons.lock_open_rounded,
+                                  color: Colors.greenAccent,
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                if (inProgress) ...[
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: progressPct / 100,
+                      minHeight: 4,
+                      backgroundColor: AppTheme.cardBorder,
+                      color: AppTheme.accent,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    ReactionButton(
+                      icon: Icons.thumb_up_outlined,
+                      activeIcon: Icons.thumb_up,
+                      active: lesson['likedByMe'] == true,
+                      activeColor: AppTheme.accent,
+                      count: (lesson['likes'] as num?)?.toInt() ?? 0,
+                      onTap: onLike,
+                    ),
+                    const SizedBox(width: 16),
+                    GestureDetector(
+                      onTap: onFavorite,
+                      behavior: HitTestBehavior.opaque,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            lesson['favoritedByMe'] == true
+                                ? Icons.favorite
+                                : Icons.favorite_border,
+                            size: 17,
+                            color: lesson['favoritedByMe'] == true
+                                ? Colors.redAccent
+                                : AppTheme.muted,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Save',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: lesson['favoritedByMe'] == true
+                                  ? Colors.redAccent
+                                  : AppTheme.muted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Spacer(),
+                    if (canWatch)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isActive ? Icons.pause_circle_filled : Icons.play_circle_outline,
+                            size: 18,
+                            color: isActive ? AppTheme.accent : AppTheme.muted,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            isActive ? 'Playing' : 'Play',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: isActive ? AppTheme.accent : AppTheme.muted,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({
+    required this.label,
+    required this.icon,
+    required this.color,
+    this.filled = true,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: filled ? color.withValues(alpha: 0.12) : Colors.transparent,
+        borderRadius: BorderRadius.circular(20),
+        border: filled ? null : Border.all(color: AppTheme.cardBorder),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

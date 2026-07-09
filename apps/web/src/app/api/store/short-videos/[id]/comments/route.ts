@@ -5,7 +5,10 @@ import { notifyTeacherShortVideoComment } from "@/services/engagement-notificati
 import { ShortVideoService } from "@/services/short-video.service";
 import { z } from "zod";
 
-const schema = z.object({ body: z.string().min(1).max(2000) });
+const schema = z.object({
+  body: z.string().min(1).max(2000),
+  parentId: z.string().optional(),
+});
 
 /** List comments on a short video. */
 export async function GET(
@@ -38,8 +41,12 @@ export async function POST(
     videoId: id,
     userId: auth.session.userId,
     body: parsed.data.body,
+    parentId: parsed.data.parentId,
   });
-  if (!result.success) return error("Video not found", 404, "NOT_FOUND");
+  if (!result.success) {
+    if (result.error === "INVALID_PARENT") return error("Invalid reply target", 422, "VALIDATION");
+    return error("Video not found", 404, "NOT_FOUND");
+  }
 
   if (result.teacherUserId !== auth.session.userId) {
     const user = await getCurrentUser();

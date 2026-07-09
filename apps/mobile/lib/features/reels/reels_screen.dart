@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/reel_video_cache.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
@@ -13,7 +14,9 @@ import 'package:ulearn/features/report/report_content_sheet.dart';
 
 /// Vertical short-video feed (reels) with likes and comments.
 class ReelsScreen extends StatefulWidget {
-  const ReelsScreen({super.key});
+  const ReelsScreen({super.key, this.isTabActive = true});
+
+  final bool isTabActive;
 
   @override
   State<ReelsScreen> createState() => _ReelsScreenState();
@@ -26,8 +29,11 @@ class _ReelsScreenState extends State<ReelsScreen> {
   bool _loadingMore = false;
   String? _nextCursor;
   int _currentIndex = 0;
+  bool _routeVisible = true;
 
-  static const _bottomInset = 88.0;
+  static const _bottomInset = 116.0;
+
+  bool get _playbackActive => widget.isTabActive && _routeVisible;
 
   @override
   void initState() {
@@ -36,9 +42,27 @@ class _ReelsScreenState extends State<ReelsScreen> {
   }
 
   @override
+  void didUpdateWidget(ReelsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isTabActive != widget.isTabActive && !widget.isTabActive) {
+      setState(() {});
+    }
+  }
+
+  @override
   void dispose() {
     _pageCtrl.dispose();
+    ReelVideoCache.disposeAll();
     super.dispose();
+  }
+
+  Future<T?> _pauseForNavigation<T>(Future<T?> Function() action) async {
+    setState(() => _routeVisible = false);
+    try {
+      return await action();
+    } finally {
+      if (mounted) setState(() => _routeVisible = true);
+    }
   }
 
   Future<void> _load({bool refresh = false}) async {
@@ -66,11 +90,19 @@ class _ReelsScreenState extends State<ReelsScreen> {
   }
 
   void _prefetchAround(int index) {
-    for (final i in [index, index + 1]) {
+    final urls = _videos.map((v) => v['fileUrl']?.toString()).toList();
+    ReelVideoCache.prefetchAround(urls, index);
+    _trimWarmControllers(index);
+  }
+
+  void _trimWarmControllers(int center) {
+    final keep = <String>{};
+    for (var i = center - 1; i <= center + 2; i++) {
       if (i < 0 || i >= _videos.length) continue;
       final url = _videos[i]['fileUrl']?.toString();
-      if (url != null && url.isNotEmpty) ReelVideoCache.prefetch(url);
+      if (url != null && url.isNotEmpty) keep.add(url);
     }
+    ReelVideoCache.trimWarm(keep);
   }
 
   Future<void> _loadMore() async {
@@ -127,19 +159,19 @@ class _ReelsScreenState extends State<ReelsScreen> {
 
   void _openComments(int index) {
     final video = _videos[index];
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => ReelCommentsSheet(
-        videoId: video['id'].toString(),
-        videoTitle: video['title']?.toString() ?? 'Reel',
-        initialCount: (video['commentCount'] as num?)?.toInt() ?? 0,
-        onCountChanged: (count) {
-          if (mounted) setState(() => video['commentCount'] = count);
-        },
-      ),
-    );
+    _pauseForNavigation(() => showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (_) => ReelCommentsSheet(
+            videoId: video['id'].toString(),
+            videoTitle: video['title']?.toString() ?? 'Reel',
+            initialCount: (video['commentCount'] as num?)?.toInt() ?? 0,
+            onCountChanged: (count) {
+              if (mounted) setState(() => video['commentCount'] = count);
+            },
+          ),
+        ));
   }
 
   void _openTeacherProfile(Map<String, dynamic> video) {
@@ -147,28 +179,90 @@ class _ReelsScreenState extends State<ReelsScreen> {
     final teacherId = teacher['id']?.toString();
     if (teacherId == null) return;
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => TeacherProfileScreen(
-          teacherId: teacherId,
-          initialName: teacher['name']?.toString(),
-        ),
+    _pauseForNavigation(() => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => TeacherProfileScreen(
+              teacherId: teacherId,
+              initialName: teacher['name']?.toString(),
+            ),
+          ),
+        ));
+  }
+
+  bool _isOwnVideo(Map<String, dynamic> video) {
+    final teacher = video['teacher'] as Map<String, dynamic>? ?? {};
+    final teacherUserId = teacher['userId']?.toString();
+    final currentUserId = context.read<AuthProvider>().user?.id;
+    return teacherUserId != null &&
+        currentUserId != null &&
+        teacherUserId == currentUserId;
+  }
+
+  Future<void> _deleteVideo(Map<String, dynamic> video) async {
+    final id = video['id']?.toString();
+    if (id == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete reel?'),
+        content: const Text('This video will be removed from the feed permanently.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: const Text('Delete'),
+          ),
+        ],
       ),
     );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await context.read<ApiClient>().delete('/api/teacher/short-videos/$id');
+      if (!mounted) return;
+      final index = _videos.indexWhere((v) => v['id']?.toString() == id);
+      setState(() {
+        _videos.removeWhere((v) => v['id']?.toString() == id);
+        if (_videos.isEmpty) {
+          _currentIndex = 0;
+        } else if (_currentIndex >= _videos.length) {
+          _currentIndex = _videos.length - 1;
+        } else if (index >= 0 && index <= _currentIndex && _currentIndex > 0) {
+          _currentIndex -= 1;
+        }
+      });
+      if (_videos.isNotEmpty && _pageCtrl.hasClients) {
+        _pageCtrl.jumpToPage(_currentIndex.clamp(0, _videos.length - 1));
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Reel deleted')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not delete reel')),
+        );
+      }
+    }
   }
 
   Future<void> _reportVideo(Map<String, dynamic> video) async {
     final id = video['id']?.toString();
     if (id == null) return;
-    await ReportContentSheet.show(
-      context,
-      targetType: 'SHORT_VIDEO',
-      targetId: id,
-      contentTitle: video['title']?.toString() ?? 'Reel',
-    );
+    await _pauseForNavigation(() => ReportContentSheet.show(
+          context,
+          targetType: 'SHORT_VIDEO',
+          targetId: id,
+          contentTitle: video['title']?.toString() ?? 'Reel',
+        ));
   }
 
   void _openMoreMenu(Map<String, dynamic> video) {
+    final isOwn = _isOwnVideo(video);
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.card,
@@ -179,14 +273,24 @@ class _ReelsScreenState extends State<ReelsScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
-              title: const Text('Report content'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _reportVideo(video);
-              },
-            ),
+            if (isOwn)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                title: const Text('Delete reel'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _deleteVideo(video);
+                },
+              ),
+            if (!isOwn)
+              ListTile(
+                leading: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
+                title: const Text('Report content'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _reportVideo(video);
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.person_outline, color: AppTheme.accent),
               title: const Text('View teacher profile'),
@@ -261,6 +365,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
           PageView.builder(
             controller: _pageCtrl,
             scrollDirection: Axis.vertical,
+            allowImplicitScrolling: false,
             onPageChanged: _onPageChanged,
             itemCount: _videos.length,
             itemBuilder: (context, index) {
@@ -268,7 +373,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
               return ReelPage(
                 key: ValueKey(video['id']),
                 video: video,
-                active: index == _currentIndex,
+                active: _playbackActive && index == _currentIndex,
                 bottomInset: _bottomInset,
                 onLike: () => _toggleLike(index),
                 onComment: () => _openComments(index),
@@ -306,14 +411,14 @@ class _ReelsScreenState extends State<ReelsScreen> {
                   else
                     IconButton(
                       icon: const Icon(Icons.notifications_outlined, color: Colors.white),
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => Scaffold(
-                            appBar: AppBar(title: const Text('Notifications')),
-                            body: const NotificationsScreen(),
-                          ),
-                        ),
-                      ),
+                      onPressed: () => _pauseForNavigation(() => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => Scaffold(
+                                appBar: AppBar(title: const Text('Notifications')),
+                                body: const NotificationsScreen(),
+                              ),
+                            ),
+                          )),
                     ),
                 ],
               ),

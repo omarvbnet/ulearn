@@ -29,6 +29,7 @@ const REASON_LABELS: Record<string, string> = {
 
 const TARGET_LABELS: Record<string, string> = {
   SHORT_VIDEO: "Reel",
+  SHORT_VIDEO_COMMENT: "Reel comment",
   STORE_COURSE: "Course",
   STORE_LESSON: "Lesson",
 };

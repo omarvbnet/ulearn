@@ -77,6 +77,16 @@ export class ContentReportService {
       return { ok: true };
     }
 
+    if (targetType === "SHORT_VIDEO_COMMENT") {
+      const comment = await prisma.shortVideoComment.findFirst({
+        where: { id: targetId, deletedAt: null },
+        include: { user: { select: { id: true } } },
+      });
+      if (!comment) return { ok: false, error: "NOT_FOUND" };
+      if (comment.userId === reporterId) return { ok: false, error: "OWN_CONTENT" };
+      return { ok: true };
+    }
+
     if (targetType === "STORE_COURSE") {
       const course = await prisma.course.findFirst({
         where: { id: targetId, deletedAt: null, status: "APPROVED" },
@@ -138,6 +148,22 @@ export class ContentReportService {
       return v
         ? { title: v.title, subtitle: v.teacher.user.fullLegalName }
         : { title: "Removed content", subtitle: null };
+    }
+    if (targetType === "SHORT_VIDEO_COMMENT") {
+      const c = await prisma.shortVideoComment.findUnique({
+        where: { id: targetId },
+        select: {
+          body: true,
+          user: { select: { fullLegalName: true } },
+          video: { select: { title: true } },
+        },
+      });
+      return c
+        ? {
+            title: c.body.slice(0, 80),
+            subtitle: `${c.video.title} · ${c.user.fullLegalName}`,
+          }
+        : { title: "Removed comment", subtitle: null };
     }
     if (targetType === "STORE_COURSE") {
       const c = await prisma.course.findUnique({

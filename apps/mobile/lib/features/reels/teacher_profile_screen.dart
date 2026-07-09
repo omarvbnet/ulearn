@@ -8,6 +8,7 @@ import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/profile/profile_avatar.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
+import 'package:ulearn/features/reels/teacher_reels_viewer.dart';
 
 /// Teacher public profile from reels — live courses available to purchase.
 class TeacherProfileScreen extends StatefulWidget {
@@ -27,6 +28,7 @@ class TeacherProfileScreen extends StatefulWidget {
 class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
   Map<String, dynamic>? _teacher;
   List<Map<String, dynamic>> _courses = [];
+  List<Map<String, dynamic>> _shortVideos = [];
   bool _loading = true;
   String? _busyCourseId;
 
@@ -45,6 +47,8 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
       setState(() {
         _teacher = data['teacher'] as Map<String, dynamic>?;
         _courses = ((data['courses'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+        _shortVideos =
+            ((data['shortVideos'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
         _loading = false;
       });
     } catch (_) {
@@ -144,6 +148,39 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                             ],
                             _StatsRow(teacher: _teacher!),
                             const SizedBox(height: 20),
+                            if (_shortVideos.isNotEmpty) ...[
+                              Row(
+                                children: [
+                                  const Text(
+                                    'Short videos',
+                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primary.withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      '${_shortVideos.length}',
+                                      style: const TextStyle(
+                                        color: AppTheme.accent,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              _ShortVideosGrid(
+                                videos: _shortVideos,
+                                teacherId: widget.teacherId,
+                                teacherName: _teacher!['name']?.toString(),
+                              ),
+                              const SizedBox(height: 24),
+                            ],
                             Row(
                               children: [
                                 const Text(
@@ -479,6 +516,119 @@ class _ProfileSkeleton extends StatelessWidget {
           SizedBox(height: 12),
           SkeletonTextCard(),
         ],
+      ),
+    );
+  }
+}
+
+class _ShortVideosGrid extends StatelessWidget {
+  const _ShortVideosGrid({
+    required this.videos,
+    required this.teacherId,
+    this.teacherName,
+  });
+
+  final List<Map<String, dynamic>> videos;
+  final String teacherId;
+  final String? teacherName;
+
+  String _formatViews(int n) {
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
+    return '$n';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+        childAspectRatio: 9 / 14,
+      ),
+      itemCount: videos.length,
+      itemBuilder: (context, index) {
+        final video = videos[index];
+        final views = (video['viewCount'] as num?)?.toInt() ?? 0;
+        final thumb = video['thumbnailUrl']?.toString();
+
+        return GestureDetector(
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => TeacherReelsViewer(
+                videos: videos,
+                initialIndex: index,
+                teacherId: teacherId,
+                teacherName: teacherName,
+              ),
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (thumb != null && thumb.isNotEmpty)
+                  Image.network(
+                    thumb,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, e, st) => _thumbFallback(),
+                  )
+                else
+                  _thumbFallback(),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.transparent, Colors.black.withValues(alpha: 0.75)],
+                      begin: Alignment.center,
+                      end: Alignment.bottomCenter,
+                    ),
+                  ),
+                ),
+                const Center(
+                  child: Icon(Icons.play_circle_fill, color: Colors.white70, size: 36),
+                ),
+                Positioned(
+                  left: 6,
+                  bottom: 6,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.visibility_outlined, color: Colors.white, size: 12),
+                      const SizedBox(width: 3),
+                      Text(
+                        _formatViews(views),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _thumbFallback() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.primary.withValues(alpha: 0.45),
+            AppTheme.card,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
       ),
     );
   }

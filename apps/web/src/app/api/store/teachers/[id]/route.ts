@@ -16,5 +16,5 @@ export async function GET(
   );
   if (!result.success) return error("Teacher not found", 404, "NOT_FOUND");
 
-  return json({ teacher: result.teacher, courses: result.courses });
+  return json({ teacher: result.teacher, courses: result.courses, shortVideos: result.shortVideos });
 }

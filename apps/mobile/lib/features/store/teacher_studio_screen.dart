@@ -3,11 +3,14 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:video_compress/video_compress.dart';
 
-/// Teacher mobile studio: upload course videos and short videos with compression.
+const _compressPrefKey = 'teacher_compress_before_upload';
+
+/// Teacher mobile studio: upload course videos and short videos.
 class TeacherStudioScreen extends StatefulWidget {
   const TeacherStudioScreen({super.key});
 
@@ -24,11 +27,25 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   bool _loading = true;
   bool _uploading = false;
   String? _uploadStatus;
+  bool _compressBeforeUpload = true;
 
   @override
   void initState() {
     super.initState();
+    _loadPrefs();
     _load();
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => _compressBeforeUpload = prefs.getBool(_compressPrefKey) ?? true);
+  }
+
+  Future<void> _setCompressBeforeUpload(bool value) async {
+    setState(() => _compressBeforeUpload = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_compressPrefKey, value);
   }
 
   @override
@@ -99,19 +116,28 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     return {'key': key, 'url': publicUrl ?? uploadUrl};
   }
 
-  Future<File?> _pickAndCompressVideo() async {
+  Future<File?> _pickVideoFile() async {
     final pick = await FilePicker.pickFiles(type: FileType.video);
     if (pick == null || pick.files.isEmpty) return null;
 
     final file = pick.files.first;
-    if (file.path != null) return _compressVideo(file.path!);
+    if (file.path != null) return File(file.path!);
 
     if (file.bytes != null) {
-      final temp = File('${Directory.systemTemp.path}/ulearn_upload_${DateTime.now().millisecondsSinceEpoch}.mp4');
+      final temp = File(
+        '${Directory.systemTemp.path}/ulearn_upload_${DateTime.now().millisecondsSinceEpoch}.mp4',
+      );
       await temp.writeAsBytes(file.bytes!);
-      return _compressVideo(temp.path);
+      return temp;
     }
     return null;
+  }
+
+  Future<File?> _pickVideoForUpload() async {
+    final source = await _pickVideoFile();
+    if (source == null) return null;
+    if (!_compressBeforeUpload) return source;
+    return _compressVideo(source.path);
   }
 
   Future<void> _uploadCourseVideo() async {
@@ -122,11 +148,11 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       _uploadStatus = 'Preparing…';
     });
     try {
-      final compressed = await _pickAndCompressVideo();
-      if (compressed == null) return;
+      final videoFile = await _pickVideoForUpload();
+      if (videoFile == null) return;
 
       final uploaded = await _uploadFile(
-        compressed,
+        videoFile,
         category: 'video',
         folder: 'teacher-courses',
       );
@@ -158,7 +184,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
           _uploadStatus = null;
         });
       }
-      await VideoCompress.deleteAllCache();
+      if (_compressBeforeUpload) await VideoCompress.deleteAllCache();
     }
   }
 
@@ -170,11 +196,11 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       _uploadStatus = 'Preparing…';
     });
     try {
-      final compressed = await _pickAndCompressVideo();
-      if (compressed == null) return;
+      final videoFile = await _pickVideoForUpload();
+      if (videoFile == null) return;
 
       final uploaded = await _uploadFile(
-        compressed,
+        videoFile,
         category: 'video',
         folder: 'teacher-shorts',
       );
@@ -203,7 +229,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
           _uploadStatus = null;
         });
       }
-      await VideoCompress.deleteAllCache();
+      if (_compressBeforeUpload) await VideoCompress.deleteAllCache();
     }
   }
 
@@ -234,6 +260,8 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                     courseId: _courseId,
                     onCourse: (id) => setState(() => _courseId = id),
                     onUpload: _uploadCourseVideo,
+                    compressBeforeUpload: _compressBeforeUpload,
+                    onCompressChanged: _setCompressBeforeUpload,
                   ),
                   _UploadTab(
                     titleCtrl: _titleCtrl,
@@ -246,6 +274,8 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                     onUpload: _uploadShort,
                     isShort: true,
                     shorts: _shorts,
+                    compressBeforeUpload: _compressBeforeUpload,
+                    onCompressChanged: _setCompressBeforeUpload,
                   ),
                 ],
               ),
@@ -264,6 +294,8 @@ class _UploadTab extends StatelessWidget {
     required this.courseId,
     required this.onCourse,
     required this.onUpload,
+    required this.compressBeforeUpload,
+    required this.onCompressChanged,
     this.isShort = false,
     this.shorts = const [],
   });
@@ -276,6 +308,8 @@ class _UploadTab extends StatelessWidget {
   final String? courseId;
   final ValueChanged<String?> onCourse;
   final VoidCallback onUpload;
+  final bool compressBeforeUpload;
+  final ValueChanged<bool> onCompressChanged;
   final bool isShort;
   final List<Map<String, dynamic>> shorts;
 
@@ -325,23 +359,26 @@ class _UploadTab extends StatelessWidget {
         ],
         const SizedBox(height: 12),
         Container(
-          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: AppTheme.primary.withValues(alpha: 0.1),
+            color: AppTheme.card,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppTheme.cardBorder),
           ),
-          child: const Row(
-            children: [
-              Icon(Icons.compress_outlined, color: AppTheme.accent, size: 20),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Videos are compressed automatically before upload to save data and load faster.',
-                  style: TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.35),
-                ),
-              ),
-            ],
+          child: SwitchListTile(
+            value: compressBeforeUpload,
+            onChanged: uploading ? null : onCompressChanged,
+            activeThumbColor: AppTheme.accent,
+            secondary: const Icon(Icons.compress_outlined, color: AppTheme.accent),
+            title: const Text(
+              'Compress before upload',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            ),
+            subtitle: Text(
+              compressBeforeUpload
+                  ? 'Recommended — smaller files load faster in Reels.'
+                  : 'Upload original quality (larger file, slower on mobile data).',
+              style: const TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.35),
+            ),
           ),
         ),
         const SizedBox(height: 20),

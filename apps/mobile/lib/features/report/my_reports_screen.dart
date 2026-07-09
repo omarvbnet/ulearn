@@ -27,6 +27,7 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
 
   static const _targetLabels = {
     'SHORT_VIDEO': 'Reel',
+    'SHORT_VIDEO_COMMENT': 'Reel comment',
     'STORE_COURSE': 'Course',
     'STORE_LESSON': 'Lesson',
   };

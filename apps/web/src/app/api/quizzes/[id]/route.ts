@@ -11,11 +11,13 @@ export async function GET(_request: Request, { params }: Params) {
   const result = await QuizService.getQuizForUser(id, auth.session.userId);
 
   if (!result.success) {
-    return error(
-      result.error === "MAX_ATTEMPTS" ? "Maximum attempts reached" : "Quiz not found",
-      result.error === "MAX_ATTEMPTS" ? 403 : 404,
-      result.error
-    );
+    if (result.error === "MAX_ATTEMPTS") {
+      return error("Maximum attempts reached", 403, result.error);
+    }
+    if (result.error === "NO_ACCESS") {
+      return error("Subscribe to the course to take this quiz", 403, result.error);
+    }
+    return error("Quiz not found", 404, result.error);
   }
 
   return json({ quiz: result.quiz });
@@ -44,11 +46,13 @@ export async function POST(request: Request, { params }: Params) {
   });
 
   if (!result.success) {
-    return error(
-      result.error === "MAX_ATTEMPTS" ? "Maximum attempts reached" : "Quiz not found",
-      result.error === "MAX_ATTEMPTS" ? 403 : 404,
-      result.error
-    );
+    if (result.error === "MAX_ATTEMPTS") {
+      return error("Maximum attempts reached", 403, result.error);
+    }
+    if (result.error === "NO_ACCESS") {
+      return error("Subscribe to the course to take this quiz", 403, result.error);
+    }
+    return error("Quiz not found", 404, result.error);
   }
 
   return json({ attempt: result.attempt });

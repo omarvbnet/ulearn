@@ -11,6 +11,24 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 export class QuizService {
+  /** Store-course quiz access: free, paid purchase, or course owner. */
+  static async canAccessStoreCourseQuiz(courseId: string, userId: string) {
+    const course = await prisma.course.findFirst({
+      where: { id: courseId, deletedAt: null, status: "APPROVED" },
+      select: {
+        price: true,
+        teacher: { select: { userId: true } },
+      },
+    });
+    if (!course) return false;
+    if (course.price <= 0) return true;
+    if (course.teacher.userId === userId) return true;
+    const purchased = await prisma.coursePurchase.findFirst({
+      where: { courseId, userId, status: "PAID" },
+    });
+    return Boolean(purchased);
+  }
+
   static async getQuizForUser(quizId: string, userId: string) {
     const quiz = await prisma.quiz.findFirst({
       where: { id: quizId, deletedAt: null, isActive: true },
@@ -19,18 +37,8 @@ export class QuizService {
     if (!quiz) return { success: false as const, error: "NOT_FOUND" };
 
     if (quiz.courseId) {
-      const course = await prisma.course.findFirst({
-        where: { id: quiz.courseId, deletedAt: null, status: "APPROVED" },
-        select: { price: true },
-      });
-      if (!course) return { success: false as const, error: "NOT_FOUND" };
-
-      const purchased = await prisma.coursePurchase.findFirst({
-        where: { courseId: quiz.courseId, userId, status: "PAID" },
-      });
-      if (!purchased && course.price > 0) {
-        return { success: false as const, error: "NO_ACCESS" };
-      }
+      const allowed = await this.canAccessStoreCourseQuiz(quiz.courseId, userId);
+      if (!allowed) return { success: false as const, error: "NO_ACCESS" as const };
     }
 
     const attempts = await prisma.quizAttempt.count({
@@ -88,18 +96,8 @@ export class QuizService {
     if (!quiz) return { success: false as const, error: "NOT_FOUND" };
 
     if (quiz.courseId) {
-      const course = await prisma.course.findFirst({
-        where: { id: quiz.courseId, deletedAt: null, status: "APPROVED" },
-        select: { price: true },
-      });
-      if (!course) return { success: false as const, error: "NOT_FOUND" };
-
-      const purchased = await prisma.coursePurchase.findFirst({
-        where: { courseId: quiz.courseId, userId: params.userId, status: "PAID" },
-      });
-      if (!purchased && course.price > 0) {
-        return { success: false as const, error: "NO_ACCESS" };
-      }
+      const allowed = await this.canAccessStoreCourseQuiz(quiz.courseId, params.userId);
+      if (!allowed) return { success: false as const, error: "NO_ACCESS" as const };
     }
 
     const attempts = await prisma.quizAttempt.count({

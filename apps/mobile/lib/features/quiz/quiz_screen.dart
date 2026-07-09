@@ -38,9 +38,21 @@ class _QuizScreenState extends State<QuizScreen> {
     try {
       final data = await context.read<ApiClient>().get('/api/quizzes/${widget.quizId}');
       if (mounted) setState(() => _quiz = data['quiz'] as Map<String, dynamic>);
-    } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = _friendlyQuizError(e.message));
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Could not load quiz');
     }
+  }
+
+  String _friendlyQuizError(String message) {
+    final lower = message.toLowerCase();
+    if (lower.contains('subscribe') || lower.contains('access')) {
+      return 'Subscribe to the course to take this quiz';
+    }
+    if (lower.contains('attempt')) return message;
+    if (lower.contains('not found')) return 'Quiz not found or no longer available';
+    return message;
   }
 
   void _start() {
@@ -98,7 +110,20 @@ class _QuizScreenState extends State<QuizScreen> {
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: Text(_error!, style: const TextStyle(color: AppTheme.muted)),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.quiz_outlined, size: 48, color: AppTheme.muted.withValues(alpha: 0.5)),
+                    const SizedBox(height: 12),
+                    Text(
+                      _error!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: AppTheme.muted, height: 1.4),
+                    ),
+                    const SizedBox(height: 16),
+                    OutlinedButton(onPressed: _load, child: const Text('Retry')),
+                  ],
+                ),
               ),
             )
           : _quiz == null

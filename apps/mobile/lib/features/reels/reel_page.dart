@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/reel_video_cache.dart';
+import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/profile/profile_avatar.dart';
 import 'package:video_player/video_player.dart';
@@ -16,7 +19,7 @@ class ReelPage extends StatefulWidget {
     required this.onComment,
     this.onTeacherTap,
     this.onMore,
-    this.bottomInset = 88,
+    this.bottomInset = 116,
   });
 
   final Map<String, dynamic> video;
@@ -39,6 +42,27 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
   late final AnimationController _likePulse;
   late final AnimationController _heartBurst;
   bool _showHeartBurst = false;
+  bool _viewRecorded = false;
+  bool _scrubMode = false;
+
+  void _onVideoTick() {
+    if (_scrubMode && mounted) setState(() {});
+  }
+
+  void _attachListener(VideoPlayerController c) {
+    c.removeListener(_onVideoTick);
+    c.addListener(_onVideoTick);
+  }
+
+  Future<void> _recordViewIfNeeded() async {
+    if (_viewRecorded || !widget.active || !mounted) return;
+    final id = widget.video['id']?.toString();
+    if (id == null) return;
+    _viewRecorded = true;
+    try {
+      await context.read<ApiClient>().post('/api/store/short-videos/$id/view', {});
+    } catch (_) {}
+  }
 
   @override
   void initState() {
@@ -57,22 +81,62 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
           setState(() => _showHeartBurst = false);
         }
       });
-    _initVideo();
+    if (widget.active) {
+      _initVideo();
+    } else {
+      _initializing = false;
+      _prefetchSelf();
+    }
+  }
+
+  void _prefetchSelf() {
+    final url = widget.video['fileUrl']?.toString();
+    if (url != null && url.isNotEmpty) ReelVideoCache.prefetch(url);
+  }
+
+  void _releaseVideo({bool stash = false}) {
+    final c = _controller;
+    if (c == null) return;
+    final url = widget.video['fileUrl']?.toString();
+    c.removeListener(_onVideoTick);
+    c.pause();
+    c.setVolume(0);
+    _controller = null;
+    if (stash && url != null && url.isNotEmpty) {
+      ReelVideoCache.stash(url, c);
+    } else {
+      c.dispose();
+    }
   }
 
   @override
   void didUpdateWidget(ReelPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.active && !oldWidget.active) {
-      _controller?.play();
+      if (_controller == null) {
+        setState(() => _initializing = true);
+        _initVideo();
+      } else {
+        _controller?.setVolume(_muted ? 0 : 1);
+        if (!_scrubMode) _controller?.play();
+        _recordViewIfNeeded();
+      }
     } else if (!widget.active && oldWidget.active) {
-      _controller?.pause();
+      _scrubMode = false;
+      _releaseVideo(stash: true);
+      if (mounted) setState(() {});
     }
     if (oldWidget.video['id'] != widget.video['id']) {
-      _controller?.dispose();
-      _controller = null;
-      _initializing = true;
-      _initVideo();
+      _viewRecorded = false;
+      _scrubMode = false;
+      _releaseVideo(stash: false);
+      _initializing = widget.active;
+      if (widget.active) {
+        _initVideo();
+      } else {
+        _prefetchSelf();
+        if (mounted) setState(() => _initializing = false);
+      }
     }
   }
 
@@ -82,12 +146,20 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
       if (mounted) setState(() => _initializing = false);
       return;
     }
+    if (!widget.active) {
+      _prefetchSelf();
+      if (mounted) setState(() => _initializing = false);
+      return;
+    }
     try {
       final c = await ReelVideoCache.createController(url);
       await c.initialize();
       c.setLooping(true);
       c.setVolume(_muted ? 0 : 1);
-      if (widget.active) await c.play();
+      if (widget.active) {
+        await c.play();
+        _recordViewIfNeeded();
+      }
       if (!mounted) {
         c.dispose();
         return;
@@ -96,6 +168,7 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
         _controller = c;
         _initializing = false;
       });
+      _attachListener(c);
     } catch (_) {
       if (mounted) setState(() => _initializing = false);
     }
@@ -103,13 +176,17 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _releaseVideo(stash: false);
     _likePulse.dispose();
     _heartBurst.dispose();
-    _controller?.dispose();
     super.dispose();
   }
 
   void _toggleMute() {
+    if (_scrubMode) {
+      _exitScrubMode(resume: true);
+      return;
+    }
     setState(() {
       _muted = !_muted;
       _showMuteHint = true;
@@ -130,6 +207,50 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     widget.onLike();
   }
 
+  void _enterScrubMode() {
+    final c = _controller;
+    if (c == null || !c.value.isInitialized || _scrubMode) return;
+    HapticFeedback.mediumImpact();
+    c.pause();
+    setState(() => _scrubMode = true);
+  }
+
+  void _exitScrubMode({bool resume = true}) {
+    if (!_scrubMode) return;
+    setState(() => _scrubMode = false);
+    if (resume && widget.active) {
+      _controller?.play();
+    }
+  }
+
+  void _seekRelative(int seconds) {
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) return;
+    final max = c.value.duration;
+    var target = c.value.position + Duration(seconds: seconds);
+    if (target < Duration.zero) target = Duration.zero;
+    if (target > max) target = max;
+    c.seekTo(target);
+    setState(() {});
+  }
+
+  void _seekToFraction(double fraction) {
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) return;
+    final max = c.value.duration;
+    if (max <= Duration.zero) return;
+    c.seekTo(Duration(milliseconds: (max.inMilliseconds * fraction).round()));
+    setState(() {});
+  }
+
+  String _formatTime(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    if (h > 0) return '$h:$m:$s';
+    return '$m:$s';
+  }
+
   String _formatCount(int n) {
     if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
     if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
@@ -143,6 +264,51 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     final legal = user?['fullLegalName']?.toString();
     if (legal != null && legal.trim().isNotEmpty) return legal.trim();
     return 'Teacher';
+  }
+
+  Widget _buildPoster() {
+    final thumb = widget.video['thumbnailUrl']?.toString();
+    if (thumb != null && thumb.isNotEmpty) {
+      return CachedImage(url: thumb, fit: BoxFit.cover);
+    }
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.primary.withValues(alpha: 0.35),
+            AppTheme.card,
+            Colors.black,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoLayer() {
+    if (_initializing && widget.active) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          _buildPoster(),
+          const Center(child: SkeletonCircle(size: 48)),
+        ],
+      );
+    }
+    if (_controller != null && _controller!.value.isInitialized) {
+      return RepaintBoundary(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: _controller!.value.size.width,
+            height: _controller!.value.size.height,
+            child: VideoPlayer(_controller!),
+          ),
+        ),
+      );
+    }
+    return _buildPoster();
   }
 
   @override
@@ -162,39 +328,11 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     return GestureDetector(
       onTap: _toggleMute,
       onDoubleTap: () => _handleLike(burst: true),
+      onLongPressStart: (_) => _enterScrubMode(),
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (_initializing)
-            const SkeletonReelPage()
-          else if (_controller != null && _controller!.value.isInitialized)
-            FittedBox(
-              fit: BoxFit.cover,
-              child: SizedBox(
-                width: _controller!.value.size.width,
-                height: _controller!.value.size.height,
-                child: VideoPlayer(_controller!),
-              ),
-            )
-          else
-            Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    AppTheme.primary.withValues(alpha: 0.35),
-                    AppTheme.card,
-                    Colors.black,
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: const Center(
-                child: Icon(Icons.videocam_off_outlined, size: 48, color: AppTheme.muted),
-              ),
-            ),
-
-          // Readability gradients
+          _buildVideoLayer(),
           DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -254,6 +392,36 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
               ),
             ),
           ),
+
+          // Hold-to-pause scrub controls
+          if (_scrubMode && _controller != null && _controller!.value.isInitialized)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: bottom + 8,
+              child: _ReelScrubBar(
+                controller: _controller!,
+                onSeek: _seekToFraction,
+                onBack: () => _seekRelative(-10),
+                onForward: () => _seekRelative(10),
+                onPlay: () => _exitScrubMode(resume: true),
+                formatTime: _formatTime,
+              ),
+            ),
+
+          // Paused indicator (center)
+          if (_scrubMode)
+            Center(
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: const Icon(Icons.pause_rounded, color: Colors.white, size: 40),
+              ),
+            ),
 
           // Right action rail
           Positioned(
@@ -409,6 +577,149 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReelScrubBar extends StatelessWidget {
+  const _ReelScrubBar({
+    required this.controller,
+    required this.onSeek,
+    required this.onBack,
+    required this.onForward,
+    required this.onPlay,
+    required this.formatTime,
+  });
+
+  final VideoPlayerController controller;
+  final ValueChanged<double> onSeek;
+  final VoidCallback onBack;
+  final VoidCallback onForward;
+  final VoidCallback onPlay;
+  final String Function(Duration) formatTime;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = controller.value;
+    final duration = value.duration;
+    final position = value.position;
+    final progress = duration.inMilliseconds > 0
+        ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.78),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Text(
+                formatTime(position),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              Text(
+                ' / ${formatTime(duration)}',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.65),
+                  fontSize: 12,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              const Spacer(),
+              Text(
+                'Hold to pause · scrub to seek',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.5),
+                  fontSize: 10,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+              activeTrackColor: AppTheme.accent,
+              inactiveTrackColor: Colors.white24,
+              thumbColor: AppTheme.accent,
+              overlayColor: AppTheme.accent.withValues(alpha: 0.2),
+            ),
+            child: Slider(
+              value: progress,
+              onChanged: onSeek,
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _ScrubIconButton(
+                icon: Icons.replay_10_rounded,
+                label: '-10s',
+                onTap: onBack,
+              ),
+              const SizedBox(width: 20),
+              Material(
+                color: AppTheme.accent,
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: onPlay,
+                  child: const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Icon(Icons.play_arrow_rounded, color: Colors.black, size: 28),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 20),
+              _ScrubIconButton(
+                icon: Icons.forward_10_rounded,
+                label: '+10s',
+                onTap: onForward,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ScrubIconButton extends StatelessWidget {
+  const _ScrubIconButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        children: [
+          Icon(icon, color: Colors.white, size: 28),
+          const SizedBox(height: 2),
+          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 10)),
         ],
       ),
     );

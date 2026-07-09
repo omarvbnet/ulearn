@@ -494,10 +494,14 @@ export class TeacherCourseService {
       _count: true,
     });
 
+    const { ShortVideoService } = await import("@/services/short-video.service");
+    const shortVideos = await ShortVideoService.listForTeacher(teacherId, userId);
+
     return {
       success: true as const,
       teacher: {
         id: teacher.id,
+        userId: teacher.userId,
         name: teacher.user.fullLegalName,
         profilePhotoUrl: teacher.user.profilePhotoUrl,
         bio: teacher.bio,
@@ -513,6 +517,7 @@ export class TeacherCourseService {
         ratingCount: ratingAgg._count,
       },
       courses: enriched,
+      shortVideos,
     };
   }
 
