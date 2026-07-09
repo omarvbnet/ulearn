@@ -266,6 +266,7 @@
       "photoUpdateFailed": "Fotoğraf güncellenemedi",
       "coverTitle": "Profil kapağı",
       "coverHint": "Herkese açık öğretmen profiliniz için bir banner seçin",
+      "changeCover": "Kapak seçmek için dokunun",
       "coverUpdated": "Kapak güncellendi",
       "coverSaveFailed": "Kapak kaydedilemedi",
       "role": "Rol",
@@ -445,11 +446,22 @@
       "chooseCover": "Choose cover",
       "fromVideo": "From video",
       "yourShorts": "Your short videos",
-      "addQuizMinOptions": "Add at least two answer options",
-      "quizAdded": "Quiz added to your course",
-      "quizSaveFailed": "Could not save quiz: {error}",
-      "atEndOfCourse": "At end of course",
-      "correctAnswer": "Correct answer"
+      "addQuizMinOptions": "Her soru için en az iki seçenek ekleyin",
+      "quizAdded": "Quiz kursunuza eklendi",
+      "quizSaveFailed": "Quiz kaydedilemedi: {error}",
+      "atEndOfCourse": "Kursun sonunda",
+      "correctAnswer": "Doğru cevap",
+      "quizBuilderHint": "Her quiz için birden fazla soru ekleyin. İsterseniz soru başına zaman sınırı açın.",
+      "quizTitle": "Quiz başlığı",
+      "questionsSection": "Sorular ({count})",
+      "addQuestion": "Soru ekle",
+      "removeQuestion": "Soruyu kaldır",
+      "questionNumber": "Soru {n}",
+      "enableQuestionTimer": "Bu soru için zaman sınırı",
+      "enableQuestionTimerHint": "İsteğe bağlı — süre bitince otomatik ilerler",
+      "timerSeconds": "İzin verilen saniye",
+      "secondsShort": "sn",
+      "saveQuiz": "Quizi kaydet"
     },
     "qa": {
       "postFailed": "Could not post your question",
@@ -541,7 +553,8 @@
       "done": "Done",
       "loading": "Loading quiz…",
       "loadFailed": "Could not load quiz",
-      "notFound": "Quiz not found or no longer available"
+      "notFound": "Quiz not found or no longer available",
+      "timedQuestions": "{count} süreli"
     },
     "pending": {
       "badge": "Onay Bekleniyor"

@@ -1,39 +1,24 @@
 #!/bin/bash
-# Remove iCloud/Desktop resource forks before Flutter codesigns native assets.
+# Strip iCloud/Desktop xattrs around Flutter compile — without racing native asset builds.
 set -euo pipefail
 
 export COPYFILE_DISABLE=1
 
 ROOT="${SRCROOT}/.."
 BUILD_DIR="${ROOT}/build"
-NATIVE_ASSETS="${BUILD_DIR}/native_assets"
 
-clean_tree() {
+strip_xattrs() {
   local path="$1"
   if [ -e "${path}" ]; then
-    dot_clean -m "${path}" 2>/dev/null || true
     xattr -cr "${path}" 2>/dev/null || true
   fi
 }
 
-clean_build() {
-  clean_tree "${BUILD_DIR}"
-  clean_tree "${NATIVE_ASSETS}"
-  if [ -d "${BUILD_DIR}/ios" ]; then
-    clean_tree "${BUILD_DIR}/ios"
-  fi
-}
+# Pre-clean only extended attributes (do not dot_clean or touch native_assets mid-build).
+strip_xattrs "${BUILD_DIR}"
 
-clean_build
+/bin/sh "$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh" build
 
-/bin/sh "$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh" build &
-build_pid=$!
-
-# Keep cleaning while Flutter compiles and signs native assets (objective_c.framework).
-while kill -0 "$build_pid" 2>/dev/null; do
-  clean_build
-  sleep 0.01
-done
-
-wait "$build_pid"
-clean_build
+# Post-clean for codesign (resource forks on Desktop/iCloud paths).
+strip_xattrs "${BUILD_DIR}/native_assets"
+strip_xattrs "${BUILD_DIR}/ios"

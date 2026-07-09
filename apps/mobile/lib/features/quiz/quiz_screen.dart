@@ -27,6 +27,7 @@ class _QuizScreenState extends State<QuizScreen> {
   final Map<String, String> _answers = {};
   int? _timeLeft;
   Timer? _timer;
+  bool _perQuestionTimers = false;
   Map<String, dynamic>? _result;
   bool _submitting = false;
   late DateTime _startedAt;
@@ -59,22 +60,75 @@ class _QuizScreenState extends State<QuizScreen> {
     return message;
   }
 
+  bool get _hasPerQuestionTimers {
+    final questions = (_quiz?['questions'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+    return questions.any((q) => ((q['timeLimitSec'] as num?) ?? 0) > 0);
+  }
+
+  void _startGlobalTimer(int limit) {
+    _timer?.cancel();
+    setState(() => _timeLeft = limit);
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      if (_timeLeft != null && _timeLeft! <= 1) {
+        _submit();
+      } else {
+        setState(() => _timeLeft = _timeLeft! - 1);
+      }
+    });
+  }
+
+  void _resetQuestionTimer() {
+    _timer?.cancel();
+    final questions = (_quiz!['questions'] as List<dynamic>).cast<Map<String, dynamic>>();
+    if (_current >= questions.length) return;
+
+    final limit = (questions[_current]['timeLimitSec'] as num?)?.toInt();
+    if (limit != null && limit > 0) {
+      setState(() => _timeLeft = limit);
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        if (_timeLeft != null && _timeLeft! <= 1) {
+          _timer?.cancel();
+          _onQuestionTimerExpired();
+        } else {
+          setState(() => _timeLeft = _timeLeft! - 1);
+        }
+      });
+    } else {
+      setState(() => _timeLeft = null);
+    }
+  }
+
+  void _onQuestionTimerExpired() {
+    final questions = (_quiz!['questions'] as List<dynamic>).cast<Map<String, dynamic>>();
+    if (_current < questions.length - 1) {
+      setState(() => _current++);
+      _resetQuestionTimer();
+    } else {
+      _submit();
+    }
+  }
+
+  void _goToQuestion(int index) {
+    setState(() => _current = index);
+    if (_perQuestionTimers) _resetQuestionTimer();
+  }
+
   void _start() {
+    _perQuestionTimers = _hasPerQuestionTimers;
     setState(() {
       _started = true;
       _startedAt = DateTime.now();
-      final limit = (_quiz?['timeLimitSec'] as num?)?.toInt();
-      if (limit != null && limit > 0) {
-        _timeLeft = limit;
-        _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-          if (_timeLeft != null && _timeLeft! <= 1) {
-            _submit();
-          } else {
-            setState(() => _timeLeft = _timeLeft! - 1);
-          }
-        });
-      }
     });
+    if (_perQuestionTimers) {
+      _resetQuestionTimer();
+      return;
+    }
+    final limit = (_quiz?['timeLimitSec'] as num?)?.toInt();
+    if (limit != null && limit > 0) {
+      _startGlobalTimer(limit);
+    }
   }
 
   Future<void> _submit() async {
@@ -276,13 +330,13 @@ class _QuizScreenState extends State<QuizScreen> {
             children: [
               if (_current > 0)
                 OutlinedButton(
-                  onPressed: () => setState(() => _current--),
+                  onPressed: () => _goToQuestion(_current - 1),
                   child: Text(l10n.quizPrevious),
                 ),
               const Spacer(),
               _current < questions.length - 1
                   ? ElevatedButton(
-                      onPressed: () => setState(() => _current++),
+                      onPressed: () => _goToQuestion(_current + 1),
                       style: ElevatedButton.styleFrom(minimumSize: const Size(120, 48)),
                       child: Text(l10n.quizNext),
                     )
@@ -326,7 +380,9 @@ class _IntroView extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final locale = context.localeCode;
-    final questions = (quiz['questions'] as List<dynamic>?)?.length ?? 0;
+    final questions = (quiz['questions'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+    final hasPerQ = questions.any((q) => ((q['timeLimitSec'] as num?) ?? 0) > 0);
+    final timedCount = questions.where((q) => ((q['timeLimitSec'] as num?) ?? 0) > 0).length;
     final limit = (quiz['timeLimitSec'] as num?)?.toInt();
     final attemptsLeft = ((quiz['maxAttempts'] as num?)?.toInt() ?? 1) -
         ((quiz['attemptsUsed'] as num?)?.toInt() ?? 0);
@@ -349,10 +405,12 @@ class _IntroView extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  _Stat(label: l10n.t('quiz.questions'), value: '$questions'),
+                  _Stat(label: l10n.t('quiz.questions'), value: '${questions.length}'),
                   _Stat(
                     label: l10n.t('quiz.time'),
-                    value: limit != null && limit > 0 ? '${limit ~/ 60}m' : '∞',
+                    value: hasPerQ
+                        ? l10n.t('mobile.quiz.timedQuestions', {'count': '$timedCount'})
+                        : (limit != null && limit > 0 ? '${limit ~/ 60}m' : '∞'),
                   ),
                   _Stat(label: l10n.t('quiz.attemptsLeft'), value: '$attemptsLeft'),
                 ],

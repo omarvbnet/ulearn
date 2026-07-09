@@ -356,7 +356,10 @@ class HomeFeedState extends State<HomeFeed> {
           if (_ads.isNotEmpty && !_hasActiveFilters)
             StaggeredItem(
               index: 2,
-              child: _AdsCarousel(ads: _ads, locale: locale, onLike: _likeAd),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 18),
+                child: _AdsCarousel(ads: _ads, locale: locale, onLike: _likeAd),
+              ),
             ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
@@ -607,7 +610,7 @@ class _FiltersBar extends StatelessWidget {
           height: 46,
           child: ListView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
             children: [
               _FilterChip(
                 icon: Icons.school_outlined,

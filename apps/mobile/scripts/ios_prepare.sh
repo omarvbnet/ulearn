@@ -27,6 +27,17 @@ fi
 dot_clean -m "$TMP_BUILD" 2>/dev/null || true
 xattr -cr "$TMP_BUILD" 2>/dev/null || true
 
+# Stale partial iOS output can reference native assets that were never compiled.
+STALE_MANIFEST="$TMP_BUILD/ios/Release-iphoneos/Runner.app/Frameworks/App.framework/flutter_assets/NativeAssetsManifest.json"
+STALE_MANIFEST_ALT="$TMP_BUILD/ios/iphoneos/Runner.app/Frameworks/App.framework/flutter_assets/NativeAssetsManifest.json"
+if { [ -f "$STALE_MANIFEST" ] || [ -f "$STALE_MANIFEST_ALT" ]; } \
+   && [ ! -d "$TMP_BUILD/native_assets/ios/objective_c.framework" ]; then
+  echo "Clearing stale build cache (native assets out of sync)..."
+  rm -rf "$TMP_BUILD"/*
+  rm -rf "$ROOT/.dart_tool/flutter_build"
+  flutter pub get >/dev/null 2>&1 || true
+fi
+
 PODS_CHECK="ios/Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
 FIREBASE_CHECK="ios/Pods/FirebaseCore/FirebaseCore/Sources/Public/FirebaseCore/FIRApp.h"
 GOOGLEUTILS_CHECK="ios/Pods/GoogleUtilities/GoogleUtilities/AppDelegateSwizzler/Public/GoogleUtilities/GULAppDelegateSwizzler.h"

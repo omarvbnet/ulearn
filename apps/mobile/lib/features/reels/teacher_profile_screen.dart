@@ -26,17 +26,26 @@ class TeacherProfileScreen extends StatefulWidget {
   State<TeacherProfileScreen> createState() => _TeacherProfileScreenState();
 }
 
-class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
+class _TeacherProfileScreenState extends State<TeacherProfileScreen>
+    with SingleTickerProviderStateMixin {
   Map<String, dynamic>? _teacher;
   List<Map<String, dynamic>> _courses = [];
   List<Map<String, dynamic>> _shortVideos = [];
   bool _loading = true;
   String? _busyCourseId;
+  late final TabController _tabCtrl;
 
   @override
   void initState() {
     super.initState();
+    _tabCtrl = TabController(length: 2, vsync: this);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _tabCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -104,153 +113,365 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                 )
               : RefreshIndicator(
                   onRefresh: _load,
-                  child: CustomScrollView(
-                    slivers: [
-                      SliverAppBar(
-                        expandedHeight: 220,
-                        pinned: true,
-                        stretch: true,
-                        backgroundColor: AppTheme.background,
-                        flexibleSpace: FlexibleSpaceBar(
-                          background: Stack(
-                            fit: StackFit.expand,
+                  child: NestedScrollView(
+                    headerSliverBuilder: (context, innerScrolled) => [
+                      SliverOverlapAbsorber(
+                        handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+                        sliver: SliverAppBar(
+                          expandedHeight: 220,
+                          pinned: true,
+                          stretch: true,
+                          backgroundColor: AppTheme.background,
+                          flexibleSpace: FlexibleSpaceBar(
+                            background: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Positioned.fill(
+                                  child: TeacherCoverBanner(
+                                    preset: (_teacher!['profileCoverPreset'] as num?)?.toInt(),
+                                  ),
+                                ),
+                                Positioned(
+                                  bottom: 24,
+                                  left: 20,
+                                  right: 20,
+                                  child: _HeaderCard(teacher: _teacher!, locale: locale),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              TeacherCoverBanner(
-                                preset: (_teacher!['profileCoverPreset'] as num?)?.toInt(),
-                              ),
-                              Positioned(
-                                bottom: 24,
-                                left: 20,
-                                right: 20,
-                                child: _HeaderCard(teacher: _teacher!, locale: locale),
-                              ),
+                              if ((_teacher!['bio'] as String?)?.isNotEmpty == true) ...[
+                                Text(
+                                  _teacher!['bio'].toString(),
+                                  style: const TextStyle(color: AppTheme.muted, height: 1.5),
+                                ),
+                                const SizedBox(height: 16),
+                              ],
+                              _StatsRow(teacher: _teacher!),
                             ],
                           ),
                         ),
                       ),
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                        sliver: SliverList(
-                          delegate: SliverChildListDelegate([
-                            if ((_teacher!['bio'] as String?)?.isNotEmpty == true) ...[
-                              Text(
-                                _teacher!['bio'].toString(),
-                                style: const TextStyle(color: AppTheme.muted, height: 1.5),
-                              ),
-                              const SizedBox(height: 16),
+                      SliverPersistentHeader(
+                        pinned: true,
+                        delegate: _ProfileTabBarDelegate(
+                          TabBar(
+                            controller: _tabCtrl,
+                            labelColor: AppTheme.accent,
+                            unselectedLabelColor: AppTheme.muted,
+                            indicatorColor: AppTheme.accent,
+                            indicatorWeight: 3,
+                            tabs: [
+                              Tab(text: '${l10n.navCourses} (${_courses.length})'),
+                              Tab(text: '${l10n.t('nav.shortVideos')} (${_shortVideos.length})'),
                             ],
-                            _StatsRow(teacher: _teacher!),
-                            const SizedBox(height: 20),
-                            if (_shortVideos.isNotEmpty) ...[
-                              Row(
-                                children: [
-                                  Text(
-                                    l10n.t('nav.shortVideos'),
-                                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: AppTheme.primary.withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Text(
-                                      '${_shortVideos.length}',
-                                      style: const TextStyle(
-                                        color: AppTheme.accent,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              _ShortVideosGrid(
-                                videos: _shortVideos,
-                                teacherId: widget.teacherId,
-                                teacherName: _teacher!['name']?.toString(),
-                              ),
-                              const SizedBox(height: 24),
-                            ],
-                            Row(
-                              children: [
-                                Text(
-                                  l10n.t('mobile.reels.liveCourses'),
-                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                                ),
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.accent.withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Text(
-                                    '${_courses.length}',
-                                    style: const TextStyle(
-                                      color: AppTheme.accent,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              l10n.storeSubscribeUnlock,
-                              style: TextStyle(
-                                color: AppTheme.muted.withValues(alpha: 0.9),
-                                fontSize: 13,
-                                height: 1.4,
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            if (_courses.isEmpty)
-                              Container(
-                                padding: const EdgeInsets.all(20),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.card,
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: AppTheme.cardBorder),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    l10n.t('mobile.reels.noLiveCourses'),
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(color: AppTheme.muted),
-                                  ),
-                                ),
-                              )
-                            else
-                              ..._courses.asMap().entries.map((e) {
-                                final c = e.value;
-                                return StaggeredItem(
-                                  index: e.key,
-                                  child: _CourseCard(
-                                    course: c,
-                                    locale: locale,
-                                    busy: _busyCourseId == c['id']?.toString(),
-                                    onOpen: () => Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => CourseDetailScreen(
-                                          courseId: c['id'].toString(),
-                                          summary: c,
-                                        ),
-                                      ),
-                                    ),
-                                    onPurchase: () => _purchase(c['id'].toString()),
-                                  ),
-                                );
-                              }),
-                          ]),
+                          ),
                         ),
                       ),
                     ],
+                    body: TabBarView(
+                      controller: _tabCtrl,
+                      children: [
+                        _CoursesTab(
+                          courses: _courses,
+                          locale: locale,
+                          busyCourseId: _busyCourseId,
+                          onPurchase: _purchase,
+                        ),
+                        _ShortVideosTab(
+                          videos: _shortVideos,
+                          teacherId: widget.teacherId,
+                          teacherName: _teacher!['name']?.toString(),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
+    );
+  }
+}
+
+class _ProfileTabBarDelegate extends SliverPersistentHeaderDelegate {
+  _ProfileTabBarDelegate(this.tabBar);
+
+  final TabBar tabBar;
+
+  @override
+  double get minExtent => tabBar.preferredSize.height;
+
+  @override
+  double get maxExtent => tabBar.preferredSize.height;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return Material(
+      color: AppTheme.background,
+      child: tabBar,
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _ProfileTabBarDelegate oldDelegate) =>
+      oldDelegate.tabBar != tabBar;
+}
+
+class _CoursesTab extends StatelessWidget {
+  const _CoursesTab({
+    required this.courses,
+    required this.locale,
+    required this.busyCourseId,
+    required this.onPurchase,
+  });
+
+  final List<Map<String, dynamic>> courses;
+  final String locale;
+  final String? busyCourseId;
+  final Future<void> Function(String courseId) onPurchase;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return CustomScrollView(
+      key: const PageStorageKey<String>('teacher_profile_courses'),
+      slivers: [
+        SliverOverlapInjector(
+          handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          sliver: courses.isEmpty
+              ? SliverToBoxAdapter(
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: AppTheme.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.cardBorder),
+                    ),
+                    child: Center(
+                      child: Text(
+                        l10n.t('mobile.reels.noLiveCourses'),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: AppTheme.muted),
+                      ),
+                    ),
+                  ),
+                )
+              : SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      if (index == 0) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 14),
+                          child: Text(
+                            l10n.storeSubscribeUnlock,
+                            style: TextStyle(
+                              color: AppTheme.muted.withValues(alpha: 0.9),
+                              fontSize: 13,
+                              height: 1.4,
+                            ),
+                          ),
+                        );
+                      }
+                      final c = courses[index - 1];
+                      return StaggeredItem(
+                        index: index - 1,
+                        child: _CourseCard(
+                          course: c,
+                          locale: locale,
+                          busy: busyCourseId == c['id']?.toString(),
+                          onOpen: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => CourseDetailScreen(
+                                courseId: c['id'].toString(),
+                                summary: c,
+                              ),
+                            ),
+                          ),
+                          onPurchase: () => onPurchase(c['id'].toString()),
+                        ),
+                      );
+                    },
+                    childCount: courses.isEmpty ? 0 : courses.length + 1,
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ShortVideosTab extends StatelessWidget {
+  const _ShortVideosTab({
+    required this.videos,
+    required this.teacherId,
+    this.teacherName,
+  });
+
+  final List<Map<String, dynamic>> videos;
+  final String teacherId;
+  final String? teacherName;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return CustomScrollView(
+      key: const PageStorageKey<String>('teacher_profile_shorts'),
+      slivers: [
+        SliverOverlapInjector(
+          handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          sliver: videos.isEmpty
+              ? SliverToBoxAdapter(
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: AppTheme.card,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.cardBorder),
+                    ),
+                    child: Center(
+                      child: Text(
+                        l10n.reelsNoReels,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: AppTheme.muted),
+                      ),
+                    ),
+                  ),
+                )
+              : SliverGrid(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                    childAspectRatio: 9 / 14,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) => _ShortVideoTile(
+                      video: videos[index],
+                      videos: videos,
+                      index: index,
+                      teacherId: teacherId,
+                      teacherName: teacherName,
+                    ),
+                    childCount: videos.length,
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ShortVideoTile extends StatelessWidget {
+  const _ShortVideoTile({
+    required this.video,
+    required this.videos,
+    required this.index,
+    required this.teacherId,
+    this.teacherName,
+  });
+
+  final Map<String, dynamic> video;
+  final List<Map<String, dynamic>> videos;
+  final int index;
+  final String teacherId;
+  final String? teacherName;
+
+  String _formatViews(int n) {
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
+    return '$n';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final views = (video['viewCount'] as num?)?.toInt() ?? 0;
+    final thumb = video['thumbnailUrl']?.toString();
+
+    return GestureDetector(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => TeacherReelsViewer(
+            videos: videos,
+            initialIndex: index,
+            teacherId: teacherId,
+            teacherName: teacherName,
+          ),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (thumb != null && thumb.isNotEmpty)
+              Image.network(
+                thumb,
+                fit: BoxFit.cover,
+                errorBuilder: (_, e, st) => _thumbFallback(),
+              )
+            else
+              _thumbFallback(),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.transparent, Colors.black.withValues(alpha: 0.75)],
+                  begin: Alignment.center,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+            ),
+            const Center(
+              child: Icon(Icons.play_circle_fill, color: Colors.white70, size: 36),
+            ),
+            Positioned(
+              left: 6,
+              bottom: 6,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.visibility_outlined, color: Colors.white, size: 12),
+                  const SizedBox(width: 3),
+                  Text(
+                    _formatViews(views),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _thumbFallback() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.primary.withValues(alpha: 0.45),
+            AppTheme.card,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
     );
   }
 }
@@ -554,119 +775,6 @@ class _ProfileSkeleton extends StatelessWidget {
           SizedBox(height: 12),
           SkeletonTextCard(),
         ],
-      ),
-    );
-  }
-}
-
-class _ShortVideosGrid extends StatelessWidget {
-  const _ShortVideosGrid({
-    required this.videos,
-    required this.teacherId,
-    this.teacherName,
-  });
-
-  final List<Map<String, dynamic>> videos;
-  final String teacherId;
-  final String? teacherName;
-
-  String _formatViews(int n) {
-    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
-    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
-    return '$n';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
-        childAspectRatio: 9 / 14,
-      ),
-      itemCount: videos.length,
-      itemBuilder: (context, index) {
-        final video = videos[index];
-        final views = (video['viewCount'] as num?)?.toInt() ?? 0;
-        final thumb = video['thumbnailUrl']?.toString();
-
-        return GestureDetector(
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => TeacherReelsViewer(
-                videos: videos,
-                initialIndex: index,
-                teacherId: teacherId,
-                teacherName: teacherName,
-              ),
-            ),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (thumb != null && thumb.isNotEmpty)
-                  Image.network(
-                    thumb,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, e, st) => _thumbFallback(),
-                  )
-                else
-                  _thumbFallback(),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [Colors.transparent, Colors.black.withValues(alpha: 0.75)],
-                      begin: Alignment.center,
-                      end: Alignment.bottomCenter,
-                    ),
-                  ),
-                ),
-                const Center(
-                  child: Icon(Icons.play_circle_fill, color: Colors.white70, size: 36),
-                ),
-                Positioned(
-                  left: 6,
-                  bottom: 6,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.visibility_outlined, color: Colors.white, size: 12),
-                      const SizedBox(width: 3),
-                      Text(
-                        _formatViews(views),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _thumbFallback() {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            AppTheme.primary.withValues(alpha: 0.45),
-            AppTheme.card,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
       ),
     );
   }

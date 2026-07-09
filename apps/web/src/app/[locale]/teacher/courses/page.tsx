@@ -535,6 +535,32 @@ type CourseQuiz = {
   _count: { questions: number; attempts: number };
 };
 
+type QuestionDraft = {
+  id: string;
+  text: string;
+  optA: string;
+  optB: string;
+  optC: string;
+  optD: string;
+  correct: string;
+  timerEnabled: boolean;
+  timeSec: string;
+};
+
+function newQuestionDraft(): QuestionDraft {
+  return {
+    id: crypto.randomUUID(),
+    text: "",
+    optA: "",
+    optB: "",
+    optC: "",
+    optD: "",
+    correct: "A",
+    timerEnabled: false,
+    timeSec: "60",
+  };
+}
+
 function QuizzesModal({ course, onClose, onChanged, toast }: {
   course: Course;
   onClose: () => void;
@@ -543,13 +569,60 @@ function QuizzesModal({ course, onClose, onChanged, toast }: {
 }) {
   const [quizzes, setQuizzes] = useState<CourseQuiz[] | null>(null);
   const [title, setTitle] = useState("");
-  const [question, setQuestion] = useState("");
-  const [optA, setOptA] = useState("");
-  const [optB, setOptB] = useState("");
-  const [optC, setOptC] = useState("");
-  const [optD, setOptD] = useState("");
-  const [correct, setCorrect] = useState("A");
+  const [questions, setQuestions] = useState<QuestionDraft[]>([newQuestionDraft()]);
   const [saving, setSaving] = useState(false);
+
+  function updateQuestion(id: string, patch: Partial<QuestionDraft>) {
+    setQuestions((prev) => prev.map((q) => (q.id === id ? { ...q, ...patch } : q)));
+  }
+
+  function addQuestion() {
+    setQuestions((prev) => [...prev, newQuestionDraft()]);
+  }
+
+  function removeQuestion(id: string) {
+    setQuestions((prev) => (prev.length <= 1 ? prev : prev.filter((q) => q.id !== id)));
+  }
+
+  function buildQuestionPayloads() {
+    const payloads: {
+      textEn: string;
+      options: Record<string, string>;
+      correctKey: string;
+      timeLimitSec?: number;
+    }[] = [];
+
+    for (const q of questions) {
+      if (!q.text.trim()) return null;
+      const options: Record<string, string> = {
+        A: q.optA.trim(),
+        B: q.optB.trim(),
+      };
+      if (q.optC.trim()) options.C = q.optC.trim();
+      if (q.optD.trim()) options.D = q.optD.trim();
+      if (!options.A || !options.B) return null;
+
+      const payload: {
+        textEn: string;
+        options: Record<string, string>;
+        correctKey: string;
+        timeLimitSec?: number;
+      } = {
+        textEn: q.text.trim(),
+        options,
+        correctKey: q.correct,
+      };
+
+      if (q.timerEnabled) {
+        const sec = parseInt(q.timeSec, 10);
+        if (sec > 0) payload.timeLimitSec = sec;
+      }
+
+      payloads.push(payload);
+    }
+
+    return payloads;
+  }
 
   const loadQuizzes = useCallback(() => {
     setQuizzes(null);
@@ -562,10 +635,10 @@ function QuizzesModal({ course, onClose, onChanged, toast }: {
 
   async function addQuiz(e: React.FormEvent) {
     e.preventDefault();
-    if (!title.trim() || !question.trim()) return;
-    const options = { A: optA, B: optB, C: optC, D: optD };
-    if (Object.values(options).some((v) => !v.trim())) {
-      toast("All four answer options are required", "error");
+    if (!title.trim()) return;
+    const questionPayloads = buildQuestionPayloads();
+    if (!questionPayloads?.length) {
+      toast("Add at least two answer options (A & B) for each question", "error");
       return;
     }
     setSaving(true);
@@ -574,25 +647,14 @@ function QuizzesModal({ course, onClose, onChanged, toast }: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         titleEn: title.trim(),
-        questions: [
-          {
-            textEn: question.trim(),
-            options,
-            correctKey: correct,
-          },
-        ],
+        questions: questionPayloads,
       }),
     });
     setSaving(false);
     if (res.ok) {
       toast("Quiz added");
       setTitle("");
-      setQuestion("");
-      setOptA("");
-      setOptB("");
-      setOptC("");
-      setOptD("");
-      setCorrect("A");
+      setQuestions([newQuestionDraft()]);
       loadQuizzes();
       onChanged();
     } else {
@@ -649,33 +711,86 @@ function QuizzesModal({ course, onClose, onChanged, toast }: {
           <EmptyState title="No quizzes yet" />
         )}
 
-        <form onSubmit={addQuiz} className="space-y-3 border-t border-card-border pt-4">
+        <form onSubmit={addQuiz} className="space-y-4 border-t border-card-border pt-4">
+          <p className="text-sm text-muted">
+            Add multiple questions per quiz. Enable an optional timer on any question.
+          </p>
           <Input
             label="Quiz title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             required
           />
-          <Textarea
-            label="Question"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            required
-          />
-          <div className="grid gap-2 sm:grid-cols-2">
-            <Input label="Option A" value={optA} onChange={(e) => setOptA(e.target.value)} required />
-            <Input label="Option B" value={optB} onChange={(e) => setOptB(e.target.value)} required />
-            <Input label="Option C" value={optC} onChange={(e) => setOptC(e.target.value)} required />
-            <Input label="Option D" value={optD} onChange={(e) => setOptD(e.target.value)} required />
+
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Questions ({questions.length})</h3>
+            <Button type="button" variant="outline" size="sm" onClick={addQuestion}>
+              Add question
+            </Button>
           </div>
-          <Select label="Correct answer" value={correct} onChange={(e) => setCorrect(e.target.value)}>
-            <option value="A">A</option>
-            <option value="B">B</option>
-            <option value="C">C</option>
-            <option value="D">D</option>
-          </Select>
+
+          {questions.map((q, index) => {
+            const correctOptions = ["A", "B", "C", "D"].filter(
+              (k) => k === "A" || k === "B" || (k === "C" && q.optC.trim()) || (k === "D" && q.optD.trim())
+            );
+            return (
+              <div key={q.id} className="space-y-3 rounded-xl border border-card-border p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold">Question {index + 1}</p>
+                  {questions.length > 1 && (
+                    <button
+                      type="button"
+                      className="text-xs text-danger hover:underline"
+                      onClick={() => removeQuestion(q.id)}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <Textarea
+                  label="Question text"
+                  value={q.text}
+                  onChange={(e) => updateQuestion(q.id, { text: e.target.value })}
+                  required
+                />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input label="Option A" value={q.optA} onChange={(e) => updateQuestion(q.id, { optA: e.target.value })} required />
+                  <Input label="Option B" value={q.optB} onChange={(e) => updateQuestion(q.id, { optB: e.target.value })} required />
+                  <Input label="Option C (optional)" value={q.optC} onChange={(e) => updateQuestion(q.id, { optC: e.target.value })} />
+                  <Input label="Option D (optional)" value={q.optD} onChange={(e) => updateQuestion(q.id, { optD: e.target.value })} />
+                </div>
+                <Select label="Correct answer" value={q.correct} onChange={(e) => updateQuestion(q.id, { correct: e.target.value })}>
+                  {correctOptions.map((k) => (
+                    <option key={k} value={k}>{k}</option>
+                  ))}
+                </Select>
+                <label className="flex items-start gap-3 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={q.timerEnabled}
+                    onChange={(e) => updateQuestion(q.id, { timerEnabled: e.target.checked })}
+                  />
+                  <span>
+                    <span className="font-medium">Time limit for this question</span>
+                    <span className="mt-0.5 block text-xs text-muted">Optional — auto-advances when time runs out</span>
+                  </span>
+                </label>
+                {q.timerEnabled && (
+                  <Input
+                    label="Seconds allowed"
+                    type="number"
+                    min={1}
+                    value={q.timeSec}
+                    onChange={(e) => updateQuestion(q.id, { timeSec: e.target.value })}
+                  />
+                )}
+              </div>
+            );
+          })}
+
           <Button type="submit" disabled={saving} className="w-full">
-            {saving ? "Saving…" : "Add Quiz"}
+            {saving ? "Saving…" : "Save quiz"}
           </Button>
         </form>
       </div>

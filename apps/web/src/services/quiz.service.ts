@@ -64,6 +64,7 @@ export class QuizService {
       textTr: q.textTr,
       options: q.options,
       points: q.points,
+      timeLimitSec: q.timeLimitSec,
     }));
 
     return {
@@ -168,6 +169,7 @@ export class QuizService {
         options: Prisma.InputJsonValue;
         correctKey: string;
         points?: number;
+        timeLimitSec?: number | null;
       }>;
     }
   ) {
@@ -181,6 +183,7 @@ export class QuizService {
                 ...q,
                 type: q.type ?? "MULTIPLE_CHOICE",
                 points: q.points ?? 1,
+                timeLimitSec: q.timeLimitSec ?? null,
                 sortOrder: i,
               })),
             }

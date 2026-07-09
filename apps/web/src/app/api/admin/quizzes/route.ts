@@ -48,6 +48,7 @@ export async function POST(request: Request) {
         options: Record<string, string>;
         correctKey: string;
         points?: number;
+        timeLimitSec?: number | null;
       }) => ({
         type: q.type ?? "MULTIPLE_CHOICE",
         textEn: q.textEn,
@@ -57,6 +58,7 @@ export async function POST(request: Request) {
         options: q.options,
         correctKey: q.correctKey,
         points: q.points ?? 1,
+        timeLimitSec: q.timeLimitSec ?? null,
       })
     ),
   });

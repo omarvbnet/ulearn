@@ -18,6 +18,7 @@ const questionSchema = z.object({
   options: z.record(z.string(), z.string()),
   correctKey: z.string().min(1),
   points: z.number().int().positive().optional(),
+  timeLimitSec: z.number().int().positive().optional(),
 });
 
 const createSchema = z.object({
@@ -96,6 +97,7 @@ export async function POST(
       options: q.options,
       correctKey: q.correctKey,
       points: q.points ?? 1,
+      timeLimitSec: q.timeLimitSec ?? null,
     })),
   });
 

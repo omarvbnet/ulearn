@@ -183,47 +183,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
         if (user.role == 'TEACHER') ...[
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
           StaggeredItem(
             index: 1,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      l10n.profileCoverTitle,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            child: Card(
+              child: ListTile(
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: SizedBox(
+                    width: 48,
+                    height: 32,
+                    child: TeacherCoverBanner(
+                      preset: user.profileCoverPreset,
+                      height: 32,
                     ),
-                    if (_savingCover) ...[
-                      const SizedBox(width: 10),
-                      const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accent),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  l10n.profileCoverHint,
-                  style: TextStyle(color: AppTheme.muted.withValues(alpha: 0.9), fontSize: 12),
-                ),
-                const SizedBox(height: 12),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: TeacherCoverBanner(
-                    preset: user.profileCoverPreset,
-                    height: 100,
                   ),
                 ),
-                const SizedBox(height: 14),
-                TeacherCoverPicker(
-                  selected: user.profileCoverPreset,
-                  onSelected: _saveCoverPreset,
+                title: Text(l10n.profileCoverTitle),
+                subtitle: Text(
+                  l10n.profileChangeCover,
+                  style: const TextStyle(color: AppTheme.muted, fontSize: 12),
                 ),
-              ],
+                trailing: _savingCover
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accent),
+                      )
+                    : const Icon(Icons.chevron_right, color: AppTheme.muted),
+                onTap: _savingCover
+                    ? null
+                    : () => showTeacherCoverPickerSheet(
+                          context: context,
+                          selected: user.profileCoverPreset,
+                          onSelected: _saveCoverPreset,
+                        ),
+              ),
             ),
           ),
         ],

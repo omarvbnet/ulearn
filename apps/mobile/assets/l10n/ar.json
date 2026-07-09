@@ -265,7 +265,8 @@
       "photoUpdated": "تم تحديث صورة الملف",
       "photoUpdateFailed": "تعذّر تحديث الصورة",
       "coverTitle": "غلاف الملف",
-      "coverHint": "اختر بanner لملفك العام كمعلّم",
+      "coverHint": "اختر غلافاً لملفك العام كمعلّم",
+      "changeCover": "اضغط لاختيار الغلاف",
       "coverUpdated": "تم تحديث الغلاف",
       "coverSaveFailed": "تعذّر حفظ الغلاف",
       "role": "الدور",
@@ -445,11 +446,22 @@
       "chooseCover": "اختر غلافاً",
       "fromVideo": "من الفيديو",
       "yourShorts": "فيديوهاتك القصيرة",
-      "addQuizMinOptions": "أضف خيارين على الأقل",
+      "addQuizMinOptions": "أضف خيارين على الأقل لكل سؤال",
       "quizAdded": "تمت إضافة الاختبار لدورتك",
       "quizSaveFailed": "تعذّر حفظ الاختبار: {error}",
       "atEndOfCourse": "في نهاية الدورة",
-      "correctAnswer": "الإجابة الصحيحة"
+      "correctAnswer": "الإجابة الصحيحة",
+      "quizBuilderHint": "أضف عدة أسئلة لكل اختبار. يمكنك تفعيل مؤقت لكل سؤال اختيارياً.",
+      "quizTitle": "عنوان الاختبار",
+      "questionsSection": "الأسئلة ({count})",
+      "addQuestion": "إضافة سؤال",
+      "removeQuestion": "حذف السؤال",
+      "questionNumber": "سؤال {n}",
+      "enableQuestionTimer": "محدد زمني لهذا السؤال",
+      "enableQuestionTimerHint": "اختياري — ينتقل تلقائياً عند انتهاء الوقت",
+      "timerSeconds": "الثواني المسموحة",
+      "secondsShort": "ث",
+      "saveQuiz": "حفظ الاختبار"
     },
     "qa": {
       "postFailed": "تعذّر نشر سؤالك",
@@ -541,7 +553,8 @@
       "done": "تم",
       "loading": "جارٍ تحميل الاختبار…",
       "loadFailed": "Could not load quiz",
-      "notFound": "Quiz not found or no longer available"
+      "notFound": "Quiz not found or no longer available",
+      "timedQuestions": "{count} مؤقت"
     },
     "pending": {
       "badge": "بانتظار الموافقة"

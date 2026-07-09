@@ -1249,6 +1249,8 @@ model QuizQuestion {
   options      Json
   correctKey   String
   points       Int          @default(1)
+  /// Optional per-question time limit in seconds (null = no limit for this question).
+  timeLimitSec Int?
   sortOrder    Int          @default(0)
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt

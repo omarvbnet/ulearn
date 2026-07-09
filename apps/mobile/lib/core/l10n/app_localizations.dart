@@ -151,6 +151,7 @@ class AppLocalizations {
   String get profilePhotoUpdateFailed => t('mobile.profile.photoUpdateFailed');
   String get profileCoverTitle => t('mobile.profile.coverTitle');
   String get profileCoverHint => t('mobile.profile.coverHint');
+  String get profileChangeCover => t('mobile.profile.changeCover');
   String get profileCoverUpdated => t('mobile.profile.coverUpdated');
   String get profileCoverSaveFailed => t('mobile.profile.coverSaveFailed');
   String get profileRole => t('mobile.profile.role');

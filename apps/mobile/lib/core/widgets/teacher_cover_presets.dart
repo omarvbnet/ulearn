@@ -2,32 +2,113 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 
-/// Twelve curated gradient banners for teacher profile covers.
+enum _CoverPattern { aurora, waves, rings, beams, petals, horizon }
+
+class _CoverStyle {
+  const _CoverStyle({
+    required this.colors,
+    required this.accent,
+    required this.pattern,
+    this.begin = Alignment.topLeft,
+    this.end = Alignment.bottomRight,
+  });
+
+  final List<Color> colors;
+  final Color accent;
+  final _CoverPattern pattern;
+  final Alignment begin;
+  final Alignment end;
+}
+
+/// Twelve bright, distinct profile banners for teachers.
 class TeacherCoverPresets {
   TeacherCoverPresets._();
 
   static const count = 12;
 
-  static List<Color> colorsFor(int? preset) {
+  static _CoverStyle _styleFor(int? preset) {
     final i = (preset ?? 0).clamp(0, count - 1);
-    return _presets[i];
+    return _styles[i];
   }
 
-  static const _presets = <List<Color>>[
-    [Color(0xFF6B21FF), Color(0xFFA020F0), Color(0xFF00E5FF)],
-    [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)],
-    [Color(0xFF141E30), Color(0xFF243B55), Color(0xFF4A6FA5)],
-    [Color(0xFF200122), Color(0xFF6F0000), Color(0xFFFF512F)],
-    [Color(0xFF000428), Color(0xFF004e92), Color(0xFF00C9FF)],
-    [Color(0xFF134E5E), Color(0xFF71B280), Color(0xFFB8E986)],
-    [Color(0xFF3A1C71), Color(0xFFD76D77), Color(0xFFFFAF7B)],
-    [Color(0xFF0F0C29), Color(0xFF302B63), Color(0xFF24243E)],
-    [Color(0xFF1A2980), Color(0xFF26D0CE), Color(0xFF00E5FF)],
-    [Color(0xFF42275A), Color(0xFF734B6D), Color(0xFFB06AB3)],
-    [Color(0xFF232526), Color(0xFF414345), Color(0xFF7B8794)],
-    [Color(0xFF11998E), Color(0xFF38EF7D), Color(0xFF00E5FF)],
+  static List<Color> colorsFor(int? preset) => _styleFor(preset).colors;
+
+  static const _styles = <_CoverStyle>[
+    _CoverStyle(
+      colors: [Color(0xFF7C3AED), Color(0xFF4F46E5), Color(0xFF06B6D4)],
+      accent: Color(0xFF67E8F9),
+      pattern: _CoverPattern.aurora,
+    ),
+    _CoverStyle(
+      colors: [Color(0xFFF97316), Color(0xFFEC4899), Color(0xFF8B5CF6)],
+      accent: Color(0xFFFDE68A),
+      pattern: _CoverPattern.petals,
+      begin: Alignment.topCenter,
+      end: Alignment.bottomLeft,
+    ),
+    _CoverStyle(
+      colors: [Color(0xFF0EA5E9), Color(0xFF2563EB), Color(0xFF7C3AED)],
+      accent: Color(0xFFBAE6FD),
+      pattern: _CoverPattern.waves,
+    ),
+    _CoverStyle(
+      colors: [Color(0xFF10B981), Color(0xFF059669), Color(0xFF14B8A6)],
+      accent: Color(0xFFBBF7D0),
+      pattern: _CoverPattern.horizon,
+      begin: Alignment.topLeft,
+      end: Alignment.bottomCenter,
+    ),
+    _CoverStyle(
+      colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8), Color(0xFF6366F1)],
+      accent: Color(0xFFFCD34D),
+      pattern: _CoverPattern.rings,
+    ),
+    _CoverStyle(
+      colors: [Color(0xFFE11D48), Color(0xFFDB2777), Color(0xFFA855F7)],
+      accent: Color(0xFFFBCFE8),
+      pattern: _CoverPattern.beams,
+      begin: Alignment.centerLeft,
+      end: Alignment.centerRight,
+    ),
+    _CoverStyle(
+      colors: [Color(0xFFF59E0B), Color(0xFFF97316), Color(0xFFEF4444)],
+      accent: Color(0xFFFFF7ED),
+      pattern: _CoverPattern.aurora,
+      begin: Alignment.topRight,
+      end: Alignment.bottomLeft,
+    ),
+    _CoverStyle(
+      colors: [Color(0xFF8B5CF6), Color(0xFFC084FC), Color(0xFFF472B6)],
+      accent: Color(0xFFEDE9FE),
+      pattern: _CoverPattern.petals,
+    ),
+    _CoverStyle(
+      colors: [Color(0xFF06B6D4), Color(0xFF0891B2), Color(0xFF0E7490)],
+      accent: Color(0xFFA5F3FC),
+      pattern: _CoverPattern.waves,
+      begin: Alignment.bottomLeft,
+      end: Alignment.topRight,
+    ),
+    _CoverStyle(
+      colors: [Color(0xFF4338CA), Color(0xFF5B21B6), Color(0xFF7C3AED)],
+      accent: Color(0xFF00E5FF),
+      pattern: _CoverPattern.beams,
+    ),
+    _CoverStyle(
+      colors: [Color(0xFF22C55E), Color(0xFF16A34A), Color(0xFF0D9488)],
+      accent: Color(0xFFD9F99D),
+      pattern: _CoverPattern.horizon,
+    ),
+    _CoverStyle(
+      colors: [Color(0xFFA020F0), Color(0xFF6B21FF), Color(0xFF00E5FF)],
+      accent: Color(0xFFE0F2FE),
+      pattern: _CoverPattern.rings,
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    ),
   ];
 }
 
@@ -48,12 +129,12 @@ class TeacherCoverBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = TeacherCoverPresets.colorsFor(preset);
+    final style = TeacherCoverPresets._styleFor(preset);
     final seed = (preset ?? 0).clamp(0, TeacherCoverPresets.count - 1);
 
     Widget banner = CustomPaint(
-      painter: _BannerPainter(colors: colors, seed: seed),
-      child: child,
+      painter: _BannerPainter(style: style, seed: seed),
+      child: child ?? const SizedBox.expand(),
     );
 
     if (height != null) {
@@ -69,63 +150,155 @@ class TeacherCoverBanner extends StatelessWidget {
 }
 
 class _BannerPainter extends CustomPainter {
-  _BannerPainter({required this.colors, required this.seed});
+  _BannerPainter({required this.style, required this.seed});
 
-  final List<Color> colors;
+  final _CoverStyle style;
   final int seed;
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.width <= 0 || size.height <= 0) return;
+
     final rect = Offset.zero & size;
+    final begin = style.begin;
+    final end = style.end;
+
     canvas.drawRect(
       rect,
       Paint()
         ..shader = ui.Gradient.linear(
-          Offset(size.width * 0.1, 0),
-          Offset(size.width * 0.9, size.height),
-          colors,
+          _alignOffset(begin, size),
+          _alignOffset(end, size),
+          style.colors,
+          [0.0, 0.55, 1.0],
         ),
     );
 
-    final glow = Paint()..color = Colors.white.withValues(alpha: 0.06);
-    for (var i = 0; i < 6; i++) {
-      final r = 40.0 + i * 28 + (seed * 7);
-      canvas.drawCircle(
-        Offset(size.width * (0.15 + seed * 0.05), size.height * 0.35),
-        r,
-        glow,
-      );
-    }
+    _drawPattern(canvas, size);
 
-    final ring = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5
-      ..color = Colors.white.withValues(alpha: 0.12);
-    for (var i = 0; i < 4; i++) {
-      canvas.drawCircle(
-        Offset(size.width * 0.82, size.height * 0.25),
-        24.0 + i * 18 + seed * 2,
-        ring,
-      );
-    }
+    // Soft light wash — keeps colors vivid instead of crushing to black.
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = ui.Gradient.radial(
+          Offset(size.width * 0.78, size.height * 0.18),
+          size.width * 0.55,
+          [Colors.white.withValues(alpha: 0.22), Colors.transparent],
+        ),
+    );
 
-    final sparkle = Paint()..color = AppTheme.accent.withValues(alpha: 0.35);
-    final rnd = math.Random(seed + 42);
-    for (var i = 0; i < 14; i++) {
-      final x = rnd.nextDouble() * size.width;
-      final y = rnd.nextDouble() * size.height;
-      canvas.drawCircle(Offset(x, y), 1.2 + rnd.nextDouble() * 2, sparkle);
-    }
-
+    // Gentle bottom fade for avatar/text readability (not a black slab).
     canvas.drawRect(
       rect,
       Paint()
         ..shader = ui.Gradient.linear(
-          Offset(0, size.height * 0.45),
+          Offset(0, size.height * 0.55),
           Offset(0, size.height),
-          [Colors.transparent, Colors.black.withValues(alpha: 0.55)],
+          [Colors.transparent, Colors.black.withValues(alpha: 0.28)],
         ),
     );
+  }
+
+  void _drawPattern(Canvas canvas, Size size) {
+    switch (style.pattern) {
+      case _CoverPattern.aurora:
+        _aurora(canvas, size);
+      case _CoverPattern.waves:
+        _waves(canvas, size);
+      case _CoverPattern.rings:
+        _rings(canvas, size);
+      case _CoverPattern.beams:
+        _beams(canvas, size);
+      case _CoverPattern.petals:
+        _petals(canvas, size);
+      case _CoverPattern.horizon:
+        _horizon(canvas, size);
+    }
+  }
+
+  void _aurora(Canvas canvas, Size size) {
+    final paint = Paint()..color = style.accent.withValues(alpha: 0.28);
+    final path = Path()
+      ..moveTo(0, size.height * 0.55)
+      ..quadraticBezierTo(
+        size.width * 0.35,
+        size.height * (0.15 + seed * 0.02),
+        size.width * 0.7,
+        size.height * 0.45,
+      )
+      ..quadraticBezierTo(size.width, size.height * 0.2, size.width, size.height * 0.65)
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  void _waves(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = style.accent.withValues(alpha: 0.35);
+    for (var i = 0; i < 4; i++) {
+      final path = Path();
+      final y = size.height * (0.25 + i * 0.14);
+      path.moveTo(0, y);
+      for (var x = 0.0; x <= size.width; x += 8) {
+        path.lineTo(
+          x,
+          y + math.sin((x / size.width) * math.pi * 3 + seed + i) * 10,
+        );
+      }
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  void _rings(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = Colors.white.withValues(alpha: 0.22);
+    final center = Offset(size.width * 0.82, size.height * 0.32);
+    for (var i = 0; i < 5; i++) {
+      canvas.drawCircle(center, 18.0 + i * 16 + seed * 1.5, paint);
+    }
+  }
+
+  void _beams(Canvas canvas, Size size) {
+    final paint = Paint()..color = style.accent.withValues(alpha: 0.18);
+    final rnd = math.Random(seed + 7);
+    for (var i = 0; i < 6; i++) {
+      final x = rnd.nextDouble() * size.width;
+      final path = Path()
+        ..moveTo(x, -10)
+        ..lineTo(x + 40, size.height + 10)
+        ..lineTo(x + 18, size.height + 10)
+        ..close();
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  void _petals(Canvas canvas, Size size) {
+    final paint = Paint()..color = style.accent.withValues(alpha: 0.25);
+    final rnd = math.Random(seed + 19);
+    for (var i = 0; i < 8; i++) {
+      final cx = rnd.nextDouble() * size.width;
+      final cy = rnd.nextDouble() * size.height * 0.75;
+      canvas.drawCircle(Offset(cx, cy), 14 + rnd.nextDouble() * 22, paint);
+    }
+  }
+
+  void _horizon(Canvas canvas, Size size) {
+    final sun = Paint()..color = style.accent.withValues(alpha: 0.45);
+    canvas.drawCircle(Offset(size.width * 0.2, size.height * 0.38), (28 + seed).toDouble(), sun);
+    final hill = Paint()..color = Colors.white.withValues(alpha: 0.12);
+    final path = Path()
+      ..moveTo(0, size.height * 0.72)
+      ..quadraticBezierTo(size.width * 0.35, size.height * 0.45, size.width * 0.65, size.height * 0.68)
+      ..quadraticBezierTo(size.width * 0.9, size.height * 0.82, size.width, size.height * 0.58)
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+    canvas.drawPath(path, hill);
   }
 
   @override
@@ -152,7 +325,7 @@ class TeacherCoverPicker extends StatelessWidget {
         crossAxisCount: 3,
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
-        childAspectRatio: 1.6,
+        childAspectRatio: 1.55,
       ),
       itemCount: TeacherCoverPresets.count,
       itemBuilder: (context, i) {
@@ -182,13 +355,18 @@ class TeacherCoverPicker extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  TeacherCoverBanner(preset: i),
+                  TeacherCoverBanner(preset: i, height: 72),
                   if (isSelected)
-                    const Align(
-                      alignment: Alignment.topRight,
-                      child: Padding(
-                        padding: EdgeInsets.all(6),
-                        child: Icon(Icons.check_circle, color: AppTheme.accent, size: 22),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.5), width: 2),
+                      ),
+                      child: const Align(
+                        alignment: Alignment.topRight,
+                        child: Padding(
+                          padding: EdgeInsets.all(5),
+                          child: Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                        ),
                       ),
                     ),
                 ],
@@ -199,4 +377,88 @@ class TeacherCoverPicker extends StatelessWidget {
       },
     );
   }
+}
+
+/// Bottom sheet for choosing a teacher profile cover.
+Future<void> showTeacherCoverPickerSheet({
+  required BuildContext context,
+  required int? selected,
+  required ValueChanged<int> onSelected,
+}) {
+  final l10n = context.l10n;
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppTheme.card,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (ctx) {
+      var current = selected ?? 0;
+      return StatefulBuilder(
+        builder: (ctx, setLocal) {
+          return SafeArea(
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 12,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppTheme.muted.withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    l10n.profileCoverTitle,
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    l10n.profileCoverHint,
+                    style: TextStyle(color: AppTheme.muted.withValues(alpha: 0.9), fontSize: 13),
+                  ),
+                  const SizedBox(height: 14),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: TeacherCoverBanner(preset: current, height: 110),
+                  ),
+                  const SizedBox(height: 16),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: TeacherCoverPicker(
+                        selected: current,
+                        onSelected: (i) {
+                          setLocal(() => current = i);
+                          onSelected(i);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
+Offset _alignOffset(Alignment alignment, Size size) {
+  return Offset(
+    (alignment.x + 1) / 2 * size.width,
+    (alignment.y + 1) / 2 * size.height,
+  );
 }

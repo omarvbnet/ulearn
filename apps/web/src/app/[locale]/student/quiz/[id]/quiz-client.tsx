@@ -13,6 +13,7 @@ type Question = {
   textEn: string;
   options: Record<string, string> | { key: string; label: string }[];
   points: number;
+  timeLimitSec?: number | null;
 };
 
 type Quiz = {
@@ -43,6 +44,23 @@ export function QuizClient({ quizId, locale }: { quizId: string; locale: string 
   const [result, setResult] = useState<Attempt | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const startedAt = useRef(0);
+  const perQuestionTimers = useRef(false);
+
+  const hasPerQuestionTimers = (q: Quiz | null) =>
+    (q?.questions ?? []).some((item) => (item.timeLimitSec ?? 0) > 0);
+
+  const resetQuestionTimer = useCallback((index: number, q: Quiz | null) => {
+    if (!q) return;
+    const limit = q.questions[index]?.timeLimitSec;
+    setTimeLeft(limit && limit > 0 ? limit : null);
+  }, []);
+
+  const goToQuestion = useCallback((index: number) => {
+    setCurrent(index);
+    if (perQuestionTimers.current && quiz) {
+      resetQuestionTimer(index, quiz);
+    }
+  }, [quiz, resetQuestionTimer]);
 
   useEffect(() => {
     fetch(`/api/quizzes/${quizId}`).then(async (res) => {
@@ -79,16 +97,30 @@ export function QuizClient({ quizId, locale }: { quizId: string; locale: string 
   useEffect(() => {
     if (!started || timeLeft === null || result) return;
     if (timeLeft <= 0) {
-      submit();
+      setTimeLeft(null);
+      if (perQuestionTimers.current && quiz) {
+        if (current < quiz.questions.length - 1) {
+          goToQuestion(current + 1);
+        } else {
+          submit();
+        }
+      } else {
+        submit();
+      }
       return;
     }
     const t = setTimeout(() => setTimeLeft((s) => (s === null ? null : s - 1)), 1000);
     return () => clearTimeout(t);
-  }, [started, timeLeft, result, submit]);
+  }, [started, timeLeft, result, submit, quiz, current, goToQuestion]);
 
   function start() {
     setStarted(true);
     startedAt.current = Date.now();
+    perQuestionTimers.current = hasPerQuestionTimers(quiz);
+    if (perQuestionTimers.current) {
+      resetQuestionTimer(0, quiz);
+      return;
+    }
     if (quiz?.timeLimitSec) setTimeLeft(quiz.timeLimitSec);
   }
 
@@ -133,6 +165,8 @@ export function QuizClient({ quizId, locale }: { quizId: string; locale: string 
 
   /* ── Intro screen ── */
   if (!started) {
+    const timedCount = quiz.questions.filter((item) => (item.timeLimitSec ?? 0) > 0).length;
+    const hasPerQ = timedCount > 0;
     return (
       <Card className="animate-slide-up mx-auto max-w-lg py-10 text-center">
         <h1 className="text-2xl font-bold glow-text">{quiz.titleEn}</h1>
@@ -143,7 +177,11 @@ export function QuizClient({ quizId, locale }: { quizId: string; locale: string 
           </div>
           <div className="stat-card !p-3">
             <p className="text-lg font-bold">
-              {quiz.timeLimitSec ? `${Math.round(quiz.timeLimitSec / 60)}m` : "∞"}
+              {hasPerQ
+                ? `${timedCount} timed`
+                : quiz.timeLimitSec
+                  ? `${Math.round(quiz.timeLimitSec / 60)}m`
+                  : "∞"}
             </p>
             <p className="text-xs text-muted">{t.quiz.time}</p>
           </div>
@@ -211,12 +249,12 @@ export function QuizClient({ quizId, locale }: { quizId: string; locale: string 
       </Card>
 
       <div className="flex items-center justify-between">
-        <Button variant="outline" disabled={current === 0} onClick={() => setCurrent((c) => c - 1)}>
+        <Button variant="outline" disabled={current === 0} onClick={() => goToQuestion(current - 1)}>
           {t.quiz.previous}
         </Button>
         <span className="text-sm text-muted">{answered}/{quiz.questions.length} {t.quiz.answeredCount}</span>
         {current < quiz.questions.length - 1 ? (
-          <Button onClick={() => setCurrent((c) => c + 1)}>{t.quiz.next}</Button>
+          <Button onClick={() => goToQuestion(current + 1)}>{t.quiz.next}</Button>
         ) : (
           <Button onClick={submit} disabled={submitting}>
             {submitting ? t.quiz.submitting : t.quiz.submit}

@@ -266,6 +266,7 @@
       "photoUpdateFailed": "نەتوانرا وێنە نوێ بکرێتەوە",
       "coverTitle": "بەرگی پرۆفایل",
       "coverHint": "بانەرێک بۆ پرۆفایلی گشتی مامۆستا هەڵبژێرە",
+      "changeCover": "بۆ هەڵبژاردنی بەرگ دابگرە",
       "coverUpdated": "بەرگ نوێکرایەوە",
       "coverSaveFailed": "نەتوانرا بەرگ پاشەکەوت بکرێت",
       "role": "ڕۆڵ",
@@ -445,11 +446,22 @@
       "chooseCover": "Choose cover",
       "fromVideo": "From video",
       "yourShorts": "Your short videos",
-      "addQuizMinOptions": "Add at least two answer options",
+      "addQuizMinOptions": "Add at least two answer options for each question",
       "quizAdded": "Quiz added to your course",
       "quizSaveFailed": "Could not save quiz: {error}",
       "atEndOfCourse": "At end of course",
-      "correctAnswer": "Correct answer"
+      "correctAnswer": "Correct answer",
+      "quizBuilderHint": "Add multiple questions per quiz. Enable a timer on any question if you want a time limit.",
+      "quizTitle": "Quiz title",
+      "questionsSection": "Questions ({count})",
+      "addQuestion": "Add question",
+      "removeQuestion": "Remove question",
+      "questionNumber": "Question {n}",
+      "enableQuestionTimer": "Time limit for this question",
+      "enableQuestionTimerHint": "Optional — auto-advances when time runs out",
+      "timerSeconds": "Seconds allowed",
+      "secondsShort": "sec",
+      "saveQuiz": "Save quiz"
     },
     "qa": {
       "postFailed": "Could not post your question",
@@ -541,7 +553,8 @@
       "done": "Done",
       "loading": "Loading quiz…",
       "loadFailed": "Could not load quiz",
-      "notFound": "Quiz not found or no longer available"
+      "notFound": "Quiz not found or no longer available",
+      "timedQuestions": "{count} timed"
     },
     "pending": {
       "badge": "چاوەڕێی پەسەندکردن"
