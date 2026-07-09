@@ -1,5 +1,6 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { ContentType } from "@prisma/client";
 import { z } from "zod";
 
 async function ownCourse(userId: string, courseId: string) {
@@ -12,9 +13,9 @@ const docSchema = z.object({
   title: z.string().min(1).max(200),
   fileKey: z.string().optional(),
   fileUrl: z.string().url().optional(),
-  fileName: z.string().optional(),
   mimeType: z.string().optional(),
-  sizeBytes: z.number().int().positive().optional(),
+  fileSize: z.number().int().positive().optional(),
+  type: z.nativeEnum(ContentType).optional(),
   lessonId: z.string().optional(),
   sortOrder: z.number().int().optional(),
 });
@@ -45,16 +46,16 @@ export async function POST(
     if (!lesson) return error("Lesson not found", 404, "NOT_FOUND");
   }
 
-  const document = await prisma.courseLessonDocument.create({
+  const document = await prisma.courseMaterial.create({
     data: {
       courseId: id,
       lessonId: parsed.data.lessonId ?? null,
       title: parsed.data.title,
+      type: parsed.data.type ?? ContentType.PDF,
       fileKey: parsed.data.fileKey ?? null,
       fileUrl: parsed.data.fileUrl ?? null,
-      fileName: parsed.data.fileName ?? null,
       mimeType: parsed.data.mimeType ?? null,
-      sizeBytes: parsed.data.sizeBytes ?? null,
+      fileSize: parsed.data.fileSize ?? null,
       sortOrder: parsed.data.sortOrder ?? 0,
     },
   });
@@ -74,8 +75,8 @@ export async function GET(
   const course = await ownCourse(auth.session.userId, id);
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
-  const documents = await prisma.courseLessonDocument.findMany({
-    where: { courseId: id },
+  const documents = await prisma.courseMaterial.findMany({
+    where: { courseId: id, deletedAt: null },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     include: { lesson: { select: { id: true, title: true } } },
   });

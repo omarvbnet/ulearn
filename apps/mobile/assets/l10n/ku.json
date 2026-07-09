@@ -366,7 +366,14 @@
       "noDocumentsHint": "مامۆستا دەتوانێت PDF و تێبینی بۆ ئەم کۆرسە بار بکات.",
       "documentOpening": "بەستەری فایل کۆپی کرا",
       "selectLessonForQA": "وانەیەک هەڵبژێرە بۆ پرسیار و وەڵام",
-      "noLessonsForQA": "هێشتا وانە بۆ پرسیار و وەڵام نییە"
+      "noLessonsForQA": "هێشتا وانە بۆ پرسیار و وەڵام نییە",
+      "courseProgress": "Course progress",
+      "previewAvailable": "Preview",
+      "tabVideosQuizzes": "Videos & Quizzes",
+      "noMaterials": "No supplementary files yet",
+      "noMaterialsHint": "Teachers can attach PDFs, slides, and notes for this course.",
+      "materialOpening": "File ready — open from your downloads",
+      "selectLessonForQa": "Select a lesson to view or ask questions"
     },
     "cast": {
       "title": "Cast to TV",

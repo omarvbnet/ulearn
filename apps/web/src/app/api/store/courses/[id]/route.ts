@@ -141,28 +141,41 @@ export async function GET(
     where: { courseId: id, status: "PAID" },
   });
 
-  const rawDocuments = await prisma.courseLessonDocument.findMany({
-    where: { courseId: id },
-    orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
-    include: { lesson: { select: { id: true, title: true } } },
-  });
+  const materialRows = hasAccess
+    ? await prisma.courseMaterial.findMany({
+        where: { courseId: id, deletedAt: null },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          fileKey: true,
+          fileUrl: true,
+          fileSize: true,
+          mimeType: true,
+          lessonId: true,
+          sortOrder: true,
+          createdAt: true,
+        },
+      })
+    : [];
 
-  const documents = await Promise.all(
-    rawDocuments.map(async (d) => {
-      let fileUrl = hasAccess ? d.fileUrl : null;
-      if (hasAccess && d.fileKey && !fileUrl) {
-        fileUrl = await getDownloadUrl(d.fileKey).catch(() => null);
+  const materials = await Promise.all(
+    materialRows.map(async (m) => {
+      let fileUrl = m.fileUrl;
+      if (m.fileKey && !fileUrl) {
+        fileUrl = await getDownloadUrl(m.fileKey).catch(() => null);
       }
       return {
-        id: d.id,
-        title: d.title,
-        fileName: d.fileName,
-        fileUrl: hasAccess ? fileUrl : null,
-        mimeType: d.mimeType,
-        sizeBytes: d.sizeBytes,
-        lessonId: d.lessonId,
-        lessonTitle: d.lesson?.title ?? null,
-        createdAt: d.createdAt,
+        id: m.id,
+        title: m.title,
+        type: m.type,
+        fileUrl,
+        fileSize: m.fileSize,
+        mimeType: m.mimeType,
+        lessonId: m.lessonId,
+        sortOrder: m.sortOrder,
+        createdAt: m.createdAt,
       };
     })
   );
@@ -171,12 +184,12 @@ export async function GET(
     course: {
       ...course,
       lessons,
+      materials,
       totalDurationSec,
       lessonsCount: lessons.length,
       subscribersCount,
     },
     quizzes,
-    documents,
     purchased,
     isOwnCourse,
     favorites: favoriteCount,

@@ -366,7 +366,14 @@
       "noDocumentsHint": "Öğretmenler bu kurs için PDF, slayt ve not ekleyebilir.",
       "documentOpening": "Dosya bağlantısı kopyalandı",
       "selectLessonForQA": "Soru sormak için bir ders seçin",
-      "noLessonsForQA": "Henüz soru-cevap için ders yok"
+      "noLessonsForQA": "Henüz soru-cevap için ders yok",
+      "courseProgress": "Course progress",
+      "previewAvailable": "Preview",
+      "tabVideosQuizzes": "Videos & Quizzes",
+      "noMaterials": "No supplementary files yet",
+      "noMaterialsHint": "Teachers can attach PDFs, slides, and notes for this course.",
+      "materialOpening": "File ready — open from your downloads",
+      "selectLessonForQa": "Select a lesson to view or ask questions"
     },
     "cast": {
       "title": "Cast to TV",

@@ -327,7 +327,7 @@ model Course {
   reactions CourseReaction[]
   favorites CourseFavorite[]
   quizzes   Quiz[]
-  documents CourseLessonDocument[]
+  materials CourseMaterial[]
 
   @@index([teacherId])
   @@index([stageId])
@@ -357,33 +357,37 @@ model CourseLesson {
   progress  CourseLessonProgress[]
   updates   CourseLessonUpdateRequest[]
   quizzesAfter Quiz[] @relation("QuizAfterLesson")
-  documents CourseLessonDocument[]
+  materials CourseMaterial[]
 
   @@index([courseId])
 }
 
-/// Supplementary files (PDFs, notes, slides) attached to a store course or lesson.
-model CourseLessonDocument {
-  id        String   @id @default(cuid())
+/// Supplementary files for a store course (PDFs, notes, attachments).
+model CourseMaterial {
+  id        String      @id @default(cuid())
   courseId  String
   lessonId  String?
   title     String
-  fileName  String?
+  type      ContentType @default(PDF)
   fileKey   String?
   fileUrl   String?
+  fileSize  Int?
   mimeType  String?
-  sizeBytes Int?
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  sortOrder Int         @default(0)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  deletedAt DateTime?
 
   course Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
   lesson CourseLesson? @relation(fields: [lessonId], references: [id], onDelete: SetNull)
 
   @@index([courseId])
   @@index([lessonId])
+  @@index([deletedAt])
 }
 
+/// Student Q&A on a store-course lesson (curriculum lessons have their
+/// own LessonQuestion/LessonAnswer models).
 model CourseLessonQuestion {
   id        String   @id @default(cuid())
   lessonId  String

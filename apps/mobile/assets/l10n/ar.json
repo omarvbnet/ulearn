@@ -366,7 +366,14 @@
       "noDocumentsHint": "يمكن للمعلّم إرفاق PDF وملاحظات وشرائح لهذه الدورة.",
       "documentOpening": "تم نسخ رابط الملف",
       "selectLessonForQA": "اختر درساً لعرض الأسئلة أو طرح سؤال",
-      "noLessonsForQA": "لا توجد دروس للأسئلة والأجوبة بعد"
+      "noLessonsForQA": "لا توجد دروس للأسئلة والأجوبة بعد",
+      "courseProgress": "Course progress",
+      "previewAvailable": "Preview",
+      "tabVideosQuizzes": "Videos & Quizzes",
+      "noMaterials": "No supplementary files yet",
+      "noMaterialsHint": "Teachers can attach PDFs, slides, and notes for this course.",
+      "materialOpening": "File ready — open from your downloads",
+      "selectLessonForQa": "Select a lesson to view or ask questions"
     },
     "cast": {
       "title": "البث على التلفاز",
