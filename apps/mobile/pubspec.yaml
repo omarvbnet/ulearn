@@ -30,6 +30,8 @@ dependencies:
   video_compress: ^3.1.4
   flutter_cache_manager: ^3.4.1
   flutter_to_airplay: ^2.1.0
+  pdfx: ^2.9.2
+  printing: ^5.14.3
 
 dev_dependencies:
   flutter_test:

@@ -8,9 +8,14 @@ import 'package:ulearn/core/widgets/skeleton.dart';
 
 /// Ask & answer thread for a course video lesson.
 class LessonQASection extends StatefulWidget {
-  const LessonQASection({super.key, required this.lessonId});
+  const LessonQASection({
+    super.key,
+    required this.lessonId,
+    this.onComposerFocusChanged,
+  });
 
   final String lessonId;
+  final ValueChanged<bool>? onComposerFocusChanged;
 
   @override
   State<LessonQASection> createState() => _LessonQASectionState();
@@ -21,21 +26,80 @@ class _LessonQASectionState extends State<LessonQASection> {
   bool _loading = true;
   final _askCtrl = TextEditingController();
   final _answerCtrls = <String, TextEditingController>{};
+  final _askFocus = FocusNode();
+  final _answerFocusNodes = <String, FocusNode>{};
   bool _posting = false;
 
   @override
   void initState() {
     super.initState();
+    _askFocus.addListener(_syncComposerFocus);
     _load();
   }
 
   @override
   void dispose() {
+    widget.onComposerFocusChanged?.call(false);
+    _askFocus.removeListener(_syncComposerFocus);
+    _askFocus.dispose();
     _askCtrl.dispose();
+    for (final node in _answerFocusNodes.values) {
+      node.removeListener(_syncComposerFocus);
+      node.dispose();
+    }
     for (final c in _answerCtrls.values) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  FocusNode _answerFocusFor(String questionId) {
+    return _answerFocusNodes.putIfAbsent(questionId, () {
+      final node = FocusNode();
+      node.addListener(_syncComposerFocus);
+      return node;
+    });
+  }
+
+  void _syncComposerFocus() {
+    final focused =
+        _askFocus.hasFocus || _answerFocusNodes.values.any((n) => n.hasFocus);
+    widget.onComposerFocusChanged?.call(focused);
+    if (focused) {
+      _scrollFocusedFieldIntoView();
+    }
+  }
+
+  void _scrollFocusedFieldIntoView() {
+    void scroll() {
+      if (!mounted) return;
+      FocusNode? focused;
+      if (_askFocus.hasFocus) {
+        focused = _askFocus;
+      } else {
+        for (final node in _answerFocusNodes.values) {
+          if (node.hasFocus) {
+            focused = node;
+            break;
+          }
+        }
+      }
+      final ctx = focused?.context;
+      if (ctx == null || !ctx.mounted) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.25,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      scroll();
+      Future.delayed(const Duration(milliseconds: 320), () {
+        if (mounted) scroll();
+      });
+    });
   }
 
   Future<void> _load() async {
@@ -68,6 +132,7 @@ class _LessonQASectionState extends State<LessonQASection> {
         _questions.insert(0, data['question'] as Map<String, dynamic>);
         _askCtrl.clear();
       });
+      _askFocus.unfocus();
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -97,6 +162,7 @@ class _LessonQASectionState extends State<LessonQASection> {
         q['answers'] = answers;
         ctrl.clear();
       });
+      _answerFocusFor(questionId).unfocus();
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -140,8 +206,11 @@ class _LessonQASectionState extends State<LessonQASection> {
             Expanded(
               child: TextField(
                 controller: _askCtrl,
+                focusNode: _askFocus,
                 minLines: 1,
                 maxLines: 3,
+                textInputAction: TextInputAction.send,
+                onSubmitted: (_) => _ask(),
                 decoration: InputDecoration(
                   hintText: l10n.t('student.askPlaceholder'),
                   isDense: true,
@@ -172,6 +241,7 @@ class _LessonQASectionState extends State<LessonQASection> {
             final qid = q['id'].toString();
             final answerCtrl =
                 _answerCtrls.putIfAbsent(qid, TextEditingController.new);
+            final answerFocus = _answerFocusFor(qid);
 
             return StaggeredItem(
               index: e.key,
@@ -261,8 +331,11 @@ class _LessonQASectionState extends State<LessonQASection> {
                         Expanded(
                           child: TextField(
                             controller: answerCtrl,
+                            focusNode: answerFocus,
                             minLines: 1,
                             maxLines: 2,
+                            textInputAction: TextInputAction.send,
+                            onSubmitted: (_) => _answer(qid),
                             decoration: InputDecoration(
                               hintText: l10n.t('student.comment'),
                               isDense: true,

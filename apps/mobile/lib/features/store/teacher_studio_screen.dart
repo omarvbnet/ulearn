@@ -112,6 +112,44 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     return File(sourcePath);
   }
 
+  Future<Map<String, String>?> _uploadFile(
+    File file,
+    String filename,
+    String contentType, {
+    required String category,
+    required String folder,
+    bool reportProgress = false,
+  }) async {
+    final api = context.read<ApiClient>();
+    final size = await file.length();
+    setState(() => _uploadStatus = context.l10n.t('student.posting'));
+    final presign = await api.post('/api/admin/uploads', {
+      'filename': filename,
+      'contentType': contentType,
+      'size': size,
+      'category': category,
+      'folder': folder,
+    });
+    final uploadUrl = presign['uploadUrl']?.toString();
+    final key = presign['key']?.toString();
+    final publicUrl = presign['publicUrl']?.toString();
+    if (uploadUrl == null || key == null) return null;
+
+    await api.putFile(
+      uploadUrl,
+      file,
+      contentType,
+      onProgress: reportProgress
+          ? (sent, total) {
+              if (!mounted || total <= 0) return;
+              final pct = ((sent / total) * 100).round().clamp(0, 100);
+              setState(() => _uploadStatus = '$pct%');
+            }
+          : null,
+    );
+    return {'key': key, 'url': publicUrl ?? uploadUrl};
+  }
+
   Future<Map<String, String>?> _uploadBytes(
     List<int> bytes,
     String filename,
@@ -138,26 +176,26 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   }
 
   Future<Map<String, String>?> _uploadVideoFile(File file, String folder) async {
-    final bytes = await file.readAsBytes();
     final name = file.path.split(Platform.pathSeparator).last;
-    return _uploadBytes(
-      bytes,
+    return _uploadFile(
+      file,
       name.endsWith('.mp4') ? name : '$name.mp4',
       'video/mp4',
       category: 'video',
       folder: folder,
+      reportProgress: true,
     );
   }
 
   Future<Map<String, String>?> _uploadPdfFile(File file) async {
-    final bytes = await file.readAsBytes();
     final name = file.path.split(Platform.pathSeparator).last;
-    return _uploadBytes(
-      bytes,
+    return _uploadFile(
+      file,
       name.toLowerCase().endsWith('.pdf') ? name : '$name.pdf',
       'application/pdf',
       category: 'document',
       folder: 'teacher-course-pdfs',
+      reportProgress: true,
     );
   }
 

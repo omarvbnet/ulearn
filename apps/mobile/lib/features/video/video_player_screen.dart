@@ -8,6 +8,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/quiz/quiz_screen.dart';
+import 'package:ulearn/core/video/cast_watermarked_video.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
 import 'package:video_player/video_player.dart';
@@ -211,6 +212,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                         protection: _protection,
                         videoUrl: _videoUrl,
                         title: widget.title,
+                        lessonId: widget.lessonId,
                         speed: _speed,
                         onSpeed: (s) {
                           setState(() => _speed = s);
@@ -230,6 +232,7 @@ class _Controls extends StatelessWidget {
     required this.protection,
     required this.videoUrl,
     required this.title,
+    required this.lessonId,
     required this.speed,
     required this.onSpeed,
   });
@@ -238,6 +241,7 @@ class _Controls extends StatelessWidget {
   final VideoProtectionController? protection;
   final String? videoUrl;
   final String title;
+  final String lessonId;
   final double speed;
   final ValueChanged<double> onSpeed;
 
@@ -285,6 +289,8 @@ class _Controls extends StatelessWidget {
                     url: videoUrl!,
                     title: title,
                     protection: protection!,
+                    lessonId: lessonId,
+                    lessonKind: CastLessonKind.curriculum,
                     positionMs: controller.value.position.inMilliseconds,
                     onPause: () => controller.pause(),
                     onResume: () => controller.play(),

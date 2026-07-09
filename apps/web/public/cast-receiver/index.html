@@ -43,19 +43,18 @@
         position: absolute;
         left: 3%;
         right: 3%;
-        padding: 1.2vh 2vw;
+        padding: 1.4vh 2vw;
         border-radius: 0.6vh;
-        background: rgba(0, 0, 0, 0.72);
-        border: 0.2vh solid rgba(255, 193, 7, 0.75);
+        background: rgba(0, 0, 0, 0.82);
+        border: 0.25vh solid rgba(255, 193, 7, 0.9);
         color: #ffc107;
-        font-size: 3.6vh;
+        font-size: 4.2vh;
         font-weight: 700;
         text-align: center;
         text-shadow: 0 0.2vh 0.8vh rgba(0, 0, 0, 0.9);
         line-height: 1.25;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        white-space: normal;
+        word-break: break-word;
       }
       .wm-top { top: 4%; }
       .wm-bottom { bottom: 8%; }
@@ -75,13 +74,28 @@
     function showWatermarks(text) {
       clearWatermarks();
       if (!text) return;
-      const positions = ['wm-top', 'wm-bottom', 'wm-center'];
-      positions.forEach((cls) => {
+      const el = document.createElement('div');
+      el.className = 'wm-banner wm-bottom';
+      el.textContent = text;
+      watermarkLayer.appendChild(el);
+    }
+
+    let rotateTimer = null;
+    function startRotating(text) {
+      const slots = ['wm-top', 'wm-bottom', 'wm-center'];
+      let i = 0;
+      function tick() {
+        clearWatermarks();
+        if (!text) return;
         const el = document.createElement('div');
-        el.className = 'wm-banner ' + cls;
+        el.className = 'wm-banner ' + slots[i % slots.length];
         el.textContent = text;
         watermarkLayer.appendChild(el);
-      });
+        i += 1;
+      }
+      tick();
+      if (rotateTimer) clearInterval(rotateTimer);
+      rotateTimer = setInterval(tick, 5000);
     }
 
     playerManager.setMessageInterceptor(
@@ -93,14 +107,17 @@
           (loadRequestData.media && loadRequestData.media.metadata &&
             loadRequestData.media.metadata.subtitle) ||
           '';
-        showWatermarks(watermark);
+        startRotating(watermark);
         return loadRequestData;
       }
     );
 
     playerManager.addEventListener(
       cast.framework.events.EventType.MEDIA_FINISHED,
-      () => clearWatermarks()
+      () => {
+        if (rotateTimer) clearInterval(rotateTimer);
+        clearWatermarks();
+      }
     );
 
     context.start({ disableIdleTimeout: true });

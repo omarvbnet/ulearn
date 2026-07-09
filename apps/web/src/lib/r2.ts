@@ -3,6 +3,7 @@ import {
   PutObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -79,10 +80,24 @@ export function validateFile(
   return { valid: true };
 }
 
+export function uploadExpiresIn(category: string, size: number): number {
+  if (category === "video") {
+    // At least 2 hours; +1 hour per GB, capped at 24 hours.
+    const hours = Math.min(24, Math.max(2, Math.ceil(size / 1024 ** 3) + 2));
+    return hours * 3600;
+  }
+  if (category === "document" && size > 50 * 1024 * 1024) {
+    return 7200;
+  }
+  return 3600;
+}
+
 export async function getUploadUrl(params: {
   key: string;
   contentType: string;
   expiresIn?: number;
+  category?: string;
+  size?: number;
 }) {
   const command = new PutObjectCommand({
     Bucket: BUCKET,
@@ -90,8 +105,14 @@ export async function getUploadUrl(params: {
     ContentType: params.contentType,
   });
 
+  const expiresIn =
+    params.expiresIn ??
+    (params.category && params.size != null
+      ? uploadExpiresIn(params.category, params.size)
+      : 3600);
+
   const url = await getSignedUrl(r2, command, {
-    expiresIn: params.expiresIn ?? 3600,
+    expiresIn,
   });
 
   return {
@@ -108,6 +129,42 @@ export async function getDownloadUrl(key: string, expiresIn = 3600) {
 
 export async function deleteObject(key: string) {
   await r2.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
+}
+
+export async function objectExists(key: string): Promise<boolean> {
+  try {
+    await r2.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function downloadObjectToFile(key: string, destPath: string) {
+  const { createWriteStream } = await import("fs");
+  const { pipeline } = await import("stream/promises");
+  const response = await r2.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+  if (!response.Body) throw new Error("EMPTY_OBJECT");
+  await pipeline(response.Body as NodeJS.ReadableStream, createWriteStream(destPath));
+}
+
+export async function uploadFileFromPath(
+  key: string,
+  filePath: string,
+  contentType: string
+) {
+  const { createReadStream } = await import("fs");
+  const { stat } = await import("fs/promises");
+  const size = (await stat(filePath)).size;
+  await r2.send(
+    new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      Body: createReadStream(filePath),
+      ContentLength: size,
+      ContentType: contentType,
+    })
+  );
 }
 
 export function buildKey(folder: string, filename: string, userId?: string) {

@@ -9,6 +9,7 @@ import 'package:ulearn/core/widgets/lesson_cover.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/reels/teacher_profile_screen.dart';
+import 'package:ulearn/features/store/course_material_pdf_screen.dart';
 import 'package:ulearn/features/store/course_evaluation_sheet.dart';
 import 'package:ulearn/features/store/course_inline_player.dart';
 import 'package:ulearn/features/store/lesson_qa_section.dart';
@@ -42,6 +43,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   List<Map<String, dynamic>> _quizzes = [];
   List<Map<String, dynamic>> _materials = [];
   int _selectedTab = 0;
+  bool _qaComposerFocused = false;
   String? _error;
   bool _reacting = false;
   Map<String, dynamic>? _completion;
@@ -53,6 +55,11 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     _course = widget.summary != null ? Map.of(widget.summary!) : null;
     _load();
     _countView();
+  }
+
+  void _onQaComposerFocusChanged(bool focused) {
+    if (_qaComposerFocused == focused) return;
+    setState(() => _qaComposerFocused = focused);
   }
 
   bool _canWatch(Map<String, dynamic> lesson, bool unlocked) {
@@ -518,8 +525,24 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         unlocked: unlocked,
         completion: _completion,
         reacting: _reacting,
+        activeLesson: active,
+        activeVideoTitle: active != null
+            ? _lessonTitle(
+                context,
+                active,
+                () {
+                  final i = lessons.indexWhere(
+                    (l) => l['id']?.toString() == active['id']?.toString(),
+                  );
+                  return i >= 0 ? i : 0;
+                }(),
+              )
+            : null,
+        completedLessonCount: _completedLessonCount(lessons),
+        isOwnCourse: _isOwnCourse,
         onTeacherTap: onTeacherTap,
         onReact: _react,
+        onEvaluate: _showEvaluationSheet,
         l10n: l10n,
       );
     }
@@ -542,6 +565,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         unlocked: unlocked,
         onSelectLesson: (l) => _selectLesson(l, unlocked),
         lessonTitle: (l, i) => _lessonTitle(context, l, i),
+        onComposerFocusChanged: _onQaComposerFocusChanged,
       );
     }
     return _CourseMaterialsTab(
@@ -562,6 +586,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     required int views,
     required int subscribers,
     required dynamic l10n,
+    required bool collapseVideo,
   }) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
@@ -629,45 +654,30 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               ),
             ),
           ],
-          if (activeUrl != null && activeUrl.isNotEmpty) ...[
-            CourseInlinePlayer(
-              key: ValueKey(activeUrl),
-              url: ApiClient.absoluteUrl(activeUrl),
-              title: active?['title']?.toString() ?? l10n.t('student.videos'),
-              lessonId: activeId,
-              initiallyCompleted: active != null && _isLessonCompleted(active),
-              onCompleted: active != null ? () => _onLessonCompleted(active) : null,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              active?['title']?.toString() ?? '',
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.foreground,
-                height: 1.3,
-              ),
-            ),
-            if (active != null && _isLessonCompleted(active))
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Row(
+          if (activeUrl != null && activeUrl.isNotEmpty)
+            ClipRect(
+              child: AnimatedAlign(
+                alignment: Alignment.topCenter,
+                heightFactor: collapseVideo ? 0.0 : 1.0,
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeInOutCubic,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.check_circle_rounded, size: 16, color: Colors.greenAccent.withValues(alpha: 0.9)),
-                    const SizedBox(width: 6),
-                    Text(
-                      l10n.t('quiz.passed'),
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.greenAccent.withValues(alpha: 0.9),
-                      ),
+                    CourseInlinePlayer(
+                      key: ValueKey(activeUrl),
+                      url: ApiClient.absoluteUrl(activeUrl),
+                      title: active?['title']?.toString() ?? l10n.t('student.videos'),
+                      lessonId: activeId,
+                      initiallyCompleted: active != null && _isLessonCompleted(active),
+                      onCompleted: active != null ? () => _onLessonCompleted(active) : null,
                     ),
+                    const SizedBox(height: 16),
                   ],
                 ),
               ),
-            const SizedBox(height: 16),
-          ] else if (!unlocked) ...[
+            )
+          else if (!unlocked) ...[
             Container(
               height: 180,
               alignment: Alignment.center,
@@ -693,7 +703,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
             index: 0,
             child: _CourseDetailTabs(
               selected: _selectedTab,
-              onSelected: (i) => setState(() => _selectedTab = i),
+              onSelected: (i) {
+                setState(() {
+                  _selectedTab = i;
+                  if (i != 2) _qaComposerFocused = false;
+                });
+              },
               lessonsCount: lessons.length,
               quizzesCount: unlocked ? _quizzes.length : 0,
               materialsCount: unlocked ? _materials.length : 0,
@@ -827,6 +842,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     final activeId = active?['id']?.toString();
 
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
@@ -863,6 +879,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
             views: views,
             subscribers: subscribers,
             l10n: l10n,
+            collapseVideo: _selectedTab == 2 && _qaComposerFocused,
           ),
           Expanded(
             child: Padding(
@@ -890,26 +907,6 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: unlocked
-          ? SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                child: _CourseProgressHeader(
-                  lessons: lessons,
-                  quizzesCount: _quizzes.length,
-                  completedCount: _completedLessonCount(lessons),
-                  unlocked: unlocked,
-                  l10n: l10n,
-                  compact: true,
-                  pendingEvaluation:
-                      _completion?['pendingEvaluation'] == true && !_isOwnCourse,
-                  myRating: (_completion?['myRating'] as num?)?.toInt(),
-                  onEvaluate: _showEvaluationSheet,
-                ),
-              ),
-            )
-          : null,
       bottomSheet: unlocked
           ? null
           : Container(
@@ -1186,8 +1183,13 @@ class _CourseDetailsTab extends StatelessWidget {
     required this.unlocked,
     required this.completion,
     required this.reacting,
+    required this.activeLesson,
+    required this.activeVideoTitle,
+    required this.completedLessonCount,
+    required this.isOwnCourse,
     required this.onTeacherTap,
     required this.onReact,
+    required this.onEvaluate,
     required this.l10n,
   });
 
@@ -1206,27 +1208,115 @@ class _CourseDetailsTab extends StatelessWidget {
   final bool unlocked;
   final Map<String, dynamic>? completion;
   final bool reacting;
+  final Map<String, dynamic>? activeLesson;
+  final String? activeVideoTitle;
+  final int completedLessonCount;
+  final bool isOwnCourse;
   final VoidCallback onTeacherTap;
   final void Function(String type) onReact;
+  final VoidCallback onEvaluate;
   final dynamic l10n;
+
+  bool _isLessonCompleted(Map<String, dynamic> lesson) {
+    if (lesson['isCompleted'] == true || lesson['completed'] == true) return true;
+    return ((lesson['progressPct'] as num?)?.toDouble() ?? 0) >= 90;
+  }
 
   @override
   Widget build(BuildContext context) {
     final courseRating = (course['courseRating'] as num?)?.toDouble();
     final courseRatingCount = (course['courseRatingCount'] as num?)?.toInt() ?? 0;
     final favorites = (course['favorites'] as num?)?.toInt() ?? 0;
-    final completedLessons = lessons.where((l) {
-      if (l['isCompleted'] == true || l['completed'] == true) return true;
-      return ((l['progressPct'] as num?)?.toDouble() ?? 0) >= 90;
-    }).length;
     final passedQuizzes = unlocked
         ? quizzes.where((q) => q['passedByMe'] == true).length
         : 0;
     final myRating = (completion?['myRating'] as num?)?.toInt();
+    final active = activeLesson;
+    final activeProgress =
+        ((active?['progressPct'] as num?)?.toDouble() ?? 0).clamp(0.0, 100.0);
+    final activeCompleted = active != null && _isLessonCompleted(active);
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 16),
       children: [
+        Text(
+          l10n.t('mobile.store.currentVideo'),
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTheme.card,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: active != null ? AppTheme.accent.withValues(alpha: 0.45) : AppTheme.cardBorder,
+            ),
+          ),
+          child: activeVideoTitle != null && activeVideoTitle!.isNotEmpty
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          activeCompleted
+                              ? Icons.check_circle_rounded
+                              : Icons.play_circle_outline_rounded,
+                          color: activeCompleted ? Colors.greenAccent : AppTheme.accent,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            activeVideoTitle!,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (active != null && !activeCompleted && activeProgress > 0) ...[
+                      const SizedBox(height: 10),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: LinearProgressIndicator(
+                          value: activeProgress / 100,
+                          minHeight: 5,
+                          backgroundColor: AppTheme.cardBorder,
+                          color: AppTheme.accent,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${activeProgress.toStringAsFixed(0)}%',
+                        style: const TextStyle(fontSize: 11.5, color: AppTheme.muted),
+                      ),
+                    ],
+                    if (activeCompleted) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        l10n.t('quiz.passed'),
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.greenAccent.withValues(alpha: 0.95),
+                        ),
+                      ),
+                    ],
+                  ],
+                )
+              : Text(
+                  l10n.t('mobile.store.selectLessonHint'),
+                  style: const TextStyle(color: AppTheme.muted, height: 1.4, fontSize: 13),
+                ),
+        ),
+        const SizedBox(height: 16),
         Material(
           color: Colors.transparent,
           child: InkWell(
@@ -1358,74 +1448,6 @@ class _CourseDetailsTab extends StatelessWidget {
             ),
           ],
         ),
-        if (unlocked && (completedLessons > 0 || quizzes.isNotEmpty)) ...[
-          const SizedBox(height: 18),
-          Text(
-            l10n.t('mobile.store.yourResults'),
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-          ),
-          const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  AppTheme.primary.withValues(alpha: 0.15),
-                  AppTheme.card,
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppTheme.cardBorder),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.play_lesson_outlined, size: 18, color: AppTheme.accent),
-                    const SizedBox(width: 8),
-                    Text(
-                      '$completedLessons/${lessons.length} ${l10n.t('student.videos')}',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-                if (quizzes.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Icon(Icons.quiz_outlined, size: 18, color: AppTheme.accent),
-                      const SizedBox(width: 8),
-                      Text(
-                        l10n.t('mobile.store.quizzesPassed', {
-                          'passed': '$passedQuizzes',
-                          'total': '${quizzes.length}',
-                        }),
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                ],
-                if (myRating != null) ...[
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Icon(Icons.star_rounded, size: 18, color: Colors.amber),
-                      const SizedBox(width: 8),
-                      Text(
-                        l10n.t('mobile.store.yourRating', {'rating': '$myRating'}),
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
         const SizedBox(height: 18),
         Text(
           l10n.t('mobile.store.about'),
@@ -1438,6 +1460,47 @@ class _CourseDetailsTab extends StatelessWidget {
               : l10n.t('mobile.store.noDescription'),
           style: const TextStyle(color: AppTheme.muted, height: 1.5, fontSize: 13.5),
         ),
+        if (unlocked) ...[
+          const SizedBox(height: 20),
+          _CourseProgressHeader(
+            lessons: lessons,
+            quizzesCount: quizzes.length,
+            completedCount: completedLessonCount,
+            unlocked: unlocked,
+            l10n: l10n,
+            compact: false,
+            pendingEvaluation: completion?['pendingEvaluation'] == true && !isOwnCourse,
+            myRating: myRating,
+            onEvaluate: onEvaluate,
+          ),
+          if (quizzes.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppTheme.card,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.cardBorder),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.quiz_outlined, size: 18, color: AppTheme.accent),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      l10n.t('mobile.store.quizzesPassed', {
+                        'passed': '$passedQuizzes',
+                        'total': '${quizzes.length}',
+                      }),
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
       ],
     );
   }
@@ -1709,6 +1772,7 @@ class _CourseQATab extends StatefulWidget {
     required this.unlocked,
     required this.onSelectLesson,
     required this.lessonTitle,
+    this.onComposerFocusChanged,
   });
 
   final List<Map<String, dynamic>> lessons;
@@ -1716,6 +1780,7 @@ class _CourseQATab extends StatefulWidget {
   final bool unlocked;
   final ValueChanged<Map<String, dynamic>> onSelectLesson;
   final String Function(Map<String, dynamic> lesson, int index) lessonTitle;
+  final ValueChanged<bool>? onComposerFocusChanged;
 
   @override
   State<_CourseQATab> createState() => _CourseQATabState();
@@ -1802,9 +1867,16 @@ class _CourseQATabState extends State<_CourseQATab> {
         const SizedBox(height: 12),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: EdgeInsets.only(
+              bottom: 12 + MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             children: [
-              LessonQASection(key: ValueKey(selectedId), lessonId: selectedId),
+              LessonQASection(
+                key: ValueKey(selectedId),
+                lessonId: selectedId,
+                onComposerFocusChanged: widget.onComposerFocusChanged,
+              ),
             ],
           ),
         ),
@@ -1896,6 +1968,18 @@ class _CourseMaterialsTab extends StatelessWidget {
               borderRadius: BorderRadius.circular(14),
               onTap: url != null && url.isNotEmpty
                   ? () {
+                      final title = m['title']?.toString() ?? l10n.t('student.materials');
+                      if (type?.toUpperCase() == 'PDF') {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => CourseMaterialPdfScreen(
+                              url: url,
+                              title: title,
+                            ),
+                          ),
+                        );
+                        return;
+                      }
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(l10n.t('mobile.store.materialOpening')),

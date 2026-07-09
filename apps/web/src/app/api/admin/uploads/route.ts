@@ -45,6 +45,11 @@ export async function POST(request: Request) {
     });
   }
 
-  const upload = await getUploadUrl({ key, contentType });
+  const upload = await getUploadUrl({
+    key,
+    contentType,
+    category,
+    size,
+  });
   return json(upload);
 }

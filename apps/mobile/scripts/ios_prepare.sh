@@ -52,7 +52,16 @@ if [ ! -f "$PODS_CHECK" ] || [ ! -f "$FIREBASE_CHECK" ] || [ ! -f "$GOOGLEUTILS_
   echo "CocoaPods reinstalled."
 fi
 
-# Clean duplicate iCloud copies in Flutter generated folder only (never touch Pods/).
+# Clean duplicate iCloud copies in Flutter generated folder.
 find ios/Flutter -maxdepth 1 \( -name 'Flutter [0-9]*.podspec' -o -name 'Generated [0-9]*.xcconfig' -o -name 'flutter_export_environment [0-9]*.sh' \) -delete 2>/dev/null || true
+
+# iCloud can also duplicate files inside Pods (e.g. pb_decode 2.c), causing linker errors.
+if find ios/Pods -name '* [0-9]*' -print -quit 2>/dev/null | grep -q .; then
+  echo "Duplicate iCloud Pod copies detected — reinstalling CocoaPods..."
+  rm -rf ios/Pods ios/Podfile.lock ios/.symlinks
+  flutter pub get
+  (cd ios && pod install --repo-update)
+  echo "CocoaPods reinstalled after duplicate cleanup."
+fi
 
 echo "iOS environment ready."

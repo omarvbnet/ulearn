@@ -185,6 +185,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       url: widget.url,
       title: widget.title,
       protection: _protection!,
+      lessonId: widget.lessonId,
       positionMs: _controller!.value.position.inMilliseconds,
       onPause: () => _controller?.pause(),
       onResume: () {
@@ -215,6 +216,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
           title: widget.title,
           speed: _speed,
           videoUrl: widget.url,
+          lessonId: widget.lessonId,
           onSpeed: (s) => setState(() {
             _speed = s;
             _controller!.setPlaybackSpeed(s);
@@ -415,6 +417,7 @@ class _FullscreenPlayer extends StatefulWidget {
     required this.speed,
     required this.onSpeed,
     required this.videoUrl,
+    this.lessonId,
   });
 
   final VideoPlayerController controller;
@@ -423,6 +426,7 @@ class _FullscreenPlayer extends StatefulWidget {
   final double speed;
   final ValueChanged<double> onSpeed;
   final String videoUrl;
+  final String? lessonId;
 
   @override
   State<_FullscreenPlayer> createState() => _FullscreenPlayerState();
@@ -503,6 +507,7 @@ class _FullscreenPlayerState extends State<_FullscreenPlayer> {
                             url: widget.videoUrl,
                             title: widget.title,
                             protection: widget.protection,
+                            lessonId: widget.lessonId,
                             positionMs: widget.controller.value.position.inMilliseconds,
                             onPause: () => widget.controller.pause(),
                             onResume: () => widget.controller.play(),
