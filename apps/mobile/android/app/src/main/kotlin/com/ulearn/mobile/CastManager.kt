@@ -119,6 +119,9 @@ class CastManager(
             putString(MediaMetadata.KEY_TITLE, title)
             putString(MediaMetadata.KEY_SUBTITLE, watermark)
             putString(MediaMetadata.KEY_ARTIST, watermark)
+            if (watermark.isNotBlank()) {
+                putString(MediaMetadata.KEY_SERIES_TITLE, watermark)
+            }
         }
 
         val contentType = when {

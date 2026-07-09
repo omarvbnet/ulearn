@@ -29,11 +29,27 @@ export class VideoService {
       return { success: false as const, error: "NO_ACCESS" };
     }
 
-    const { completionPct, isCompleted, positionSec } = computeVideoCompletion({
+    const existing = await prisma.videoProgress.findUnique({
+      where: {
+        userId_lessonId: { userId: params.userId, lessonId: params.lessonId },
+      },
+    });
+
+    let { completionPct, isCompleted, positionSec } = computeVideoCompletion({
       positionSec: params.positionSec,
       durationSec: params.durationSec,
       completed: params.completed,
     });
+
+    if (existing?.isCompleted) {
+      isCompleted = true;
+      completionPct = 100;
+      if (params.durationSec > 0) {
+        positionSec = Math.max(existing.positionSec, params.durationSec);
+      } else {
+        positionSec = Math.max(existing.positionSec, positionSec);
+      }
+    }
 
     const progress = await prisma.videoProgress.upsert({
       where: {

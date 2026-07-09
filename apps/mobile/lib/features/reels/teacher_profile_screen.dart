@@ -10,6 +10,7 @@ import 'package:ulearn/features/profile/profile_avatar.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
 import 'package:ulearn/core/widgets/teacher_cover_presets.dart';
 import 'package:ulearn/features/reels/teacher_reels_viewer.dart';
+import 'package:ulearn/features/video/video_protection.dart';
 
 /// Teacher public profile from reels — live courses available to purchase.
 class TeacherProfileScreen extends StatefulWidget {
@@ -39,11 +40,13 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen>
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this);
+    VideoProtectionController.enableScreenHardening();
     _load();
   }
 
   @override
   void dispose() {
+    VideoProtectionController.disableScreenHardening();
     _tabCtrl.dispose();
     super.dispose();
   }

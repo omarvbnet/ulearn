@@ -574,10 +574,10 @@ class _FiltersBar extends StatelessWidget {
   static List<(String?, String, IconData)> _levels(BuildContext context) {
     final l10n = context.l10n;
     return [
-      (null, l10n.homeAllStages, Icons.all_inclusive),
-      ('MASTER', '${l10n.t('rank.highestScores')} ★★★', Icons.workspace_premium_outlined),
-      ('EXCELLENT', '${l10n.t('rank.mostActive')} ★★', Icons.military_tech_outlined),
-      ('GOOD', '${l10n.t('student.start')} ★', Icons.thumb_up_alt_outlined),
+      (null, l10n.t('mobile.home.allTeacherLevels'), Icons.all_inclusive),
+      ('MASTER', '${l10n.t('mobile.home.teacherLevelMaster')} ★★★', Icons.workspace_premium_outlined),
+      ('EXCELLENT', '${l10n.t('mobile.home.teacherLevelExcellent')} ★★', Icons.military_tech_outlined),
+      ('GOOD', '${l10n.t('mobile.home.teacherLevelGood')} ★', Icons.thumb_up_alt_outlined),
     ];
   }
 
@@ -965,6 +965,15 @@ class CourseCard extends StatelessWidget {
             l10n.t('student.teacher');
     final rating = (course['teacherRating'] as num?)?.toDouble() ?? 0;
     final ratingCount = (course['teacherRatingCount'] as num?)?.toInt() ?? 0;
+    final courseRating = (course['courseRating'] as num?)?.toDouble();
+    final courseRatingCount = (course['courseRatingCount'] as num?)?.toInt() ?? 0;
+    final teacherLevel = teacher?['level']?.toString();
+    String levelStars = switch (teacherLevel) {
+      'MASTER' => ' ★★★',
+      'EXCELLENT' => ' ★★',
+      'GOOD' => ' ★',
+      _ => '',
+    };
     final views = (course['viewCount'] as num?)?.toInt() ?? 0;
     final likes = (course['likes'] as num?)?.toInt() ?? 0;
     final dislikes = (course['dislikes'] as num?)?.toInt() ?? 0;
@@ -1160,7 +1169,7 @@ class CourseCard extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          teacherName,
+                          '$teacherName$levelStars',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 13, color: AppTheme.muted),
@@ -1179,6 +1188,26 @@ class CourseCard extends StatelessWidget {
                         ),
                     ],
                   ),
+                  if (courseRating != null && courseRating > 0) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(Icons.menu_book_rounded, size: 14, color: AppTheme.accent.withValues(alpha: 0.9)),
+                        const SizedBox(width: 6),
+                        Text(
+                          l10n.t('mobile.store.courseRating', {
+                            'rating': courseRating.toStringAsFixed(1),
+                          }),
+                          style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                        ),
+                        if (courseRatingCount > 0)
+                          Text(
+                            ' (${formatCount(courseRatingCount)})',
+                            style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                          ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   // Stats row: views + like/dislike + previews.
                   Row(

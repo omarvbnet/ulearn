@@ -1,5 +1,6 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { CourseRatingService } from "@/services/course-rating.service";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 import { getDownloadUrl } from "@/lib/r2";
 
@@ -88,6 +89,22 @@ export async function GET(
     },
   });
   const progressMap = new Map(progressRows.map((p) => [p.lessonId, p]));
+
+  const quizIds = quizzes.map((q) => q.id);
+  const passedAttempts =
+    quizIds.length > 0
+      ? await prisma.quizAttempt.findMany({
+          where: {
+            userId,
+            quizId: { in: quizIds },
+            passed: true,
+            completedAt: { not: null },
+          },
+          select: { quizId: true },
+          distinct: ["quizId"],
+        })
+      : [];
+  const passedQuizIds = new Set(passedAttempts.map((a) => a.quizId));
 
   const durationBackfill = lessonIds.length
     ? await prisma.courseLessonProgress.groupBy({
@@ -180,6 +197,12 @@ export async function GET(
     })
   );
 
+  const completion = await CourseRatingService.getCompletionStatus(id, userId);
+  const quizzesWithStatus = quizzes.map((q) => ({
+    ...q,
+    passedByMe: passedQuizIds.has(q.id),
+  }));
+
   return json({
     course: {
       ...course,
@@ -188,8 +211,11 @@ export async function GET(
       totalDurationSec,
       lessonsCount: lessons.length,
       subscribersCount,
+      courseRating: completion?.courseRating ?? null,
+      courseRatingCount: completion?.courseRatingCount ?? 0,
     },
-    quizzes,
+    quizzes: quizzesWithStatus,
+    completion,
     purchased,
     isOwnCourse,
     favorites: favoriteCount,

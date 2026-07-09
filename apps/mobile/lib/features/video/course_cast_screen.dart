@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_to_airplay/flutter_to_airplay.dart';
+import 'package:provider/provider.dart';
+import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/course_cast_service.dart';
@@ -37,6 +39,18 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
   @override
   void initState() {
     super.initState();
+    _prepareCast();
+  }
+
+  Future<void> _prepareCast() async {
+    final auth = context.read<AuthProvider>();
+    final l10n = context.l10nRead;
+    await ensureFreshProtectionIdentity(
+      auth,
+      widget.protection,
+      l10n.t('mobile.roles.student'),
+    );
+    if (!mounted) return;
     widget.protection.setCasting(true);
     if (Platform.isAndroid) {
       _castSub = CourseCastService.castingStream.listen((casting) {
@@ -44,7 +58,9 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
         widget.protection.setCasting(casting);
         setState(() {});
       });
-      _startAndroidCast();
+      await _startAndroidCast();
+    } else {
+      setState(() {});
     }
   }
 
@@ -127,8 +143,9 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
               onPickDevice: () => CourseCastService.showDevicePicker(),
             ),
           const VideoBrandLogo(markSize: 24),
-              DynamicWatermark(controller: widget.protection),
-              CastingIdentityBanner(controller: widget.protection),
+          PlaybackViewerStamp(controller: widget.protection),
+          DynamicWatermark(controller: widget.protection),
+          CastingIdentityBanner(controller: widget.protection),
           if (Platform.isIOS)
             Positioned(
               right: 16,

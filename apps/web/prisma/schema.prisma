@@ -200,6 +200,7 @@ model User {
   productPurchases     ProductPurchase[]
   courseReactions      CourseReaction[]
   courseFavorites      CourseFavorite[]
+  courseRatings        CourseRating[]
   lessonLikes          CourseLessonLike[]
   lessonFavorites      CourseLessonFavorite[]
   courseLessonQuestions CourseLessonQuestion[] @relation("courseLessonQuestions")
@@ -328,6 +329,7 @@ model Course {
   purchases CoursePurchase[]
   reactions CourseReaction[]
   favorites CourseFavorite[]
+  ratings   CourseRating[]
   quizzes   Quiz[]
   materials CourseMaterial[]
 
@@ -848,6 +850,23 @@ model TeacherRating {
 
   @@unique([teacherId, userId])
   @@index([teacherId])
+}
+
+/// Student star rating for a completed store course (one per user per course).
+model CourseRating {
+  id        String   @id @default(cuid())
+  courseId  String
+  userId    String
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, userId])
+  @@index([courseId])
 }
 
 model Complaint {

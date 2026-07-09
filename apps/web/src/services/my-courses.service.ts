@@ -550,11 +550,26 @@ export class MyCoursesService {
       return { success: false as const, error: "NO_ACCESS" };
     }
 
-    const { completionPct, isCompleted, positionSec } = computeVideoCompletion({
+    const existing = await prisma.courseLessonProgress.findUnique({
+      where: { userId_lessonId: { userId: input.userId, lessonId: input.lessonId } },
+    });
+
+    let { completionPct, isCompleted, positionSec } = computeVideoCompletion({
       positionSec: input.positionSec,
       durationSec: input.durationSec,
       completed: input.completed,
     });
+
+    // Once a lesson is completed, rewatches must not reset progress.
+    if (existing?.isCompleted) {
+      isCompleted = true;
+      completionPct = 100;
+      if (input.durationSec > 0) {
+        positionSec = Math.max(existing.positionSec, input.durationSec);
+      } else {
+        positionSec = Math.max(existing.positionSec, positionSec);
+      }
+    }
 
     const row = await prisma.courseLessonProgress.upsert({
       where: { userId_lessonId: { userId: input.userId, lessonId: input.lessonId } },

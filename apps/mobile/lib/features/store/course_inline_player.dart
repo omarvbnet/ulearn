@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +7,8 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/video/course_video_cache.dart';
+import 'package:ulearn/core/video/course_cast_service.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
@@ -20,6 +23,7 @@ class CourseInlinePlayer extends StatefulWidget {
     required this.title,
     this.lessonId,
     this.autoPlay = true,
+    this.initiallyCompleted = false,
     this.onCompleted,
   });
 
@@ -27,6 +31,7 @@ class CourseInlinePlayer extends StatefulWidget {
   final String title;
   final String? lessonId;
   final bool autoPlay;
+  final bool initiallyCompleted;
   final VoidCallback? onCompleted;
 
   @override
@@ -43,10 +48,14 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   Timer? _progressTimer;
   bool _completionSaved = false;
   bool _showCompleteFlash = false;
+  bool _lessonWasCompleted = false;
+  StreamSubscription<bool>? _castSub;
 
   @override
   void initState() {
     super.initState();
+    _lessonWasCompleted = widget.initiallyCompleted;
+    _completionSaved = widget.initiallyCompleted;
     _init();
   }
 
@@ -58,11 +67,15 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       _controller?.removeListener(_onControllerTick);
       _controller?.dispose();
       _controller = null;
-      _completionSaved = false;
+      _lessonWasCompleted = widget.initiallyCompleted;
+      _completionSaved = widget.initiallyCompleted;
       _showCompleteFlash = false;
       _loading = true;
       _error = null;
       _init();
+    } else if (oldWidget.initiallyCompleted != widget.initiallyCompleted) {
+      _lessonWasCompleted = widget.initiallyCompleted;
+      _completionSaved = widget.initiallyCompleted;
     }
   }
 
@@ -100,6 +113,8 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   Future<void> _saveProgress({bool completed = false}) async {
     final c = _controller;
     if (c == null || !c.value.isInitialized || widget.lessonId == null) return;
+    // Completed lessons stay completed — skip saves that would regress progress.
+    if (_lessonWasCompleted && !completed) return;
     try {
       final duration = c.value.duration.inSeconds;
       final position = completed && duration > 0 ? duration : c.value.position.inSeconds;
@@ -108,26 +123,38 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
             {
               'positionSec': position,
               'durationSec': duration,
-              if (completed) 'completed': true,
+              if (completed || _lessonWasCompleted) 'completed': true,
             },
           );
+      if (completed) _lessonWasCompleted = true;
     } catch (_) {}
   }
 
   Future<void> _init() async {
     final auth = context.read<AuthProvider>();
     final l10n = context.l10nRead;
-    _protection ??= VideoProtectionController(
-      studentName: auth.user?.fullLegalName ?? l10n.t('mobile.roles.student'),
-      nationalId: auth.user?.nationalId ?? '',
-      phone: auth.user?.phone ?? '',
+    _protection ??= videoProtectionFromAuth(
+      auth: auth,
+      fallbackName: l10n.t('mobile.roles.student'),
     )..addListener(() {
         if (mounted) setState(() {});
       });
+    await ensureFreshProtectionIdentity(
+      auth,
+      _protection!,
+      l10n.t('mobile.roles.student'),
+    );
     await _protection!.enable();
 
+    if (Platform.isAndroid) {
+      _castSub ??= CourseCastService.castingStream.listen((casting) {
+        _protection?.setCasting(casting);
+      });
+    }
+
     try {
-      _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+      CourseVideoCache.prefetch(widget.url);
+      _controller = await CourseVideoCache.createController(widget.url);
       await _controller!.initialize();
       if (!mounted) return;
       if (widget.autoPlay) await _controller!.play();
@@ -145,6 +172,14 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
 
   Future<void> _openCast() async {
     if (_controller == null || _protection == null) return;
+    final auth = context.read<AuthProvider>();
+    final l10n = context.l10nRead;
+    await ensureFreshProtectionIdentity(
+      auth,
+      _protection!,
+      l10n.t('mobile.roles.student'),
+    );
+    if (!mounted) return;
     await openCourseCastScreen(
       context,
       url: widget.url,
@@ -161,6 +196,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   @override
   void dispose() {
     _progressTimer?.cancel();
+    _castSub?.cancel();
     _saveProgress();
     _controller?.removeListener(_onControllerTick);
     _controller?.dispose();
@@ -218,6 +254,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
               children: [
                 Center(child: VideoPlayer(_controller!)),
                 if (_protection != null) const VideoBrandLogo(markSize: 24),
+                if (_protection != null) PlaybackViewerStamp(controller: _protection!),
                 if (_protection != null) DynamicWatermark(controller: _protection!),
                 if (_protection != null) CastingIdentityBanner(controller: _protection!),
                 if (_protection != null)
@@ -437,6 +474,7 @@ class _FullscreenPlayerState extends State<_FullscreenPlayer> {
                 ),
               ),
               const VideoBrandLogo(markSize: 26),
+              PlaybackViewerStamp(controller: widget.protection),
               DynamicWatermark(controller: widget.protection),
               CastingIdentityBanner(controller: widget.protection),
               ScreenshotBlockOverlay(visible: widget.protection.screenshotBlocked),

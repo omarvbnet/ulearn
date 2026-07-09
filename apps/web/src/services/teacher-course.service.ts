@@ -703,6 +703,7 @@ export class TeacherCourseService {
       favoriteGroups,
       myFavorites,
       ratingGroups,
+      courseRatingGroups,
       purchases,
       durationGroups,
     ] = await Promise.all([
@@ -727,6 +728,12 @@ export class TeacherCourseService {
         prisma.teacherRating.groupBy({
           by: ["teacherId"],
           where: { teacherId: { in: teacherIds } },
+          _avg: { rating: true },
+          _count: true,
+        }),
+        prisma.courseRating.groupBy({
+          by: ["courseId"],
+          where: { courseId: { in: courseIds } },
           _avg: { rating: true },
           _count: true,
         }),
@@ -756,6 +763,15 @@ export class TeacherCourseService {
     const ratings = new Map(
       ratingGroups.map((r) => [r.teacherId, { avg: r._avg.rating ?? 0, count: r._count }])
     );
+    const courseRatings = new Map(
+      courseRatingGroups.map((r) => [
+        r.courseId,
+        {
+          avg: r._avg.rating != null ? Math.round(r._avg.rating * 10) / 10 : 0,
+          count: r._count,
+        },
+      ])
+    );
     const purchaseByCourse = new Map(purchases.map((p) => [p.courseId, p.status]));
     const watchedDuration = new Map(
       durationGroups.map((g) => [g.lessonId, g._max.durationSec ?? 0])
@@ -779,6 +795,7 @@ export class TeacherCourseService {
       courses.map(async (c) => {
         const r = reactions.get(c.id) ?? { likes: 0, dislikes: 0 };
         const rating = ratings.get(c.teacher.id) ?? { avg: 0, count: 0 };
+        const courseRating = courseRatings.get(c.id) ?? { avg: 0, count: 0 };
         const lessons = c.lessons.map((l) => ({
           ...l,
           durationSec: l.durationSec ?? watchedDuration.get(l.id) ?? null,
@@ -802,6 +819,8 @@ export class TeacherCourseService {
           favoritedByMe: myFavs.has(c.id),
           teacherRating: Math.round(rating.avg * 10) / 10,
           teacherRatingCount: rating.count,
+          courseRating: courseRating.avg > 0 ? courseRating.avg : null,
+          courseRatingCount: courseRating.count,
           totalDurationSec,
           lessonsCount: lessons.length,
           freePreviewCount: lessons.filter((l) => l.isFreePreview).length,

@@ -1,6 +1,7 @@
 import { json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { getDownloadUrl } from "@/lib/r2";
+import { CourseRatingService } from "@/services/course-rating.service";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 import type { TeacherLevel } from "@prisma/client";
 
@@ -91,7 +92,9 @@ export async function GET(request: Request) {
     })
   );
 
-  const coursesOut = await TeacherCourseService.enrichCoursesForUser(courses, userId);
+  const coursesOut = CourseRatingService.sortForHomeFeed(
+    await TeacherCourseService.enrichCoursesForUser(courses, userId)
+  );
 
   return json({ stage, stages, ads: adsOut, courses: coursesOut });
 }

@@ -3,10 +3,13 @@ import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/video/course_video_cache.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/lesson_cover.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
+import 'package:ulearn/features/reels/teacher_profile_screen.dart';
+import 'package:ulearn/features/store/course_evaluation_sheet.dart';
 import 'package:ulearn/features/store/course_inline_player.dart';
 import 'package:ulearn/features/store/lesson_qa_section.dart';
 import 'package:ulearn/features/quiz/quiz_screen.dart';
@@ -40,6 +43,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   List<Map<String, dynamic>> _materials = [];
   int _selectedTab = 0;
   String? _error;
+  bool _reacting = false;
+  Map<String, dynamic>? _completion;
+  bool _evaluationPromptShown = false;
 
   @override
   void initState() {
@@ -109,9 +115,17 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         _favorited = data['favoritedByMe'] == true;
         _quizzes = quizzes;
         _materials = materials;
+        _completion = data['completion'] as Map<String, dynamic>?;
         _error = null;
         _selectInitialLesson(lessons, unlocked);
       });
+      for (final l in lessons) {
+        final url = l['fileUrl']?.toString();
+        if (url != null && url.isNotEmpty) {
+          CourseVideoCache.prefetch(url);
+        }
+      }
+      _maybeShowEvaluation();
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _error = e.message);
@@ -123,7 +137,32 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
 
   Future<void> _react(String type) async {
     final course = _course;
-    if (course == null) return;
+    if (course == null || _reacting) return;
+    _reacting = true;
+
+    final previous = {
+      'likes': course['likes'],
+      'dislikes': course['dislikes'],
+      'myReaction': course['myReaction'],
+    };
+
+    setState(() {
+      final mine = course['myReaction']?.toString();
+      if (mine == type) {
+        course['myReaction'] = null;
+        final key = type == 'LIKE' ? 'likes' : 'dislikes';
+        course[key] = ((course[key] as num?)?.toInt() ?? 0) - 1;
+      } else {
+        if (mine != null) {
+          final oldKey = mine == 'LIKE' ? 'likes' : 'dislikes';
+          course[oldKey] = ((course[oldKey] as num?)?.toInt() ?? 0) - 1;
+        }
+        course['myReaction'] = type;
+        final key = type == 'LIKE' ? 'likes' : 'dislikes';
+        course[key] = ((course[key] as num?)?.toInt() ?? 0) + 1;
+      }
+    });
+
     try {
       final data = await context
           .read<ApiClient>()
@@ -134,7 +173,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         course['dislikes'] = data['dislikes'];
         course['myReaction'] = data['myReaction'];
       });
-    } catch (_) {}
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => course.addAll(previous));
+    } finally {
+      _reacting = false;
+    }
   }
 
   Future<void> _toggleFavorite() async {
@@ -257,10 +301,40 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     return null;
   }
 
-  void _openQuiz(Map<String, dynamic> quiz) {
+  void _maybeShowEvaluation() {
+    if (_isOwnCourse || _evaluationPromptShown) return;
+    if (_completion?['pendingEvaluation'] != true) return;
+    final course = _course;
+    if (course == null) return;
+    _evaluationPromptShown = true;
+    final title = localizedText(course, context.localeCode);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      CourseEvaluationSheet.show(
+        context,
+        courseId: widget.courseId,
+        courseTitle: title,
+        onSubmitted: _load,
+      );
+    });
+  }
+
+  void _showEvaluationSheet() {
+    final course = _course;
+    if (course == null) return;
+    CourseEvaluationSheet.show(
+      context,
+      courseId: widget.courseId,
+      courseTitle: localizedText(course, context.localeCode),
+      initialRating: (_completion?['myRating'] as num?)?.toInt(),
+      onSubmitted: _load,
+    );
+  }
+
+  Future<void> _openQuiz(Map<String, dynamic> quiz) async {
     final locale = context.localeCode;
     final title = localizedText(quiz, locale);
-    Navigator.of(context).push(
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => QuizScreen(
           quizId: quiz['id'].toString(),
@@ -268,6 +342,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         ),
       ),
     );
+    if (!mounted) return;
+    await _load();
   }
 
   List<({bool isQuiz, Map<String, dynamic> data, int? lessonIndex})> _courseTimeline(
@@ -356,7 +432,13 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     }
 
     final next = _nextWatchableLesson(lessons, unlocked, current: lesson);
-    if (next == null) return;
+    if (next == null) {
+      Future.delayed(const Duration(milliseconds: 900), () async {
+        if (!mounted) return;
+        await _load();
+      });
+      return;
+    }
 
     Future.delayed(const Duration(milliseconds: 900), () {
       if (!mounted) return;
@@ -384,6 +466,340 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
 
   int _completedLessonCount(List<Map<String, dynamic>> lessons) {
     return lessons.where(_isLessonCompleted).length;
+  }
+
+  void _openTeacherProfile(Map<String, dynamic>? teacher, String teacherName) {
+    final teacherId = teacher?['id']?.toString();
+    if (teacherId == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TeacherProfileScreen(
+          teacherId: teacherId,
+          initialName: teacherName,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectedTabContent({
+    required List<Map<String, dynamic>> lessons,
+    required bool unlocked,
+    required String? activeId,
+    required dynamic l10n,
+    required Map<String, dynamic>? active,
+  }) {
+    if (_selectedTab == 0) {
+      final items = _buildVideosQuizzesTab(
+        lessons: lessons,
+        unlocked: unlocked,
+        activeId: activeId,
+        l10n: l10n,
+      );
+      return ListView(
+        padding: const EdgeInsets.only(bottom: 12),
+        children: items,
+      );
+    }
+    if (_selectedTab == 1) {
+      return _CourseQATab(
+        lessons: lessons,
+        activeLesson: active,
+        unlocked: unlocked,
+        onSelectLesson: (l) => _selectLesson(l, unlocked),
+        lessonTitle: (l, i) => _lessonTitle(context, l, i),
+      );
+    }
+    return _CourseMaterialsTab(
+      materials: _materials,
+      lessons: lessons,
+      unlocked: unlocked,
+      lessonTitle: (l, i) => _lessonTitle(context, l, i),
+    );
+  }
+
+  Widget _buildCourseHeader({
+    required Map<String, dynamic> course,
+    required String title,
+    required String teacherName,
+    required double rating,
+    required int views,
+    required int subscribers,
+    required int totalSec,
+    required int likes,
+    required int dislikes,
+    required String? myReaction,
+    required String? description,
+    required List<Map<String, dynamic>> lessons,
+    required bool unlocked,
+    required Map<String, dynamic>? active,
+    required String? activeUrl,
+    required String? activeId,
+    required Map<String, dynamic>? teacher,
+    required VoidCallback onTeacherTap,
+    required dynamic l10n,
+  }) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_isOwnCourse) ...[
+            StaggeredItem(
+              index: 0,
+              child: Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 12),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primary.withValues(alpha: 0.22),
+                      AppTheme.card,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.accent.withValues(alpha: 0.35)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.school_outlined, color: AppTheme.accent),
+                        const SizedBox(width: 8),
+                        Text(
+                          l10n.storeYourCourse,
+                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      [
+                        '${l10n.t('common.status')}: ${(course['status']?.toString() ?? 'APPROVED').replaceAll('_', ' ')}',
+                        l10n.t('student.videos'),
+                        l10n.homeViews(views),
+                        if (subscribers > 0) l10n.homeSubscribers(subscribers),
+                      ].join(' · '),
+                      style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const TeacherStudioScreen()),
+                            ),
+                            icon: const Icon(Icons.video_call_outlined, size: 18),
+                            label: Text(l10n.storeManageInStudio),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          if (activeUrl != null && activeUrl.isNotEmpty) ...[
+            CourseInlinePlayer(
+              key: ValueKey(activeUrl),
+              url: ApiClient.absoluteUrl(activeUrl),
+              title: active?['title']?.toString() ?? l10n.t('student.videos'),
+              lessonId: activeId,
+              initiallyCompleted: active != null && _isLessonCompleted(active),
+              onCompleted: active != null ? () => _onLessonCompleted(active) : null,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              active?['title']?.toString() ?? '',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.foreground,
+                height: 1.3,
+              ),
+            ),
+            if (active != null && _isLessonCompleted(active))
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  children: [
+                    Icon(Icons.check_circle_rounded, size: 16, color: Colors.greenAccent.withValues(alpha: 0.9)),
+                    const SizedBox(width: 6),
+                    Text(
+                      l10n.t('quiz.passed'),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.greenAccent.withValues(alpha: 0.9),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 16),
+          ] else if (!unlocked) ...[
+            Container(
+              height: 180,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                gradient: AppTheme.gradient,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.lock_outline, color: Colors.white70, size: 40),
+                  const SizedBox(height: 8),
+                  Text(
+                    l10n.storeSubscribeUnlock,
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          StaggeredItem(
+            index: 0,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: onTeacherTap,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: AppTheme.gradient,
+                        ),
+                        child: Center(
+                          child: Text(
+                            teacherName.isNotEmpty ? teacherName[0].toUpperCase() : '?',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    teacherName,
+                                    style: const TextStyle(fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                                Text(
+                                  l10n.t('mobile.reels.viewTeacher'),
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: AppTheme.accent,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(width: 2),
+                                const Icon(
+                                  Icons.chevron_right_rounded,
+                                  size: 18,
+                                  color: AppTheme.accent,
+                                ),
+                              ],
+                            ),
+                            Row(
+                              children: [
+                                const Icon(Icons.star_rounded, size: 15, color: Colors.amber),
+                                const SizedBox(width: 3),
+                                Text(
+                                  rating > 0
+                                      ? rating.toStringAsFixed(1)
+                                      : l10n.t('rank.noRankings'),
+                                  style: const TextStyle(fontSize: 12.5, color: AppTheme.muted),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    '${l10n.homeViews(views)} · ${l10n.homeSubscribers(subscribers)} · ${formatDuration(totalSec)}',
+                                    style: const TextStyle(fontSize: 12.5, color: AppTheme.muted),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          StaggeredItem(
+            index: 1,
+            child: Row(
+              children: [
+                ReactionButton(
+                  icon: Icons.thumb_up_outlined,
+                  activeIcon: Icons.thumb_up,
+                  active: myReaction == 'LIKE',
+                  activeColor: AppTheme.accent,
+                  count: likes,
+                  onTap: _reacting ? () {} : () => _react('LIKE'),
+                ),
+                const SizedBox(width: 18),
+                ReactionButton(
+                  icon: Icons.thumb_down_outlined,
+                  activeIcon: Icons.thumb_down,
+                  active: myReaction == 'DISLIKE',
+                  activeColor: Colors.redAccent,
+                  count: dislikes,
+                  onTap: _reacting ? () {} : () => _react('DISLIKE'),
+                ),
+              ],
+            ),
+          ),
+          if (description != null && description.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            StaggeredItem(
+              index: 2,
+              child: Text(
+                description,
+                style: const TextStyle(color: AppTheme.muted, height: 1.5),
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          StaggeredItem(
+            index: 3,
+            child: _CourseDetailTabs(
+              selected: _selectedTab,
+              onSelected: (i) => setState(() => _selectedTab = i),
+              lessonsCount: lessons.length,
+              quizzesCount: unlocked ? _quizzes.length : 0,
+              materialsCount: unlocked ? _materials.length : 0,
+              l10n: l10n,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   List<Widget> _buildVideosQuizzesTab({
@@ -531,267 +947,65 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+      body: Column(
         children: [
-          if (_isOwnCourse) ...[
-            StaggeredItem(
-              index: 0,
-              child: Container(
-                margin: const EdgeInsets.only(top: 8, bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.primary.withValues(alpha: 0.22),
-                      AppTheme.card,
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppTheme.accent.withValues(alpha: 0.35)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.school_outlined, color: AppTheme.accent),
-                        const SizedBox(width: 8),
-                        Text(
-                          l10n.storeYourCourse,
-                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      [
-                        '${l10n.t('common.status')}: ${(course['status']?.toString() ?? 'APPROVED').replaceAll('_', ' ')}',
-                        l10n.t('student.videos'),
-                        l10n.homeViews(views),
-                        if (subscribers > 0) l10n.homeSubscribers(subscribers),
-                      ].join(' · '),
-                      style: const TextStyle(color: AppTheme.muted, fontSize: 13),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () => Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const TeacherStudioScreen()),
-                            ),
-                            icon: const Icon(Icons.video_call_outlined, size: 18),
-                            label: Text(l10n.storeManageInStudio),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          if (activeUrl != null && activeUrl.isNotEmpty) ...[
-            CourseInlinePlayer(
-              key: ValueKey(activeUrl),
-              url: ApiClient.absoluteUrl(activeUrl),
-              title: active?['title']?.toString() ?? l10n.t('student.videos'),
-              lessonId: activeId,
-              onCompleted: active != null ? () => _onLessonCompleted(active) : null,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              active?['title']?.toString() ?? '',
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.foreground,
-                height: 1.3,
-              ),
-            ),
-            if (active != null && _isLessonCompleted(active))
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Row(
-                  children: [
-                    Icon(Icons.check_circle_rounded, size: 16, color: Colors.greenAccent.withValues(alpha: 0.9)),
-                    const SizedBox(width: 6),
-                    Text(
-                      l10n.t('quiz.passed'),
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.greenAccent.withValues(alpha: 0.9),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            const SizedBox(height: 16),
-          ] else if (!unlocked) ...[
-            Container(
-              height: 180,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                gradient: AppTheme.gradient,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.lock_outline, color: Colors.white70, size: 40),
-                  const SizedBox(height: 8),
-                  Text(
-                    l10n.storeSubscribeUnlock,
-                    style: const TextStyle(color: Colors.white70),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-          StaggeredItem(
-            index: 0,
-            child: Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: AppTheme.gradient,
-                  ),
-                  child: Center(
-                    child: Text(
-                      teacherName.isNotEmpty ? teacherName[0].toUpperCase() : '?',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(teacherName, style: const TextStyle(fontWeight: FontWeight.w600)),
-                      Row(
-                        children: [
-                          const Icon(Icons.star_rounded, size: 15, color: Colors.amber),
-                          const SizedBox(width: 3),
-                          Text(
-                            rating > 0
-                                ? rating.toStringAsFixed(1)
-                                : l10n.t('rank.noRankings'),
-                            style: const TextStyle(fontSize: 12.5, color: AppTheme.muted),
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            '${l10n.homeViews(views)} · ${l10n.homeSubscribers(subscribers)} · ${formatDuration(totalSec)}',
-                            style: const TextStyle(fontSize: 12.5, color: AppTheme.muted),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          StaggeredItem(
-            index: 1,
-            child: Row(
-              children: [
-                ReactionButton(
-                  icon: Icons.thumb_up_outlined,
-                  activeIcon: Icons.thumb_up,
-                  active: myReaction == 'LIKE',
-                  activeColor: AppTheme.accent,
-                  count: likes,
-                  onTap: () => _react('LIKE'),
-                ),
-                const SizedBox(width: 18),
-                ReactionButton(
-                  icon: Icons.thumb_down_outlined,
-                  activeIcon: Icons.thumb_down,
-                  active: myReaction == 'DISLIKE',
-                  activeColor: Colors.redAccent,
-                  count: dislikes,
-                  onTap: () => _react('DISLIKE'),
-                ),
-              ],
-            ),
-          ),
-          if (description != null && description.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            StaggeredItem(
-              index: 2,
-              child: Text(
-                description,
-                style: const TextStyle(color: AppTheme.muted, height: 1.5),
-              ),
-            ),
-          ],
-          const SizedBox(height: 20),
-          StaggeredItem(
-            index: 3,
-            child: _CourseProgressHeader(
-              lessons: lessons,
-              quizzesCount: _quizzes.length,
-              completedCount: _completedLessonCount(lessons),
-              unlocked: unlocked,
-              l10n: l10n,
-            ),
-          ),
-          const SizedBox(height: 14),
-          StaggeredItem(
-            index: 4,
-            child: _CourseDetailTabs(
-              selected: _selectedTab,
-              onSelected: (i) => setState(() => _selectedTab = i),
-              lessonsCount: lessons.length,
-              quizzesCount: unlocked ? _quizzes.length : 0,
-              materialsCount: unlocked ? _materials.length : 0,
-              l10n: l10n,
-            ),
-          ),
-          const SizedBox(height: 14),
-          if (_selectedTab == 0)
-            ..._buildVideosQuizzesTab(
+          Flexible(
+            child: _buildCourseHeader(
+              course: course,
+              title: title,
+              teacherName: teacherName,
+              rating: rating,
+              views: views,
+              subscribers: subscribers,
+              totalSec: totalSec,
+              likes: likes,
+              dislikes: dislikes,
+              myReaction: myReaction,
+              description: description,
               lessons: lessons,
               unlocked: unlocked,
+              active: active,
+              activeUrl: activeUrl,
               activeId: activeId,
+              teacher: teacher,
+              onTeacherTap: () => _openTeacherProfile(teacher, teacherName),
               l10n: l10n,
-            )
-          else if (_selectedTab == 1)
-            KeyedSubtree(
-              key: const ValueKey<int>(1),
-              child: _CourseQATab(
-                lessons: lessons,
-                activeLesson: active,
-                unlocked: unlocked,
-                onSelectLesson: (l) => _selectLesson(l, unlocked),
-                lessonTitle: (l, i) => _lessonTitle(context, l, i),
-              ),
-            )
-          else
-            KeyedSubtree(
-              key: const ValueKey<int>(2),
-              child: _CourseMaterialsTab(
-                materials: _materials,
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: _buildSelectedTabContent(
                 lessons: lessons,
                 unlocked: unlocked,
-                lessonTitle: (l, i) => _lessonTitle(context, l, i),
+                activeId: activeId,
+                l10n: l10n,
+                active: active,
               ),
             ),
+          ),
         ],
       ),
+      bottomNavigationBar: unlocked
+          ? SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: _CourseProgressHeader(
+                  lessons: lessons,
+                  quizzesCount: _quizzes.length,
+                  completedCount: _completedLessonCount(lessons),
+                  unlocked: unlocked,
+                  l10n: l10n,
+                  compact: true,
+                  pendingEvaluation:
+                      _completion?['pendingEvaluation'] == true && !_isOwnCourse,
+                  myRating: (_completion?['myRating'] as num?)?.toInt(),
+                  onEvaluate: _showEvaluationSheet,
+                ),
+              ),
+            )
+          : null,
       bottomSheet: unlocked
           ? null
           : Container(
@@ -851,7 +1065,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 }
 
-/// Course progress summary shown above the content tabs.
+/// Course progress summary pinned at the bottom of the detail screen.
 class _CourseProgressHeader extends StatelessWidget {
   const _CourseProgressHeader({
     required this.lessons,
@@ -859,6 +1073,10 @@ class _CourseProgressHeader extends StatelessWidget {
     required this.completedCount,
     required this.unlocked,
     required this.l10n,
+    this.compact = false,
+    this.pendingEvaluation = false,
+    this.myRating,
+    this.onEvaluate,
   });
 
   final List<Map<String, dynamic>> lessons;
@@ -866,6 +1084,10 @@ class _CourseProgressHeader extends StatelessWidget {
   final int completedCount;
   final bool unlocked;
   final dynamic l10n;
+  final bool compact;
+  final bool pendingEvaluation;
+  final int? myRating;
+  final VoidCallback? onEvaluate;
 
   @override
   Widget build(BuildContext context) {
@@ -873,7 +1095,7 @@ class _CourseProgressHeader extends StatelessWidget {
     final progress = total == 0 ? 0.0 : completedCount / total;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(compact ? 12 : 16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
@@ -883,28 +1105,33 @@ class _CourseProgressHeader extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(compact ? 14 : 16),
         border: Border.all(color: AppTheme.cardBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: EdgeInsets.all(compact ? 6 : 8),
                 decoration: BoxDecoration(
                   color: AppTheme.accent.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.trending_up_rounded, color: AppTheme.accent, size: 20),
+                child: Icon(
+                  Icons.trending_up_rounded,
+                  color: AppTheme.accent,
+                  size: compact ? 18 : 20,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   l10n.t('mobile.store.courseProgress'),
-                  style: const TextStyle(
-                    fontSize: 16,
+                  style: TextStyle(
+                    fontSize: compact ? 14 : 16,
                     fontWeight: FontWeight.w800,
                     color: AppTheme.foreground,
                   ),
@@ -914,48 +1141,77 @@ class _CourseProgressHeader extends StatelessWidget {
                 Text(
                   '$completedCount/$total',
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: compact ? 13 : 14,
                     fontWeight: FontWeight.w700,
                     color: Colors.greenAccent.withValues(alpha: 0.95),
                   ),
                 ),
             ],
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: compact ? 8 : 12),
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: LinearProgressIndicator(
               value: unlocked && total > 0 ? progress : null,
-              minHeight: 8,
+              minHeight: compact ? 6 : 8,
               backgroundColor: AppTheme.cardBorder,
               color: Colors.greenAccent,
             ),
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: [
-              _ProgressStatChip(
-                icon: Icons.play_lesson_outlined,
-                label: l10n.t('student.videos'),
-                value: '$total',
+          if (!compact) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                _ProgressStatChip(
+                  icon: Icons.play_lesson_outlined,
+                  label: l10n.t('student.videos'),
+                  value: '$total',
+                ),
+                if (quizzesCount > 0)
+                  _ProgressStatChip(
+                    icon: Icons.quiz_outlined,
+                    label: l10n.t('student.quizzes'),
+                    value: '$quizzesCount',
+                  ),
+                if (!unlocked)
+                  _ProgressStatChip(
+                    icon: Icons.lock_open_outlined,
+                    label: l10n.t('common.free'),
+                    value: l10n.t('mobile.store.previewAvailable'),
+                    accent: true,
+                  ),
+              ],
+            ),
+          ],
+          if (pendingEvaluation && onEvaluate != null) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onEvaluate,
+                icon: const Icon(Icons.star_rounded, size: 18),
+                label: Text(l10n.t('mobile.store.tapToEvaluate')),
               ),
-              if (quizzesCount > 0)
-                _ProgressStatChip(
-                  icon: Icons.quiz_outlined,
-                  label: l10n.t('student.quizzes'),
-                  value: '$quizzesCount',
+            ),
+          ] else if (myRating != null) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.star_rounded, size: 16, color: Colors.amber),
+                const SizedBox(width: 6),
+                Text(
+                  l10n.t('mobile.store.yourRating', {'rating': '$myRating'}),
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.muted,
+                  ),
                 ),
-              if (!unlocked)
-                _ProgressStatChip(
-                  icon: Icons.lock_open_outlined,
-                  label: l10n.t('common.free'),
-                  value: l10n.t('mobile.store.previewAvailable'),
-                  accent: true,
-                ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -1330,8 +1586,15 @@ class _CourseQATabState extends State<_CourseQATab> {
             },
           ),
         ),
-        const SizedBox(height: 16),
-        LessonQASection(key: ValueKey(selectedId), lessonId: selectedId),
+        const SizedBox(height: 12),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.only(bottom: 12),
+            children: [
+              LessonQASection(key: ValueKey(selectedId), lessonId: selectedId),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -1397,8 +1660,11 @@ class _CourseMaterialsTab extends StatelessWidget {
       );
     }
 
-    return Column(
-      children: materials.map((m) {
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 12),
+      itemCount: materials.length,
+      itemBuilder: (context, index) {
+        final m = materials[index];
         final type = m['type']?.toString();
         final lessonName = _lessonNameFor(m['lessonId']?.toString());
         final size = _formatSize((m['fileSize'] as num?)?.toInt());
@@ -1479,7 +1745,7 @@ class _CourseMaterialsTab extends StatelessWidget {
             ),
           ),
         );
-      }).toList(),
+      },
     );
   }
 }

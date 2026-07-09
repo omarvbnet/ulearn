@@ -4,27 +4,42 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:screen_protector/screen_protector.dart';
+import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 
 /// Video protection: screen capture hardening, casting awareness, and a
 /// moving viewer watermark (name + national ID) during playback and casting.
 class VideoProtectionController {
   VideoProtectionController({
-    required this.studentName,
-    required this.nationalId,
-    this.phone = '',
-  });
+    required String studentName,
+    required String nationalId,
+    String phone = '',
+  })  : _studentName = studentName,
+        _nationalId = nationalId,
+        _phone = phone;
 
-  final String studentName;
-  final String nationalId;
-  final String phone;
+  String _studentName;
+  String _nationalId;
+  String _phone;
 
   bool isCasting = false;
+  bool isScreenCaptured = false;
   bool screenshotBlocked = false;
   Offset watermarkOffset = const Offset(24, 80);
   Timer? _watermarkTimer;
   final _listeners = <VoidCallback>[];
   final _rand = math.Random();
+
+  void updateIdentity({
+    String? studentName,
+    String? nationalId,
+    String? phone,
+  }) {
+    if (studentName != null) _studentName = studentName;
+    if (nationalId != null) _nationalId = nationalId;
+    if (phone != null) _phone = phone;
+    _notify();
+  }
 
   void addListener(VoidCallback cb) => _listeners.add(cb);
   void removeListener(VoidCallback cb) => _listeners.remove(cb);
@@ -34,12 +49,55 @@ class VideoProtectionController {
     }
   }
 
+  /// True when identity overlays should be visible (cast, mirror, or record).
+  bool get showIdentityOverlay => isCasting || isScreenCaptured;
+
   Future<void> enable() async {
     try {
       await ScreenProtector.protectDataLeakageOn();
+      await ScreenProtector.preventScreenshotOn();
+    } catch (_) {}
+
+    if (Platform.isAndroid) {
+      try {
+        const channel = MethodChannel('ulearn/security');
+        await channel.invokeMethod('enableSecureFlag');
+      } catch (_) {}
+    }
+
+    if (Platform.isIOS) {
+      try {
+        ScreenProtector.addListener(
+          onScreenshotDetected,
+          setScreenCaptured,
+        );
+      } catch (_) {}
+    }
+  }
+
+  Future<void> disable() async {
+    _watermarkTimer?.cancel();
+    try {
       if (Platform.isIOS) {
-        await ScreenProtector.preventScreenshotOn();
+        ScreenProtector.removeListener();
       }
+      await ScreenProtector.protectDataLeakageOff();
+      await ScreenProtector.preventScreenshotOff();
+    } catch (_) {}
+
+    if (Platform.isAndroid) {
+      try {
+        const channel = MethodChannel('ulearn/security');
+        await channel.invokeMethod('disableSecureFlag');
+      } catch (_) {}
+    }
+  }
+
+  /// Enables screenshot / recording hardening without a video watermark controller.
+  static Future<void> enableScreenHardening() async {
+    try {
+      await ScreenProtector.protectDataLeakageOn();
+      await ScreenProtector.preventScreenshotOn();
     } catch (_) {}
 
     if (Platform.isAndroid) {
@@ -50,13 +108,10 @@ class VideoProtectionController {
     }
   }
 
-  Future<void> disable() async {
-    _watermarkTimer?.cancel();
+  static Future<void> disableScreenHardening() async {
     try {
       await ScreenProtector.protectDataLeakageOff();
-      if (Platform.isIOS) {
-        await ScreenProtector.preventScreenshotOff();
-      }
+      await ScreenProtector.preventScreenshotOff();
     } catch (_) {}
 
     if (Platform.isAndroid) {
@@ -71,7 +126,14 @@ class VideoProtectionController {
   void setCasting(bool casting) {
     if (isCasting == casting) return;
     isCasting = casting;
-    if (casting) _startWatermarkMotion();
+    if (casting || isScreenCaptured) _startWatermarkMotion();
+    _notify();
+  }
+
+  void setScreenCaptured(bool captured) {
+    if (isScreenCaptured == captured) return;
+    isScreenCaptured = captured;
+    if (captured || isCasting) _startWatermarkMotion();
     _notify();
   }
 
@@ -85,6 +147,7 @@ class VideoProtectionController {
   }
 
   void _startWatermarkMotion() {
+    if (!showIdentityOverlay) return;
     _watermarkTimer?.cancel();
     _watermarkTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       watermarkOffset = Offset(
@@ -96,13 +159,21 @@ class VideoProtectionController {
   }
 
   String get watermarkText {
-    final id = nationalId.trim();
-    if (id.isEmpty) return studentName;
-    return '$studentName · ID: $id';
+    final name = _studentName.trim();
+    final id = _nationalId.trim();
+    final phone = _phone.trim();
+    final displayName = name.isNotEmpty
+        ? name
+        : phone.isNotEmpty
+            ? phone
+            : 'Viewer';
+    if (id.isNotEmpty) return '$displayName · ID: $id';
+    if (phone.isNotEmpty && phone != displayName) return '$displayName · $phone';
+    return displayName;
   }
 }
 
-/// Moving watermark — visible only while casting to another screen.
+/// Moving watermark — visible while casting, mirroring, or screen recording.
 class DynamicWatermark extends StatelessWidget {
   const DynamicWatermark({
     super.key,
@@ -113,7 +184,7 @@ class DynamicWatermark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!controller.isCasting) return const SizedBox.shrink();
+    if (!controller.showIdentityOverlay) return const SizedBox.shrink();
 
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 1800),
@@ -154,7 +225,7 @@ class CastingIdentityBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!controller.isCasting) return const SizedBox.shrink();
+    if (!controller.showIdentityOverlay) return const SizedBox.shrink();
 
     return Positioned(
       left: 12,
@@ -242,4 +313,80 @@ class ScreenshotBlockOverlay extends StatelessWidget {
     if (!visible) return const SizedBox.shrink();
     return const Positioned.fill(child: ColoredBox(color: Colors.black));
   }
+}
+
+/// Persistent viewer stamp on the video frame (visible when mirrored / cast).
+class PlaybackViewerStamp extends StatelessWidget {
+  const PlaybackViewerStamp({super.key, required this.controller});
+
+  final VideoProtectionController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = controller.watermarkText;
+    if (text.isEmpty || text == 'Viewer') return const SizedBox.shrink();
+
+    return Positioned(
+      left: 8,
+      right: 8,
+      bottom: 50,
+      child: IgnorePointer(
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Text(
+              text,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Builds or refreshes protection identity from the signed-in user.
+VideoProtectionController videoProtectionFromAuth({
+  required AuthProvider auth,
+  required String fallbackName,
+}) {
+  final user = auth.user;
+  return VideoProtectionController(
+    studentName: user?.fullLegalName?.trim().isNotEmpty == true
+        ? user!.fullLegalName!.trim()
+        : fallbackName,
+    nationalId: user?.nationalId?.trim() ?? '',
+    phone: user?.phone.trim() ?? '',
+  );
+}
+
+Future<void> ensureFreshProtectionIdentity(
+  AuthProvider auth,
+  VideoProtectionController protection,
+  String fallbackName,
+) async {
+  if (auth.user?.nationalId == null || auth.user!.nationalId!.trim().isEmpty) {
+    await auth.refreshUser();
+  }
+  final user = auth.user;
+  protection.updateIdentity(
+    studentName: user?.fullLegalName?.trim().isNotEmpty == true
+        ? user!.fullLegalName!.trim()
+        : fallbackName,
+    nationalId: user?.nationalId?.trim() ?? '',
+    phone: user?.phone.trim() ?? '',
+  );
 }
