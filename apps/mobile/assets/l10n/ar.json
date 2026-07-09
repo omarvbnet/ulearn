@@ -78,6 +78,7 @@
     "loading": "جارٍ التحميل...",
     "skip": "تخطي",
     "save": "حفظ",
+    "edit": "تعديل",
     "cancel": "إلغاء",
     "approve": "موافقة",
     "reject": "رفض",
@@ -436,6 +437,23 @@
       "airplay": "AirPlay",
       "castingToTv": "Casting to your TV",
       "casting": "Casting"
+    },
+    "teacher": {
+      "specialtiesTitle": "التخصصات التدريسية",
+      "specialtiesHint": "اختر حتى {max} مواد تدرّسها (مثل الرياضيات، الكيمياء).",
+      "specialtiesChoose": "اختيار",
+      "specialtiesSelected": "{count} من {max} محددة",
+      "specialtiesSaved": "تم تحديث التخصصات",
+      "specialtiesRequired": "أضف تخصصاً واحداً على الأقل في ملفك قبل إنشاء الدورات.",
+      "newCourse": "دورة جديدة",
+      "newCourseHint": "اختر أحد تخصصاتك ومرحلة تعليمية واحدة لهذه الدورة.",
+      "courseTitle": "عنوان الدورة",
+      "courseDescription": "الوصف (اختياري)",
+      "courseSpecialty": "التخصص",
+      "courseStage": "المرحلة التعليمية",
+      "coursePrice": "السعر (دينار)",
+      "submitCourse": "إرسال للمراجعة",
+      "courseSubmitted": "تم إرسال الدورة لمراجعة الإدارة"
     },
     "studio": {
       "pickVideoFirst": "اختر فيديواً أولاً",

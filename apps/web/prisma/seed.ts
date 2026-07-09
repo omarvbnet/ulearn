@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { IRAQ_EDUCATIONAL_STAGES, IRAQ_PROVINCES } from "./iraq-data";
+import { IRAQ_EDUCATIONAL_STAGES, IRAQ_PROVINCES, TEACHER_SPECIALTY_SUBJECTS } from "./iraq-data";
 
 const prisma = new PrismaClient();
 
@@ -84,6 +84,38 @@ async function main() {
   });
 
   if (!stage) throw new Error("No educational stage found for Iraq seed");
+
+  for (const spec of TEACHER_SPECIALTY_SUBJECTS) {
+    const existing = await prisma.subject.findFirst({
+      where: { countryId: iraq.id, nameEn: spec.nameEn, stageId: null, deletedAt: null },
+    });
+    if (existing) {
+      await prisma.subject.update({
+        where: { id: existing.id },
+        data: {
+          nameAr: spec.nameAr,
+          nameKu: spec.nameKu,
+          nameTr: spec.nameTr,
+          sortOrder: spec.sortOrder,
+          isActive: true,
+          isCertificateProgram: false,
+        },
+      });
+    } else {
+      await prisma.subject.create({
+        data: {
+          countryId: iraq.id,
+          stageId: null,
+          nameEn: spec.nameEn,
+          nameAr: spec.nameAr,
+          nameKu: spec.nameKu,
+          nameTr: spec.nameTr,
+          sortOrder: spec.sortOrder,
+          isCertificateProgram: false,
+        },
+      });
+    }
+  }
 
   let subject = await prisma.subject.findFirst({
     where: { countryId: iraq.id, nameEn: "Mathematics" },
@@ -230,11 +262,30 @@ async function main() {
           provinceId: baghdad?.id,
           bio: "Mathematics teacher with 12 years of experience.",
           specializations: ["Mathematics", "Physics"],
-          subjects: { create: [{ subjectId: subject.id }] },
         },
       },
     },
   });
+
+  const teacherProfile = await prisma.teacherProfile.findUnique({ where: { userId: teacher.id } });
+  const mathSpecialty = await prisma.subject.findFirst({
+    where: { countryId: iraq.id, nameEn: "Mathematics", stageId: null, deletedAt: null },
+  });
+  const physicsSpecialty = await prisma.subject.findFirst({
+    where: { countryId: iraq.id, nameEn: "Physics", stageId: null, deletedAt: null },
+  });
+  if (teacherProfile && mathSpecialty) {
+    await prisma.teacherSubject.deleteMany({ where: { teacherId: teacherProfile.id } });
+    const specialtyIds = [mathSpecialty.id, physicsSpecialty?.id].filter(Boolean) as string[];
+    await prisma.teacherSubject.createMany({
+      data: specialtyIds.map((subjectId) => ({ teacherId: teacherProfile.id, subjectId })),
+      skipDuplicates: true,
+    });
+    await prisma.teacherProfile.update({
+      where: { id: teacherProfile.id },
+      data: { specializations: ["Mathematics", "Physics"] },
+    });
+  }
 
   /* ── Test students ─────────────────────────────── */
   const studentSpecs = [

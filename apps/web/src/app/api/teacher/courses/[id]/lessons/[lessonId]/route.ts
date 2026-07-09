@@ -1,5 +1,6 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { TeacherCourseService } from "@/services/teacher-course.service";
 import { z } from "zod";
 
 const schema = z.object({
@@ -9,6 +10,14 @@ const schema = z.object({
   thumbnailKey: z.string().optional(),
   thumbnailUrl: z.string().optional(),
   durationSec: z.number().int().optional(),
+  isFreePreview: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+  pdfTitle: z.string().optional(),
+  pdfFileKey: z.string().optional(),
+  pdfFileUrl: z.string().optional(),
+  pdfMimeType: z.string().optional(),
+  pdfFileSize: z.number().int().positive().optional(),
+  removePdf: z.boolean().optional(),
 });
 
 /** Teacher: update a lesson. Live courses queue media changes for admin review. */
@@ -36,13 +45,24 @@ export async function PATCH(
 
   const data = parsed.data;
   const hasMediaChange = Boolean(data.fileKey || data.fileUrl || data.thumbnailUrl);
+  const { pdfTitle, pdfFileKey, pdfFileUrl, pdfMimeType, pdfFileSize, removePdf, ...lessonPatch } =
+    data;
+
+  if (lessonPatch.isFreePreview) {
+    const previews = await prisma.courseLesson.count({
+      where: { courseId, isFreePreview: true, id: { not: lessonId } },
+    });
+    if (previews >= 2) {
+      return error("A course can have at most 2 free preview lessons", 400, "FREE_PREVIEW_LIMIT");
+    }
+  }
 
   if (lesson.course.status === "APPROVED" && hasMediaChange) {
     const pending = await prisma.courseLessonUpdateRequest.create({
       data: {
         lessonId,
         teacherId: teacher.id,
-        ...data,
+        ...lessonPatch,
         status: "PENDING",
       },
     });
@@ -53,6 +73,32 @@ export async function PATCH(
     });
   }
 
-  const updated = await prisma.courseLesson.update({ where: { id: lessonId }, data });
+  const updated = await prisma.courseLesson.update({
+    where: { id: lessonId },
+    data: lessonPatch,
+  });
+
+  if (removePdf) {
+    await prisma.courseMaterial.updateMany({
+      where: { courseId, lessonId, deletedAt: null, type: "PDF" },
+      data: { deletedAt: new Date() },
+    });
+  } else if (pdfFileKey || pdfFileUrl) {
+    await TeacherCourseService.attachLessonPdf(courseId, lessonId, {
+      title: pdfTitle?.trim() || `${updated.title} — PDF`,
+      fileKey: pdfFileKey,
+      fileUrl: pdfFileUrl,
+      mimeType: pdfMimeType,
+      fileSize: pdfFileSize,
+    });
+  }
+
+  if (
+    lesson.course.status === "APPROVED" &&
+    (Object.keys(lessonPatch).length > 0 || pdfFileKey || pdfFileUrl || removePdf)
+  ) {
+    await TeacherCourseService.markCoursePendingReview(courseId);
+  }
+
   return json({ lesson: updated, pendingReview: false });
 }

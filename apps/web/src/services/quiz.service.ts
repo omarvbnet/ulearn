@@ -193,6 +193,70 @@ export class QuizService {
     });
   }
 
+  static async updateCourseQuiz(
+    quizId: string,
+    input: {
+      titleEn?: string;
+      titleAr?: string;
+      titleKu?: string;
+      titleTr?: string;
+      afterLessonId?: string | null;
+      timeLimitSec?: number | null;
+      maxAttempts?: number;
+      passPercentage?: number;
+      questions?: Array<{
+        textEn: string;
+        textAr: string;
+        textKu: string;
+        textTr: string;
+        options: Prisma.InputJsonValue;
+        correctKey: string;
+        points?: number;
+        timeLimitSec?: number | null;
+      }>;
+    }
+  ) {
+    const { questions, afterLessonId, ...meta } = input;
+
+    if (questions) {
+      await prisma.quizQuestion.updateMany({
+        where: { quizId, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+    }
+
+    return prisma.quiz.update({
+      where: { id: quizId },
+      data: {
+        ...meta,
+        ...(afterLessonId !== undefined
+          ? afterLessonId
+            ? { afterLesson: { connect: { id: afterLessonId } } }
+            : { afterLesson: { disconnect: true } }
+          : {}),
+        ...(questions
+          ? {
+              questions: {
+                create: questions.map((q, i) => ({
+                  type: "MULTIPLE_CHOICE",
+                  textEn: q.textEn,
+                  textAr: q.textAr,
+                  textKu: q.textKu,
+                  textTr: q.textTr,
+                  options: q.options,
+                  correctKey: q.correctKey,
+                  points: q.points ?? 1,
+                  timeLimitSec: q.timeLimitSec ?? null,
+                  sortOrder: i,
+                })),
+              },
+            }
+          : {}),
+      },
+      include: { questions: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } } },
+    });
+  }
+
   static async getUserStats(userId: string) {
     const attempts = await prisma.quizAttempt.findMany({
       where: { userId, completedAt: { not: null } },

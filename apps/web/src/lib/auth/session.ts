@@ -89,7 +89,23 @@ export async function getCurrentUser() {
         },
       },
       certificateProfile: true,
-      teacherProfile: { include: { subjects: true } },
+      teacherProfile: {
+        include: {
+          subjects: {
+            include: {
+              subject: {
+                select: {
+                  id: true,
+                  nameEn: true,
+                  nameAr: true,
+                  nameKu: true,
+                  nameTr: true,
+                },
+              },
+            },
+          },
+        },
+      },
       country: true,
       province: true,
     },

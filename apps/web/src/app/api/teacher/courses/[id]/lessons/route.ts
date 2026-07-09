@@ -1,5 +1,6 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { TeacherCourseService } from "@/services/teacher-course.service";
 import { z } from "zod";
 
 async function ownCourse(userId: string, courseId: string) {
@@ -17,6 +18,11 @@ const lessonSchema = z.object({
   durationSec: z.number().int().optional(),
   sortOrder: z.number().int().optional(),
   isFreePreview: z.boolean().optional(),
+  pdfTitle: z.string().optional(),
+  pdfFileKey: z.string().optional(),
+  pdfFileUrl: z.string().optional(),
+  pdfMimeType: z.string().optional(),
+  pdfFileSize: z.number().int().positive().optional(),
 });
 
 /** Teacher: add a lesson to own course. */
@@ -45,8 +51,32 @@ export async function POST(
   }
 
   const lesson = await prisma.courseLesson.create({
-    data: { courseId: id, ...parsed.data },
+    data: {
+      courseId: id,
+      title: parsed.data.title,
+      fileKey: parsed.data.fileKey,
+      fileUrl: parsed.data.fileUrl,
+      thumbnailKey: parsed.data.thumbnailKey,
+      thumbnailUrl: parsed.data.thumbnailUrl,
+      durationSec: parsed.data.durationSec,
+      sortOrder: parsed.data.sortOrder,
+      isFreePreview: parsed.data.isFreePreview ?? false,
+    },
   });
+
+  if (parsed.data.pdfFileKey || parsed.data.pdfFileUrl) {
+    await TeacherCourseService.attachLessonPdf(id, lesson.id, {
+      title: parsed.data.pdfTitle?.trim() || `${parsed.data.title} — PDF`,
+      fileKey: parsed.data.pdfFileKey,
+      fileUrl: parsed.data.pdfFileUrl,
+      mimeType: parsed.data.pdfMimeType,
+      fileSize: parsed.data.pdfFileSize,
+    });
+  }
+
+  if (course.status === "APPROVED") {
+    await TeacherCourseService.markCoursePendingReview(id);
+  }
 
   if (!course.thumbnail && parsed.data.thumbnailUrl) {
     await prisma.course.update({
@@ -74,5 +104,8 @@ export async function DELETE(
   if (!lessonId) return error("lessonId is required", 422, "VALIDATION");
 
   await prisma.courseLesson.deleteMany({ where: { id: lessonId, courseId: id } });
+  if (course.status === "APPROVED") {
+    await TeacherCourseService.markCoursePendingReview(id);
+  }
   return json({ success: true });
 }

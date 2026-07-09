@@ -72,8 +72,12 @@ class ApiClient {
     return data;
   }
 
-  Future<Map<String, dynamic>> delete(String path) async {
-    final res = await http.delete(Uri.parse('$baseUrl$path'), headers: _headers);
+  Future<Map<String, dynamic>> delete(String path, [Map<String, dynamic>? body]) async {
+    final res = await http.delete(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers,
+      body: body != null ? jsonEncode(body) : null,
+    );
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);

@@ -1,5 +1,6 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { TeacherCourseService } from "@/services/teacher-course.service";
 import { ContentType } from "@prisma/client";
 import { z } from "zod";
 
@@ -61,6 +62,33 @@ export async function POST(
   });
 
   return json({ document }, 201);
+}
+
+/** Teacher: remove a supplementary file. */
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireAuth(["TEACHER"]);
+  if (auth.error) return auth.error;
+
+  const { id } = await params;
+  const course = await ownCourse(auth.session.userId, id);
+  if (!course) return error("Course not found", 404, "NOT_FOUND");
+
+  const { documentId } = (await request.json()) as { documentId?: string };
+  if (!documentId) return error("documentId is required", 422, "VALIDATION");
+
+  await prisma.courseMaterial.updateMany({
+    where: { id: documentId, courseId: id, deletedAt: null },
+    data: { deletedAt: new Date() },
+  });
+
+  if (course.status === "APPROVED") {
+    await TeacherCourseService.markCoursePendingReview(id);
+  }
+
+  return json({ success: true });
 }
 
 /** Teacher: list supplementary files for a course. */

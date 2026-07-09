@@ -2,6 +2,7 @@
 
 import { Badge, Button, Card, Input, PageHeader, Select, StatCard, Textarea } from "@/components/ui";
 import { EmptyState, Modal, SkeletonRows, useToast } from "@/components/overlay";
+import { cn } from "@/lib/utils";
 import { captureVideoThumbnail } from "@/lib/video-thumbnail";
 import { useCallback, useEffect, useState } from "react";
 
@@ -55,6 +56,7 @@ export default function TeacherCoursesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [lessonsFor, setLessonsFor] = useState<Course | null>(null);
   const [quizzesFor, setQuizzesFor] = useState<Course | null>(null);
+  const [editFor, setEditFor] = useState<Course | null>(null);
 
   const load = useCallback(() => {
     fetch("/api/teacher/courses")
@@ -90,10 +92,22 @@ export default function TeacherCoursesPage() {
         description="Create priced courses for your students — every course is reviewed by an admin before it goes live"
         actions={
           meta?.isActive ? (
-            <Button onClick={() => setShowCreate(true)}>+ New Course</Button>
+            <Button
+              onClick={() => {
+                if (!meta.subjects.length) {
+                  toast("Set your teaching specialties first (up to 3)", "error");
+                  return;
+                }
+                setShowCreate(true);
+              }}
+            >
+              + New Course
+            </Button>
           ) : undefined
         }
       />
+
+      {meta && <TeacherSpecialtiesPanel onChanged={load} toast={toast} />}
 
       {meta && (
         <>
@@ -166,6 +180,18 @@ export default function TeacherCoursesPage() {
                 </p>
               )}
               <div className="mt-3 flex flex-wrap gap-2">
+                {c.status !== "APPROVED" && (
+                  <p className="w-full rounded-lg bg-amber-500/10 p-2 text-xs text-amber-200">
+                    Editing is allowed, but videos and PDFs stay hidden until admin approval.
+                  </p>
+                )}
+                <Button
+                  variant="outline"
+                  className="!px-3 !py-1.5 text-xs"
+                  onClick={() => setEditFor(c)}
+                >
+                  Edit Course
+                </Button>
                 <Button
                   variant="outline"
                   className="!px-3 !py-1.5 text-xs"
@@ -205,6 +231,15 @@ export default function TeacherCoursesPage() {
         />
       )}
 
+      {editFor && (
+        <EditCourseModal
+          course={editFor}
+          onClose={() => setEditFor(null)}
+          onDone={() => { setEditFor(null); load(); }}
+          toast={toast}
+        />
+      )}
+
       {lessonsFor && (
         <LessonsModal
           course={lessonsFor}
@@ -223,6 +258,174 @@ export default function TeacherCoursesPage() {
         />
       )}
     </div>
+  );
+}
+
+function TeacherSpecialtiesPanel({
+  onChanged,
+  toast,
+}: {
+  onChanged: () => void;
+  toast: (msg: string, type?: "success" | "error" | "info") => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [available, setAvailable] = useState<{ id: string; nameEn: string }[]>([]);
+  const max = 3;
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch("/api/profile/teacher")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        setSelected((d.specialties ?? []).map((s: { id: string }) => s.id));
+        setAvailable(d.available ?? []);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(load, [load]);
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= max) return prev;
+      return [...prev, id];
+    });
+  }
+
+  async function save() {
+    if (selected.length === 0) {
+      toast("Select at least one specialty", "error");
+      return;
+    }
+    setSaving(true);
+    const res = await fetch("/api/profile/teacher", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subjectIds: selected }),
+    });
+    setSaving(false);
+    if (res.ok) {
+      toast("Specialties saved");
+      load();
+      onChanged();
+    } else {
+      const d = await res.json().catch(() => ({}));
+      toast(d.error || "Could not save specialties", "error");
+    }
+  }
+
+  if (loading) return <div className="mb-5"><SkeletonRows rows={1} /></div>;
+
+  return (
+    <Card className="mb-6 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold">Teaching specialties</h2>
+          <p className="mt-1 text-sm text-muted">
+            Choose up to {max} subjects you teach (e.g. Mathematics, Chemistry). Required before
+            creating courses.
+          </p>
+        </div>
+        <Button variant="outline" disabled={saving} onClick={save}>
+          {saving ? "Saving…" : "Save specialties"}
+        </Button>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {available.map((s) => {
+          const active = selected.includes(s.id);
+          const disabled = !active && selected.length >= max;
+          return (
+            <button
+              key={s.id}
+              type="button"
+              disabled={disabled}
+              onClick={() => toggle(s.id)}
+              className={cn(
+                "rounded-full border px-3 py-1.5 text-sm transition",
+                active
+                  ? "border-accent bg-accent/15 text-accent"
+                  : "border-card-border text-muted hover:border-accent/40",
+                disabled && "opacity-40"
+              )}
+            >
+              {s.nameEn}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-3 text-xs text-muted">
+        {selected.length} of {max} selected
+      </p>
+    </Card>
+  );
+}
+
+function EditCourseModal({ course, onClose, onDone, toast }: {
+  course: Course;
+  onClose: () => void;
+  onDone: () => void;
+  toast: (msg: string, type?: "success" | "error" | "info") => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    titleEn: course.titleEn,
+    description: course.description ?? "",
+    price: String(course.price),
+  });
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    const res = await fetch(`/api/teacher/courses/${course.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        titleEn: form.titleEn,
+        description: form.description || undefined,
+        price: Number(form.price),
+      }),
+    });
+    setSaving(false);
+    if (res.ok) {
+      toast("Course updated — sent back for review if it was live");
+      onDone();
+    } else {
+      const d = await res.json().catch(() => ({}));
+      toast(d.error || "Failed to update course", "error");
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Edit — ${course.titleEn}`}>
+      <form onSubmit={submit} className="space-y-4">
+        <Input
+          label="Title (English)"
+          value={form.titleEn}
+          onChange={(e) => setForm({ ...form, titleEn: e.target.value })}
+          required
+        />
+        <Textarea
+          label="Description"
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+        />
+        <Input
+          label="Course price (IQD)"
+          type="number"
+          min="0"
+          value={form.price}
+          onChange={(e) => setForm({ ...form, price: e.target.value })}
+          required
+        />
+        <Button type="submit" disabled={saving} className="w-full">
+          {saving ? "Saving…" : "Save changes"}
+        </Button>
+      </form>
+    </Modal>
   );
 }
 
@@ -299,11 +502,17 @@ function CreateCourseModal({ meta, onClose, onDone, toast }: {
           required
         >
           <option value="">—</option>
-          {meta.subjects.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.nameEn}
+          {meta.subjects.length === 0 ? (
+            <option value="" disabled>
+              Add specialties on your profile first
             </option>
-          ))}
+          ) : (
+            meta.subjects.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.nameEn}
+              </option>
+            ))
+          )}
         </Select>
         <Select
           label="Students' stage"
@@ -343,6 +552,7 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
   const [lessons, setLessons] = useState<Lesson[]>(course.lessons);
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [preview, setPreview] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -359,6 +569,8 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
       let thumbnailKey: string | undefined;
       let thumbnailUrl: string | undefined;
       let durationSec: number | undefined;
+      let pdfFileKey: string | undefined;
+      let pdfFileUrl: string | undefined;
 
       if (file) {
         const presign = await fetch("/api/admin/uploads", {
@@ -420,6 +632,29 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
         }
       }
 
+      if (pdfFile) {
+        const presign = await fetch("/api/admin/uploads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: pdfFile.name,
+            contentType: "application/pdf",
+            size: pdfFile.size,
+            category: "document",
+            folder: "teacher-course-pdfs",
+          }),
+        });
+        if (!presign.ok) throw new Error((await presign.json()).error);
+        const { uploadUrl, key, publicUrl } = await presign.json();
+        await fetch(uploadUrl, {
+          method: "PUT",
+          headers: { "Content-Type": "application/pdf" },
+          body: pdfFile,
+        });
+        pdfFileKey = key;
+        pdfFileUrl = publicUrl;
+      }
+
       const res = await fetch(`/api/teacher/courses/${course.id}/lessons`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -432,6 +667,14 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
           durationSec,
           sortOrder: lessons.length,
           isFreePreview: preview,
+          ...(pdfFileKey
+            ? {
+                pdfFileKey,
+                pdfFileUrl,
+                pdfMimeType: "application/pdf",
+                pdfTitle: `${title.trim()} — PDF`,
+              }
+            : {}),
         }),
       });
       if (!res.ok) throw new Error("Failed to save lesson");
@@ -439,6 +682,7 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
       setLessons([...lessons, lesson]);
       setTitle("");
       setFile(null);
+      setPdfFile(null);
       setPreview(false);
       toast(thumbnailUrl ? "Lesson added with smart cover" : "Lesson added");
       onChanged();
@@ -501,6 +745,13 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             className="input file:me-3 file:rounded-lg file:border-0 file:bg-accent/15 file:px-3 file:py-1.5 file:text-sm file:text-accent"
           />
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={(e) => setPdfFile(e.target.files?.[0] ?? null)}
+            className="input file:me-3 file:rounded-lg file:border-0 file:bg-accent/15 file:px-3 file:py-1.5 file:text-sm file:text-accent"
+          />
+          {pdfFile && <p className="text-xs text-muted">PDF: {pdfFile.name}</p>}
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"

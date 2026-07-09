@@ -353,14 +353,17 @@ class HomeFeedState extends State<HomeFeed> {
               },
             ),
           ),
-          if (_ads.isNotEmpty && !_hasActiveFilters)
+          if (_ads.isNotEmpty && !_hasActiveFilters) ...[
+            const SizedBox(height: 8),
             StaggeredItem(
               index: 2,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 18),
-                child: _AdsCarousel(ads: _ads, locale: locale, onLike: _likeAd),
+              child: _AdsSection(
+                ads: _ads,
+                locale: locale,
+                onLike: _likeAd,
               ),
             ),
+          ],
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
             child: Row(
@@ -606,34 +609,36 @@ class _FiltersBar extends StatelessWidget {
             ),
           ),
         ),
-        SizedBox(
-          height: 46,
-          child: ListView(
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+          child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-            children: [
-              _FilterChip(
-                icon: Icons.school_outlined,
-                label: stageLabel,
-                active: stageActive,
-                trailing: Icons.expand_more,
-                onTap: onPickStage,
-              ),
-              const SizedBox(width: 8),
-              ..._levels(context).map((entry) {
-                final (value, label, icon) = entry;
-                final active = levelFilter == value;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: _FilterChip(
-                    icon: icon,
-                    label: label,
-                    active: active,
-                    onTap: () => onLevelChanged(active && value != null ? null : value),
-                  ),
-                );
-              }),
-            ],
+            clipBehavior: Clip.hardEdge,
+            child: Row(
+              children: [
+                _FilterChip(
+                  icon: Icons.school_outlined,
+                  label: stageLabel,
+                  active: stageActive,
+                  trailing: Icons.expand_more,
+                  onTap: onPickStage,
+                ),
+                const SizedBox(width: 8),
+                ..._levels(context).map((entry) {
+                  final (value, label, icon) = entry;
+                  final active = levelFilter == value;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: _FilterChip(
+                      icon: icon,
+                      label: label,
+                      active: active,
+                      onTap: () => onLevelChanged(active && value != null ? null : value),
+                    ),
+                  );
+                }),
+              ],
+            ),
           ),
         ),
       ],
@@ -695,6 +700,51 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
+// ── Ads section ────────────────────────────────────────────────
+
+class _AdsSection extends StatelessWidget {
+  const _AdsSection({
+    required this.ads,
+    required this.locale,
+    required this.onLike,
+  });
+
+  final List<Map<String, dynamic>> ads;
+  final String locale;
+  final ValueChanged<Map<String, dynamic>> onLike;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+          child: Row(
+            children: [
+              Icon(Icons.campaign_outlined, size: 16, color: AppTheme.muted.withValues(alpha: 0.9)),
+              const SizedBox(width: 6),
+              Text(
+                l10n.t('nav.ads'),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.muted,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ],
+          ),
+        ),
+        ClipRect(
+          child: _AdsCarousel(ads: ads, locale: locale, onLike: onLike),
+        ),
+      ],
+    );
+  }
+}
+
 // ── Ads carousel ───────────────────────────────────────────────
 
 class _AdsCarousel extends StatefulWidget {
@@ -716,7 +766,7 @@ class _AdsCarouselState extends State<_AdsCarousel> {
   @override
   void initState() {
     super.initState();
-    _controller = PageController(viewportFraction: 0.92);
+    _controller = PageController(viewportFraction: 1);
     _startAutoPlay();
   }
 
@@ -744,77 +794,76 @@ class _AdsCarouselState extends State<_AdsCarousel> {
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(
-          height: 160,
+          height: 152,
           child: PageView.builder(
             controller: _controller,
+            clipBehavior: Clip.hardEdge,
             itemCount: widget.ads.length,
             onPageChanged: (i) => setState(() => _page = i),
             itemBuilder: (context, i) {
               final ad = widget.ads[i];
               final title = localizedText(ad, widget.locale);
               final imageUrl = ad['imageUrl']?.toString() ?? '';
-              return AnimatedScale(
-                scale: _page == i ? 1 : 0.95,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeOut,
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 5),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        if (imageUrl.isNotEmpty)
-                          CachedImage(
-                            url: imageUrl,
-                            fit: BoxFit.cover,
-                            error: const _CoverFallback(),
-                          )
-                        else
-                          const _CoverFallback(),
-                        // Legibility gradient over the banner.
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                Colors.transparent,
-                                Colors.black.withValues(alpha: 0.65),
-                              ],
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                            ),
+              return Padding(
+                padding: EdgeInsets.only(
+                  left: i == 0 ? 16 : 6,
+                  right: i == widget.ads.length - 1 ? 16 : 6,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (imageUrl.isNotEmpty)
+                        CachedImage(
+                          url: imageUrl,
+                          fit: BoxFit.cover,
+                          error: const _CoverFallback(),
+                        )
+                      else
+                        const _CoverFallback(),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.65),
+                            ],
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
                           ),
                         ),
-                        Positioned(
-                          left: 14,
-                          right: 14,
-                          bottom: 12,
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  title,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15,
-                                  ),
+                      ),
+                      Positioned(
+                        left: 14,
+                        right: 14,
+                        bottom: 12,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
                                 ),
                               ),
-                              _AdLikeButton(
-                                liked: ad['likedByMe'] == true,
-                                count: (ad['likes'] as num?)?.toInt() ?? 0,
-                                onTap: () => widget.onLike(ad),
-                              ),
-                            ],
-                          ),
+                            ),
+                            _AdLikeButton(
+                              liked: ad['likedByMe'] == true,
+                              count: (ad['likes'] as num?)?.toInt() ?? 0,
+                              onTap: () => widget.onLike(ad),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               );
@@ -1391,9 +1440,6 @@ class _HomeSkeleton extends StatelessWidget {
           // Welcome header
           SkeletonBox(height: 110, radius: 20),
           SizedBox(height: 16),
-          // Ads carousel
-          SkeletonBox(height: 150, radius: 18),
-          SizedBox(height: 16),
           // Search + filter chips
           SkeletonBox(height: 48, radius: 14),
           SizedBox(height: 10),
@@ -1407,6 +1453,9 @@ class _HomeSkeleton extends StatelessWidget {
             ],
           ),
           SizedBox(height: 20),
+          // Ads carousel
+          SkeletonBox(height: 150, radius: 18),
+          SizedBox(height: 16),
           // Course cards
           SkeletonCourseCard(),
           SkeletonCourseCard(),

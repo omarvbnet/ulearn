@@ -15,6 +15,7 @@ import 'package:ulearn/features/profile/stage_request_screen.dart';
 import 'package:ulearn/features/rankings/rankings_screen.dart';
 import 'package:ulearn/features/report/my_reports_screen.dart';
 import 'package:ulearn/core/widgets/teacher_cover_presets.dart';
+import 'package:ulearn/features/profile/teacher_specialties_section.dart';
 import 'package:ulearn/features/store/teacher_studio_screen.dart';
 import 'package:ulearn/features/subscriptions/subscriptions_screen.dart';
 
@@ -184,8 +185,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         if (user.role == 'TEACHER') ...[
           const SizedBox(height: 16),
-          StaggeredItem(
+          const StaggeredItem(
             index: 1,
+            child: TeacherSpecialtiesSection(),
+          ),
+          const SizedBox(height: 16),
+          StaggeredItem(
+            index: 2,
             child: Card(
               child: ListTile(
                 leading: ClipRRect(

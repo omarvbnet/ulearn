@@ -62,6 +62,9 @@ export async function POST(request: Request) {
 
   const profile = await getTeacherProfile(auth.session.userId);
   if (!profile) return error("Teacher profile not found", 404, "NOT_FOUND");
+  if (profile.subjects.length === 0) {
+    return error("Set your teaching specialties on your profile first", 400, "NO_SPECIALTIES_SET");
+  }
 
   const parsed = createSchema.safeParse(await request.json());
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");

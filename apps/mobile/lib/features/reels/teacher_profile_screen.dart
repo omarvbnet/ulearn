@@ -153,8 +153,32 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen>
                                   _teacher!['bio'].toString(),
                                   style: const TextStyle(color: AppTheme.muted, height: 1.5),
                                 ),
-                                const SizedBox(height: 16),
+                                const SizedBox(height: 12),
                               ],
+                              if (((_teacher!['subjects'] as List<dynamic>?) ?? []).isNotEmpty) ...[
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: ((_teacher!['subjects'] as List<dynamic>?) ?? [])
+                                      .cast<Map<String, dynamic>>()
+                                      .map(
+                                        (s) => Chip(
+                                          label: Text(
+                                            localizedText(s, context.localeCode, prefix: 'name'),
+                                            style: const TextStyle(fontSize: 12),
+                                          ),
+                                          backgroundColor: AppTheme.primary.withValues(alpha: 0.15),
+                                          side: BorderSide(
+                                            color: AppTheme.accent.withValues(alpha: 0.3),
+                                          ),
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                                const SizedBox(height: 16),
+                              ] else
+                                const SizedBox(height: 4),
                               _StatsRow(teacher: _teacher!),
                             ],
                           ),

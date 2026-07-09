@@ -190,6 +190,9 @@ export class TeacherCourseService {
     });
     if (!teacher) return { success: false as const, error: "TEACHER_NOT_FOUND" };
     if (!teacher.isActive) return { success: false as const, error: "TEACHER_BLOCKED" };
+    if (teacher.subjects.length === 0) {
+      return { success: false as const, error: "NO_SPECIALTIES_SET" };
+    }
 
     // Courses must match the teacher's assigned specialization subjects.
     const allowed = teacher.subjects.some((s) => s.subjectId === input.subjectId);
@@ -245,6 +248,16 @@ export class TeacherCourseService {
     });
     if (!course) return { success: false as const, error: "NOT_FOUND" };
 
+    if (input.subjectId) {
+      const teacher = await prisma.teacherProfile.findFirst({
+        where: { id: teacherId, deletedAt: null },
+        include: { subjects: true },
+      });
+      if (!teacher) return { success: false as const, error: "TEACHER_NOT_FOUND" };
+      const allowed = teacher.subjects.some((s) => s.subjectId === input.subjectId);
+      if (!allowed) return { success: false as const, error: "SUBJECT_NOT_ASSIGNED" };
+    }
+
     // Any content edit sends the course back to review.
     const updated = await prisma.course.update({
       where: { id: courseId },
@@ -267,19 +280,131 @@ export class TeacherCourseService {
   }
 
   static async listTeacherCourses(teacherId: string) {
-    return prisma.course.findMany({
+    const courses = await prisma.course.findMany({
       where: { teacherId, deletedAt: null },
       orderBy: { createdAt: "desc" },
       include: {
         stage: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
         subject: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
-        lessons: { orderBy: { sortOrder: "asc" } },
+        lessons: {
+          orderBy: { sortOrder: "asc" },
+          include: {
+            materials: {
+              where: { deletedAt: null },
+              select: {
+                id: true,
+                title: true,
+                type: true,
+                fileKey: true,
+                fileUrl: true,
+                mimeType: true,
+                fileSize: true,
+                lessonId: true,
+              },
+            },
+          },
+        },
+        quizzes: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: "asc" },
+          include: { _count: { select: { questions: true } } },
+        },
         _count: {
           select: {
             purchases: { where: { status: "PAID" } },
             quizzes: { where: { deletedAt: null } },
           },
         },
+      },
+    });
+
+    return courses.map((c) => this.formatTeacherCourse(c));
+  }
+
+  /** Teachers may edit anytime but only preview media after admin approval. */
+  static formatTeacherCourse<
+    T extends {
+      status: CourseStatus;
+      lessons: Array<{
+        fileKey: string | null;
+        fileUrl: string | null;
+        materials?: Array<{
+          fileKey: string | null;
+          fileUrl: string | null;
+          [key: string]: unknown;
+        }>;
+        [key: string]: unknown;
+      }>;
+      [key: string]: unknown;
+    },
+  >(course: T) {
+    const canPreview = course.status === "APPROVED";
+    return {
+      ...course,
+      canPreview,
+      lessons: course.lessons.map((lesson) => ({
+        ...lesson,
+        canWatch: canPreview,
+        fileKey: canPreview ? lesson.fileKey : null,
+        fileUrl: canPreview ? lesson.fileUrl : null,
+        materials: (lesson.materials ?? []).map((m) => ({
+          ...m,
+          canDownload: canPreview,
+          fileKey: canPreview ? m.fileKey : null,
+          fileUrl: canPreview ? m.fileUrl : null,
+        })),
+      })),
+    };
+  }
+
+  static async markCoursePendingReview(courseId: string) {
+    await prisma.course.updateMany({
+      where: { id: courseId, status: "APPROVED", deletedAt: null },
+      data: {
+        status: "PENDING_REVIEW",
+        reviewedAt: null,
+        reviewNotes: null,
+        reviewedById: null,
+      },
+    });
+  }
+
+  static async attachLessonPdf(
+    courseId: string,
+    lessonId: string,
+    pdf: {
+      title: string;
+      fileKey?: string;
+      fileUrl?: string;
+      mimeType?: string;
+      fileSize?: number;
+    }
+  ) {
+    const existing = await prisma.courseMaterial.findFirst({
+      where: { courseId, lessonId, deletedAt: null, type: "PDF" },
+    });
+    if (existing) {
+      return prisma.courseMaterial.update({
+        where: { id: existing.id },
+        data: {
+          title: pdf.title,
+          fileKey: pdf.fileKey ?? null,
+          fileUrl: pdf.fileUrl ?? null,
+          mimeType: pdf.mimeType ?? "application/pdf",
+          fileSize: pdf.fileSize ?? null,
+        },
+      });
+    }
+    return prisma.courseMaterial.create({
+      data: {
+        courseId,
+        lessonId,
+        title: pdf.title,
+        type: "PDF",
+        fileKey: pdf.fileKey ?? null,
+        fileUrl: pdf.fileUrl ?? null,
+        mimeType: pdf.mimeType ?? "application/pdf",
+        fileSize: pdf.fileSize ?? null,
       },
     });
   }

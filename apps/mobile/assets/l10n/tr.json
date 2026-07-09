@@ -78,6 +78,7 @@
     "loading": "Yükleniyor...",
     "skip": "Atla",
     "save": "Kaydet",
+    "edit": "Düzenle",
     "cancel": "İptal",
     "approve": "Onayla",
     "reject": "Reddet",
@@ -436,6 +437,23 @@
       "airplay": "AirPlay",
       "castingToTv": "Casting to your TV",
       "casting": "Casting"
+    },
+    "teacher": {
+      "specialtiesTitle": "Öğretim uzmanlıkları",
+      "specialtiesHint": "Verdiğiniz en fazla {max} dersi seçin (ör. Matematik, Kimya).",
+      "specialtiesChoose": "Seç",
+      "specialtiesSelected": "{count} / {max} seçildi",
+      "specialtiesSaved": "Uzmanlıklar güncellendi",
+      "specialtiesRequired": "Kurs oluşturmadan önce profilinize en az bir uzmanlık ekleyin.",
+      "newCourse": "Yeni kurs",
+      "newCourseHint": "Bu kurs için bir uzmanlık ve bir eğitim aşaması seçin.",
+      "courseTitle": "Kurs başlığı",
+      "courseDescription": "Açıklama (isteğe bağlı)",
+      "courseSpecialty": "Uzmanlık",
+      "courseStage": "Eğitim aşaması",
+      "coursePrice": "Fiyat (IQD)",
+      "submitCourse": "İncelemeye gönder",
+      "courseSubmitted": "Kurs yönetici incelemesine gönderildi"
     },
     "studio": {
       "pickVideoFirst": "Pick a video first",

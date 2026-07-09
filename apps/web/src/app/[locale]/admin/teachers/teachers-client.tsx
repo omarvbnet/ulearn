@@ -191,16 +191,40 @@ function CreateTeacherModal({ countries, onClose, onDone, toast }: {
   toast: (msg: string, type?: "success" | "error" | "info") => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const [catalog, setCatalog] = useState<{ id: string; nameEn: string }[]>([]);
   const [form, setForm] = useState({
     fullLegalName: "",
     phone: "",
     email: "",
     countryId: "",
-    specializations: "",
+    subjectIds: [] as string[],
   });
+
+  useEffect(() => {
+    if (!form.countryId) {
+      setCatalog([]);
+      return;
+    }
+    fetch(`/api/subjects/specialties?countryId=${form.countryId}`)
+      .then((r) => (r.ok ? r.json() : { subjects: [] }))
+      .then((d) => setCatalog(d.subjects ?? []));
+  }, [form.countryId]);
+
+  function toggleSubject(id: string) {
+    setForm((f) => {
+      const has = f.subjectIds.includes(id);
+      if (has) return { ...f, subjectIds: f.subjectIds.filter((x) => x !== id) };
+      if (f.subjectIds.length >= 3) return f;
+      return { ...f, subjectIds: [...f.subjectIds, id] };
+    });
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (form.subjectIds.length === 0) {
+      toast("Select at least one specialty (max 3)", "error");
+      return;
+    }
     setSaving(true);
     const res = await fetch("/api/admin/teachers", {
       method: "POST",
@@ -210,10 +234,7 @@ function CreateTeacherModal({ countries, onClose, onDone, toast }: {
         phone: form.phone,
         email: form.email || undefined,
         countryId: form.countryId || undefined,
-        specializations: form.specializations
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
+        subjectIds: form.subjectIds,
       }),
     });
     setSaving(false);
@@ -232,11 +253,35 @@ function CreateTeacherModal({ countries, onClose, onDone, toast }: {
         <Input label="Full legal name" value={form.fullLegalName} onChange={(e) => setForm({ ...form, fullLegalName: e.target.value })} required />
         <Input label="WhatsApp phone (with country code)" dir="ltr" placeholder="+9647501234567" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} required />
         <Input label="Email (optional)" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-        <Select label="Country" value={form.countryId} onChange={(e) => setForm({ ...form, countryId: e.target.value })}>
+        <Select label="Country" value={form.countryId} onChange={(e) => setForm({ ...form, countryId: e.target.value, subjectIds: [] })} required>
           <option value="">—</option>
           {countries.map((c) => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
         </Select>
-        <Input label="Specializations (comma separated)" placeholder="Math, Physics" value={form.specializations} onChange={(e) => setForm({ ...form, specializations: e.target.value })} />
+        {form.countryId && (
+          <div>
+            <p className="label">Specialties (max 3)</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {catalog.map((s) => {
+                const active = form.subjectIds.includes(s.id);
+                const disabled = !active && form.subjectIds.length >= 3;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => toggleSubject(s.id)}
+                    className={`rounded-full border px-3 py-1 text-sm ${
+                      active ? "border-accent bg-accent/15 text-accent" : "border-card-border"
+                    } ${disabled ? "opacity-40" : ""}`}
+                  >
+                    {s.nameEn}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-xs text-muted">{form.subjectIds.length} of 3 selected</p>
+          </div>
+        )}
         <Button type="submit" disabled={saving} className="w-full">{saving ? "Creating…" : "Create Teacher"}</Button>
       </form>
     </Modal>

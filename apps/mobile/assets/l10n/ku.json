@@ -78,6 +78,7 @@
     "loading": "باردەکرێت...",
     "skip": "بازدان",
     "save": "پاشەکەوتکردن",
+    "edit": "دەستکاری",
     "cancel": "هەڵوەشاندنەوە",
     "approve": "ڕەزامەندی",
     "reject": "ڕەتکردنەوە",
@@ -436,6 +437,23 @@
       "airplay": "AirPlay",
       "castingToTv": "Casting to your TV",
       "casting": "Casting"
+    },
+    "teacher": {
+      "specialtiesTitle": "Teaching specialties",
+      "specialtiesHint": "Choose up to {max} subjects you teach (e.g. Mathematics, Chemistry).",
+      "specialtiesChoose": "Choose",
+      "specialtiesSelected": "{count} of {max} selected",
+      "specialtiesSaved": "Specialties updated",
+      "specialtiesRequired": "Add at least one specialty on your profile before creating courses.",
+      "newCourse": "New course",
+      "newCourseHint": "Pick one of your specialties and one educational stage for this course.",
+      "courseTitle": "Course title",
+      "courseDescription": "Description (optional)",
+      "courseSpecialty": "Specialty",
+      "courseStage": "Educational stage",
+      "coursePrice": "Price (IQD)",
+      "submitCourse": "Submit for review",
+      "courseSubmitted": "Course submitted for admin review"
     },
     "studio": {
       "pickVideoFirst": "Pick a video first",

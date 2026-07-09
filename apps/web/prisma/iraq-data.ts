@@ -38,3 +38,17 @@ export const IRAQ_EDUCATIONAL_STAGES = [
   { nameEn: "5th Literary", nameAr: "الخامس ادبي", nameKu: "پێنجەم ئەدەبی", nameTr: "5. Edebiyat", sortOrder: 14 },
   { nameEn: "6th Literary", nameAr: "السادس ادبي", nameKu: "شەشەم ئەدەبی", nameTr: "6. Edebiyat", sortOrder: 15 },
 ] as const;
+
+/** Stage-agnostic teaching specialties (max 3 per teacher profile). */
+export const TEACHER_SPECIALTY_SUBJECTS = [
+  { nameEn: "Mathematics", nameAr: "الرياضيات", nameKu: "بیرکاری", nameTr: "Matematik", sortOrder: 1 },
+  { nameEn: "Chemistry", nameAr: "الكيمياء", nameKu: "کیمیا", nameTr: "Kimya", sortOrder: 2 },
+  { nameEn: "Physics", nameAr: "الفيزياء", nameKu: "فیزیا", nameTr: "Fizik", sortOrder: 3 },
+  { nameEn: "Biology", nameAr: "الأحياء", nameKu: "زیندەزانی", nameTr: "Biyoloji", sortOrder: 4 },
+  { nameEn: "Arabic", nameAr: "اللغة العربية", nameKu: "زمانی عەرەبی", nameTr: "Arapça", sortOrder: 5 },
+  { nameEn: "English", nameAr: "اللغة الإنجليزية", nameKu: "زمانی ئینگلیزی", nameTr: "İngilizce", sortOrder: 6 },
+  { nameEn: "History", nameAr: "التاريخ", nameKu: "مێژوو", nameTr: "Tarih", sortOrder: 7 },
+  { nameEn: "Geography", nameAr: "الجغرافيا", nameKu: "جوگرافیا", nameTr: "Coğrafya", sortOrder: 8 },
+  { nameEn: "Computer Science", nameAr: "علوم الحاسوب", nameKu: "زانستی کۆمپیوتەر", nameTr: "Bilgisayar Bilimi", sortOrder: 9 },
+  { nameEn: "Islamic Studies", nameAr: "التربية الإسلامية", nameKu: "پەروەردەی ئیسلامی", nameTr: "İslam Eğitimi", sortOrder: 10 },
+] as const;

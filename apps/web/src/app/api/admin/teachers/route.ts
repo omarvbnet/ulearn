@@ -2,6 +2,7 @@ import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { ADMIN_ROLES } from "@/lib/auth/session";
 import { AuthService } from "@/services/auth.service";
+import { MAX_TEACHER_SPECIALTIES } from "@/services/teacher-profile.service";
 
 export async function GET() {
   const auth = await requireAuth(ADMIN_ROLES);
@@ -35,6 +36,13 @@ export async function POST(request: Request) {
 
   if (!phone || !fullLegalName) {
     return error("phone and fullLegalName are required", 422, "VALIDATION");
+  }
+
+  if (subjectIds != null) {
+    const ids = Array.isArray(subjectIds) ? subjectIds : [];
+    if (ids.length > MAX_TEACHER_SPECIALTIES) {
+      return error(`Teachers can have at most ${MAX_TEACHER_SPECIALTIES} specialties`, 422, "VALIDATION");
+    }
   }
 
   const existing = await prisma.user.findUnique({

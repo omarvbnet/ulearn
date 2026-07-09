@@ -1,12 +1,13 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { QuizService } from "@/services/quiz.service";
+import { TeacherCourseService } from "@/services/teacher-course.service";
 import { z } from "zod";
 
 async function ownCourse(userId: string, courseId: string) {
   return prisma.course.findFirst({
     where: { id: courseId, deletedAt: null, teacher: { userId, deletedAt: null } },
-    select: { id: true },
+    select: { id: true, status: true },
   });
 }
 
@@ -101,6 +102,10 @@ export async function POST(
     })),
   });
 
+  if (course.status === "APPROVED") {
+    await TeacherCourseService.markCoursePendingReview(id);
+  }
+
   return json({ quiz }, 201);
 }
 
@@ -128,6 +133,10 @@ export async function DELETE(
     where: { id: quizId },
     data: { deletedAt: new Date(), isActive: false },
   });
+
+  if (course.status === "APPROVED") {
+    await TeacherCourseService.markCoursePendingReview(id);
+  }
 
   return json({ success: true });
 }

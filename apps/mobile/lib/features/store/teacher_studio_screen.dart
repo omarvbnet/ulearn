@@ -9,6 +9,8 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/media/video_cover_helper.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/features/store/teacher_create_course_screen.dart';
+import 'package:ulearn/features/store/teacher_course_manage_screen.dart';
 import 'package:ulearn/features/store/teacher_quiz_tab.dart';
 import 'package:video_compress/video_compress.dart';
 
@@ -35,6 +37,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
 
   File? _pendingVideo;
   File? _pendingCover;
+  File? _pendingPdf;
   int? _pendingDurationSec;
 
   @override
@@ -70,6 +73,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     setState(() {
       _pendingVideo = null;
       _pendingCover = null;
+      _pendingPdf = null;
       _pendingDurationSec = null;
     });
   }
@@ -143,6 +147,28 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       category: 'video',
       folder: folder,
     );
+  }
+
+  Future<Map<String, String>?> _uploadPdfFile(File file) async {
+    final bytes = await file.readAsBytes();
+    final name = file.path.split(Platform.pathSeparator).last;
+    return _uploadBytes(
+      bytes,
+      name.toLowerCase().endsWith('.pdf') ? name : '$name.pdf',
+      'application/pdf',
+      category: 'document',
+      folder: 'teacher-course-pdfs',
+    );
+  }
+
+  Future<void> _pickPdf() async {
+    final pick = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['pdf'],
+    );
+    if (pick == null || pick.files.isEmpty) return;
+    final file = pick.files.first;
+    if (file.path != null && mounted) setState(() => _pendingPdf = File(file.path!));
   }
 
   Future<Map<String, String>?> _uploadCoverFile(File file, String folder) async {
@@ -246,16 +272,28 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
 
       final cover = await _uploadCoverIfAny('teacher-covers');
 
+      final payload = <String, dynamic>{
+        'title': _titleCtrl.text.trim(),
+        'fileKey': uploaded['key'],
+        'fileUrl': uploaded['url'],
+        if (cover != null) 'thumbnailKey': cover['key'],
+        if (cover != null) 'thumbnailUrl': cover['url'],
+        if (_pendingDurationSec != null) 'durationSec': _pendingDurationSec,
+      };
+
+      if (_pendingPdf != null) {
+        final pdf = await _uploadPdfFile(_pendingPdf!);
+        if (pdf != null) {
+          payload['pdfFileKey'] = pdf['key'];
+          payload['pdfFileUrl'] = pdf['url'];
+          payload['pdfMimeType'] = 'application/pdf';
+          payload['pdfTitle'] = '${_titleCtrl.text.trim()} — PDF';
+        }
+      }
+
       await context.read<ApiClient>().post(
             '/api/teacher/courses/$_courseId/lessons',
-            {
-              'title': _titleCtrl.text.trim(),
-              'fileKey': uploaded['key'],
-              'fileUrl': uploaded['url'],
-              if (cover != null) 'thumbnailKey': cover['key'],
-              if (cover != null) 'thumbnailUrl': cover['url'],
-              if (_pendingDurationSec != null) 'durationSec': _pendingDurationSec,
-            },
+            payload,
           );
       if (!mounted) return;
       _titleCtrl.clear();
@@ -342,6 +380,32 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: Text(l10n.profileTeacherStudio),
+          actions: [
+            IconButton(
+              tooltip: l10n.t('mobile.teacher.manageCourse'),
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: _courseId == null
+                  ? null
+                  : () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => TeacherCourseManageScreen(courseId: _courseId!),
+                        ),
+                      );
+                      if (mounted) _load();
+                    },
+            ),
+            IconButton(
+              tooltip: l10n.t('mobile.teacher.newCourse'),
+              icon: const Icon(Icons.add_circle_outline),
+              onPressed: () async {
+                final created = await Navigator.of(context).push<bool>(
+                  MaterialPageRoute(builder: (_) => const TeacherCreateCourseScreen()),
+                );
+                if (created == true && mounted) _load();
+              },
+            ),
+          ],
           bottom: TabBar(
             tabs: [
               Tab(text: l10n.t('student.videos')),
@@ -369,6 +433,9 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                     onClearMedia: _clearPendingMedia,
                     pendingVideo: _pendingVideo,
                     pendingCover: _pendingCover,
+                    pendingPdf: _pendingPdf,
+                    onPickPdf: _pickPdf,
+                    onClearPdf: () => setState(() => _pendingPdf = null),
                     pendingDurationSec: _pendingDurationSec,
                     onUpload: _uploadCourseVideo,
                     compressBeforeUpload: _compressBeforeUpload,
@@ -424,6 +491,9 @@ class _UploadTab extends StatelessWidget {
     required this.onClearMedia,
     required this.pendingVideo,
     required this.pendingCover,
+    this.pendingPdf,
+    this.onPickPdf,
+    this.onClearPdf,
     required this.pendingDurationSec,
     required this.onUpload,
     required this.compressBeforeUpload,
@@ -446,6 +516,9 @@ class _UploadTab extends StatelessWidget {
   final VoidCallback onClearMedia;
   final File? pendingVideo;
   final File? pendingCover;
+  final File? pendingPdf;
+  final VoidCallback? onPickPdf;
+  final VoidCallback? onClearPdf;
   final int? pendingDurationSec;
   final VoidCallback onUpload;
   final bool compressBeforeUpload;
@@ -578,6 +651,25 @@ class _UploadTab extends StatelessWidget {
               ),
             ),
           ),
+        ],
+        if (!isShort) ...[
+          const SizedBox(height: 16),
+          Text(l10n.t('mobile.teacher.attachPdfOptional'),
+              style: const TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: uploading ? null : onPickPdf,
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            label: Text(
+              pendingPdf != null
+                  ? pendingPdf!.path.split(Platform.pathSeparator).last
+                  : l10n.t('mobile.teacher.choosePdf'),
+            ),
+          ),
+          if (pendingPdf != null && onClearPdf != null) ...[
+            const SizedBox(height: 6),
+            TextButton(onPressed: onClearPdf, child: Text(l10n.t('mobile.teacher.removePdf'))),
+          ],
         ],
         const SizedBox(height: 12),
         Container(
