@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
@@ -83,7 +84,7 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
         MaterialPageRoute(
           builder: (_) => VideoPlayerScreen(
             lessonId: resumeId,
-            title: localizedText(c, context.read<AuthProvider>().user?.locale ?? 'AR'),
+            title: localizedText(c, context.localeCode),
           ),
         ),
       );
@@ -94,7 +95,8 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final isTeacher = auth.user?.role == 'TEACHER';
-    final locale = auth.user?.locale ?? 'AR';
+    final locale = context.localeCode;
+    final l10n = context.l10n;
 
     return Column(
       children: [
@@ -105,11 +107,11 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
               TextField(
                 onChanged: _onSearch,
                 decoration: InputDecoration(
-                  hintText: 'Search courses, teachers, subjects…',
+                  hintText: '${l10n.t('common.search')}…',
                   prefixIcon: const Icon(Icons.search, color: AppTheme.muted),
                   suffixIcon: isTeacher
                       ? IconButton(
-                          tooltip: 'Upload videos',
+                          tooltip: l10n.profileTeacherStudio,
                           icon: const Icon(Icons.video_call_outlined, color: AppTheme.accent),
                           onPressed: () => Navigator.of(context).push(
                             MaterialPageRoute(builder: (_) => const TeacherStudioScreen()),
@@ -124,7 +126,7 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                 child: Row(
                   children: [
                     _FilterChip(
-                      label: 'Recent',
+                      label: l10n.t('student.resumedFrom'),
                       selected: _sort == 'recent',
                       onTap: () {
                         setState(() => _sort = 'recent');
@@ -132,7 +134,7 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                       },
                     ),
                     _FilterChip(
-                      label: 'Progress',
+                      label: l10n.t('dashboard.completionRate'),
                       selected: _sort == 'progress',
                       onTap: () {
                         setState(() => _sort = 'progress');
@@ -149,7 +151,7 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                     ),
                     const SizedBox(width: 8),
                     _FilterChip(
-                      label: 'In progress',
+                      label: l10n.continueWatching,
                       selected: _minProgress == 1,
                       onTap: () {
                         setState(() => _minProgress = _minProgress == 1 ? 0 : 1);
@@ -173,7 +175,7 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                   child: Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Certificate courses only · Upload from studio',
+                      l10n.profileTeacherStudioHint,
                       style: TextStyle(fontSize: 12, color: AppTheme.muted.withValues(alpha: 0.9)),
                     ),
                   ),
@@ -196,8 +198,8 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                           const SizedBox(height: 12),
                           Text(
                             isTeacher
-                                ? 'No certificate courses yet.\nSubscribe or purchase from Store.'
-                                : 'No subscribed courses yet.\nBrowse Store or Subscribe tab.',
+                                ? '${l10n.t('student.noCertificates')}\n${l10n.t('student.noCertificatesHint')}'
+                                : '${l10n.t('student.noCourses')}\n${l10n.homeBrowseStore}',
                             textAlign: TextAlign.center,
                             style: const TextStyle(color: AppTheme.muted),
                           ),
@@ -267,8 +269,8 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                                                 color: Colors.black54,
                                                 borderRadius: BorderRadius.circular(8),
                                               ),
-                                              child: const Text(
-                                                'Certificate',
+                                              child: Text(
+                                                l10n.authCertificate,
                                                 style: TextStyle(
                                                   color: AppTheme.accent,
                                                   fontSize: 11,
@@ -297,8 +299,9 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                                           Text(
                                             [
                                               if (teacherName != null) teacherName,
-                                              '$lessonCount videos',
-                                              '$progress% complete',
+                                              l10n.t('student.videos'),
+                                              '$lessonCount',
+                                              '$progress%',
                                             ].join(' · '),
                                             style: const TextStyle(
                                               fontSize: 12.5,

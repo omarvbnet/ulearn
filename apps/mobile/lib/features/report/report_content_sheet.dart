@@ -1,52 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 
 /// Report reasons aligned with backend `ContentReportReason`.
 class ReportReason {
-  const ReportReason(this.apiValue, this.label, this.description);
+  const ReportReason(this.apiValue);
 
   final String apiValue;
-  final String label;
-  final String description;
 
   static const all = [
-    ReportReason(
-      'INAPPROPRIATE',
-      'Inappropriate content',
-      'Sexual, offensive, or not suitable for learners',
-    ),
-    ReportReason(
-      'SPAM',
-      'Spam or misleading',
-      'Unwanted promotion, scams, or repetitive content',
-    ),
-    ReportReason(
-      'HARASSMENT',
-      'Harassment or hate',
-      'Bullying, threats, or hate speech',
-    ),
-    ReportReason(
-      'COPYRIGHT',
-      'Copyright violation',
-      'Uses content you own without permission',
-    ),
-    ReportReason(
-      'VIOLENCE',
-      'Violence or dangerous acts',
-      'Harmful or dangerous behavior shown',
-    ),
-    ReportReason(
-      'MISLEADING',
-      'False information',
-      'Incorrect or deceptive educational claims',
-    ),
-    ReportReason(
-      'OTHER',
-      'Other',
-      'Something else — please describe in detail',
-    ),
+    ReportReason('INAPPROPRIATE'),
+    ReportReason('SPAM'),
+    ReportReason('HARASSMENT'),
+    ReportReason('COPYRIGHT'),
+    ReportReason('VIOLENCE'),
+    ReportReason('MISLEADING'),
+    ReportReason('OTHER'),
   ];
 }
 
@@ -104,13 +75,14 @@ class _ReportContentSheetState extends State<ReportContentSheet> {
   }
 
   String? _validate() {
-    if (_reason == null) return 'Please select a reason';
+    final l10n = context.l10n;
+    if (_reason == null) return l10n.t('mobile.report.selectReason');
     final details = _detailsCtrl.text.trim();
     if (details.length < 10) {
-      return 'Please describe the issue (at least 10 characters)';
+      return l10n.t('mobile.report.detailsTooShort');
     }
     if (_reason!.apiValue == 'OTHER' && details.length < 20) {
-      return 'Please provide more detail for "Other" (at least 20 characters)';
+      return l10n.t('mobile.report.otherTooShort');
     }
     return null;
   }
@@ -137,8 +109,8 @@ class _ReportContentSheetState extends State<ReportContentSheet> {
       if (!mounted) return;
       Navigator.pop(context, true);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Report submitted. Our team will review it.'),
+        SnackBar(
+          content: Text(context.l10n.reportSubmitted),
           backgroundColor: AppTheme.primary,
         ),
       );
@@ -152,23 +124,24 @@ class _ReportContentSheetState extends State<ReportContentSheet> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = 'Could not submit report. Try again.';
+        _error = context.l10n.t('mobile.report.submitFailed');
       });
     }
   }
 
   String _friendlyError(String code) {
+    final l10n = context.l10n;
     switch (code) {
       case 'ALREADY_REPORTED':
-        return 'You already reported this content';
+        return l10n.t('mobile.report.alreadyReported');
       case 'OWN_CONTENT':
-        return 'You cannot report your own content';
+        return l10n.t('mobile.report.ownContent');
       case 'NOT_FOUND':
-        return 'This content is no longer available';
+        return l10n.t('mobile.report.notFound');
       case 'DETAILS_TOO_SHORT':
-        return 'Please provide at least 10 characters describing the issue';
+        return l10n.t('mobile.report.detailsTooShort');
       case 'OTHER_REQUIRES_DETAILS':
-        return 'Please provide more detail for "Other" (min 20 characters)';
+        return l10n.t('mobile.report.otherTooShort');
       default:
         return code;
     }
@@ -176,6 +149,7 @@ class _ReportContentSheetState extends State<ReportContentSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -200,7 +174,7 @@ class _ReportContentSheetState extends State<ReportContentSheet> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Report content',
+                    l10n.reelsReportContent,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -214,13 +188,15 @@ class _ReportContentSheetState extends State<ReportContentSheet> {
               style: const TextStyle(color: AppTheme.muted, fontSize: 13),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Reports are confidential. False reports may lead to account restrictions.',
-              style: TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.4),
+            Text(
+              l10n.t('mobile.report.confidentiality'),
+              style: const TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.4),
             ),
             const SizedBox(height: 16),
             ...ReportReason.all.map((r) {
               final selected = _reason?.apiValue == r.apiValue;
+              final label = l10n.t('mobile.report.reasons.${r.apiValue}');
+              final description = l10n.t('mobile.report.reasonDescriptions.${r.apiValue}');
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Material(
@@ -245,7 +221,7 @@ class _ReportContentSheetState extends State<ReportContentSheet> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  r.label,
+                                  label,
                                   style: TextStyle(
                                     fontWeight: FontWeight.w600,
                                     color: selected ? AppTheme.foreground : AppTheme.muted,
@@ -253,7 +229,7 @@ class _ReportContentSheetState extends State<ReportContentSheet> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  r.description,
+                                  description,
                                   style: const TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.35),
                                 ),
                               ],
@@ -271,11 +247,11 @@ class _ReportContentSheetState extends State<ReportContentSheet> {
               controller: _detailsCtrl,
               maxLines: 4,
               maxLength: 1000,
-              decoration: const InputDecoration(
-                labelText: 'Additional details *',
-                hintText: 'What happened? Include timestamps or context if helpful.',
+              decoration: InputDecoration(
+                labelText: l10n.t('mobile.report.additionalDetails'),
+                hintText: l10n.t('mobile.report.detailsHint'),
                 alignLabelWithHint: true,
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
               ),
             ),
             if (_error != null) ...[
@@ -292,7 +268,7 @@ class _ReportContentSheetState extends State<ReportContentSheet> {
                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                     )
                   : const Icon(Icons.send_outlined),
-              label: Text(_submitting ? 'Submitting…' : 'Submit report'),
+              label: Text(_submitting ? l10n.quizSubmitting : l10n.t('mobile.report.submitReport')),
             ),
           ],
         ),

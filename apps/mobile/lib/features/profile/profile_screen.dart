@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/features/profile/favorites_screen.dart';
+import 'package:ulearn/features/profile/language_screen.dart';
+import 'package:ulearn/features/profile/saved_reels_screen.dart';
 import 'package:ulearn/features/profile/profile_avatar.dart';
 import 'package:ulearn/features/profile/profile_photo_service.dart';
 import 'package:ulearn/features/profile/stage_request_screen.dart';
@@ -33,6 +36,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _onAvatarTap() async {
     if (!_canEditPhoto || _uploadingPhoto) return;
 
+    final l10n = context.l10n;
     final user = context.read<AuthProvider>().user;
     final hasPhoto = user?.profilePhotoUrl?.isNotEmpty == true;
 
@@ -48,13 +52,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.photo_library_outlined, color: AppTheme.accent),
-              title: Text(hasPhoto ? 'Change photo' : 'Add photo'),
+              title: Text(hasPhoto ? l10n.profileChangePhoto : l10n.profileAddPhoto),
               onTap: () => Navigator.pop(ctx, 'pick'),
             ),
             if (hasPhoto)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                title: const Text('Remove photo', style: TextStyle(color: Colors.redAccent)),
+                title: Text(
+                  l10n.profileRemovePhoto,
+                  style: const TextStyle(color: Colors.redAccent),
+                ),
                 onTap: () => Navigator.pop(ctx, 'remove'),
               ),
             const SizedBox(height: 8),
@@ -72,12 +79,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (!mounted) return;
         context.read<AuthProvider>().applyUser(data['user'] as Map<String, dynamic>);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile photo removed')),
+          SnackBar(content: Text(context.l10n.profilePhotoRemoved)),
         );
       } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not remove photo')),
+            SnackBar(content: Text(context.l10n.profilePhotoRemoveFailed)),
           );
         }
       } finally {
@@ -93,7 +100,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (!mounted) return;
         context.read<AuthProvider>().applyUser(data['user'] as Map<String, dynamic>);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile photo updated')),
+          SnackBar(content: Text(context.l10n.profilePhotoUpdated)),
         );
       } on ProfilePhotoException catch (e) {
         if (e.message != 'cancelled' && mounted) {
@@ -104,7 +111,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not update photo')),
+            SnackBar(content: Text(context.l10n.profilePhotoUpdateFailed)),
           );
         }
       } finally {
@@ -123,12 +130,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (!mounted) return;
       context.read<AuthProvider>().applyUser(data['user'] as Map<String, dynamic>);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Profile cover updated')),
+        SnackBar(content: Text(context.l10n.profileCoverUpdated)),
       );
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not save cover')),
+          SnackBar(content: Text(context.l10n.profileCoverSaveFailed)),
         );
       }
     } finally {
@@ -138,6 +145,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final auth = context.watch<AuthProvider>();
     final user = auth.user;
     if (user == null) return const SizedBox.shrink();
@@ -159,13 +167,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               if (_canEditPhoto) ...[
                 const SizedBox(height: 8),
                 Text(
-                  'Tap to change photo',
+                  l10n.profileTapChangePhoto,
                   style: TextStyle(color: AppTheme.muted.withValues(alpha: 0.85), fontSize: 12),
                 ),
               ],
               const SizedBox(height: 14),
               Text(
-                user.fullLegalName ?? 'Student',
+                user.fullLegalName ?? l10n.authStudent,
                 style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 4),
@@ -182,9 +190,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               children: [
                 Row(
                   children: [
-                    const Text(
-                      'Profile cover',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    Text(
+                      l10n.profileCoverTitle,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     if (_savingCover) ...[
                       const SizedBox(width: 10),
@@ -198,7 +206,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Choose a banner for your public teacher profile',
+                  l10n.profileCoverHint,
                   style: TextStyle(color: AppTheme.muted.withValues(alpha: 0.9), fontSize: 12),
                 ),
                 const SizedBox(height: 12),
@@ -223,14 +231,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
           index: 2,
           child: _InfoCard(
             children: [
-              _InfoRow(icon: Icons.badge_outlined, label: 'Role', value: _roleLabel(user.role)),
-              _InfoRow(icon: Icons.verified_outlined, label: 'Status', value: user.status),
-              _InfoRow(icon: Icons.language_outlined, label: 'Language', value: user.locale),
+              _InfoRow(
+                icon: Icons.badge_outlined,
+                label: l10n.profileRole,
+                value: l10n.roleLabel(user.role),
+              ),
+              _InfoRow(
+                icon: Icons.verified_outlined,
+                label: l10n.profileStatus,
+                value: user.status,
+              ),
+              _InfoRow(
+                icon: Icons.language_outlined,
+                label: l10n.profileLanguage,
+                value: l10n.languageName(user.locale),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const LanguageScreen()),
+                ),
+              ),
               if (user.role == 'STUDENT')
                 _InfoRow(
                   icon: Icons.school_outlined,
-                  label: 'Stage',
-                  value: user.stage?.nameFor(user.locale) ?? 'Not set',
+                  label: l10n.profileStage,
+                  value: user.stage?.nameFor(context.localeCode) ?? l10n.profileNotSet,
                 ),
             ],
           ),
@@ -241,10 +264,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Card(
             child: ListTile(
               leading: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
-              title: const Text('My Reports'),
-              subtitle: const Text(
-                'Content you reported for review',
-                style: TextStyle(color: AppTheme.muted, fontSize: 12),
+              title: Text(l10n.profileMyReports),
+              subtitle: Text(
+                l10n.profileMyReportsHint,
+                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
               ),
               trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
               onTap: () => Navigator.of(context).push(
@@ -258,16 +281,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Card(
             child: ListTile(
               leading: const Icon(Icons.leaderboard_outlined, color: AppTheme.primary),
-              title: const Text('Rankings'),
-              subtitle: const Text(
-                'Leaderboard and top learners',
-                style: TextStyle(color: AppTheme.muted, fontSize: 12),
+              title: Text(l10n.rankTitle),
+              subtitle: Text(
+                l10n.profileRankingsHint,
+                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
               ),
               trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => Scaffold(
-                    appBar: AppBar(title: const Text('Rankings')),
+                    appBar: AppBar(title: Text(l10n.rankTitle)),
                     body: const RankingsScreen(),
                   ),
                 ),
@@ -280,14 +303,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Card(
             child: ListTile(
               leading: const Icon(Icons.favorite_outline, color: Colors.redAccent),
-              title: const Text('My Favorites'),
-              subtitle: const Text(
-                'Saved courses and videos',
-                style: TextStyle(color: AppTheme.muted, fontSize: 12),
+              title: Text(l10n.profileFavorites),
+              subtitle: Text(
+                l10n.profileFavoritesHint,
+                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
               ),
               trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const FavoritesScreen()),
+              ),
+            ),
+          ),
+        ),
+        StaggeredItem(
+          index: 5,
+          child: Card(
+            child: ListTile(
+              leading: const Icon(Icons.bookmark_outline, color: AppTheme.accent),
+              title: Text(l10n.profileSavedReels),
+              subtitle: Text(
+                l10n.profileSavedReelsHint,
+                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+              ),
+              trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SavedReelsScreen()),
               ),
             ),
           ),
@@ -299,10 +339,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Card(
               child: ListTile(
                 leading: const Icon(Icons.card_membership_outlined, color: AppTheme.primary),
-                title: const Text('Subscriptions'),
-                subtitle: const Text(
-                  'Packages, activation codes & plans',
-                  style: TextStyle(color: AppTheme.muted, fontSize: 12),
+                title: Text(l10n.navSubscriptions),
+                subtitle: Text(
+                  l10n.profileSubscriptionsHint,
+                  style: const TextStyle(color: AppTheme.muted, fontSize: 12),
                 ),
                 trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
                 onTap: () => Navigator.of(context).push(
@@ -319,10 +359,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Card(
               child: ListTile(
                 leading: const Icon(Icons.swap_vert_rounded, color: AppTheme.accent),
-                title: const Text('Change stage'),
-                subtitle: const Text(
-                  'Request a move with your certificate',
-                  style: TextStyle(color: AppTheme.muted, fontSize: 12),
+                title: Text(l10n.profileChangeStage),
+                subtitle: Text(
+                  l10n.profileChangeStageHint,
+                  style: const TextStyle(color: AppTheme.muted, fontSize: 12),
                 ),
                 trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
                 onTap: () async {
@@ -344,10 +384,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Card(
               child: ListTile(
                 leading: const Icon(Icons.video_call_outlined, color: AppTheme.accent),
-                title: const Text('Teacher Studio'),
-                subtitle: const Text(
-                  'Upload course videos & short videos',
-                  style: TextStyle(color: AppTheme.muted, fontSize: 12),
+                title: Text(l10n.profileTeacherStudio),
+                subtitle: Text(
+                  l10n.profileTeacherStudioHint,
+                  style: const TextStyle(color: AppTheme.muted, fontSize: 12),
                 ),
                 trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
                 onTap: () => Navigator.of(context).push(
@@ -363,22 +403,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Card(
             child: ListTile(
               leading: const Icon(Icons.logout, color: Colors.redAccent),
-              title: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
+              title: Text(l10n.navLogout, style: const TextStyle(color: Colors.redAccent)),
               onTap: () async {
                 final confirmed = await showDialog<bool>(
                   context: context,
                   builder: (ctx) => AlertDialog(
                     backgroundColor: AppTheme.card,
-                    title: const Text('Logout'),
-                    content: const Text('Are you sure you want to log out?'),
+                    title: Text(l10n.navLogout),
+                    content: Text(l10n.profileLogoutConfirm),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('Cancel'),
+                        child: Text(l10n.cancel),
                       ),
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
+                        child: Text(
+                          l10n.navLogout,
+                          style: const TextStyle(color: Colors.redAccent),
+                        ),
                       ),
                     ],
                   ),
@@ -392,19 +435,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       ],
     );
-  }
-
-  static String _roleLabel(String role) {
-    switch (role) {
-      case 'STUDENT':
-        return 'Student';
-      case 'CERTIFICATE_USER':
-        return 'Certificate User';
-      case 'TEACHER':
-        return 'Teacher';
-      default:
-        return role;
-    }
   }
 }
 
@@ -424,18 +454,34 @@ class _InfoCard extends StatelessWidget {
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.icon, required this.label, required this.value});
+  const _InfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.onTap,
+  });
 
   final IconData icon;
   final String label;
   final String value;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
       leading: Icon(icon, color: AppTheme.accent),
       title: Text(label, style: const TextStyle(color: AppTheme.muted, fontSize: 13)),
-      trailing: Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+          if (onTap != null) ...[
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right, color: AppTheme.muted, size: 20),
+          ],
+        ],
+      ),
+      onTap: onTap,
     );
   }
 }

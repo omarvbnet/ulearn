@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
+import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/quiz/quiz_screen.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
@@ -44,8 +46,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   Future<void> _init() async {
     final auth = context.read<AuthProvider>();
+    final l10n = context.l10nRead;
     _protection = VideoProtectionController(
-      studentName: auth.user?.fullLegalName ?? 'Student',
+      studentName: auth.user?.fullLegalName ?? l10n.t('mobile.roles.student'),
       nationalId: auth.user?.nationalId ?? '',
       phone: auth.user?.phone ?? '',
     );
@@ -69,7 +72,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       if (!_hasAccess) {
         setState(() {
           _loading = false;
-          _error = 'Subscribe to unlock all lessons';
+          _error = context.l10n.t('common.subscribeToUnlock');
         });
         return;
       }
@@ -84,7 +87,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       if (url == null || url.isEmpty) {
         setState(() {
           _loading = false;
-          _error = 'Video not available';
+          _error = context.l10n.t('mobile.video.notAvailable');
         });
         return;
       }
@@ -152,6 +155,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -161,12 +165,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           if (_quizzes.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.quiz_outlined, color: AppTheme.accent),
-              tooltip: 'Take quiz',
+              tooltip: l10n.t('mobile.video.takeQuiz'),
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => QuizScreen(
                     quizId: _quizzes.first['id'] as String,
-                    title: _quizzes.first['titleEn']?.toString() ?? 'Quiz',
+                    title: localizedText(_quizzes.first, context.localeCode),
                   ),
                 ),
               ),
@@ -271,7 +275,7 @@ class _Controls extends StatelessWidget {
               const Spacer(),
               if (protection != null && videoUrl != null)
                 IconButton(
-                  tooltip: 'Cast to TV',
+                  tooltip: context.l10n.castTitle,
                   icon: Icon(
                     protection!.isCasting ? Icons.cast_connected : Icons.cast_outlined,
                     color: protection!.isCasting ? AppTheme.accent : Colors.white,

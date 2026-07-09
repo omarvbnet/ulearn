@@ -24,10 +24,25 @@ export async function GET() {
   const videos = await prisma.teacherShortVideo.findMany({
     where: { teacherId: teacher.id, deletedAt: null },
     orderBy: { createdAt: "desc" },
-    include: { _count: { select: { likes: true } } },
+    include: {
+      _count: {
+        select: {
+          likes: true,
+          saves: true,
+          comments: { where: { deletedAt: null } },
+        },
+      },
+    },
   });
 
-  return json({ videos });
+  return json({
+    videos: videos.map((v) => ({
+      ...v,
+      likes: v._count.likes,
+      saves: v._count.saves,
+      commentCount: v._count.comments,
+    })),
+  });
 }
 
 export async function POST(request: Request) {

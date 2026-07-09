@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/features/home/home_feed.dart';
 
 class SubscriptionsScreen extends StatefulWidget {
   const SubscriptionsScreen({super.key});
@@ -39,7 +41,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
       await context.read<ApiClient>().post('/api/subscriptions', {
         'packageId': packageId,
       });
-      setState(() => _message = 'Activation request submitted');
+      setState(() => _message = context.l10n.studentRequestSubmitted);
     } catch (e) {
       setState(() => _message = e.toString());
     }
@@ -50,7 +52,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
       await context.read<ApiClient>().post('/api/subscriptions/activate', {
         'code': _codeCtrl.text.trim(),
       });
-      setState(() => _message = 'Subscription activated!');
+      setState(() => _message = context.l10n.studentActivated);
     } catch (e) {
       setState(() => _message = e.toString());
     }
@@ -58,6 +60,8 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final locale = context.localeCode;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -67,15 +71,15 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Activate Code', style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(l10n.studentActivateCode, style: const TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _codeCtrl,
                   textDirection: TextDirection.ltr,
-                  decoration: const InputDecoration(hintText: 'XXXX-XXXX-XXXX'),
+                  decoration: InputDecoration(hintText: l10n.t('mobile.subscriptions.codeHint')),
                 ),
                 const SizedBox(height: 12),
-                ElevatedButton(onPressed: _activate, child: const Text('Activate')),
+                ElevatedButton(onPressed: _activate, child: Text(l10n.t('common.activate'))),
               ],
             ),
           ),
@@ -95,11 +99,12 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(pkg['nameEn']?.toString() ?? 'Package',
+                  Text(
+                    localizedText(pkg, locale, prefix: 'name'),
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 8),
                   Text(
-                    '${pkg['price']} · ${pkg['deviceLimit']} device(s)',
+                    '${pkg['price']} · ${pkg['deviceLimit']} ${l10n.t('student.devices')}',
                     style: const TextStyle(color: AppTheme.muted),
                   ),
                   const SizedBox(height: 12),
@@ -107,7 +112,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () => _request(pkg['id'] as String),
-                      child: const Text('Request Activation'),
+                      child: Text(l10n.studentRequestActivation),
                     ),
                   ),
                 ],

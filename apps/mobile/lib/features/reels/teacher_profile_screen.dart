@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
-import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
@@ -63,7 +63,7 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
       await context.read<ApiClient>().post('/api/store/courses/$courseId/purchase', {});
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Purchase requested — payment confirmation pending')),
+        SnackBar(content: Text(context.l10n.storePurchasePending)),
       );
       await _load();
     } on ApiException catch (e) {
@@ -72,8 +72,8 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
         SnackBar(
           content: Text(
             e.message == 'ALREADY_REQUESTED'
-                ? 'You already requested this course'
-                : 'Could not request purchase',
+                ? context.l10n.t('student.purchaseAlreadyRequested')
+                : context.l10n.t('mobile.store.purchaseFailed'),
           ),
         ),
       );
@@ -84,7 +84,8 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final locale = context.watch<AuthProvider>().user?.locale ?? 'AR';
+    final locale = context.localeCode;
+    final l10n = context.l10n;
 
     return Scaffold(
       body: _loading
@@ -96,8 +97,8 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                     children: [
                       const Icon(Icons.person_off_outlined, size: 48, color: AppTheme.muted),
                       const SizedBox(height: 12),
-                      const Text('Teacher not found', style: TextStyle(color: AppTheme.muted)),
-                      TextButton(onPressed: _load, child: const Text('Retry')),
+                      Text(l10n.reelsTeacherNotFound, style: const TextStyle(color: AppTheme.muted)),
+                      TextButton(onPressed: _load, child: Text(l10n.retry)),
                     ],
                   ),
                 )
@@ -143,9 +144,9 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                             if (_shortVideos.isNotEmpty) ...[
                               Row(
                                 children: [
-                                  const Text(
-                                    'Short videos',
-                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                  Text(
+                                    l10n.t('nav.shortVideos'),
+                                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                                   ),
                                   const SizedBox(width: 8),
                                   Container(
@@ -175,9 +176,9 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                             ],
                             Row(
                               children: [
-                                const Text(
-                                  'Live courses',
-                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                Text(
+                                  l10n.t('mobile.reels.liveCourses'),
+                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                                 ),
                                 const SizedBox(width: 8),
                                 Container(
@@ -199,7 +200,7 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              'Subscribe by purchasing a course — unlock all lessons after payment confirmation.',
+                              l10n.storeSubscribeUnlock,
                               style: TextStyle(
                                 color: AppTheme.muted.withValues(alpha: 0.9),
                                 fontSize: 13,
@@ -215,11 +216,11 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen> {
                                   borderRadius: BorderRadius.circular(16),
                                   border: Border.all(color: AppTheme.cardBorder),
                                 ),
-                                child: const Center(
+                                child: Center(
                                   child: Text(
-                                    'No live courses yet.\nCheck back soon!',
+                                    l10n.t('mobile.reels.noLiveCourses'),
                                     textAlign: TextAlign.center,
-                                    style: TextStyle(color: AppTheme.muted),
+                                    style: const TextStyle(color: AppTheme.muted),
                                   ),
                                 ),
                               )
@@ -262,7 +263,8 @@ class _HeaderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = teacher['name']?.toString() ?? 'Teacher';
+    final l10n = context.l10n;
+    final name = teacher['name']?.toString() ?? l10n.t('student.teacher');
     final level = teacher['level']?.toString() ?? '';
     final rating = (teacher['rating'] as num?)?.toDouble();
     final ratingCount = (teacher['ratingCount'] as num?)?.toInt() ?? 0;
@@ -303,7 +305,10 @@ class _HeaderCard extends StatelessWidget {
               if (rating != null && rating > 0) ...[
                 const SizedBox(height: 4),
                 Text(
-                  '${rating.toStringAsFixed(1)} ★ · $ratingCount reviews',
+                  l10n.t('mobile.reels.ratingReviews', {
+                    'rating': rating.toStringAsFixed(1),
+                    'count': '$ratingCount',
+                  }),
                   style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 12),
                 ),
               ],
@@ -329,6 +334,7 @@ class _StatsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Column(
       children: [
         Row(
@@ -336,13 +342,13 @@ class _StatsRow extends StatelessWidget {
             _StatChip(
               icon: Icons.play_lesson_outlined,
               label: '${teacher['liveCoursesCount'] ?? 0}',
-              caption: 'Courses',
+              caption: l10n.navCourses,
             ),
             const SizedBox(width: 10),
             _StatChip(
               icon: Icons.movie_outlined,
               label: '${teacher['reelsCount'] ?? 0}',
-              caption: 'Reels',
+              caption: l10n.reelsTitle,
             ),
           ],
         ),
@@ -352,13 +358,13 @@ class _StatsRow extends StatelessWidget {
             _StatChip(
               icon: Icons.people_outline,
               label: _fmt(teacher['subscriptionsCount'] as num?),
-              caption: 'Subscriptions',
+              caption: l10n.navSubscriptions,
             ),
             const SizedBox(width: 10),
             _StatChip(
               icon: Icons.favorite_outline,
               label: _fmt(teacher['totalLikesCount'] as num?),
-              caption: 'Total likes',
+              caption: l10n.t('mobile.reels.totalLikes'),
             ),
           ],
         ),
@@ -419,6 +425,7 @@ class _CourseCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final title = localizedText(course, locale);
     final price = course['price'];
     final currency = course['currency']?.toString() ?? 'IQD';
@@ -473,9 +480,9 @@ class _CourseCard extends StatelessWidget {
                   [
                     if (subject != null) localizedText(subject, locale, prefix: 'name'),
                     if (stage != null) localizedText(stage, locale, prefix: 'name'),
-                    '$lessons lessons',
+                    l10n.homeLessons(lessons),
                     duration,
-                    if (subscribers > 0) '$subscribers subscribers',
+                    if (subscribers > 0) l10n.homeSubscribers(subscribers),
                   ].where((s) => s.isNotEmpty).join(' · '),
                   style: const TextStyle(color: AppTheme.muted, fontSize: 12),
                 ),
@@ -495,17 +502,17 @@ class _CourseCard extends StatelessWidget {
                     'PAID' => FilledButton.icon(
                         onPressed: onOpen,
                         icon: const Icon(Icons.play_circle_outline, size: 18),
-                        label: const Text('Subscribed — watch in My Courses'),
+                        label: Text(l10n.reelsSubscribedWatch),
                       ),
                     'PENDING' => OutlinedButton.icon(
                         onPressed: null,
                         icon: const Icon(Icons.hourglass_top, size: 18),
-                        label: const Text('Awaiting payment confirmation'),
+                        label: Text(l10n.homeAwaitingPayment),
                       ),
                     _ when isOwnCourse => OutlinedButton.icon(
                         onPressed: onOpen,
                         icon: const Icon(Icons.school_outlined, size: 18),
-                        label: const Text('Your course — open'),
+                        label: Text(l10n.reelsYourCourseOpen),
                       ),
                     _ => FilledButton(
                         onPressed: busy
@@ -513,7 +520,9 @@ class _CourseCard extends StatelessWidget {
                             : () {
                                 onPurchase();
                               },
-                        child: Text(busy ? 'Requesting…' : 'Subscribe / Buy course'),
+                        child: Text(
+                          busy ? l10n.quizSubmitting : l10n.t('mobile.reels.subscribeBuy'),
+                        ),
                       ),
                   },
                 ),

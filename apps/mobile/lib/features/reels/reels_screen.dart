@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/reel_video_cache.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
@@ -14,15 +15,20 @@ import 'package:ulearn/features/report/report_content_sheet.dart';
 
 /// Vertical short-video feed (reels) with likes and comments.
 class ReelsScreen extends StatefulWidget {
-  const ReelsScreen({super.key, this.isTabActive = true});
+  const ReelsScreen({
+    super.key,
+    this.isTabActive = true,
+    this.refreshTrigger,
+  });
 
   final bool isTabActive;
+  final ValueNotifier<int>? refreshTrigger;
 
   @override
-  State<ReelsScreen> createState() => _ReelsScreenState();
+  State<ReelsScreen> createState() => ReelsScreenState();
 }
 
-class _ReelsScreenState extends State<ReelsScreen> {
+class ReelsScreenState extends State<ReelsScreen> {
   final _pageCtrl = PageController();
   final _activeIndex = ValueNotifier(0);
   final _playbackActive = ValueNotifier(true);
@@ -39,7 +45,27 @@ class _ReelsScreenState extends State<ReelsScreen> {
   void initState() {
     super.initState();
     _syncPlayback();
+    widget.refreshTrigger?.addListener(_onRefreshTriggered);
     _load();
+  }
+
+  void _onRefreshTriggered() {
+    refreshFeed();
+  }
+
+  /// Pull latest ranked reels (double-tap Reels tab).
+  Future<void> refreshFeed() => _load(refresh: true);
+
+  @override
+  void didUpdateWidget(ReelsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshTrigger != widget.refreshTrigger) {
+      oldWidget.refreshTrigger?.removeListener(_onRefreshTriggered);
+      widget.refreshTrigger?.addListener(_onRefreshTriggered);
+    }
+    if (oldWidget.isTabActive != widget.isTabActive) {
+      _syncPlayback();
+    }
   }
 
   void _syncPlayback() {
@@ -47,15 +73,8 @@ class _ReelsScreenState extends State<ReelsScreen> {
   }
 
   @override
-  void didUpdateWidget(ReelsScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.isTabActive != widget.isTabActive) {
-      _syncPlayback();
-    }
-  }
-
-  @override
   void dispose() {
+    widget.refreshTrigger?.removeListener(_onRefreshTriggered);
     _pageCtrl.dispose();
     _activeIndex.dispose();
     _playbackActive.dispose();
@@ -90,7 +109,8 @@ class _ReelsScreenState extends State<ReelsScreen> {
       }
     }
     try {
-      final data = await context.read<ApiClient>().get('/api/store/short-videos?limit=12');
+      final query = refresh ? 'limit=12&refresh=true' : 'limit=12';
+      final data = await context.read<ApiClient>().get('/api/store/short-videos?$query');
       if (!mounted) return;
       final videos = ((data['videos'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
       setState(() {
@@ -100,6 +120,19 @@ class _ReelsScreenState extends State<ReelsScreen> {
       });
       _activeIndex.value = 0;
       _prefetchAround(0);
+      if (refresh && mounted) {
+        final l10n = context.l10n;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              videos.isEmpty
+                  ? l10n.reelsNoReels
+                  : l10n.t('mobile.reels.feedUpdated'),
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -182,7 +215,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
           backgroundColor: Colors.transparent,
           builder: (_) => ReelCommentsSheet(
             videoId: video['id'].toString(),
-            videoTitle: video['title']?.toString() ?? 'Reel',
+            videoTitle: video['title']?.toString() ?? context.l10n.reelsTitle,
             initialCount: (video['commentCount'] as num?)?.toInt() ?? 0,
             onCountChanged: (count) {
               if (mounted) setState(() => video['commentCount'] = count);
@@ -219,17 +252,18 @@ class _ReelsScreenState extends State<ReelsScreen> {
     final id = video['id']?.toString();
     if (id == null) return;
 
+    final l10n = context.l10n;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete reel?'),
-        content: const Text('This video will be removed from the feed permanently.'),
+        title: Text(l10n.reelsDeleteTitle),
+        content: Text(l10n.reelsDeleteBody),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(l10n.cancel)),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
-            child: const Text('Delete'),
+            child: Text(l10n.reelsDelete),
           ),
         ],
       ),
@@ -259,13 +293,13 @@ class _ReelsScreenState extends State<ReelsScreen> {
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Reel deleted')),
+          SnackBar(content: Text(context.l10n.reelsDeleted)),
         );
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not delete reel')),
+          SnackBar(content: Text(context.l10n.reelsDeleteFailed)),
         );
       }
     }
@@ -278,51 +312,104 @@ class _ReelsScreenState extends State<ReelsScreen> {
           context,
           targetType: 'SHORT_VIDEO',
           targetId: id,
-          contentTitle: video['title']?.toString() ?? 'Reel',
+          contentTitle: video['title']?.toString() ?? context.l10n.reelsTitle,
         ));
+  }
+
+  Future<void> _toggleSave(int index) async {
+    final video = _videos[index];
+    final id = video['id']?.toString();
+    if (id == null) return;
+
+    final wasSaved = video['savedByMe'] == true;
+    final saves = (video['saves'] as num?)?.toInt() ?? 0;
+    setState(() {
+      video['savedByMe'] = !wasSaved;
+      video['saves'] = wasSaved ? (saves > 0 ? saves - 1 : 0) : saves + 1;
+    });
+
+    try {
+      final data = await context.read<ApiClient>().post('/api/store/short-videos/$id/save', {});
+      if (!mounted) return;
+      setState(() {
+        video['saves'] = data['saves'];
+        video['savedByMe'] = data['savedByMe'];
+      });
+      if (mounted) {
+        final l10n = context.l10n;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(data['savedByMe'] == true ? l10n.reelsSaved : l10n.reelsUnsaved),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        video['savedByMe'] = wasSaved;
+        video['saves'] = saves;
+      });
+    }
   }
 
   void _openMoreMenu(Map<String, dynamic> video) {
     final isOwn = _isOwnVideo(video);
+    final index = _videos.indexWhere((v) => v['id']?.toString() == video['id']?.toString());
+    final saved = video['savedByMe'] == true;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (isOwn)
+      builder: (ctx) {
+        final l10n = ctx.l10n;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               ListTile(
-                leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                title: const Text('Delete reel'),
+                leading: Icon(
+                  saved ? Icons.bookmark : Icons.bookmark_border_outlined,
+                  color: AppTheme.accent,
+                ),
+                title: Text(saved ? l10n.reelsUnsaveReel : l10n.reelsSaveReel),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _deleteVideo(video);
+                  if (index >= 0) _toggleSave(index);
                 },
               ),
-            if (!isOwn)
+              if (isOwn)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  title: Text(l10n.reelsDeleteReel),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _deleteVideo(video);
+                  },
+                ),
+              if (!isOwn)
+                ListTile(
+                  leading: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
+                  title: Text(l10n.reelsReportContent),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _reportVideo(video);
+                  },
+                ),
               ListTile(
-                leading: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
-                title: const Text('Report content'),
+                leading: const Icon(Icons.person_outline, color: AppTheme.accent),
+                title: Text(l10n.reelsViewTeacher),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _reportVideo(video);
+                  _openTeacherProfile(video);
                 },
               ),
-            ListTile(
-              leading: const Icon(Icons.person_outline, color: AppTheme.accent),
-              title: const Text('View teacher profile'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _openTeacherProfile(video);
-              },
-            ),
-          ],
-        ),
-      ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -333,6 +420,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
     }
 
     if (_videos.isEmpty) {
+      final l10n = context.l10n;
       return ColoredBox(
         color: Colors.black,
         child: Stack(
@@ -343,13 +431,13 @@ class _ReelsScreenState extends State<ReelsScreen> {
                 children: [
                   Icon(Icons.movie_filter_outlined, size: 56, color: AppTheme.muted.withValues(alpha: 0.5)),
                   const SizedBox(height: 16),
-                  const Text(
-                    'No reels yet',
-                    style: TextStyle(color: AppTheme.foreground, fontSize: 18, fontWeight: FontWeight.w600),
+                  Text(
+                    l10n.reelsNoReels,
+                    style: const TextStyle(color: AppTheme.foreground, fontSize: 18, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Teachers can upload short videos\nfrom Teacher Studio',
+                    l10n.profileTeacherStudioHint,
                     textAlign: TextAlign.center,
                     style: TextStyle(color: AppTheme.muted.withValues(alpha: 0.85), height: 1.4),
                   ),
@@ -357,19 +445,22 @@ class _ReelsScreenState extends State<ReelsScreen> {
                   TextButton.icon(
                     onPressed: () => _load(refresh: true),
                     icon: const Icon(Icons.refresh, color: AppTheme.accent),
-                    label: const Text('Refresh', style: TextStyle(color: AppTheme.accent)),
+                    label: Text(l10n.reelsRefresh, style: const TextStyle(color: AppTheme.accent)),
                   ),
                 ],
               ),
             ),
-            const SafeArea(
+            SafeArea(
               child: Padding(
-                padding: EdgeInsets.all(12),
+                padding: const EdgeInsets.all(12),
                 child: Row(
                   children: [
-                    ULearnLogo(size: 28),
-                    SizedBox(width: 8),
-                    Text('Reels', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white)),
+                    const ULearnLogo(size: 28),
+                    const SizedBox(width: 8),
+                    Text(
+                      l10n.reelsTitle,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+                    ),
                   ],
                 ),
               ),
@@ -415,9 +506,9 @@ class _ReelsScreenState extends State<ReelsScreen> {
                   const SizedBox(width: 8),
                   ShaderMask(
                     shaderCallback: (bounds) => AppTheme.gradient.createShader(bounds),
-                    child: const Text(
-                      'Reels',
-                      style: TextStyle(
+                    child: Text(
+                      context.l10n.reelsTitle,
+                      style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
                         color: Colors.white,
@@ -438,7 +529,7 @@ class _ReelsScreenState extends State<ReelsScreen> {
                       onPressed: () => _pauseForNavigation(() => Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => Scaffold(
-                                appBar: AppBar(title: const Text('Notifications')),
+                                appBar: AppBar(title: Text(context.l10n.navNotifications)),
                                 body: const NotificationsScreen(),
                               ),
                             ),

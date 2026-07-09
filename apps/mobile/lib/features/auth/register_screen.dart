@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -129,7 +130,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not upload ID: $e')),
+          SnackBar(content: Text(context.l10n.registerIdUploadFailed('$e'))),
         );
       }
     } finally {
@@ -137,29 +138,30 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  String _stageLabel(Map<String, dynamic> s) {
-    final ar = s['nameAr']?.toString();
-    if (ar != null && ar.isNotEmpty) return ar;
-    return s['nameEn']?.toString() ?? 'Stage';
-  }
-
-  String _provinceLabel(Map<String, dynamic> p) {
-    final ar = p['nameAr']?.toString();
-    if (ar != null && ar.isNotEmpty) return ar;
-    return p['nameEn']?.toString() ?? 'Province';
+  String _localizedName(Map<String, dynamic> item, String fallback) {
+    final locale = context.localeCode;
+    final name = switch (locale) {
+      'AR' => item['nameAr']?.toString(),
+      'KU' => item['nameKu']?.toString(),
+      'TR' => item['nameTr']?.toString(),
+      _ => item['nameEn']?.toString(),
+    };
+    if (name != null && name.isNotEmpty) return name;
+    return item['nameEn']?.toString() ?? fallback;
   }
 
   Future<void> _submit() async {
+    final l10n = context.l10n;
     if (_countryId == null || _provinceId == null) {
-      setState(() => _error = 'Please select country and province');
+      setState(() => _error = l10n.t('mobile.register.selectCountryProvince'));
       return;
     }
     if (_nationalIdImageUrl == null) {
-      setState(() => _error = 'Please attach your national ID image');
+      setState(() => _error = l10n.t('mobile.register.attachNationalId'));
       return;
     }
     if (_type == 'STUDENT' && (_stageId == null || _stageId!.isEmpty)) {
-      setState(() => _error = 'Please select your educational stage');
+      setState(() => _error = l10n.t('mobile.register.selectStage'));
       return;
     }
 
@@ -179,7 +181,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'nationalId': _nationalId.text.trim(),
         'nationalIdImage': _nationalIdImageUrl,
         'email': _email.text.trim().isEmpty ? null : _email.text.trim(),
-        'locale': 'AR',
+        'locale': context.localeCode,
       };
 
       if (_type == 'STUDENT') {
@@ -217,37 +219,48 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final emailOptionalLabel = '${l10n.authEmail} (${l10n.t('student.optional')})';
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Create Account')),
+      appBar: AppBar(title: Text(l10n.authRegister)),
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
-          Text('Phone: ${widget.phone}',
-              style: const TextStyle(color: AppTheme.muted),
-              textDirection: TextDirection.ltr),
+          Text(
+            l10n.registerPhoneLabel(widget.phone),
+            style: const TextStyle(color: AppTheme.muted),
+            textDirection: TextDirection.ltr,
+          ),
           const SizedBox(height: 16),
           SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'STUDENT', label: Text('Student')),
-              ButtonSegment(value: 'CERTIFICATE', label: Text('Certificate')),
+            segments: [
+              ButtonSegment(value: 'STUDENT', label: Text(l10n.authStudent)),
+              ButtonSegment(value: 'CERTIFICATE', label: Text(l10n.authCertificate)),
             ],
             selected: {_type},
             onSelectionChanged: (s) => setState(() => _type = s.first),
           ),
           const SizedBox(height: 16),
-          TextField(controller: _name, decoration: const InputDecoration(labelText: 'Full Legal Name')),
+          TextField(
+            controller: _name,
+            decoration: InputDecoration(labelText: l10n.authFullName),
+          ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: _gender,
-            items: const [
-              DropdownMenuItem(value: 'MALE', child: Text('Male')),
-              DropdownMenuItem(value: 'FEMALE', child: Text('Female')),
+            items: [
+              DropdownMenuItem(value: 'MALE', child: Text(l10n.authMale)),
+              DropdownMenuItem(value: 'FEMALE', child: Text(l10n.authFemale)),
             ],
             onChanged: (v) => setState(() => _gender = v ?? 'MALE'),
-            decoration: const InputDecoration(labelText: 'Gender'),
+            decoration: InputDecoration(labelText: l10n.authGender),
           ),
           const SizedBox(height: 12),
-          TextField(controller: _nationalId, decoration: const InputDecoration(labelText: 'National ID')),
+          TextField(
+            controller: _nationalId,
+            decoration: InputDecoration(labelText: l10n.authNationalId),
+          ),
           const SizedBox(height: 12),
           if (_countries.isNotEmpty)
             DropdownButtonFormField<String>(
@@ -255,11 +268,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
               items: _countries
                   .map((c) => DropdownMenuItem(
                         value: c['id']?.toString(),
-                        child: Text(c['nameAr']?.toString() ?? c['nameEn']?.toString() ?? 'Country'),
+                        child: Text(_localizedName(c, l10n.authCountry)),
                       ))
                   .toList(),
               onChanged: (v) => _onCountryChanged(v, reloadStages: true),
-              decoration: const InputDecoration(labelText: 'Country'),
+              decoration: InputDecoration(labelText: l10n.authCountry),
             ),
           const SizedBox(height: 12),
           if (_provinces.isNotEmpty)
@@ -268,16 +281,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
               items: _provinces
                   .map((p) => DropdownMenuItem(
                         value: p['id']?.toString(),
-                        child: Text(_provinceLabel(p)),
+                        child: Text(_localizedName(p, l10n.authProvince)),
                       ))
                   .toList(),
               onChanged: (v) => setState(() => _provinceId = v),
-              decoration: const InputDecoration(labelText: 'Province'),
+              decoration: InputDecoration(labelText: l10n.authProvince),
             ),
           const SizedBox(height: 12),
-          TextField(controller: _email, decoration: const InputDecoration(labelText: 'Email (optional)')),
+          TextField(
+            controller: _email,
+            decoration: InputDecoration(labelText: emailOptionalLabel),
+          ),
           const SizedBox(height: 16),
-          const Text('National ID photo', style: TextStyle(fontWeight: FontWeight.w600)),
+          Text(
+            l10n.registerIdPhoto,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: _uploadingId ? null : _pickIdImage,
@@ -288,15 +307,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.badge_outlined),
-            label: Text(_idFileName ?? 'Attach ID image'),
+            label: Text(_idFileName ?? l10n.t('mobile.register.attachId')),
           ),
           if (_nationalIdImageUrl != null) ...[
             const SizedBox(height: 6),
-            const Row(
+            Row(
               children: [
-                Icon(Icons.check_circle, color: Colors.greenAccent, size: 16),
-                SizedBox(width: 6),
-                Text('ID uploaded', style: TextStyle(color: Colors.greenAccent, fontSize: 12)),
+                const Icon(Icons.check_circle, color: Colors.greenAccent, size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  l10n.registerIdUploaded,
+                  style: const TextStyle(color: Colors.greenAccent, fontSize: 12),
+                ),
               ],
             ),
           ],
@@ -306,16 +328,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
               controller: _parentPhone,
               keyboardType: TextInputType.phone,
               textDirection: TextDirection.ltr,
-              decoration: const InputDecoration(labelText: 'Parent Phone'),
+              decoration: InputDecoration(labelText: l10n.authParentPhone),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _parentEmail,
               keyboardType: TextInputType.emailAddress,
               textDirection: TextDirection.ltr,
-              decoration: const InputDecoration(
-                labelText: 'Parent Email (for quiz results)',
-                hintText: 'optional',
+              decoration: InputDecoration(
+                labelText: l10n.t('mobile.register.parentEmail'),
+                hintText: l10n.t('student.optional'),
               ),
             ),
             const SizedBox(height: 12),
@@ -324,17 +346,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
               items: _stages
                   .map((s) => DropdownMenuItem(
                         value: s['id'].toString(),
-                        child: Text(_stageLabel(s)),
+                        child: Text(_localizedName(s, l10n.authStage)),
                       ))
                   .toList(),
               onChanged: (v) => setState(() => _stageId = v),
-              decoration: const InputDecoration(labelText: 'Educational Stage *'),
+              decoration: InputDecoration(labelText: '${l10n.authStage} *'),
             ),
           ],
           const SizedBox(height: 24),
           ElevatedButton(
             onPressed: _loading ? null : _submit,
-            child: Text(_loading ? 'Submitting...' : 'Submit Registration'),
+            child: Text(_loading ? l10n.t('quiz.submitting') : l10n.authSubmit),
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),

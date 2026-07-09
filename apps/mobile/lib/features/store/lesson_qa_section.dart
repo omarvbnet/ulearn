@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
@@ -70,7 +71,7 @@ class _LessonQASectionState extends State<LessonQASection> {
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not post your question')),
+        SnackBar(content: Text(context.l10n.qaPostFailed)),
       );
     } finally {
       if (mounted) setState(() => _posting = false);
@@ -99,7 +100,7 @@ class _LessonQASectionState extends State<LessonQASection> {
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not post your answer')),
+        SnackBar(content: Text(context.l10n.qaAnswerFailed)),
       );
     } finally {
       if (mounted) setState(() => _posting = false);
@@ -108,6 +109,8 @@ class _LessonQASectionState extends State<LessonQASection> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+
     if (_loading) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -126,9 +129,9 @@ class _LessonQASectionState extends State<LessonQASection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Ask & Answer',
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+        Text(
+          l10n.t('student.qaTitle'),
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 10),
         Row(
@@ -139,8 +142,8 @@ class _LessonQASectionState extends State<LessonQASection> {
                 controller: _askCtrl,
                 minLines: 1,
                 maxLines: 3,
-                decoration: const InputDecoration(
-                  hintText: 'Ask a question about this video…',
+                decoration: InputDecoration(
+                  hintText: l10n.t('student.askPlaceholder'),
                   isDense: true,
                 ),
               ),
@@ -148,21 +151,21 @@ class _LessonQASectionState extends State<LessonQASection> {
             const SizedBox(width: 8),
             FilledButton(
               onPressed: _posting ? null : _ask,
-              child: Text(_posting ? '…' : 'Ask'),
+              child: Text(_posting ? l10n.t('student.posting') : l10n.t('student.askQuestion')),
             ),
           ],
         ),
         const SizedBox(height: 14),
         if (_questions.isEmpty)
-          const Text(
-            'No questions yet — be the first to ask!',
-            style: TextStyle(color: AppTheme.muted, fontSize: 13),
+          Text(
+            l10n.t('student.noQuestions'),
+            style: const TextStyle(color: AppTheme.muted, fontSize: 13),
           )
         else
           ..._questions.asMap().entries.map((e) {
             final q = e.value;
             final user = q['user'] as Map<String, dynamic>?;
-            final name = user?['fullLegalName']?.toString() ?? 'Student';
+            final name = user?['fullLegalName']?.toString() ?? l10n.t('mobile.roles.student');
             final role = user?['role']?.toString() ?? 'STUDENT';
             final answers =
                 (q['answers'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
@@ -200,7 +203,9 @@ class _LessonQASectionState extends State<LessonQASection> {
                             children: [
                               Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
                               Text(
-                                role == 'TEACHER' ? 'Teacher' : 'Student',
+                                role == 'TEACHER'
+                                    ? l10n.t('student.teacher')
+                                    : l10n.t('mobile.roles.student'),
                                 style: const TextStyle(fontSize: 11, color: AppTheme.muted),
                               ),
                             ],
@@ -214,7 +219,7 @@ class _LessonQASectionState extends State<LessonQASection> {
                       const SizedBox(height: 10),
                       ...answers.map((a) {
                         final au = a['user'] as Map<String, dynamic>?;
-                        final an = au?['fullLegalName']?.toString() ?? 'User';
+                        final an = au?['fullLegalName']?.toString() ?? l10n.t('mobile.roles.student');
                         final isTeacher = au?['role'] == 'TEACHER';
                         return Container(
                           width: double.infinity,
@@ -258,8 +263,8 @@ class _LessonQASectionState extends State<LessonQASection> {
                             controller: answerCtrl,
                             minLines: 1,
                             maxLines: 2,
-                            decoration: const InputDecoration(
-                              hintText: 'Write an answer…',
+                            decoration: InputDecoration(
+                              hintText: l10n.t('student.comment'),
                               isDense: true,
                             ),
                           ),
@@ -267,7 +272,7 @@ class _LessonQASectionState extends State<LessonQASection> {
                         const SizedBox(width: 8),
                         TextButton(
                           onPressed: _posting ? null : () => _answer(qid),
-                          child: const Text('Reply'),
+                          child: Text(l10n.qaReply),
                         ),
                       ],
                     ),

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:ulearn/core/l10n/locale_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/particle_field.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
@@ -38,6 +40,10 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
+    final locale = context.watch<LocaleProvider>();
+    final brand = locale.ready ? locale.l10n.brand : 'U Learn';
+    final tagline = locale.ready ? locale.l10n.learnWithoutLimits : 'Learn without limits';
+
     return Scaffold(
       body: Stack(
         fit: StackFit.expand,
@@ -74,9 +80,9 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                       ShaderMask(
                         shaderCallback: (bounds) =>
                             AppTheme.gradient.createShader(bounds),
-                        child: const Text(
-                          'U Learn',
-                          style: TextStyle(
+                        child: Text(
+                          brand,
+                          style: const TextStyle(
                             fontSize: 38,
                             fontWeight: FontWeight.w800,
                             color: Colors.white,
@@ -85,9 +91,9 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                         ),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
-                        'Learn without limits',
-                        style: TextStyle(
+                      Text(
+                        tagline,
+                        style: const TextStyle(
                           color: AppTheme.muted,
                           fontSize: 14,
                           letterSpacing: 2.5,

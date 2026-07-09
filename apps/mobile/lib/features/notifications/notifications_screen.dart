@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
@@ -57,13 +58,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
 
     if (_items.isEmpty) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.notifications_none, size: 48, color: AppTheme.muted),
-            SizedBox(height: 12),
-            Text('No notifications yet', style: TextStyle(color: AppTheme.muted)),
+            const Icon(Icons.notifications_none, size: 48, color: AppTheme.muted),
+            const SizedBox(height: 12),
+            Text(
+              context.l10n.studentNoNotifications,
+              style: const TextStyle(color: AppTheme.muted),
+            ),
           ],
         ),
       );

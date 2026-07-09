@@ -8,12 +8,14 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const cursor = searchParams.get("cursor") ?? undefined;
-  const limit = Number(searchParams.get("limit") ?? "10");
+  const limit = Number(searchParams.get("limit") ?? "12");
+  const refresh = searchParams.get("refresh") === "true";
 
   const feed = await ShortVideoService.listFeed({
     userId: auth.session.userId,
-    cursor,
-    limit: Number.isFinite(limit) ? limit : 10,
+    cursor: refresh ? undefined : cursor,
+    limit: Number.isFinite(limit) ? limit : 12,
+    refresh,
   });
 
   return json(feed);

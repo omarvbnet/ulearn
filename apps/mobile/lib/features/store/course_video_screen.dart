@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
@@ -35,7 +36,7 @@ class _CourseVideoScreenState extends State<CourseVideoScreen> {
   Future<void> _init() async {
     final auth = context.read<AuthProvider>();
     _protection = VideoProtectionController(
-      studentName: auth.user?.fullLegalName ?? 'Student',
+      studentName: auth.user?.fullLegalName ?? context.l10n.t('mobile.roles.student'),
       nationalId: auth.user?.nationalId ?? '',
       phone: auth.user?.phone ?? '',
     );
@@ -54,7 +55,7 @@ class _CourseVideoScreenState extends State<CourseVideoScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Could not play this video';
+        _error = context.l10n.t('student.noVideo');
       });
     }
   }
@@ -133,7 +134,7 @@ class _CourseVideoScreenState extends State<CourseVideoScreen> {
                                   ),
                                 ),
                                 IconButton(
-                                  tooltip: 'Cast to TV',
+                                  tooltip: context.l10n.castTitle,
                                   icon: Icon(
                                     _protection!.isCasting
                                         ? Icons.cast_connected

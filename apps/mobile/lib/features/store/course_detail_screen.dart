@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
-import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/lesson_cover.dart';
@@ -107,7 +107,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       setState(() => _error = e.message);
     } catch (_) {
       if (!mounted) return;
-      setState(() => _error = 'Could not load the course');
+      setState(() => _error = context.l10n.t('mobile.error.generic'));
     }
   }
 
@@ -195,8 +195,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       if (!mounted) return;
       setState(() => _course?['purchaseStatus'] = 'PENDING');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Subscription requested — we\'ll confirm your payment shortly'),
+        SnackBar(
+          content: Text(context.l10n.storeSubscriptionRequested),
         ),
       );
     } on ApiException catch (e) {
@@ -205,8 +205,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         SnackBar(
           content: Text(
             e.message == 'ALREADY_REQUESTED'
-                ? 'You already requested this course'
-                : 'Failed to request the subscription',
+                ? context.l10n.t('student.purchaseAlreadyRequested')
+                : context.l10n.t('mobile.error.generic'),
           ),
         ),
       );
@@ -218,7 +218,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   void _selectLesson(Map<String, dynamic> lesson, bool unlocked) {
     if (!_canWatch(lesson, unlocked)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Subscribe to unlock this video')),
+        SnackBar(content: Text(context.l10n.storeSubscribeUnlock)),
       );
       return;
     }
@@ -248,7 +248,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   void _openQuiz(Map<String, dynamic> quiz) {
-    final locale = context.read<AuthProvider>().user?.locale ?? 'AR';
+    final locale = context.localeCode;
     final title = localizedText(quiz, locale);
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -307,16 +307,18 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
 
     final quiz = _quizAfterLesson(lesson['id']?.toString());
     if (quiz != null) {
-      final locale = context.read<AuthProvider>().user?.locale ?? 'AR';
+      final locale = context.localeCode;
       final quizTitle = localizedText(quiz, locale);
       Future.delayed(const Duration(milliseconds: 700), () {
         if (!mounted) return;
         showDialog<void>(
           context: context,
-          builder: (ctx) => AlertDialog(
+          builder: (ctx) {
+            final l10n = ctx.l10n;
+            return AlertDialog(
             backgroundColor: AppTheme.card,
-            title: const Text('Video completed'),
-            content: Text('Ready for "$quizTitle"?'),
+            title: Text(l10n.storeVideoCompleted),
+            content: Text(l10n.storeReadyForQuiz(quizTitle)),
             actions: [
               TextButton(
                 onPressed: () {
@@ -326,17 +328,18 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                     setState(() => _activeLesson = next);
                   }
                 },
-                child: const Text('Later'),
+                child: Text(l10n.storeLater),
               ),
               FilledButton(
                 onPressed: () {
                   Navigator.pop(ctx);
                   _openQuiz(quiz);
                 },
-                child: const Text('Go to quiz'),
+                child: Text(l10n.storeGoToQuiz),
               ),
             ],
-          ),
+          );
+          },
         );
       });
       return;
@@ -350,7 +353,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       setState(() => _activeLesson = next);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Up next: ${next['title'] ?? 'Lesson'}'),
+          content: Text(context.l10n.storeUpNext(next['title']?.toString() ?? '')),
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
         ),
@@ -363,10 +366,10 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     return ((lesson['progressPct'] as num?)?.toDouble() ?? 0) >= 90;
   }
 
-  String _lessonTitle(Map<String, dynamic> lesson, int index) {
+  String _lessonTitle(BuildContext context, Map<String, dynamic> lesson, int index) {
     final raw = lesson['title']?.toString().trim();
     if (raw != null && raw.isNotEmpty) return raw;
-    return 'Video ${index + 1}';
+    return '${context.l10n.t('student.videos')} ${index + 1}';
   }
 
   int _completedLessonCount(List<Map<String, dynamic>> lessons) {
@@ -375,8 +378,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final locale = auth.user?.locale ?? 'AR';
+    final locale = context.localeCode;
+    final l10n = context.l10n;
     final course = _course;
 
     if (course == null) {
@@ -414,7 +417,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     final teacher = course['teacher'] as Map<String, dynamic>?;
     final teacherName =
         (teacher?['user'] as Map<String, dynamic>?)?['fullLegalName']?.toString() ??
-            'Teacher';
+            l10n.t('student.teacher');
     final rating = (course['teacherRating'] as num?)?.toDouble() ?? 0;
     final views = (course['viewCount'] as num?)?.toInt() ?? 0;
     final subscribers = (course['subscribersCount'] as num?)?.toInt() ?? 0;
@@ -444,7 +447,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         actions: [
           if (!_isOwnCourse)
             IconButton(
-              tooltip: 'Report course',
+              tooltip: l10n.reelsReportContent,
               icon: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
               onPressed: () => ReportContentSheet.show(
                 context,
@@ -487,23 +490,23 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
+                    Row(
                       children: [
-                        Icon(Icons.school_outlined, color: AppTheme.accent),
-                        SizedBox(width: 8),
+                        const Icon(Icons.school_outlined, color: AppTheme.accent),
+                        const SizedBox(width: 8),
                         Text(
-                          'Your course',
-                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                          l10n.storeYourCourse,
+                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       [
-                        'Status: ${(course['status']?.toString() ?? 'APPROVED').replaceAll('_', ' ')}',
-                        '${lessons.length} videos',
-                        '${formatCount(views)} views',
-                        if (subscribers > 0) '${formatCount(subscribers)} subscribers',
+                        '${l10n.t('common.status')}: ${(course['status']?.toString() ?? 'APPROVED').replaceAll('_', ' ')}',
+                        l10n.t('student.videos'),
+                        l10n.homeViews(views),
+                        if (subscribers > 0) l10n.homeSubscribers(subscribers),
                       ].join(' · '),
                       style: const TextStyle(color: AppTheme.muted, fontSize: 13),
                     ),
@@ -516,7 +519,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                               MaterialPageRoute(builder: (_) => const TeacherStudioScreen()),
                             ),
                             icon: const Icon(Icons.video_call_outlined, size: 18),
-                            label: const Text('Manage in Studio'),
+                            label: Text(l10n.storeManageInStudio),
                           ),
                         ),
                       ],
@@ -530,7 +533,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
             CourseInlinePlayer(
               key: ValueKey(activeUrl),
               url: ApiClient.absoluteUrl(activeUrl),
-              title: active?['title']?.toString() ?? 'Lesson',
+              title: active?['title']?.toString() ?? l10n.t('student.videos'),
               lessonId: activeId,
               onCompleted: active != null ? () => _onLessonCompleted(active) : null,
             ),
@@ -552,7 +555,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                     Icon(Icons.check_circle_rounded, size: 16, color: Colors.greenAccent.withValues(alpha: 0.9)),
                     const SizedBox(width: 6),
                     Text(
-                      'Completed',
+                      l10n.t('quiz.passed'),
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -571,14 +574,14 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                 gradient: AppTheme.gradient,
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: const Column(
+              child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.lock_outline, color: Colors.white70, size: 40),
-                  SizedBox(height: 8),
+                  const Icon(Icons.lock_outline, color: Colors.white70, size: 40),
+                  const SizedBox(height: 8),
                   Text(
-                    'Subscribe to watch videos',
-                    style: TextStyle(color: Colors.white70),
+                    l10n.storeSubscribeUnlock,
+                    style: const TextStyle(color: Colors.white70),
                   ),
                 ],
               ),
@@ -617,12 +620,14 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                           const Icon(Icons.star_rounded, size: 15, color: Colors.amber),
                           const SizedBox(width: 3),
                           Text(
-                            rating > 0 ? rating.toStringAsFixed(1) : 'No ratings yet',
+                            rating > 0
+                                ? rating.toStringAsFixed(1)
+                                : l10n.t('rank.noRankings'),
                             style: const TextStyle(fontSize: 12.5, color: AppTheme.muted),
                           ),
                           const SizedBox(width: 12),
                           Text(
-                            '${formatCount(views)} views · ${formatCount(subscribers)} subs · ${formatDuration(totalSec)}',
+                            '${l10n.homeViews(views)} · ${l10n.homeSubscribers(subscribers)} · ${formatDuration(totalSec)}',
                             style: const TextStyle(fontSize: 12.5, color: AppTheme.muted),
                           ),
                         ],
@@ -676,9 +681,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               children: [
                 Row(
                   children: [
-                    const Text(
-                      'Videos',
-                      style: TextStyle(
+                    Text(
+                      l10n.t('student.videos'),
+                      style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                         color: AppTheme.foreground,
@@ -703,7 +708,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                     const Spacer(),
                     if (unlocked && lessons.isNotEmpty)
                       Text(
-                        '${_completedLessonCount(lessons)}/${lessons.length} done',
+                        '${_completedLessonCount(lessons)}/${lessons.length}',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -711,9 +716,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                         ),
                       )
                     else if (!unlocked)
-                      const Text(
-                        'Free previews play above',
-                        style: TextStyle(fontSize: 12, color: AppTheme.accent),
+                      Text(
+                        l10n.t('common.free'),
+                        style: const TextStyle(fontSize: 12, color: AppTheme.accent),
                       ),
                   ],
                 ),
@@ -740,9 +745,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
             if (item.isQuiz) {
               if (!unlocked) return const SizedBox.shrink();
               final quiz = item.data;
-              final locale = context.read<AuthProvider>().user?.locale ?? 'AR';
+              final locale = context.localeCode;
               final title = localizedText(quiz, locale);
-              final qCount = (quiz['_count']?['questions'] as num?)?.toInt() ?? 0;
               return StaggeredItem(
                 index: e.key + 4,
                 child: Container(
@@ -764,7 +768,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                       ),
                     ),
                     subtitle: Text(
-                      '$qCount questions · pass ${(quiz['passPercentage'] as num?)?.toInt() ?? 50}%',
+                      '${l10n.t('quiz.questions')} · ${l10n.t('quiz.passMark')} ${(quiz['passPercentage'] as num?)?.toInt() ?? 50}%',
                       style: const TextStyle(fontSize: 12, color: AppTheme.muted),
                     ),
                     trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
@@ -783,7 +787,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
             final progressPct =
                 ((lesson['progressPct'] as num?)?.toDouble() ?? 0).clamp(0.0, 100.0);
             final duration = (lesson['durationSec'] as num?)?.toInt() ?? 0;
-            final title = _lessonTitle(lesson, lessonIndex);
+            final title = _lessonTitle(context, lesson, lessonIndex);
 
             return StaggeredItem(
               index: e.key + 4,
@@ -825,9 +829,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text(
-                        'Full access',
-                        style: TextStyle(fontSize: 12, color: AppTheme.muted),
+                      Text(
+                        l10n.t('student.enrolled'),
+                        style: const TextStyle(fontSize: 12, color: AppTheme.muted),
                       ),
                       Text(
                         '${price.toStringAsFixed(0)} $currency',
@@ -847,7 +851,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                           ? OutlinedButton.icon(
                               onPressed: null,
                               icon: const Icon(Icons.hourglass_top, size: 18),
-                              label: const Text('Awaiting confirmation'),
+                              label: Text(l10n.studentPurchasePending),
                             )
                           : FilledButton.icon(
                               style: FilledButton.styleFrom(
@@ -858,7 +862,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                               ),
                               onPressed: _buying ? null : _buy,
                               icon: const Icon(Icons.workspace_premium_outlined),
-                              label: Text(_buying ? 'Requesting…' : 'Subscribe'),
+                              label: Text(_buying ? l10n.t('student.issuing') : l10n.subscribe),
                             ),
                     ),
                   ),
@@ -905,13 +909,14 @@ class _LessonVideoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final inProgress = !isCompleted && progressPct > 0 && canWatch;
 
     final (statusLabel, statusColor, statusBg) = switch (true) {
-      _ when isCompleted => ('Completed', Colors.greenAccent, Colors.greenAccent.withValues(alpha: 0.15)),
-      _ when inProgress => ('${progressPct.round()}% watched', AppTheme.accent, AppTheme.accent.withValues(alpha: 0.12)),
-      _ when canWatch => ('Not started', AppTheme.muted, AppTheme.cardBorder.withValues(alpha: 0.6)),
-      _ => ('Locked', Colors.orangeAccent, Colors.orangeAccent.withValues(alpha: 0.12)),
+      _ when isCompleted => (l10n.t('quiz.passed'), Colors.greenAccent, Colors.greenAccent.withValues(alpha: 0.15)),
+      _ when inProgress => ('${progressPct.round()}%', AppTheme.accent, AppTheme.accent.withValues(alpha: 0.12)),
+      _ when canWatch => (l10n.t('student.start'), AppTheme.muted, AppTheme.cardBorder.withValues(alpha: 0.6)),
+      _ => (l10n.t('common.locked'), Colors.orangeAccent, Colors.orangeAccent.withValues(alpha: 0.12)),
     };
 
     return Container(
@@ -991,11 +996,26 @@ class _LessonVideoCard extends StatelessWidget {
                         const SizedBox(height: 6),
                         _MetaBadge(
                           icon: Icons.star_rounded,
-                          label: 'Free preview',
+                          label: l10n.t('common.free'),
                           color: Colors.greenAccent,
                           background: Colors.greenAccent.withValues(alpha: 0.12),
                         ),
                       ],
+                      const SizedBox(height: 8),
+                      Text(
+                        l10n.storeDurationLikesSaves(
+                          _durationLabel,
+                          (lesson['likes'] as num?)?.toInt() ?? 0,
+                          (lesson['favoritesCount'] as num?)?.toInt() ?? 0,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: AppTheme.muted,
+                          height: 1.3,
+                        ),
+                      ),
                       if (inProgress) ...[
                         const SizedBox(height: 8),
                         ClipRRect(

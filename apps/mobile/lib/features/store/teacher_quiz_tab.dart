@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 
 /// Teacher mobile tab: add a quiz after a specific course video.
@@ -56,7 +57,7 @@ class _TeacherQuizTabState extends State<TeacherQuizTab> {
     if (_questionCtrl.text.trim().isEmpty) return;
     if (_optA.text.trim().isEmpty || _optB.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add at least two answer options')),
+        SnackBar(content: Text(context.l10n.studioAddQuizMinOptions)),
       );
       return;
     }
@@ -90,12 +91,12 @@ class _TeacherQuizTabState extends State<TeacherQuizTab> {
       _optD.clear();
       setState(() => _afterLessonId = null);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Quiz added to your course')),
+        SnackBar(content: Text(context.l10n.studioQuizAdded)),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save quiz: $e')),
+        SnackBar(content: Text(context.l10n.studioQuizSaveFailed('$e'))),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -104,14 +105,16 @@ class _TeacherQuizTabState extends State<TeacherQuizTab> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+
     if (widget.courses.isEmpty) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(24),
+          padding: const EdgeInsets.all(24),
           child: Text(
-            'Create a course on the web teacher portal first, then add videos before quizzes.',
+            l10n.t('student.noCertificatesHint'),
             textAlign: TextAlign.center,
-            style: TextStyle(color: AppTheme.muted),
+            style: const TextStyle(color: AppTheme.muted),
           ),
         ),
       );
@@ -122,23 +125,23 @@ class _TeacherQuizTabState extends State<TeacherQuizTab> {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        const Text(
-          'Place a quiz between videos',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        Text(
+          l10n.t('student.quizzes'),
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 6),
-        const Text(
-          'Students will see the quiz right after the selected video. At least 2 quizzes are required before course approval.',
-          style: TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.4),
+        Text(
+          l10n.t('student.coursesDescription'),
+          style: const TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.4),
         ),
         const SizedBox(height: 16),
         DropdownButtonFormField<String>(
           initialValue: widget.courseId,
-          decoration: const InputDecoration(labelText: 'Course'),
+          decoration: InputDecoration(labelText: l10n.t('student.storeTitle')),
           items: widget.courses
               .map((c) => DropdownMenuItem(
                     value: c['id']?.toString(),
-                    child: Text(c['titleEn']?.toString() ?? 'Course'),
+                    child: Text(c['titleEn']?.toString() ?? l10n.t('student.storeTitle')),
                   ))
               .toList(),
           onChanged: (id) {
@@ -149,14 +152,14 @@ class _TeacherQuizTabState extends State<TeacherQuizTab> {
         const SizedBox(height: 14),
         DropdownButtonFormField<String?>(
           initialValue: _afterLessonId,
-          decoration: const InputDecoration(labelText: 'After video'),
+          decoration: InputDecoration(labelText: l10n.t('student.videos')),
           items: [
-            const DropdownMenuItem(value: null, child: Text('At end of course')),
+            DropdownMenuItem(value: null, child: Text(l10n.studioAtEndOfCourse)),
             ...lessons.map(
               (l) => DropdownMenuItem(
                 value: l['id']?.toString(),
                 child: Text(
-                  l['title']?.toString() ?? 'Video',
+                  l['title']?.toString() ?? l10n.t('student.videos'),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -166,32 +169,32 @@ class _TeacherQuizTabState extends State<TeacherQuizTab> {
         ),
         if (lessons.isEmpty) ...[
           const SizedBox(height: 8),
-          const Text(
-            'Upload at least one video before adding a quiz.',
-            style: TextStyle(color: Colors.orangeAccent, fontSize: 12),
+          Text(
+            l10n.t('student.noVideo'),
+            style: const TextStyle(color: Colors.orangeAccent, fontSize: 12),
           ),
         ],
         const SizedBox(height: 16),
         TextField(
           controller: _titleCtrl,
-          decoration: const InputDecoration(labelText: 'Quiz title'),
+          decoration: InputDecoration(labelText: l10n.t('student.quizzes')),
         ),
         const SizedBox(height: 14),
         TextField(
           controller: _questionCtrl,
           maxLines: 2,
-          decoration: const InputDecoration(labelText: 'Question'),
+          decoration: InputDecoration(labelText: l10n.t('quiz.question')),
         ),
         const SizedBox(height: 14),
-        TextField(controller: _optA, decoration: const InputDecoration(labelText: 'Option A')),
+        TextField(controller: _optA, decoration: InputDecoration(labelText: 'A')),
         const SizedBox(height: 10),
-        TextField(controller: _optB, decoration: const InputDecoration(labelText: 'Option B')),
+        TextField(controller: _optB, decoration: InputDecoration(labelText: 'B')),
         const SizedBox(height: 10),
-        TextField(controller: _optC, decoration: const InputDecoration(labelText: 'Option C (optional)')),
+        TextField(controller: _optC, decoration: InputDecoration(labelText: 'C (${l10n.t('student.optional')})')),
         const SizedBox(height: 10),
-        TextField(controller: _optD, decoration: const InputDecoration(labelText: 'Option D (optional)')),
+        TextField(controller: _optD, decoration: InputDecoration(labelText: 'D (${l10n.t('student.optional')})')),
         const SizedBox(height: 14),
-        const Text('Correct answer', style: TextStyle(fontWeight: FontWeight.w600)),
+        Text(l10n.studioCorrectAnswer, style: const TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -220,7 +223,7 @@ class _TeacherQuizTabState extends State<TeacherQuizTab> {
                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                   )
                 : const Icon(Icons.quiz_outlined),
-            label: Text(_saving ? 'Saving…' : 'Add quiz'),
+            label: Text(_saving ? l10n.t('student.issuing') : l10n.t('student.quizzes')),
           ),
         ),
       ],

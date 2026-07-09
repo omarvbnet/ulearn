@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 
@@ -14,23 +15,6 @@ class MyReportsScreen extends StatefulWidget {
 class _MyReportsScreenState extends State<MyReportsScreen> {
   List<Map<String, dynamic>> _reports = [];
   bool _loading = true;
-
-  static const _reasonLabels = {
-    'INAPPROPRIATE': 'Inappropriate content',
-    'SPAM': 'Spam or misleading',
-    'HARASSMENT': 'Harassment or hate',
-    'COPYRIGHT': 'Copyright violation',
-    'VIOLENCE': 'Violence or dangerous acts',
-    'MISLEADING': 'False information',
-    'OTHER': 'Other',
-  };
-
-  static const _targetLabels = {
-    'SHORT_VIDEO': 'Reel',
-    'SHORT_VIDEO_COMMENT': 'Reel comment',
-    'STORE_COURSE': 'Course',
-    'STORE_LESSON': 'Lesson',
-  };
 
   static const _statusColors = {
     'PENDING': Colors.orangeAccent,
@@ -59,10 +43,17 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
     }
   }
 
+  String _reasonLabel(String reason) =>
+      context.l10n.t('mobile.report.reasons.$reason');
+
+  String _targetLabel(String targetType) =>
+      context.l10n.t('mobile.report.targets.$targetType');
+
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
-      appBar: AppBar(title: const Text('My Reports')),
+      appBar: AppBar(title: Text(l10n.profileMyReports)),
       body: _loading
           ? const Padding(
               padding: EdgeInsets.all(16),
@@ -75,10 +66,10 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
                     children: [
                       Icon(Icons.flag_outlined, size: 48, color: AppTheme.muted.withValues(alpha: 0.5)),
                       const SizedBox(height: 12),
-                      const Text('No reports yet', style: TextStyle(fontWeight: FontWeight.w600)),
+                      Text(l10n.reportNoReports, style: const TextStyle(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 6),
                       Text(
-                        'Use Report on reels or courses',
+                        l10n.reportNoReportsHint,
                         style: TextStyle(color: AppTheme.muted.withValues(alpha: 0.85)),
                       ),
                     ],
@@ -107,7 +98,9 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      '${_targetLabels[targetType] ?? targetType} report',
+                                      l10n.t('mobile.report.reportTitle', {
+                                        'target': _targetLabel(targetType),
+                                      }),
                                       style: const TextStyle(fontWeight: FontWeight.w700),
                                     ),
                                   ),
@@ -130,7 +123,7 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                _reasonLabels[reason] ?? reason,
+                                _reasonLabelsContains(reason) ? _reasonLabel(reason) : reason,
                                 style: const TextStyle(color: AppTheme.accent, fontSize: 13),
                               ),
                               const SizedBox(height: 6),
@@ -156,6 +149,16 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
                 ),
     );
   }
+
+  bool _reasonLabelsContains(String reason) => const {
+        'INAPPROPRIATE',
+        'SPAM',
+        'HARASSMENT',
+        'COPYRIGHT',
+        'VIOLENCE',
+        'MISLEADING',
+        'OTHER',
+      }.contains(reason);
 
   String _formatDate(DateTime dt) {
     return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '

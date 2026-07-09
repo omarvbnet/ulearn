@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
@@ -59,7 +60,7 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Could not load stages';
+        _error = context.l10n.t('mobile.stageRequest.loadFailed');
       });
     }
   }
@@ -90,11 +91,11 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
     final stageId = _selectedStageId;
     final cert = _certificate;
     if (stageId == null) {
-      setState(() => _error = 'Please choose the stage you want to move to');
+      setState(() => _error = context.l10n.t('mobile.stageRequest.chooseStage'));
       return;
     }
     if (cert == null) {
-      setState(() => _error = 'Please attach your certificate');
+      setState(() => _error = context.l10n.t('mobile.stageRequest.certificateRequired'));
       return;
     }
 
@@ -136,20 +137,20 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
         _note.clear();
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Request sent — the admin will review it shortly')),
+        SnackBar(content: Text(context.l10n.stageRequestSent)),
       );
       await _load();
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _error = switch (e.message) {
-            'ALREADY_PENDING' => 'You already have a pending stage request',
-            'SAME_STAGE' => 'You are already in this stage',
-            'CERTIFICATE_REQUIRED' => 'Please attach your certificate',
+            'ALREADY_PENDING' => context.l10n.t('mobile.stageRequest.alreadyPending'),
+            'SAME_STAGE' => context.l10n.t('mobile.stageRequest.sameStage'),
+            'CERTIFICATE_REQUIRED' => context.l10n.t('mobile.stageRequest.certificateRequired'),
             _ => e.message,
           });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Failed to send the request');
+      setState(() => _error = context.l10n.t('mobile.stageRequest.submitFailed'));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -158,7 +159,8 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final locale = auth.user?.locale ?? 'AR';
+    final locale = context.localeCode;
+    final l10n = context.l10n;
     final currentStage = auth.user?.stage;
     final hasPending = _requests.any((r) => r['status'] == 'PENDING');
 
@@ -174,7 +176,7 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Change Stage')),
+      appBar: AppBar(title: Text(l10n.stageRequestTitle)),
       body: _loading
           ? Skeleton(
               child: ListView(
@@ -201,12 +203,12 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
                   child: Card(
                     child: ListTile(
                       leading: const Icon(Icons.school_outlined, color: AppTheme.accent),
-                      title: const Text(
-                        'Current stage',
-                        style: TextStyle(color: AppTheme.muted, fontSize: 13),
+                      title: Text(
+                        l10n.stageRequestCurrentStage,
+                        style: const TextStyle(color: AppTheme.muted, fontSize: 13),
                       ),
                       trailing: Text(
-                        currentStage?.nameFor(locale) ?? 'Not set',
+                        currentStage?.nameFor(locale) ?? l10n.profileNotSet,
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ),
@@ -225,7 +227,7 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
-                                'Your stage change request is being reviewed by the admin.',
+                                l10n.t('mobile.stageRequest.pendingReview'),
                                 style: TextStyle(
                                   color: AppTheme.foreground.withValues(alpha: 0.85),
                                 ),
@@ -249,7 +251,7 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
                               ))
                           .toList(),
                       onChanged: (v) => setState(() => _selectedStageId = v),
-                      decoration: const InputDecoration(labelText: 'New stage'),
+                      decoration: InputDecoration(labelText: l10n.stageRequestRequestedStage),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -283,7 +285,7 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
                             Expanded(
                               child: Text(
                                 _certificate?.name ??
-                                    'Attach certificate (image or PDF)',
+                                    l10n.t('mobile.stageRequest.attachCertificate'),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -305,7 +307,7 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
                       controller: _note,
                       maxLines: 3,
                       decoration:
-                          const InputDecoration(labelText: 'Note (optional)'),
+                          InputDecoration(labelText: l10n.t('mobile.stageRequest.noteOptional')),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -314,7 +316,7 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
                     child: ElevatedButton.icon(
                       onPressed: _submitting ? null : _submit,
                       icon: const Icon(Icons.send_rounded, size: 18),
-                      label: Text(_submitting ? 'Sending…' : 'Send Request'),
+                      label: Text(_submitting ? l10n.t('auth.sending') : l10n.stageRequestSubmit),
                     ),
                   ),
                 ],
@@ -324,9 +326,9 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
                 ],
                 if (_requests.isNotEmpty) ...[
                   const SizedBox(height: 28),
-                  const Text(
-                    'Previous requests',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  Text(
+                    l10n.t('mobile.stageRequest.previousRequests'),
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 10),
                   ..._requests.asMap().entries.map((e) {
@@ -345,7 +347,7 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
                         child: ListTile(
                           leading: Icon(icon, color: color),
                           title: Text(
-                            requested != null ? stageName(requested) : 'Stage',
+                            requested != null ? stageName(requested) : l10n.profileStage,
                             style: const TextStyle(fontSize: 14.5),
                           ),
                           subtitle: r['reviewNotes'] != null

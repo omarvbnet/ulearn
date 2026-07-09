@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/locale_provider.dart';
 
 class StageModel {
   final String id;
@@ -85,17 +86,23 @@ class AuthProvider extends ChangeNotifier {
   AuthProvider(this._api);
 
   final ApiClient _api;
+  LocaleProvider? _locale;
   UserModel? user;
   bool loading = true;
   String? pendingPhone;
 
   bool get isAuthenticated => user != null;
 
+  void attachLocale(LocaleProvider locale) {
+    _locale = locale;
+  }
+
   Future<void> bootstrap() async {
     await _api.loadToken();
     try {
       final data = await _api.get('/api/auth/me');
       user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
+      await _locale?.syncFromUser(user?.locale);
     } catch (_) {
       user = null;
     }
@@ -142,6 +149,7 @@ class AuthProvider extends ChangeNotifier {
 
     if (data['user'] != null) {
       user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
+      await _locale?.syncFromUser(user?.locale);
     }
     notifyListeners();
     return data;
@@ -158,6 +166,7 @@ class AuthProvider extends ChangeNotifier {
 
   void applyUser(Map<String, dynamic> json) {
     user = UserModel.fromJson(json);
+    _locale?.syncFromUser(user?.locale);
     notifyListeners();
   }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
@@ -41,6 +42,7 @@ class _RankingsScreenState extends State<RankingsScreen>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     if (_loading) {
       return SkeletonList(
         count: 8,
@@ -55,10 +57,10 @@ class _RankingsScreenState extends State<RankingsScreen>
           indicatorColor: AppTheme.accent,
           labelColor: AppTheme.foreground,
           unselectedLabelColor: AppTheme.muted,
-          tabs: const [
-            Tab(text: 'Top Learners'),
-            Tab(text: 'Quiz Scores'),
-            Tab(text: 'Most Active'),
+          tabs: [
+            Tab(text: l10n.t('rank.topStudents')),
+            Tab(text: l10n.t('rank.highestScores')),
+            Tab(text: l10n.t('rank.mostActive')),
           ],
         ),
         Expanded(
@@ -75,7 +77,9 @@ class _RankingsScreenState extends State<RankingsScreen>
               ),
               _RankList(
                 entries: _list('mostActive'),
-                valueOf: (e) => '${e['activityScore'] ?? 0} pts',
+                valueOf: (e) => l10n.t('mobile.rankings.points', {
+                      'score': '${e['activityScore'] ?? 0}',
+                    }),
               ),
             ],
           ),
@@ -109,8 +113,8 @@ class _RankList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (entries.isEmpty) {
-      return const Center(
-        child: Text('No rankings yet', style: TextStyle(color: AppTheme.muted)),
+      return Center(
+        child: Text(context.l10n.rankNoRankings, style: const TextStyle(color: AppTheme.muted)),
       );
     }
 

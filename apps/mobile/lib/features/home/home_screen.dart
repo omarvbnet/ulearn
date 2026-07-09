@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/widgets/apple_tab_bar.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/courses/my_courses_screen.dart';
@@ -17,28 +19,57 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
+  final _reelsRefresh = ValueNotifier(0);
+  DateTime? _lastReelsTap;
 
-  static const _titles = ['U Learn', 'My Courses', 'Store', 'Reels', 'Profile'];
+  static const _reelsTabIndex = 3;
 
-  static const _tabs = [
-    AppleTabItem(icon: Icons.home_outlined, activeIcon: Icons.home_rounded, label: 'Home'),
-    AppleTabItem(
-      icon: Icons.play_lesson_outlined,
-      activeIcon: Icons.play_lesson_rounded,
-      label: 'Courses',
-    ),
-    AppleTabItem(
-      icon: Icons.storefront_outlined,
-      activeIcon: Icons.storefront_rounded,
-      label: 'Store',
-    ),
-    AppleTabItem(icon: Icons.movie_outlined, activeIcon: Icons.movie_rounded, label: 'Reels'),
-    AppleTabItem(icon: Icons.person_outline, activeIcon: Icons.person_rounded, label: 'Profile'),
-  ];
+  String _title(BuildContext context) {
+    final l10n = context.l10n;
+    return switch (_index) {
+      0 => l10n.brand,
+      1 => l10n.homeMyCourses,
+      2 => l10n.navStore,
+      3 => l10n.reelsTitle,
+      4 => l10n.navProfile,
+      _ => l10n.brand,
+    };
+  }
+
+  List<AppleTabItem> _tabs(BuildContext context) {
+    final l10n = context.l10n;
+    return [
+      AppleTabItem(
+        icon: Icons.home_outlined,
+        activeIcon: Icons.home_rounded,
+        label: l10n.navHome,
+      ),
+      AppleTabItem(
+        icon: Icons.play_lesson_outlined,
+        activeIcon: Icons.play_lesson_rounded,
+        label: l10n.navCourses,
+      ),
+      AppleTabItem(
+        icon: Icons.storefront_outlined,
+        activeIcon: Icons.storefront_rounded,
+        label: l10n.navStore,
+      ),
+      AppleTabItem(
+        icon: Icons.movie_outlined,
+        activeIcon: Icons.movie_rounded,
+        label: l10n.reelsTitle,
+      ),
+      AppleTabItem(
+        icon: Icons.person_outline,
+        activeIcon: Icons.person_rounded,
+        label: l10n.navProfile,
+      ),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isReels = _index == 3;
+    final isReels = _index == _reelsTabIndex;
 
     return Scaffold(
       extendBody: true,
@@ -51,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   const ULearnLogo(size: 28),
                   const SizedBox(width: 8),
-                  Text(_titles[_index]),
+                  Text(_title(context)),
                 ],
               ),
               actions: [
@@ -60,7 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => Scaffold(
-                        appBar: AppBar(title: const Text('Notifications')),
+                        appBar: AppBar(title: Text(context.l10n.navNotifications)),
                         body: const NotificationsScreen(),
                       ),
                     ),
@@ -74,16 +105,37 @@ class _HomeScreenState extends State<HomeScreen> {
           const _TabSafeArea(child: HomeFeed()),
           const _TabSafeArea(child: MyCoursesScreen()),
           const _TabSafeArea(child: StoreScreen()),
-          ReelsScreen(isTabActive: _index == 3),
+          ReelsScreen(isTabActive: _index == _reelsTabIndex, refreshTrigger: _reelsRefresh),
           const _TabSafeArea(child: ProfileScreen()),
         ],
       ),
       bottomNavigationBar: AppleTabBar(
-        items: _tabs,
+        items: _tabs(context),
         currentIndex: _index,
-        onTap: (i) => setState(() => _index = i),
+        onTap: (i) {
+          if (i == _reelsTabIndex && _index == _reelsTabIndex) {
+            final now = DateTime.now();
+            if (_lastReelsTap != null &&
+                now.difference(_lastReelsTap!) < const Duration(milliseconds: 450)) {
+              HapticFeedback.mediumImpact();
+              _reelsRefresh.value++;
+              _lastReelsTap = null;
+              return;
+            }
+            _lastReelsTap = now;
+          } else {
+            _lastReelsTap = null;
+          }
+          setState(() => _index = i);
+        },
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _reelsRefresh.dispose();
+    super.dispose();
   }
 }
 

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
-import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
@@ -97,20 +97,25 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final locale = context.watch<AuthProvider>().user?.locale ?? 'AR';
+    final locale = context.localeCode;
+    final l10n = context.l10n;
 
     return DefaultTabController(
       length: 2,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('My Favorites'),
+          title: Text(l10n.profileFavorites),
           bottom: TabBar(
             indicatorColor: AppTheme.accent,
             labelColor: AppTheme.accent,
             unselectedLabelColor: AppTheme.muted,
             tabs: [
-              Tab(text: 'Courses${_courses != null ? ' (${_courses!.length})' : ''}'),
-              Tab(text: 'Videos${_lessons != null ? ' (${_lessons!.length})' : ''}'),
+              Tab(
+                  text:
+                      '${l10n.favoritesCoursesTab}${_courses != null ? ' (${_courses!.length})' : ''}'),
+              Tab(
+                  text:
+                      '${l10n.favoritesVideosTab}${_lessons != null ? ' (${_lessons!.length})' : ''}'),
             ],
           ),
         ),
@@ -133,10 +138,9 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       );
     }
     if (courses.isEmpty) {
-      return const _EmptyFavorites(
+      return _EmptyFavorites(
         icon: Icons.favorite_border,
-        message:
-            'No favorite courses yet.\nTap the heart on any course to save it here.',
+        message: context.l10n.favoritesEmptyCourses,
       );
     }
     return RefreshIndicator(
@@ -175,10 +179,9 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       );
     }
     if (lessons.isEmpty) {
-      return const _EmptyFavorites(
+      return _EmptyFavorites(
         icon: Icons.video_library_outlined,
-        message:
-            'No favorite videos yet.\nTap the heart on any course video to save it here.',
+        message: context.l10n.favoritesEmptyVideos,
       );
     }
     return RefreshIndicator(
@@ -232,7 +235,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              lesson['title']?.toString() ?? 'Video',
+                              lesson['title']?.toString() ?? context.l10n.t('student.videos'),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -265,9 +268,9 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                                   const SizedBox(width: 12),
                                 ],
                                 if (lesson['isFreePreview'] == true)
-                                  const Text(
-                                    'FREE PREVIEW',
-                                    style: TextStyle(
+                                  Text(
+                                    context.l10n.t('mobile.favorites.freePreview'),
+                                    style: const TextStyle(
                                       color: Colors.greenAccent,
                                       fontSize: 10.5,
                                       fontWeight: FontWeight.bold,

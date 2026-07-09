@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
-import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
@@ -43,8 +43,8 @@ class _StoreScreenState extends State<StoreScreen> {
       await context.read<ApiClient>().post('/api/store/courses/$id/purchase', {});
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Purchase requested — we\'ll confirm your payment shortly'),
+        SnackBar(
+          content: Text(context.l10n.t('student.purchaseRequested')),
         ),
       );
       await _load();
@@ -54,8 +54,8 @@ class _StoreScreenState extends State<StoreScreen> {
         SnackBar(
           content: Text(
             e.message == 'ALREADY_REQUESTED'
-                ? 'You already requested this course'
-                : 'Failed to request purchase',
+                ? context.l10n.t('student.purchaseAlreadyRequested')
+                : context.l10n.t('mobile.error.generic'),
           ),
         ),
       );
@@ -73,18 +73,19 @@ class _StoreScreenState extends State<StoreScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final locale = context.watch<AuthProvider>().user?.locale ?? 'AR';
+    final locale = context.localeCode;
+    final l10n = context.l10n;
     final courses = _courses;
     if (courses == null) {
       return SkeletonList(itemBuilder: (_) => const SkeletonTextCard());
     }
     if (courses.isEmpty) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(24),
+          padding: const EdgeInsets.all(24),
           child: Text(
-            'No courses available yet.\nTeacher courses appear here once approved.',
-            style: TextStyle(color: AppTheme.muted),
+            '${l10n.studentStoreEmpty}\n${l10n.t('student.storeEmptyHint')}',
+            style: const TextStyle(color: AppTheme.muted),
             textAlign: TextAlign.center,
           ),
         ),
@@ -176,7 +177,7 @@ class _StoreScreenState extends State<StoreScreen> {
                           bottom: 8,
                           child: _MetaChip(
                             icon: Icons.play_circle_outline,
-                            label: '$lessonsCount videos',
+                            label: '${l10n.t('student.videos')}: $lessonsCount',
                           ),
                         ),
                         if (subscribers > 0)
@@ -187,7 +188,7 @@ class _StoreScreenState extends State<StoreScreen> {
                             child: Center(
                               child: _MetaChip(
                                 icon: Icons.people_outline,
-                                label: '${formatCount(subscribers)} subs',
+                                label: l10n.homeSubscribers(subscribers),
                               ),
                             ),
                           ),
@@ -231,7 +232,7 @@ class _StoreScreenState extends State<StoreScreen> {
                               const Icon(Icons.people_outline, size: 14, color: AppTheme.muted),
                               const SizedBox(width: 4),
                               Text(
-                                '${formatCount(subscribers)} subscriber${subscribers == 1 ? '' : 's'}',
+                                l10n.homeSubscribers(subscribers),
                                 style: const TextStyle(color: AppTheme.muted, fontSize: 12),
                               ),
                             ],
@@ -250,17 +251,17 @@ class _StoreScreenState extends State<StoreScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: switch (status) {
-                            'PAID' => const Chip(
-                                label: Text('Purchased'),
-                                avatar: Icon(Icons.check_circle, size: 18, color: Colors.green),
+                            'PAID' => Chip(
+                                label: Text(l10n.studentPurchased),
+                                avatar: const Icon(Icons.check_circle, size: 18, color: Colors.green),
                               ),
-                            'PENDING' => const Chip(
-                                label: Text('Awaiting payment confirmation'),
-                                avatar: Icon(Icons.hourglass_top, size: 18),
+                            'PENDING' => Chip(
+                                label: Text(l10n.studentPurchasePending),
+                                avatar: const Icon(Icons.hourglass_top, size: 18),
                               ),
-                            _ when isOwnCourse => const Chip(
-                                label: Text('Your course'),
-                                avatar: Icon(Icons.school_outlined, size: 18, color: AppTheme.accent),
+                            _ when isOwnCourse => Chip(
+                                label: Text(l10n.storeYourCourse),
+                                avatar: const Icon(Icons.school_outlined, size: 18, color: AppTheme.accent),
                               ),
                             _ => FilledButton(
                                 onPressed: _busyId == id
@@ -268,7 +269,9 @@ class _StoreScreenState extends State<StoreScreen> {
                                     : () {
                                         _buy(id);
                                       },
-                                child: Text(_busyId == id ? 'Requesting…' : 'Buy Course'),
+                                child: Text(
+                                  _busyId == id ? l10n.t('student.issuing') : l10n.studentBuyCourse,
+                                ),
                               ),
                           },
                         ),

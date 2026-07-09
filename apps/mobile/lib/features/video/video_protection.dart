@@ -48,8 +48,6 @@ class VideoProtectionController {
         await channel.invokeMethod('enableSecureFlag');
       } catch (_) {}
     }
-
-    _startWatermarkMotion();
   }
 
   Future<void> disable() async {
@@ -104,21 +102,18 @@ class VideoProtectionController {
   }
 }
 
-/// Moving watermark — always visible on course videos; stronger while casting.
+/// Moving watermark — visible only while casting to another screen.
 class DynamicWatermark extends StatelessWidget {
   const DynamicWatermark({
     super.key,
     required this.controller,
-    this.prominent = false,
   });
 
   final VideoProtectionController controller;
-  final bool prominent;
 
   @override
   Widget build(BuildContext context) {
-    final casting = controller.isCasting;
-    final opacity = casting || prominent ? 0.72 : 0.38;
+    if (!controller.isCasting) return const SizedBox.shrink();
 
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 1800),
@@ -127,21 +122,19 @@ class DynamicWatermark extends StatelessWidget {
       top: controller.watermarkOffset.dy,
       child: IgnorePointer(
         child: Opacity(
-          opacity: opacity,
+          opacity: 0.72,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
               color: Colors.black54,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: casting ? Colors.amber.withValues(alpha: 0.65) : Colors.white24,
-              ),
+              border: Border.all(color: Colors.amber.withValues(alpha: 0.65)),
             ),
             child: Text(
               controller.watermarkText,
-              style: TextStyle(
+              style: const TextStyle(
                 color: Colors.white,
-                fontSize: casting ? 12 : 11,
+                fontSize: 12,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.3,
               ),

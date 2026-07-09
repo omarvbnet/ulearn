@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/video/video_player_screen.dart';
 
@@ -36,6 +38,9 @@ class _CoursesScreenState extends State<CoursesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final locale = context.localeCode;
+
     if (_loading) {
       return SkeletonList(itemBuilder: (_) => const SkeletonTextCard());
     }
@@ -49,7 +54,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
         return Card(
           margin: const EdgeInsets.only(bottom: 16),
           child: ExpansionTile(
-            title: Text(subject['nameEn']?.toString() ?? 'Subject'),
+            title: Text(localizedText(subject, locale, prefix: 'name')),
             children: chapters.map((c) {
               final chapter = c as Map<String, dynamic>;
               final lessons = chapter['lessons'] as List<dynamic>? ?? [];
@@ -59,17 +64,18 @@ class _CoursesScreenState extends State<CoursesScreen> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                     child: Text(
-                      chapter['nameEn']?.toString() ?? 'Chapter',
+                      localizedText(chapter, locale, prefix: 'name'),
                       style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.accent),
                     ),
                   ),
                   ...lessons.map((l) {
                     final lesson = l as Map<String, dynamic>;
                     final isFree = lesson['isFree'] == true;
+                    final lessonTitle = localizedText(lesson, locale, prefix: 'name');
                     return ListTile(
-                      title: Text(lesson['nameEn']?.toString() ?? 'Lesson'),
+                      title: Text(lessonTitle),
                       subtitle: Text(
-                        isFree ? 'Free' : 'Subscribe to unlock all lessons',
+                        isFree ? l10n.free : l10n.t('common.subscribeToUnlock'),
                         style: TextStyle(
                           color: isFree ? AppTheme.accent : AppTheme.muted,
                           fontSize: 12,
@@ -84,7 +90,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                                 MaterialPageRoute(
                                   builder: (_) => VideoPlayerScreen(
                                     lessonId: lesson['id'] as String,
-                                    title: lesson['nameEn']?.toString() ?? 'Lesson',
+                                    title: lessonTitle,
                                   ),
                                 ),
                               )

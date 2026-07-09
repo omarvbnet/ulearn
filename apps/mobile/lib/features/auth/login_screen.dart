@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/particle_field.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
@@ -69,7 +70,7 @@ class _LoginScreenState extends State<LoginScreen>
   Future<void> _sendOtp() async {
     final phone = _phoneCtrl.text.trim();
     if (phone.length < 8) {
-      _showError('Please enter a valid phone number');
+      _showError(context.l10n.loginValidPhone);
       return;
     }
     setState(() {
@@ -137,9 +138,9 @@ class _LoginScreenState extends State<LoginScreen>
                     ShaderMask(
                       shaderCallback: (bounds) =>
                           AppTheme.gradient.createShader(bounds),
-                      child: const Text(
-                        'U Learn',
-                        style: TextStyle(
+                      child: Text(
+                        context.l10n.brand,
+                        style: const TextStyle(
                           fontSize: 34,
                           fontWeight: FontWeight.w800,
                           color: Colors.white,
@@ -148,16 +149,15 @@ class _LoginScreenState extends State<LoginScreen>
                       ),
                     ),
                     const SizedBox(height: 6),
-                    const Text(
-                      'Learn without limits',
-                      style: TextStyle(
+                    Text(
+                      context.l10n.learnWithoutLimits,
+                      style: const TextStyle(
                         color: AppTheme.muted,
                         fontSize: 13,
                         letterSpacing: 2,
                       ),
                     ),
                     const SizedBox(height: 32),
-                    // Glass card holding the auth flow.
                     AnimatedBuilder(
                       animation: _shake,
                       builder: (context, child) {
@@ -244,19 +244,20 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Widget _buildPhoneStep() {
+    final l10n = context.l10n;
     return Column(
       key: const ValueKey('phone'),
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Text(
-          'Welcome 👋',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        Text(
+          l10n.loginWelcome,
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 6),
-        const Text(
-          'Sign in with your phone number — we\'ll send a code to your WhatsApp.',
-          style: TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.5),
+        Text(
+          l10n.loginSignInHint,
+          style: const TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.5),
         ),
         const SizedBox(height: 20),
         TextField(
@@ -265,10 +266,10 @@ class _LoginScreenState extends State<LoginScreen>
           textDirection: TextDirection.ltr,
           style: const TextStyle(fontSize: 16, letterSpacing: 0.5),
           onSubmitted: (_) => _sendOtp(),
-          decoration: const InputDecoration(
-            labelText: 'Mobile Number',
-            hintText: '+964 7XX XXX XXXX',
-            prefixIcon: Icon(Icons.phone_iphone, color: AppTheme.muted),
+          decoration: InputDecoration(
+            labelText: l10n.authPhone,
+            hintText: l10n.authPhonePlaceholder,
+            prefixIcon: const Icon(Icons.phone_iphone, color: AppTheme.muted),
           ),
         ),
         const SizedBox(height: 18),
@@ -294,7 +295,7 @@ class _LoginScreenState extends State<LoginScreen>
                   )
                 : const Icon(Icons.send_rounded, size: 19),
             label: Text(
-              _loading ? 'Sending…' : 'Send code via WhatsApp',
+              _loading ? l10n.authSending : l10n.loginSendCodeWhatsApp,
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
             ),
           ),
@@ -304,15 +305,16 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Widget _buildOtpStep() {
+    final l10n = context.l10n;
     final code = _otpCtrl.text;
     return Column(
       key: const ValueKey('otp'),
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Text(
-          'Enter the code',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        Text(
+          l10n.loginEnterCode,
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 6),
         Text.rich(
@@ -320,7 +322,7 @@ class _LoginScreenState extends State<LoginScreen>
             style: const TextStyle(
                 color: AppTheme.muted, fontSize: 13, height: 1.5),
             children: [
-              const TextSpan(text: 'We sent a 6-digit code to '),
+              TextSpan(text: l10n.loginCodeSentPrefix),
               TextSpan(
                 text: _phoneCtrl.text.trim(),
                 style: const TextStyle(
@@ -328,12 +330,11 @@ class _LoginScreenState extends State<LoginScreen>
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const TextSpan(text: ' on WhatsApp.'),
+              TextSpan(text: l10n.loginCodeSentSuffix),
             ],
           ),
         ),
         const SizedBox(height: 20),
-        // Hidden input driving 6 visible digit boxes.
         Stack(
           children: [
             Opacity(
@@ -420,7 +421,7 @@ class _LoginScreenState extends State<LoginScreen>
             ),
             onPressed: _loading || code.length < 6 ? null : _verify,
             child: Text(
-              _loading ? 'Verifying…' : 'Verify & Continue',
+              _loading ? l10n.authVerifying : l10n.loginVerifyContinue,
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
             ),
           ),
@@ -434,15 +435,15 @@ class _LoginScreenState extends State<LoginScreen>
                 _otpStep = false;
                 _error = null;
               }),
-              child: const Text(
-                'Change number',
-                style: TextStyle(color: AppTheme.muted),
+              child: Text(
+                l10n.authChangeNumber,
+                style: const TextStyle(color: AppTheme.muted),
               ),
             ),
             TextButton(
               onPressed: _resendIn > 0 || _loading ? null : _sendOtp,
               child: Text(
-                _resendIn > 0 ? 'Resend in ${_resendIn}s' : 'Resend code',
+                _resendIn > 0 ? l10n.loginResendIn(_resendIn) : l10n.authResend,
                 style: TextStyle(
                   color: _resendIn > 0 ? AppTheme.muted : AppTheme.accent,
                 ),

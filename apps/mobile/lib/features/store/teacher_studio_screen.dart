@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/media/video_cover_helper.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/features/store/teacher_quiz_tab.dart';
@@ -94,7 +95,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   }
 
   Future<File?> _compressVideo(String sourcePath) async {
-    setState(() => _uploadStatus = 'Compressing video…');
+    setState(() => _uploadStatus = context.l10n.t('student.issuing'));
     try {
       final info = await VideoCompress.compressVideo(
         sourcePath,
@@ -115,7 +116,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     required String folder,
   }) async {
     final api = context.read<ApiClient>();
-    setState(() => _uploadStatus = 'Uploading…');
+    setState(() => _uploadStatus = context.l10n.t('student.posting'));
     final presign = await api.post('/api/admin/uploads', {
       'filename': filename,
       'contentType': contentType,
@@ -184,7 +185,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   Future<void> _pickCoverImage() async {
     if (_pendingVideo == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pick a video first')),
+        SnackBar(content: Text(context.l10n.studioPickVideoFirst)),
       );
       return;
     }
@@ -194,7 +195,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
 
   Future<void> _autoCoverFromVideo() async {
     if (_pendingVideo == null) return;
-    setState(() => _uploadStatus = 'Generating cover…');
+    setState(() => _uploadStatus = context.l10n.t('student.issuing'));
     final cover = await VideoCoverHelper.thumbnailFromVideo(_pendingVideo!.path);
     if (mounted) {
       setState(() {
@@ -217,7 +218,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
 
   Future<Map<String, String>?> _uploadCoverIfAny(String folder) async {
     if (_pendingCover == null) return null;
-    setState(() => _uploadStatus = 'Uploading cover…');
+    setState(() => _uploadStatus = context.l10n.t('student.posting'));
     return _uploadCoverFile(_pendingCover!, folder);
   }
 
@@ -226,7 +227,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
 
     setState(() {
       _uploading = true;
-      _uploadStatus = 'Preparing…';
+      _uploadStatus = context.l10n.t('common.loading');
     });
     try {
       final videoFile = await _prepareVideoForUpload();
@@ -236,7 +237,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       if (uploaded == null) throw Exception('Upload failed');
 
       if (_pendingCover == null) {
-        setState(() => _uploadStatus = 'Generating cover…');
+        setState(() => _uploadStatus = context.l10n.t('student.issuing'));
         _pendingCover = await VideoCoverHelper.thumbnailFromVideo(videoFile.path);
       }
       if (_pendingDurationSec == null || _pendingDurationSec! <= 0) {
@@ -260,7 +261,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       _titleCtrl.clear();
       _clearPendingMedia();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Video uploaded — pending review if course is live')),
+        SnackBar(content: Text(context.l10n.studioVideoUploaded)),
       );
       _load();
     } catch (e) {
@@ -284,7 +285,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
 
     setState(() {
       _uploading = true;
-      _uploadStatus = 'Preparing…';
+      _uploadStatus = context.l10n.t('common.loading');
     });
     try {
       final videoFile = await _prepareVideoForUpload();
@@ -294,7 +295,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       if (uploaded == null) throw Exception('Upload failed');
 
       if (_pendingCover == null) {
-        setState(() => _uploadStatus = 'Generating cover…');
+        setState(() => _uploadStatus = context.l10n.t('student.issuing'));
         _pendingCover = await VideoCoverHelper.thumbnailFromVideo(videoFile.path);
       }
       if (_pendingDurationSec == null || _pendingDurationSec! <= 0) {
@@ -316,7 +317,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       _descCtrl.clear();
       _clearPendingMedia();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Short video submitted for review')),
+        SnackBar(content: Text(context.l10n.studioShortSubmitted)),
       );
       _load();
     } catch (e) {
@@ -335,16 +336,17 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return DefaultTabController(
       length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Teacher Studio'),
-          bottom: const TabBar(
+          title: Text(l10n.profileTeacherStudio),
+          bottom: TabBar(
             tabs: [
-              Tab(text: 'Course Video'),
-              Tab(text: 'Quiz'),
-              Tab(text: 'Short Video'),
+              Tab(text: l10n.t('student.videos')),
+              Tab(text: l10n.t('student.quizzes')),
+              Tab(text: l10n.reelsTitle),
             ],
           ),
         ),
@@ -451,20 +453,22 @@ class _UploadTab extends StatelessWidget {
   final bool isShort;
   final List<Map<String, dynamic>> shorts;
 
-  String get _videoName {
-    if (pendingVideo == null) return 'No video selected';
+  String _videoName(BuildContext context) {
+    final l10n = context.l10n;
+    if (pendingVideo == null) return l10n.studioVideoFile;
     return pendingVideo!.path.split(Platform.pathSeparator).last;
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
         TextField(
           controller: titleCtrl,
           decoration: InputDecoration(
-            labelText: isShort ? 'Title' : 'Lesson title',
+            labelText: isShort ? l10n.t('student.videos') : l10n.t('student.videos'),
           ),
         ),
         if (isShort && descCtrl != null) ...[
@@ -473,9 +477,9 @@ class _UploadTab extends StatelessWidget {
             controller: descCtrl,
             maxLines: 3,
             maxLength: 500,
-            decoration: const InputDecoration(
-              labelText: 'Description (shown on Reels)',
-              hintText: 'What is this video about?',
+            decoration: InputDecoration(
+              labelText: l10n.t('student.comment'),
+              hintText: l10n.t('student.comment'),
               alignLabelWithHint: true,
             ),
           ),
@@ -483,49 +487,49 @@ class _UploadTab extends StatelessWidget {
         if (!isShort) ...[
           const SizedBox(height: 16),
           if (courses.isEmpty)
-            const Text(
-              'Create a course on the web teacher portal first.',
-              style: TextStyle(color: AppTheme.muted),
+            Text(
+              l10n.t('student.noCertificatesHint'),
+              style: const TextStyle(color: AppTheme.muted),
             )
           else
             DropdownButtonFormField<String>(
               initialValue: courseId,
-              decoration: const InputDecoration(labelText: 'Course'),
+              decoration: InputDecoration(labelText: l10n.t('student.storeTitle')),
               items: courses
                   .map((c) => DropdownMenuItem(
                         value: c['id']?.toString(),
-                        child: Text(c['titleEn']?.toString() ?? 'Course'),
+                        child: Text(c['titleEn']?.toString() ?? l10n.t('student.storeTitle')),
                       ))
                   .toList(),
               onChanged: onCourse,
             ),
         ],
         const SizedBox(height: 16),
-        const Text('Video file', style: TextStyle(fontWeight: FontWeight.w600)),
+        Text(l10n.studioVideoFile, style: const TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         OutlinedButton.icon(
           onPressed: uploading ? null : onSelectVideo,
           icon: const Icon(Icons.video_library_outlined),
-          label: Text(pendingVideo == null ? 'Pick video' : 'Change video'),
+          label: Text(pendingVideo == null ? l10n.studioVideoFile : l10n.t('common.save')),
         ),
         if (pendingVideo != null) ...[
           const SizedBox(height: 6),
           Text(
-            _videoName,
+            _videoName(context),
             style: const TextStyle(color: AppTheme.muted, fontSize: 12),
           ),
           if (pendingDurationSec != null)
             Text(
-              'Duration: ${pendingDurationSec! ~/ 60}:${(pendingDurationSec! % 60).toString().padLeft(2, '0')}',
+              '${l10n.t('student.min')}: ${pendingDurationSec! ~/ 60}:${(pendingDurationSec! % 60).toString().padLeft(2, '0')}',
               style: const TextStyle(color: AppTheme.muted, fontSize: 12),
             ),
         ],
         const SizedBox(height: 16),
-        const Text('Cover image (optional)', style: TextStyle(fontWeight: FontWeight.w600)),
+        Text(l10n.studioCoverOptional, style: const TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 4),
-        const Text(
-          'Covers load instantly in feeds and course lists.',
-          style: TextStyle(color: AppTheme.muted, fontSize: 12),
+        Text(
+          l10n.t('student.coursesDescription'),
+          style: const TextStyle(color: AppTheme.muted, fontSize: 12),
         ),
         const SizedBox(height: 8),
         Row(
@@ -534,7 +538,7 @@ class _UploadTab extends StatelessWidget {
               child: OutlinedButton.icon(
                 onPressed: uploading || pendingVideo == null ? null : onPickCover,
                 icon: const Icon(Icons.image_outlined, size: 18),
-                label: const Text('Choose cover'),
+                label: Text(l10n.studioChooseCover),
               ),
             ),
             const SizedBox(width: 8),
@@ -542,7 +546,7 @@ class _UploadTab extends StatelessWidget {
               child: OutlinedButton.icon(
                 onPressed: uploading || pendingVideo == null ? null : onAutoCover,
                 icon: const Icon(Icons.auto_fix_high_outlined, size: 18),
-                label: const Text('From video'),
+                label: Text(l10n.studioFromVideo),
               ),
             ),
           ],
@@ -587,14 +591,14 @@ class _UploadTab extends StatelessWidget {
             onChanged: uploading ? null : onCompressChanged,
             activeThumbColor: AppTheme.accent,
             secondary: const Icon(Icons.compress_outlined, color: AppTheme.accent),
-            title: const Text(
-              'Compress before upload',
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            title: Text(
+              l10n.t('student.speed'),
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
             ),
             subtitle: Text(
               compressBeforeUpload
-                  ? 'Recommended — smaller files load faster.'
-                  : 'Upload original quality (larger file).',
+                  ? l10n.t('student.coursesDescription')
+                  : l10n.t('student.packagesDescription'),
               style: const TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.35),
             ),
           ),
@@ -609,11 +613,11 @@ class _UploadTab extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
               : const Icon(Icons.upload_file),
-          label: Text(uploading ? (uploadStatus ?? 'Working…') : 'Upload video'),
+          label: Text(uploading ? (uploadStatus ?? l10n.t('common.loading')) : l10n.t('student.videos')),
         ),
         if (isShort && shorts.isNotEmpty) ...[
           const SizedBox(height: 24),
-          const Text('Your short videos', style: TextStyle(fontWeight: FontWeight.bold)),
+          Text(l10n.studioYourShorts, style: const TextStyle(fontWeight: FontWeight.bold)),
           ...shorts.map((s) {
             final status = s['status']?.toString() ?? '';
             return Card(
@@ -632,14 +636,16 @@ class _UploadTab extends StatelessWidget {
                       )
                     : const Icon(Icons.movie_outlined),
                 title: Text(s['title']?.toString() ?? ''),
-                subtitle: s['description'] != null
-                    ? Text(
-                        s['description'].toString(),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12, color: AppTheme.muted),
-                      )
-                    : null,
+                subtitle: Text(
+                  [
+                    if (s['description'] != null && s['description'].toString().trim().isNotEmpty)
+                      s['description'].toString(),
+                    '${l10n.homeViews((s['viewCount'] as num?)?.toInt() ?? 0)} · ${l10n.homeLikes((s['likes'] as num?)?.toInt() ?? 0)} · ${l10n.homeSaves((s['saves'] as num?)?.toInt() ?? 0)}',
+                  ].where((t) => t.isNotEmpty).join('\n'),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: AppTheme.muted, height: 1.35),
+                ),
                 trailing: Chip(
                   label: Text(status.replaceAll('_', ' '), style: const TextStyle(fontSize: 10)),
                   visualDensity: VisualDensity.compact,

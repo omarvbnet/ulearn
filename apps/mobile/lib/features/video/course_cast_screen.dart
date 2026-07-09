@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_to_airplay/flutter_to_airplay.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/course_cast_service.dart';
 import 'package:ulearn/features/video/video_protection.dart';
@@ -48,9 +49,10 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
   }
 
   Future<void> _startAndroidCast() async {
+    final l10n = context.l10n;
     setState(() {
       _androidBusy = true;
-      _message = 'Searching for cast devices…';
+      _message = l10n.t('mobile.cast.searching');
     });
     final ok = await CourseCastService.castVideo(
       url: widget.url,
@@ -62,8 +64,8 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
     setState(() {
       _androidBusy = false;
       _message = ok
-          ? 'Connected — your name and ID appear on the cast screen'
-          : 'Pick a Chromecast device to continue';
+          ? l10n.t('mobile.cast.connected')
+          : l10n.castChooseChromecast;
     });
     if (!ok) {
       await CourseCastService.showDevicePicker();
@@ -91,6 +93,7 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -100,12 +103,12 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
         actions: [
           if (Platform.isAndroid)
             IconButton(
-              tooltip: 'Choose device',
+              tooltip: l10n.t('mobile.cast.chooseDevice'),
               icon: const Icon(Icons.devices),
               onPressed: () => CourseCastService.showDevicePicker(),
             ),
           IconButton(
-            tooltip: 'Stop casting',
+            tooltip: l10n.t('mobile.cast.stopCasting'),
             icon: const Icon(Icons.cast_connected),
             onPressed: _close,
           ),
@@ -124,8 +127,8 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
               onPickDevice: () => CourseCastService.showDevicePicker(),
             ),
           const VideoBrandLogo(markSize: 24),
-          DynamicWatermark(controller: widget.protection, prominent: true),
-          CastingIdentityBanner(controller: widget.protection),
+              DynamicWatermark(controller: widget.protection),
+              CastingIdentityBanner(controller: widget.protection),
           if (Platform.isIOS)
             Positioned(
               right: 16,
@@ -136,7 +139,7 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
                   color: Colors.black.withValues(alpha: 0.55),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Column(
+                child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     AirPlayRoutePickerView(
@@ -144,10 +147,10 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
                       activeTintColor: AppTheme.accent,
                       backgroundColor: Colors.transparent,
                     ),
-                    SizedBox(height: 4),
+                    const SizedBox(height: 4),
                     Text(
-                      'AirPlay',
-                      style: TextStyle(color: Colors.white70, fontSize: 11),
+                      l10n.t('mobile.cast.airplay'),
+                      style: const TextStyle(color: Colors.white70, fontSize: 11),
                     ),
                   ],
                 ),
@@ -174,6 +177,7 @@ class _AndroidCastPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(28),
@@ -186,7 +190,7 @@ class _AndroidCastPanel extends StatelessWidget {
               const Icon(Icons.cast, color: AppTheme.accent, size: 56),
             const SizedBox(height: 20),
             Text(
-              message ?? 'Casting to your TV',
+              message ?? l10n.t('mobile.cast.castingToTv'),
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.4),
             ),
@@ -204,7 +208,7 @@ class _AndroidCastPanel extends StatelessWidget {
             FilledButton.icon(
               onPressed: onPickDevice,
               icon: const Icon(Icons.devices),
-              label: const Text('Choose Chromecast'),
+              label: Text(l10n.castChooseChromecast),
             ),
           ],
         ),

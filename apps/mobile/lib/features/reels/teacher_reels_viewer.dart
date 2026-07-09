@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/reel_video_cache.dart';
 import 'package:ulearn/features/reels/reel_comments_sheet.dart';
@@ -104,7 +105,7 @@ class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
       backgroundColor: Colors.transparent,
       builder: (_) => ReelCommentsSheet(
         videoId: video['id'].toString(),
-        videoTitle: video['title']?.toString() ?? 'Reel',
+        videoTitle: video['title']?.toString() ?? context.l10n.reelsTitle,
         initialCount: (video['commentCount'] as num?)?.toInt() ?? 0,
         onCountChanged: (count) {
           if (mounted) setState(() => video['commentCount'] = count);
@@ -131,33 +132,77 @@ class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
     );
   }
 
+  Future<void> _toggleSave(int index) async {
+    if (index < 0) return;
+    final video = _videos[index];
+    final id = video['id']?.toString();
+    if (id == null) return;
+
+    final wasSaved = video['savedByMe'] == true;
+    final saves = (video['saves'] as num?)?.toInt() ?? 0;
+    setState(() {
+      video['savedByMe'] = !wasSaved;
+      video['saves'] = wasSaved ? (saves > 0 ? saves - 1 : 0) : saves + 1;
+    });
+
+    try {
+      final data = await context.read<ApiClient>().post('/api/store/short-videos/$id/save', {});
+      if (!mounted) return;
+      setState(() {
+        video['saves'] = data['saves'];
+        video['savedByMe'] = data['savedByMe'];
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        video['savedByMe'] = wasSaved;
+        video['saves'] = saves;
+      });
+    }
+  }
+
   void _openMoreMenu(Map<String, dynamic> video) {
+    final saved = video['savedByMe'] == true;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
-              title: const Text('Report content'),
-              onTap: () {
-                Navigator.pop(ctx);
-                ReportContentSheet.show(
-                  context,
-                  targetType: 'SHORT_VIDEO',
-                  targetId: video['id'].toString(),
-                  contentTitle: video['title']?.toString() ?? 'Reel',
-                );
-              },
-            ),
-          ],
-        ),
-      ),
+      builder: (ctx) {
+        final l10n = ctx.l10n;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(
+                  saved ? Icons.bookmark : Icons.bookmark_border_outlined,
+                  color: AppTheme.accent,
+                ),
+                title: Text(saved ? l10n.reelsUnsaveReel : l10n.reelsSaveReel),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _toggleSave(_videos.indexOf(video));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
+                title: Text(l10n.reelsReportContent),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  ReportContentSheet.show(
+                    context,
+                    targetType: 'SHORT_VIDEO',
+                    targetId: video['id'].toString(),
+                    contentTitle: video['title']?.toString() ?? l10n.reelsTitle,
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -167,8 +212,11 @@ class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
       return Scaffold(
         backgroundColor: Colors.black,
         appBar: AppBar(backgroundColor: Colors.transparent),
-        body: const Center(
-          child: Text('No reels available', style: TextStyle(color: Colors.white70)),
+        body: Center(
+          child: Text(
+            context.l10n.reelsNoReels,
+            style: const TextStyle(color: Colors.white70),
+          ),
         ),
       );
     }

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
@@ -115,8 +116,9 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
 
   Future<void> _init() async {
     final auth = context.read<AuthProvider>();
+    final l10n = context.l10nRead;
     _protection ??= VideoProtectionController(
-      studentName: auth.user?.fullLegalName ?? 'Student',
+      studentName: auth.user?.fullLegalName ?? l10n.t('mobile.roles.student'),
       nationalId: auth.user?.nationalId ?? '',
       phone: auth.user?.phone ?? '',
     )..addListener(() {
@@ -136,7 +138,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Could not play this video';
+        _error = context.l10n.t('mobile.video.playFailed');
       });
     }
   }
@@ -249,14 +251,14 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.6)),
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.check_circle_rounded, color: Colors.greenAccent),
-                            SizedBox(width: 10),
+                            const Icon(Icons.check_circle_rounded, color: Colors.greenAccent),
+                            const SizedBox(width: 10),
                             Text(
-                              'Completed',
-                              style: TextStyle(
+                              context.l10n.storeVideoCompleted,
+                              style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w700,
                                 fontSize: 16,
@@ -296,6 +298,7 @@ class _ControlsOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Stack(
       children: [
         Positioned(
@@ -341,7 +344,9 @@ class _ControlsOverlay extends StatelessWidget {
                       const Spacer(),
                       if (protection != null)
                         IconButton(
-                          tooltip: protection!.isCasting ? 'Casting' : 'Cast to TV',
+                          tooltip: protection!.isCasting
+                              ? l10n.t('mobile.cast.casting')
+                              : l10n.castTitle,
                           icon: Icon(
                             protection!.isCasting
                                 ? Icons.cast_connected
@@ -432,7 +437,7 @@ class _FullscreenPlayerState extends State<_FullscreenPlayer> {
                 ),
               ),
               const VideoBrandLogo(markSize: 26),
-              DynamicWatermark(controller: widget.protection, prominent: true),
+              DynamicWatermark(controller: widget.protection),
               CastingIdentityBanner(controller: widget.protection),
               ScreenshotBlockOverlay(visible: widget.protection.screenshotBlocked),
               AnimatedOpacity(

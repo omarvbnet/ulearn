@@ -204,6 +204,7 @@ model User {
   courseLessonAnswers   CourseLessonAnswer[]   @relation("courseLessonAnswers")
   courseLessonProgress  CourseLessonProgress[]
   shortVideoLikes       ShortVideoLike[]
+  shortVideoSaves       ShortVideoSave[]
   shortVideoComments    ShortVideoComment[]
   contentReports        ContentReport[]
   adLikes              AdLike[]
@@ -459,6 +460,7 @@ model TeacherShortVideo {
 
   teacher TeacherProfile  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
   likes    ShortVideoLike[]
+  saves    ShortVideoSave[]
   comments ShortVideoComment[]
 
   @@index([teacherId])
@@ -475,6 +477,21 @@ model ShortVideoLike {
   user  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([videoId, userId])
+  @@index([videoId])
+}
+
+/// Student bookmark on a teacher short video (reel).
+model ShortVideoSave {
+  id        String   @id @default(cuid())
+  videoId   String
+  userId    String
+  createdAt DateTime @default(now())
+
+  video TeacherShortVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  user  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([videoId, userId])
+  @@index([userId])
   @@index([videoId])
 }
 

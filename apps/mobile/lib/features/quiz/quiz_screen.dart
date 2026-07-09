@@ -2,9 +2,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/app_localizations.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
+import 'package:ulearn/features/home/home_feed.dart';
 
 class QuizScreen extends StatefulWidget {
   const QuizScreen({super.key, required this.quizId, required this.title});
@@ -41,17 +44,18 @@ class _QuizScreenState extends State<QuizScreen> {
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = _friendlyQuizError(e.message));
     } catch (_) {
-      if (mounted) setState(() => _error = 'Could not load quiz');
+      if (mounted) setState(() => _error = context.l10n.t('mobile.quiz.loadFailed'));
     }
   }
 
   String _friendlyQuizError(String message) {
+    final l10n = context.l10n;
     final lower = message.toLowerCase();
     if (lower.contains('subscribe') || lower.contains('access')) {
-      return 'Subscribe to the course to take this quiz';
+      return l10n.t('common.subscribeToUnlock');
     }
     if (lower.contains('attempt')) return message;
-    if (lower.contains('not found')) return 'Quiz not found or no longer available';
+    if (lower.contains('not found')) return l10n.t('mobile.quiz.notFound');
     return message;
   }
 
@@ -104,6 +108,7 @@ class _QuizScreenState extends State<QuizScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       appBar: AppBar(title: Text(widget.title)),
       body: _error != null
@@ -121,7 +126,7 @@ class _QuizScreenState extends State<QuizScreen> {
                       style: const TextStyle(color: AppTheme.muted, height: 1.4),
                     ),
                     const SizedBox(height: 16),
-                    OutlinedButton(onPressed: _load, child: const Text('Retry')),
+                    OutlinedButton(onPressed: _load, child: Text(l10n.retry)),
                   ],
                 ),
               ),
@@ -159,9 +164,11 @@ class _QuizScreenState extends State<QuizScreen> {
   }
 
   Widget _questionView() {
+    final l10n = context.l10n;
+    final locale = context.localeCode;
     final questions = (_quiz!['questions'] as List<dynamic>).cast<Map<String, dynamic>>();
     final q = questions[_current];
-    final options = _optionsOf(q);
+    final options = _optionsOf(q, l10n);
     final selected = _answers[q['id']];
 
     return Padding(
@@ -205,12 +212,12 @@ class _QuizScreenState extends State<QuizScreen> {
           ),
           const SizedBox(height: 20),
           Text(
-            'Question ${_current + 1} of ${questions.length}',
+            '${l10n.t('quiz.question')} ${_current + 1} ${l10n.t('quiz.of')} ${questions.length}',
             style: const TextStyle(color: AppTheme.muted, fontSize: 13),
           ),
           const SizedBox(height: 8),
           Text(
-            q['textEn']?.toString() ?? '',
+            localizedText(q, locale, prefix: 'text'),
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 20),
@@ -270,19 +277,19 @@ class _QuizScreenState extends State<QuizScreen> {
               if (_current > 0)
                 OutlinedButton(
                   onPressed: () => setState(() => _current--),
-                  child: const Text('Previous'),
+                  child: Text(l10n.quizPrevious),
                 ),
               const Spacer(),
               _current < questions.length - 1
                   ? ElevatedButton(
                       onPressed: () => setState(() => _current++),
                       style: ElevatedButton.styleFrom(minimumSize: const Size(120, 48)),
-                      child: const Text('Next'),
+                      child: Text(l10n.quizNext),
                     )
                   : ElevatedButton(
                       onPressed: _submitting ? null : _submit,
                       style: ElevatedButton.styleFrom(minimumSize: const Size(120, 48)),
-                      child: Text(_submitting ? 'Submitting…' : 'Submit'),
+                      child: Text(_submitting ? l10n.quizSubmitting : l10n.quizSubmit),
                     ),
             ],
           ),
@@ -291,9 +298,9 @@ class _QuizScreenState extends State<QuizScreen> {
     );
   }
 
-  static List<(String, String)> _optionsOf(Map<String, dynamic> q) {
+  static List<(String, String)> _optionsOf(Map<String, dynamic> q, AppLocalizations l10n) {
     if (q['type'] == 'TRUE_FALSE') {
-      return [('true', 'True'), ('false', 'False')];
+      return [('true', l10n.quizTrue), ('false', l10n.quizFalse)];
     }
     final raw = q['options'];
     if (raw is Map) {
@@ -317,6 +324,8 @@ class _IntroView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final locale = context.localeCode;
     final questions = (quiz['questions'] as List<dynamic>?)?.length ?? 0;
     final limit = (quiz['timeLimitSec'] as num?)?.toInt();
     final attemptsLeft = ((quiz['maxAttempts'] as num?)?.toInt() ?? 1) -
@@ -332,7 +341,7 @@ class _IntroView extends StatelessWidget {
               const Icon(Icons.quiz_outlined, size: 56, color: AppTheme.accent),
               const SizedBox(height: 16),
               Text(
-                quiz['titleEn']?.toString() ?? 'Quiz',
+                localizedText(quiz, locale),
                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 textAlign: TextAlign.center,
               ),
@@ -340,16 +349,16 @@ class _IntroView extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  _Stat(label: 'Questions', value: '$questions'),
+                  _Stat(label: l10n.t('quiz.questions'), value: '$questions'),
                   _Stat(
-                    label: 'Time',
+                    label: l10n.t('quiz.time'),
                     value: limit != null && limit > 0 ? '${limit ~/ 60}m' : '∞',
                   ),
-                  _Stat(label: 'Attempts', value: '$attemptsLeft'),
+                  _Stat(label: l10n.t('quiz.attemptsLeft'), value: '$attemptsLeft'),
                 ],
               ),
               const SizedBox(height: 28),
-              ElevatedButton(onPressed: onStart, child: const Text('Start Quiz')),
+              ElevatedButton(onPressed: onStart, child: Text(l10n.quizStart)),
             ],
           ),
         ),
@@ -391,6 +400,7 @@ class _ResultView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final passed = result['passed'] == true;
     final pct = ((result['percentage'] as num?) ?? 0).toDouble();
     final color = passed ? Colors.greenAccent : Colors.redAccent;
@@ -424,18 +434,18 @@ class _ResultView extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             Text(
-              passed ? 'You passed!' : 'Not this time',
+              passed ? l10n.quizPassed : l10n.quizFailed,
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(
-              '${result['score']} / ${result['maxScore']} points',
+              '${result['score']} / ${result['maxScore']} ${l10n.t('quiz.points')}',
               style: const TextStyle(color: AppTheme.muted),
             ),
             const SizedBox(height: 28),
             ElevatedButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Done'),
+              child: Text(l10n.quizDone),
             ),
           ],
         ),

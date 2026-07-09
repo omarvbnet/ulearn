@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 
@@ -9,6 +10,7 @@ class PendingScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -19,15 +21,15 @@ class PendingScreen extends StatelessWidget {
               children: [
                 const PulsingULearnLogo(size: 96),
                 const SizedBox(height: 24),
-                const Text(
-                  'Account Under Review',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                Text(
+                  l10n.authPendingTitle,
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  'Your account is under review. Please wait for administrator approval.',
-                  style: TextStyle(color: AppTheme.muted),
+                Text(
+                  l10n.authPendingMessage,
+                  style: const TextStyle(color: AppTheme.muted),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
@@ -37,12 +39,15 @@ class PendingScreen extends StatelessWidget {
                     color: Colors.amber.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(999),
                   ),
-                  child: const Text('Pending Approval', style: TextStyle(color: Colors.amber)),
+                  child: Text(
+                    l10n.pendingBadge,
+                    style: const TextStyle(color: Colors.amber),
+                  ),
                 ),
                 const SizedBox(height: 32),
                 TextButton(
                   onPressed: () => context.read<AuthProvider>().logout(),
-                  child: const Text('Logout'),
+                  child: Text(l10n.navLogout),
                 ),
               ],
             ),

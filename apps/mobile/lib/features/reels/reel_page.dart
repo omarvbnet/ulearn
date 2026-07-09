@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/reel_video_cache.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
@@ -288,13 +289,13 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     return '$n';
   }
 
-  String _teacherName(Map<String, dynamic> teacher) {
+  String _teacherName(Map<String, dynamic> teacher, BuildContext context) {
     final direct = teacher['name']?.toString();
     if (direct != null && direct.trim().isNotEmpty) return direct.trim();
     final user = teacher['user'] as Map<String, dynamic>?;
     final legal = user?['fullLegalName']?.toString();
     if (legal != null && legal.trim().isNotEmpty) return legal.trim();
-    return 'Teacher';
+    return context.l10n.t('student.teacher');
   }
 
   Widget _buildPoster() {
@@ -345,7 +346,7 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final teacher = widget.video['teacher'] as Map<String, dynamic>? ?? {};
-    final name = _teacherName(teacher);
+    final name = _teacherName(teacher, context);
     final level = teacher['level']?.toString() ?? '';
     final teacherPhoto = teacher['profilePhotoUrl']?.toString();
     final title = widget.video['title']?.toString().trim() ?? '';
@@ -353,6 +354,8 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     final caption = description.isNotEmpty ? description : title;
     final likes = (widget.video['likes'] as num?)?.toInt() ?? 0;
     final comments = (widget.video['commentCount'] as num?)?.toInt() ?? 0;
+    final saves = (widget.video['saves'] as num?)?.toInt() ?? 0;
+    final views = (widget.video['viewCount'] as num?)?.toInt() ?? 0;
     final liked = widget.video['likedByMe'] == true;
     final bottom = widget.bottomInset;
 
@@ -489,11 +492,23 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
                   label: _formatCount(comments),
                   onTap: widget.onComment,
                 ),
+                const SizedBox(height: 16),
+                _ActionButton(
+                  icon: Icons.bookmark_border_rounded,
+                  label: _formatCount(saves),
+                  onTap: () {},
+                ),
+                const SizedBox(height: 16),
+                _ActionButton(
+                  icon: Icons.visibility_outlined,
+                  label: _formatCount(views),
+                  onTap: () {},
+                ),
                 if (widget.onMore != null) ...[
                   const SizedBox(height: 16),
                   _ActionButton(
                     icon: Icons.more_horiz_rounded,
-                    label: 'More',
+                    label: context.l10n.reelsMore,
                     onTap: widget.onMore!,
                   ),
                 ],
@@ -590,14 +605,14 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
                         borderRadius: BorderRadius.circular(22),
                         border: Border.all(color: Colors.white30),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.storefront_outlined, color: AppTheme.accent, size: 15),
-                          SizedBox(width: 6),
+                          const Icon(Icons.storefront_outlined, color: AppTheme.accent, size: 15),
+                          const SizedBox(width: 6),
                           Text(
-                            'View courses',
-                            style: TextStyle(
+                            context.l10n.navCourses,
+                            style: const TextStyle(
                               color: Colors.white,
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
@@ -674,7 +689,7 @@ class _ReelScrubBar extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                'Hold to pause · scrub to seek',
+                context.l10n.t('mobile.reels.holdToPause'),
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.5),
                   fontSize: 10,

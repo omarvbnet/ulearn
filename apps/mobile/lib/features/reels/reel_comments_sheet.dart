@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/profile/profile_avatar.dart';
@@ -68,8 +69,9 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
 
   void _startReply(Map<String, dynamic> comment) {
     final user = comment['user'] as Map<String, dynamic>? ?? {};
+    final userLabel = context.l10n.t('mobile.roles.student');
     setState(() => _replyTo = comment);
-    _inputCtrl.text = '@${user['fullLegalName']?.toString() ?? 'User'} ';
+    _inputCtrl.text = '@${user['fullLegalName']?.toString() ?? userLabel} ';
     _inputCtrl.selection = TextSelection.fromPosition(
       TextPosition(offset: _inputCtrl.text.length),
     );
@@ -146,12 +148,13 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
     if (diff.inDays > 0) return '${diff.inDays}d';
     if (diff.inHours > 0) return '${diff.inHours}h';
     if (diff.inMinutes > 0) return '${diff.inMinutes}m';
-    return 'now';
+    return context.l10n.t('mobile.reels.timeNow');
   }
 
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final l10n = context.l10n;
 
     return DraggableScrollableSheet(
       initialChildSize: 0.62,
@@ -183,9 +186,9 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Comments',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          Text(
+                            l10n.reelsComments,
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                           ),
                           Text(
                             widget.videoTitle,
@@ -228,8 +231,8 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
                                 Icon(Icons.chat_bubble_outline,
                                     size: 40, color: AppTheme.muted.withValues(alpha: 0.45)),
                                 const SizedBox(height: 10),
-                                const Text('Be the first to comment',
-                                    style: TextStyle(color: AppTheme.muted)),
+                                Text(l10n.reelsFirstComment,
+                                    style: const TextStyle(color: AppTheme.muted)),
                               ],
                             ),
                           )
@@ -256,7 +259,11 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
                     children: [
                       Expanded(
                         child: Text(
-                          'Replying to ${(_replyTo!['user'] as Map?)?['fullLegalName'] ?? 'User'}',
+                          l10n.t('mobile.reels.replyingTo', {
+                            'name':
+                                (_replyTo!['user'] as Map?)?['fullLegalName']?.toString() ??
+                                    l10n.t('mobile.roles.student'),
+                          }),
                           style: const TextStyle(color: AppTheme.muted, fontSize: 12),
                         ),
                       ),
@@ -283,7 +290,9 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
                         textInputAction: TextInputAction.send,
                         onSubmitted: (_) => _post(),
                         decoration: InputDecoration(
-                          hintText: _replyTo != null ? 'Write a reply…' : 'Add a comment…',
+                          hintText: _replyTo != null
+                              ? l10n.t('mobile.reels.writeReply')
+                              : l10n.reelsAddComment,
                           filled: true,
                           fillColor: AppTheme.card,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -415,7 +424,7 @@ class _CommentTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = comment['user'] as Map<String, dynamic>? ?? {};
-    final name = user['fullLegalName']?.toString() ?? 'User';
+    final name = user['fullLegalName']?.toString() ?? context.l10n.t('mobile.roles.student');
     final body = comment['body']?.toString() ?? '';
     final photoUrl = user['profilePhotoUrl']?.toString();
     final avatarSize = compact ? 28.0 : 36.0;
@@ -463,14 +472,14 @@ class _CommentTile extends StatelessWidget {
                       onSelected: (value) {
                         if (value == 'report') onReport!();
                       },
-                      itemBuilder: (_) => const [
+                      itemBuilder: (ctx) => [
                         PopupMenuItem(
                           value: 'report',
                           child: Row(
                             children: [
-                              Icon(Icons.flag_outlined, size: 18, color: Colors.orangeAccent),
-                              SizedBox(width: 8),
-                              Text('Report'),
+                              const Icon(Icons.flag_outlined, size: 18, color: Colors.orangeAccent),
+                              const SizedBox(width: 8),
+                              Text(ctx.l10n.reelsReport),
                             ],
                           ),
                         ),
@@ -485,7 +494,7 @@ class _CommentTile extends StatelessWidget {
                 GestureDetector(
                   onTap: onReply,
                   child: Text(
-                    'Reply',
+                    context.l10n.qaReply,
                     style: TextStyle(
                       color: AppTheme.muted.withValues(alpha: 0.9),
                       fontSize: 12,

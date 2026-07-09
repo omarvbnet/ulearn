@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
@@ -116,7 +117,7 @@ class HomeFeedState extends State<HomeFeed> {
       setState(() {
         _loading = false;
         _searching = false;
-        _error = 'Could not load the home feed';
+        _error = context.l10n.t('mobile.error.generic');
       });
     }
   }
@@ -124,11 +125,12 @@ class HomeFeedState extends State<HomeFeed> {
   bool get _hasActiveFilters =>
       _stageFilter != null || _levelFilter != null || _search.text.trim().isNotEmpty;
 
-  String _stageLabel(String locale) {
-    if (_stageFilter == null) return 'My stage';
-    if (_stageFilter == 'all') return 'All stages';
+  String _stageLabel(BuildContext context, String locale) {
+    final l10n = context.l10n;
+    if (_stageFilter == null) return l10n.homeMyStage;
+    if (_stageFilter == 'all') return l10n.homeAllStages;
     final match = _stages.where((s) => s['id'] == _stageFilter);
-    return match.isEmpty ? 'Stage' : localizedText(match.first, locale, prefix: 'name');
+    return match.isEmpty ? l10n.homeStage : localizedText(match.first, locale, prefix: 'name');
   }
 
   Future<void> _reactToCourse(Map<String, dynamic> course, String type) async {
@@ -202,28 +204,30 @@ class HomeFeedState extends State<HomeFeed> {
   }
 
   Future<void> _pickStage() async {
-    final locale = context.read<AuthProvider>().user?.locale ?? 'AR';
+    final locale = context.localeCode;
     final picked = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: AppTheme.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => SafeArea(
+      builder: (ctx) {
+        final l10n = ctx.l10n;
+        return SafeArea(
         child: ListView(
           shrinkWrap: true,
           padding: const EdgeInsets.symmetric(vertical: 12),
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 8, 20, 12),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
               child: Text(
-                'Browse stage',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                l10n.t('mobile.profile.changeStage'),
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               ),
             ),
             ListTile(
               leading: const Icon(Icons.school_outlined, color: AppTheme.accent),
-              title: const Text('My stage'),
+              title: Text(l10n.homeMyStage),
               trailing: _stageFilter == null
                   ? const Icon(Icons.check, color: AppTheme.accent)
                   : null,
@@ -231,7 +235,7 @@ class HomeFeedState extends State<HomeFeed> {
             ),
             ListTile(
               leading: const Icon(Icons.public, color: AppTheme.accent),
-              title: const Text('All stages'),
+              title: Text(l10n.homeAllStages),
               trailing: _stageFilter == 'all'
                   ? const Icon(Icons.check, color: AppTheme.accent)
                   : null,
@@ -251,7 +255,8 @@ class HomeFeedState extends State<HomeFeed> {
             }),
           ],
         ),
-      ),
+      );
+      },
     );
 
     if (picked == null || !mounted) return;
@@ -298,7 +303,8 @@ class HomeFeedState extends State<HomeFeed> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final user = auth.user;
-    final locale = user?.locale ?? 'AR';
+    final locale = context.localeCode;
+    final l10n = context.l10n;
 
     if (_loading) return const _HomeSkeleton();
 
@@ -337,7 +343,7 @@ class HomeFeedState extends State<HomeFeed> {
                 _search.clear();
                 _load(soft: true);
               },
-              stageLabel: _stageLabel(locale),
+              stageLabel: _stageLabel(context, locale),
               stageActive: _stageFilter != null,
               onPickStage: _pickStage,
               levelFilter: _levelFilter,
@@ -367,14 +373,14 @@ class HomeFeedState extends State<HomeFeed> {
                 const SizedBox(width: 8),
                 Text(
                   _search.text.trim().isNotEmpty
-                      ? 'Search results'
+                      ? l10n.t('common.search')
                       : _stageFilter == 'all'
-                          ? 'All stages'
+                          ? l10n.homeAllStages
                           : _stageFilter != null
-                              ? _stageLabel(locale)
+                              ? _stageLabel(context, locale)
                               : _stage != null
-                                  ? 'Courses for your stage'
-                                  : 'Latest courses',
+                                  ? l10n.t('student.noCoursesHint')
+                                  : l10n.t('student.noCourses'),
                   style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
@@ -413,8 +419,8 @@ class HomeFeedState extends State<HomeFeed> {
                       const SizedBox(height: 12),
                       Text(
                         _hasActiveFilters
-                            ? 'No courses match your filters.\nTry a different search or stage.'
-                            : 'No courses for your stage yet.\nNew courses appear here once teachers publish them.',
+                            ? l10n.homeNoCoursesInStage
+                            : '${l10n.homeNoCoursesInStage}\n${l10n.t('student.noCoursesHint')}',
                         style: const TextStyle(color: AppTheme.muted),
                         textAlign: TextAlign.center,
                       ),
@@ -451,7 +457,8 @@ class _WelcomeHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final firstName = (name ?? 'Student').trim().split(RegExp(r'\s+')).first;
+    final firstName =
+        (name ?? context.l10n.t('mobile.roles.student')).trim().split(RegExp(r'\s+')).first;
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       padding: const EdgeInsets.all(20),
@@ -474,7 +481,7 @@ class _WelcomeHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Welcome back,',
+                  '${context.l10n.studentWelcome},',
                   style: TextStyle(color: AppTheme.foreground.withValues(alpha: 0.75)),
                 ),
                 const SizedBox(height: 2),
@@ -558,15 +565,19 @@ class _FiltersBar extends StatelessWidget {
   final String? levelFilter;
   final ValueChanged<String?> onLevelChanged;
 
-  static const _levels = [
-    (null, 'All levels', Icons.all_inclusive),
-    ('MASTER', 'Master ★★★', Icons.workspace_premium_outlined),
-    ('EXCELLENT', 'Excellent ★★', Icons.military_tech_outlined),
-    ('GOOD', 'Good ★', Icons.thumb_up_alt_outlined),
-  ];
+  static List<(String?, String, IconData)> _levels(BuildContext context) {
+    final l10n = context.l10n;
+    return [
+      (null, l10n.homeAllStages, Icons.all_inclusive),
+      ('MASTER', '${l10n.t('rank.highestScores')} ★★★', Icons.workspace_premium_outlined),
+      ('EXCELLENT', '${l10n.t('rank.mostActive')} ★★', Icons.military_tech_outlined),
+      ('GOOD', '${l10n.t('student.start')} ★', Icons.thumb_up_alt_outlined),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Column(
       children: [
         Padding(
@@ -578,7 +589,7 @@ class _FiltersBar extends StatelessWidget {
               onChanged: onQueryChanged,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                hintText: 'Search courses, teachers or videos…',
+                hintText: '${l10n.t('common.search')}…',
                 hintStyle: const TextStyle(color: AppTheme.muted, fontSize: 14),
                 prefixIcon: const Icon(Icons.search, color: AppTheme.muted),
                 suffixIcon: value.text.isNotEmpty
@@ -606,7 +617,7 @@ class _FiltersBar extends StatelessWidget {
                 onTap: onPickStage,
               ),
               const SizedBox(width: 8),
-              ..._levels.map((entry) {
+              ..._levels(context).map((entry) {
                 final (value, label, icon) = entry;
                 final active = levelFilter == value;
                 return Padding(
@@ -894,10 +905,12 @@ class CourseCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final title = localizedText(course, locale);
     final teacher = course['teacher'] as Map<String, dynamic>?;
     final teacherName =
-        (teacher?['user'] as Map<String, dynamic>?)?['fullLegalName']?.toString() ?? 'Teacher';
+        (teacher?['user'] as Map<String, dynamic>?)?['fullLegalName']?.toString() ??
+            l10n.t('student.teacher');
     final rating = (course['teacherRating'] as num?)?.toDouble() ?? 0;
     final ratingCount = (course['teacherRatingCount'] as num?)?.toInt() ?? 0;
     final views = (course['viewCount'] as num?)?.toInt() ?? 0;
@@ -978,7 +991,7 @@ class CourseCard extends StatelessWidget {
                       bottom: 10,
                       child: _CoverChip(
                         icon: Icons.play_circle_outline,
-                        label: '$lessonsCount lessons',
+                        label: l10n.homeLessons(lessonsCount),
                       ),
                     ),
                     if (subscribers > 0)
@@ -989,7 +1002,7 @@ class CourseCard extends StatelessWidget {
                         child: Center(
                           child: _CoverChip(
                             icon: Icons.people_outline,
-                            label: '${formatCount(subscribers)} subs',
+                            label: l10n.homeSubscribers(subscribers),
                           ),
                         ),
                       ),
@@ -1004,7 +1017,9 @@ class CourseCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
-                          isFree ? 'FREE' : '${price.toStringAsFixed(0)} $currency',
+                          isFree
+                              ? l10n.t('mobile.home.free').toUpperCase()
+                              : '${price.toStringAsFixed(0)} $currency',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 12,
@@ -1032,14 +1047,14 @@ class CourseCard extends StatelessWidget {
                                 color: Colors.green.shade600,
                                 borderRadius: BorderRadius.circular(20),
                               ),
-                              child: const Row(
+                              child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(Icons.check_circle,
                                       size: 13, color: Colors.white),
                                   SizedBox(width: 4),
                                   Text(
-                                    'Owned',
+                                    l10n.studentPurchased,
                                     style: TextStyle(
                                       color: Colors.white,
                                       fontSize: 11,
@@ -1156,7 +1171,7 @@ class CourseCard extends StatelessWidget {
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
-                            '$previews free preview${previews > 1 ? 's' : ''}',
+                            l10n.t('common.free'),
                             style: const TextStyle(
                               fontSize: 11,
                               color: AppTheme.accent,
@@ -1176,7 +1191,7 @@ class CourseCard extends StatelessWidget {
                           ? OutlinedButton.icon(
                               onPressed: onTap,
                               icon: const Icon(Icons.hourglass_top, size: 17),
-                              label: const Text('Awaiting payment confirmation'),
+                              label: Text(l10n.homeAwaitingPayment),
                             )
                           : FilledButton.icon(
                               style: FilledButton.styleFrom(
@@ -1187,7 +1202,7 @@ class CourseCard extends StatelessWidget {
                               ),
                               onPressed: onTap,
                               icon: const Icon(Icons.workspace_premium_outlined, size: 18),
-                              label: const Text('Subscribe'),
+                              label: Text(l10n.subscribe),
                             ),
                     ),
                   ],

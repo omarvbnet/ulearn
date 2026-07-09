@@ -42,6 +42,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/l10n/
 
 # App icons are rendered from the code-based logo painter
 # (see test/generate_brand_assets_test.dart).
