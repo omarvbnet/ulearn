@@ -5,6 +5,7 @@ import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
+import 'package:ulearn/features/profile/completed_courses_screen.dart';
 import 'package:ulearn/features/profile/favorites_screen.dart';
 import 'package:ulearn/features/profile/language_screen.dart';
 import 'package:ulearn/features/profile/saved_reels_screen.dart';
@@ -300,6 +301,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         StaggeredItem(
           index: 4,
+          child: Card(
+            child: ListTile(
+              leading: const Icon(Icons.task_alt_outlined, color: Colors.greenAccent),
+              title: Text(l10n.profileCompletedCourses),
+              subtitle: Text(
+                l10n.profileCompletedCoursesHint,
+                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+              ),
+              trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const CompletedCoursesScreen()),
+              ),
+            ),
+          ),
+        ),
+        StaggeredItem(
+          index: 5,
           child: Card(
             child: ListTile(
               leading: const Icon(Icons.favorite_outline, color: Colors.redAccent),

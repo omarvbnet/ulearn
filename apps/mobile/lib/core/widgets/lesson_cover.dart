@@ -5,8 +5,8 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 
-/// Smart lesson cover: uses a server thumbnail when available, otherwise
-/// generates a branded procedural cover from the lesson title/id.
+/// Smart lesson cover: server thumbnail when available, otherwise a branded
+/// procedural cover from the lesson title/id.
 class LessonCover extends StatelessWidget {
   const LessonCover({
     super.key,
@@ -17,6 +17,8 @@ class LessonCover extends StatelessWidget {
     this.showPlay = true,
     this.active = false,
     this.index,
+    /// When true, renders only the cover image (no play badge, duration, or index).
+    this.coverOnly = false,
   });
 
   final Map<String, dynamic> lesson;
@@ -26,35 +28,58 @@ class LessonCover extends StatelessWidget {
   final bool showPlay;
   final bool active;
   final int? index;
+  final bool coverOnly;
+
+  static String? resolveThumbnailUrl(Map<String, dynamic> lesson) {
+    for (final key in ['thumbnailUrl', 'thumbnail', 'coverUrl', 'posterUrl']) {
+      final value = lesson[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+    return null;
+  }
+
+  static String resolveTitle(Map<String, dynamic> lesson, {int? index}) {
+    final raw = lesson['title']?.toString().trim();
+    if (raw != null && raw.isNotEmpty) return raw;
+    if (index != null) return 'Lesson ${index + 1}';
+    return 'Lesson';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final thumb = lesson['thumbnailUrl']?.toString().trim();
+    final thumb = resolveThumbnailUrl(lesson);
     final duration = (lesson['durationSec'] as num?)?.toInt();
-    final title = lesson['title']?.toString().trim();
-    final displayTitle = (title != null && title.isNotEmpty) ? title : 'Lesson';
+    final displayTitle = resolveTitle(lesson, index: index);
     final id = lesson['id']?.toString() ?? displayTitle;
     final hasThumb = thumb != null && thumb.isNotEmpty;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(borderRadius),
-      child: SizedBox(
-        width: width,
-        height: height,
+    final coverLayer = hasThumb
+        ? CachedImage(
+            url: thumb,
+            fit: BoxFit.cover,
+            width: width.isFinite ? width : null,
+            height: height.isFinite ? height : null,
+            placeholder: _ProceduralCover(id: id, title: displayTitle, index: index),
+            error: _ProceduralCover(id: id, title: displayTitle, index: index),
+          )
+        : _ProceduralCover(id: id, title: displayTitle, index: index);
+
+    if (coverOnly) {
+      return _wrapSize(
+        ClipRRect(
+          borderRadius: BorderRadius.circular(borderRadius),
+          child: coverLayer,
+        ),
+      );
+    }
+
+    return _wrapSize(
+      ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (hasThumb)
-              CachedImage(
-                url: thumb,
-                fit: BoxFit.cover,
-                width: width,
-                height: height,
-                placeholder: _ProceduralCover(id: id, title: displayTitle, index: index),
-                error: _ProceduralCover(id: id, title: displayTitle, index: index),
-              )
-            else
-              _ProceduralCover(id: id, title: displayTitle, index: index),
+            coverLayer,
             DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -143,6 +168,108 @@ class LessonCover extends StatelessWidget {
       ),
     );
   }
+
+  Widget _wrapSize(Widget child) {
+    if (width.isFinite && height.isFinite) {
+      return SizedBox(width: width, height: height, child: child);
+    }
+    return child;
+  }
+}
+
+/// Strictly bounded thumbnail for lesson list rows (never expands in a [Row]).
+class LessonListThumbnail extends StatelessWidget {
+  const LessonListThumbnail({
+    super.key,
+    required this.lesson,
+    this.index,
+    this.size = 48,
+    this.locked = false,
+    this.progressPct = 0,
+  });
+
+  final Map<String, dynamic> lesson;
+  final int? index;
+  final double size;
+  final bool locked;
+  final double progressPct;
+
+  @override
+  Widget build(BuildContext context) {
+    final thumb = LessonCover.resolveThumbnailUrl(lesson);
+    final title = LessonCover.resolveTitle(lesson, index: index);
+    final id = lesson['id']?.toString() ?? title;
+    final hash = (id.hashCode.abs() + (index ?? 0) * 17);
+    final colors = [
+      AppTheme.primary,
+      AppTheme.accent,
+      const Color(0xFF6B21FF),
+      const Color(0xFF00C9FF),
+    ];
+    final c1 = colors[hash % colors.length];
+    final c2 = colors[(hash + 1) % colors.length];
+
+    Widget generated() => Container(
+          width: size,
+          height: size,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [c1, c2],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: Icon(
+            Icons.play_circle_outline_rounded,
+            color: Colors.white.withValues(alpha: 0.75),
+            size: size * 0.42,
+          ),
+        );
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (thumb != null && thumb.isNotEmpty)
+              CachedImage(
+                url: thumb,
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                placeholder: generated(),
+                error: generated(),
+              )
+            else
+              generated(),
+            if (locked)
+              ColoredBox(
+                color: Colors.black.withValues(alpha: 0.45),
+                child: Icon(
+                  Icons.lock_rounded,
+                  color: Colors.white.withValues(alpha: 0.85),
+                  size: size * 0.36,
+                ),
+              ),
+            if (progressPct > 0 && progressPct < 100)
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: LinearProgressIndicator(
+                  value: progressPct / 100,
+                  minHeight: 3,
+                  backgroundColor: Colors.black45,
+                  color: AppTheme.accent,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _ProceduralCover extends StatelessWidget {
@@ -170,13 +297,25 @@ class _ProceduralCover extends StatelessWidget {
     final c1 = palette[hash % palette.length];
     final c2 = palette[(hash + 2) % palette.length];
     final c3 = palette[(hash + 4) % palette.length];
+    final initial = title.isNotEmpty ? title[0].toUpperCase() : '?';
 
-    return CustomPaint(
-      painter: _CoverPainter(
-        colors: [c1, c2, c3],
-        seed: hash,
-        label: title.isNotEmpty ? title[0].toUpperCase() : '?',
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth.isFinite && constraints.maxWidth > 0
+            ? constraints.maxWidth
+            : 120.0;
+        final h = constraints.maxHeight.isFinite && constraints.maxHeight > 0
+            ? constraints.maxHeight
+            : 68.0;
+        return CustomPaint(
+          size: Size(w, h),
+          painter: _CoverPainter(
+            colors: [c1, c2, c3],
+            seed: hash,
+            label: initial,
+          ),
+        );
+      },
     );
   }
 }

@@ -41,35 +41,46 @@ def patch_frameworks_script!(path)
   return unless File.exist?(path)
 
   contents = File.read(path)
-  marker = '# ULEARN_DESKTOP_CODESIGN_FIX'
+  changed = false
 
-  return if contents.include?(marker)
-
-  contents = contents.gsub(
-    "  rsync --delete -av \"${RSYNC_PROTECT_TMP_FILES[@]}\" --links --filter \"- CVS/\" --filter \"- .svn/\" --filter \"- .git/\" --filter \"- .hg/\" --filter \"- Headers\" --filter \"- PrivateHeaders/\" --filter \"- Modules\" \"${source}\" \"${destination}\"",
-    "#{marker}\n  dot_clean -m \"${source}\" 2>/dev/null || true\n  xattr -cr \"${source}\" 2>/dev/null || true\n  rsync --delete -av \"${RSYNC_PROTECT_TMP_FILES[@]}\" --links --filter \"- CVS/\" --filter \"- .svn/\" --filter \"- .git/\" --filter \"- .hg/\" --filter \"- Headers\" --filter \"- PrivateHeaders/\" --filter \"- Modules\" \"${source}\" \"${destination}\""
-  )
-
-  # Fix typo in filter - PrivateHeaders not PrivateHeaders/
-  contents = contents.gsub(
-    "  rsync --delete -av \"${RSYNC_PROTECT_TMP_FILES[@]}\" --links --filter \"- CVS/\" --filter \"- .svn/\" --filter \"- .git/\" --filter \"- .hg/\" --filter \"- Headers\" --filter \"- PrivateHeaders\" --filter \"- Modules\" \"${source}\" \"${destination}\"",
-    "#{marker}\n  dot_clean -m \"${source}\" 2>/dev/null || true\n  xattr -cr \"${source}\" 2>/dev/null || true\n  rsync --delete -av \"${RSYNC_PROTECT_TMP_FILES[@]}\" --links --filter \"- CVS/\" --filter \"- .svn/\" --filter \"- .git/\" --filter \"- .hg/\" --filter \"- Headers\" --filter \"- PrivateHeaders\" --filter \"- Modules\" \"${source}\" \"${destination}\""
-  )
-
-  unless contents.include?(marker)
-    # Already patched destination signing path from a previous run.
-    contents = contents.gsub(
-      '  code_sign_if_enabled "${destination}/$(basename "$1")"',
-      "  dot_clean -m \"${destination}/$(basename \"$1\")\" 2>/dev/null || true\n  xattr -cr \"${destination}/$(basename \"$1\")\" 2>/dev/null || true\n  code_sign_if_enabled \"${destination}/$(basename \"$1\")\""
+  unless contents.include?('# ULEARN_DESKTOP_CODESIGN_FIX')
+    patched = contents.gsub(
+      "  rsync --delete -av \"${RSYNC_PROTECT_TMP_FILES[@]}\" --links --filter \"- CVS/\" --filter \"- .svn/\" --filter \"- .git/\" --filter \"- .hg/\" --filter \"- Headers\" --filter \"- PrivateHeaders/\" --filter \"- Modules\" \"${source}\" \"${destination}\"",
+      "# ULEARN_DESKTOP_CODESIGN_FIX\n  dot_clean -m \"${source}\" 2>/dev/null || true\n  xattr -cr \"${source}\" 2>/dev/null || true\n  rsync --delete -av \"${RSYNC_PROTECT_TMP_FILES[@]}\" --links --filter \"- CVS/\" --filter \"- .svn/\" --filter \"- .git/\" --filter \"- .hg/\" --filter \"- Headers\" --filter \"- PrivateHeaders/\" --filter \"- Modules\" \"${source}\" \"${destination}\""
     )
+    patched = patched.gsub(
+      "  rsync --delete -av \"${RSYNC_PROTECT_TMP_FILES[@]}\" --links --filter \"- CVS/\" --filter \"- .svn/\" --filter \"- .git/\" --filter \"- .hg/\" --filter \"- Headers\" --filter \"- PrivateHeaders\" --filter \"- Modules\" \"${source}\" \"${destination}\"",
+      "# ULEARN_DESKTOP_CODESIGN_FIX\n  dot_clean -m \"${source}\" 2>/dev/null || true\n  xattr -cr \"${source}\" 2>/dev/null || true\n  dot_clean -m \"${destination}\" 2>/dev/null || true\n  xattr -cr \"${destination}\" 2>/dev/null || true\n  rsync --delete -av \"${RSYNC_PROTECT_TMP_FILES[@]}\" --links --filter \"- CVS/\" --filter \"- .svn/\" --filter \"- .git/\" --filter \"- .hg/\" --filter \"- Headers\" --filter \"- PrivateHeaders\" --filter \"- Modules\" \"${source}\" \"${destination}\""
+    )
+    if patched != contents
+      contents = patched
+      changed = true
+    end
   end
 
-  contents = contents.gsub(
-    "    if [ \"${COCOAPODS_PARALLEL_CODE_SIGN}\" == \"true\" ]; then\n      code_sign_cmd=\"$code_sign_cmd &\"\n    fi",
-    "    if [ \"${COCOAPODS_PARALLEL_CODE_SIGN}\" == \"true\" ] && [ \"${ULEARN_FORCE_SYNC_SIGN:-}\" == \"true\" ]; then\n      code_sign_cmd=\"$code_sign_cmd &\"\n    fi"
-  )
+  unless contents.include?('# ULEARN_CODESIGN_STRIP_BEFORE_SIGN')
+    patched = contents.gsub(
+      '    echo "Code Signing $1 with Identity ${EXPANDED_CODE_SIGN_IDENTITY_NAME}"',
+      "    # ULEARN_CODESIGN_STRIP_BEFORE_SIGN\n    dot_clean -m \"$1\" 2>/dev/null || true\n    xattr -cr \"$1\" 2>/dev/null || true\n    echo \"Code Signing $1 with Identity ${EXPANDED_CODE_SIGN_IDENTITY_NAME}\""
+    )
+    if patched != contents
+      contents = patched
+      changed = true
+    end
+  end
 
-  File.write(path, contents)
+  unless contents.include?('ULEARN_FORCE_SYNC_SIGN')
+    patched = contents.gsub(
+      "    if [ \"${COCOAPODS_PARALLEL_CODE_SIGN}\" == \"true\" ]; then\n      code_sign_cmd=\"$code_sign_cmd &\"\n    fi",
+      "    if [ \"${COCOAPODS_PARALLEL_CODE_SIGN}\" == \"true\" ] && [ \"${ULEARN_FORCE_SYNC_SIGN:-}\" == \"true\" ]; then\n      code_sign_cmd=\"$code_sign_cmd &\"\n    fi"
+    )
+    if patched != contents
+      contents = patched
+      changed = true
+    end
+  end
+
+  File.write(path, contents) if changed
 end
 
 post_install do |installer|

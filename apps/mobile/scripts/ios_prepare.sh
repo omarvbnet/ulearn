@@ -10,18 +10,30 @@ export COPYFILE_DISABLE=1
 TMP_BUILD="/tmp/ulearn-mobile-build"
 mkdir -p "$TMP_BUILD"
 
-if [ ! -L "build" ]; then
+if [ -d "build" ] && [ ! -L "build" ]; then
+  echo "Moving build/ off Desktop (avoids iCloud xattr on codesign)..."
+  rm -rf "$TMP_BUILD"/*
+  if [ -n "$(ls -A build 2>/dev/null)" ]; then
+    mv build/* "$TMP_BUILD/" 2>/dev/null || true
+  fi
   rm -rf build
+fi
+
+if [ ! -L "build" ]; then
   ln -s "$TMP_BUILD" build
   echo "Linked build/ -> $TMP_BUILD"
 fi
+
+dot_clean -m "$TMP_BUILD" 2>/dev/null || true
+xattr -cr "$TMP_BUILD" 2>/dev/null || true
 
 PODS_CHECK="ios/Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
 FIREBASE_CHECK="ios/Pods/FirebaseCore/FirebaseCore/Sources/Public/FirebaseCore/FIRApp.h"
 GOOGLEUTILS_CHECK="ios/Pods/GoogleUtilities/GoogleUtilities/AppDelegateSwizzler/Public/GoogleUtilities/GULAppDelegateSwizzler.h"
 DKPHOTO_CHECK="ios/Pods/DKPhotoGallery/DKPhotoGallery/Preview/PDFPreview/DKPDFView.swift"
+DKIMAGE_CHECK="ios/Pods/DKImagePickerController/Sources/DKImagePickerController/View/Cell/DKAssetGroupDetailCameraCell.swift"
 
-if [ ! -f "$PODS_CHECK" ] || [ ! -f "$FIREBASE_CHECK" ] || [ ! -f "$GOOGLEUTILS_CHECK" ] || [ ! -f "$DKPHOTO_CHECK" ]; then
+if [ ! -f "$PODS_CHECK" ] || [ ! -f "$FIREBASE_CHECK" ] || [ ! -f "$GOOGLEUTILS_CHECK" ] || [ ! -f "$DKPHOTO_CHECK" ] || [ ! -f "$DKIMAGE_CHECK" ]; then
   echo "CocoaPods incomplete or corrupted — reinstalling..."
   rm -rf ios/Pods ios/Podfile.lock ios/.symlinks
   flutter pub get

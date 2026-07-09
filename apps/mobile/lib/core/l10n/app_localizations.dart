@@ -165,6 +165,19 @@ class AppLocalizations {
   String get profileFavoritesHint => t('mobile.profile.favoritesHint');
   String get profileSavedReels => t('mobile.profile.savedReels');
   String get profileSavedReelsHint => t('mobile.profile.savedReelsHint');
+  String get profileCompletedCourses => t('mobile.profile.completedCourses');
+  String get profileCompletedCoursesHint => t('mobile.profile.completedCoursesHint');
+  String get profileCompletedSummary => t('mobile.profile.completedSummary');
+  String get profileNoCompletedCourses => t('mobile.profile.noCompletedCourses');
+  String get profileQuizNotTaken => t('mobile.profile.quizNotTaken');
+  String profileCompletedCount(int count) =>
+      t('mobile.profile.completedCount', {'count': '$count'});
+  String profileTotalWatchTime(String duration) =>
+      t('mobile.profile.totalWatchTime', {'duration': duration});
+  String profileQuizResults(int passed, int taken) =>
+      t('mobile.profile.quizResults', {'passed': '$passed', 'taken': '$taken'});
+  String profileCompletedOn(String date) =>
+      t('mobile.profile.completedOn', {'date': date});
   String get profileSubscriptionsHint => t('mobile.profile.subscriptionsHint');
   String get profileChangeStage => t('mobile.profile.changeStage');
   String get profileChangeStageHint => t('mobile.profile.changeStageHint');

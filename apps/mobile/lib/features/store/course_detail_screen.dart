@@ -98,7 +98,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           ((course['materials'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
 
       setState(() {
-        _course = {...?_course, ...course};
+        _course = {
+          ...?widget.summary,
+          ...course,
+          'lessons': lessons,
+          'materials': materials,
+        };
         _purchased = purchased;
         _isOwnCourse = isOwn;
         _favorited = data['favoritedByMe'] == true;
@@ -393,8 +398,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         if (!unlocked) return const SizedBox.shrink();
         final quiz = item.data;
         final title = localizedText(quiz, context.localeCode);
-        return StaggeredItem(
-          index: e.key + 5,
+        return Padding(
+          key: ValueKey('quiz-${quiz['id']}'),
+          padding: const EdgeInsets.only(bottom: 6),
           child: _QuizTimelineCard(
             title: title,
             passPct: (quiz['passPercentage'] as num?)?.toInt() ?? 50,
@@ -415,8 +421,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       final duration = (lesson['durationSec'] as num?)?.toInt() ?? 0;
       final title = _lessonTitle(context, lesson, lessonIndex);
 
-      return StaggeredItem(
-        index: e.key + 5,
+      return Padding(
+        key: ValueKey('lesson-${lesson['id']}'),
+        padding: const EdgeInsets.only(bottom: 6),
         child: _LessonVideoCard(
           index: lessonIndex,
           title: title,
@@ -429,8 +436,6 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           progressPct: progressPct,
           duration: duration,
           onTap: () => _selectLesson(lesson, unlocked),
-          onLike: () => _toggleLessonLike(lesson),
-          onFavorite: () => _toggleLessonFavorite(lesson),
         ),
       );
     }).toList();
@@ -765,8 +770,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               l10n: l10n,
             )
           else if (_selectedTab == 1)
-            StaggeredItem(
-              index: 5,
+            KeyedSubtree(
+              key: const ValueKey<int>(1),
               child: _CourseQATab(
                 lessons: lessons,
                 activeLesson: active,
@@ -776,8 +781,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               ),
             )
           else
-            StaggeredItem(
-              index: 5,
+            KeyedSubtree(
+              key: const ValueKey<int>(2),
               child: _CourseMaterialsTab(
                 materials: _materials,
                 lessons: lessons,
@@ -1025,101 +1030,125 @@ class _CourseDetailTabs extends StatelessWidget {
   Widget build(BuildContext context) {
     final tabs = [
       (
-        icon: Icons.play_circle_outline,
-        label: l10n.t('mobile.store.tabVideosQuizzes'),
+        icon: Icons.play_lesson_rounded,
+        short: l10n.t('mobile.store.tabShortCurriculum'),
         count: lessonsCount + quizzesCount,
       ),
       (
-        icon: Icons.forum_outlined,
-        label: l10n.t('mobile.store.tabQA'),
+        icon: Icons.chat_bubble_outline_rounded,
+        short: l10n.t('mobile.store.tabShortQA'),
         count: null,
       ),
       (
-        icon: Icons.folder_open_outlined,
-        label: l10n.t('mobile.store.tabDocuments'),
+        icon: Icons.folder_copy_outlined,
+        short: l10n.t('mobile.store.tabShortFiles'),
         count: materialsCount > 0 ? materialsCount : null,
       ),
     ];
 
     return Container(
-      padding: const EdgeInsets.all(4),
+      height: 48,
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: AppTheme.card,
+        color: const Color(0xFF08081A),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppTheme.cardBorder),
       ),
-      child: Row(
-        children: List.generate(tabs.length, (i) {
-          final tab = tabs[i];
-          final active = selected == i;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => onSelected(i),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 220),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final tabWidth = constraints.maxWidth / tabs.length;
+          final isRtl = Directionality.of(context) == TextDirection.rtl;
+          final pillStart = (isRtl ? tabs.length - 1 - selected : selected) * tabWidth + 2;
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 260),
                 curve: Curves.easeOutCubic,
-                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-                decoration: BoxDecoration(
-                  gradient: active ? AppTheme.gradient : null,
-                  color: active ? null : Colors.transparent,
-                  borderRadius: BorderRadius.circular(10),
-                  boxShadow: active
-                      ? [
-                          BoxShadow(
-                            color: AppTheme.primary.withValues(alpha: 0.25),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ]
-                      : null,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      tab.icon,
-                      size: 18,
-                      color: active ? Colors.white : AppTheme.muted,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      tab.label,
-                      maxLines: 2,
-                      textAlign: TextAlign.center,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                        color: active ? Colors.white : AppTheme.muted,
-                        height: 1.2,
-                      ),
-                    ),
-                    if (tab.count != null) ...[
-                      const SizedBox(height: 3),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: active
-                              ? Colors.white.withValues(alpha: 0.2)
-                              : AppTheme.primary.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(10),
+                left: pillStart,
+                top: 2,
+                bottom: 2,
+                width: tabWidth - 4,
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: AppTheme.gradient,
+                      borderRadius: BorderRadius.circular(11),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppTheme.primary.withValues(alpha: 0.35),
+                          blurRadius: 10,
+                          offset: const Offset(0, 2),
                         ),
-                        child: Text(
-                          '${tab.count}',
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                            color: active ? Colors.white : AppTheme.accent,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            ),
+              Row(
+                children: List.generate(tabs.length, (i) {
+                  final tab = tabs[i];
+                  final active = selected == i;
+                  return Expanded(
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(11),
+                        onTap: () => onSelected(i),
+                        child: SizedBox(
+                          height: 42,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                tab.icon,
+                                size: 17,
+                                color: active ? Colors.white : AppTheme.muted,
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  tab.short,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                                    color: active ? Colors.white : AppTheme.muted,
+                                  ),
+                                ),
+                              ),
+                              if (tab.count != null) ...[
+                                const SizedBox(width: 5),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: active
+                                        ? Colors.white.withValues(alpha: 0.22)
+                                        : AppTheme.primary.withValues(alpha: 0.18),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '${tab.count}',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: active ? Colors.white : AppTheme.accent,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ],
           );
-        }),
+        },
       ),
     );
   }
@@ -1141,58 +1170,61 @@ class _QuizTimelineCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: AppTheme.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.35)),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    gradient: AppTheme.gradient,
-                    borderRadius: BorderRadius.circular(12),
+    return SizedBox(
+      height: 60,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 4),
+        decoration: BoxDecoration(
+          color: AppTheme.card,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppTheme.accent.withValues(alpha: 0.35)),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      gradient: AppTheme.gradient,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.quiz_outlined, color: Colors.white, size: 20),
                   ),
-                  child: const Icon(Icons.quiz_outlined, color: Colors.white, size: 22),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        [
-                          if (questionCount != null) '${l10n.t('quiz.questions')}: $questionCount',
-                          '${l10n.t('quiz.passMark')} $passPct%',
-                        ].join(' · '),
-                        style: const TextStyle(fontSize: 12, color: AppTheme.muted),
-                      ),
-                    ],
+                        const SizedBox(height: 3),
+                        Text(
+                          [
+                            if (questionCount != null) '${l10n.t('quiz.questions')}: $questionCount',
+                            '${l10n.t('quiz.passMark')} $passPct%',
+                          ].join(' · '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 10.5, color: AppTheme.muted),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppTheme.muted),
-              ],
+                  const Icon(Icons.arrow_forward_ios_rounded, size: 12, color: AppTheme.muted),
+                ],
+              ),
             ),
           ),
         ),
@@ -1534,7 +1566,7 @@ class _EmptyTabPlaceholder extends StatelessWidget {
   }
 }
 
-/// Compact lesson row: cover + title + duration + completion status.
+/// Compact lesson list row — mirrors quiz card layout (proven to render).
 class _LessonVideoCard extends StatelessWidget {
   const _LessonVideoCard({
     required this.index,
@@ -1548,8 +1580,6 @@ class _LessonVideoCard extends StatelessWidget {
     required this.progressPct,
     required this.duration,
     required this.onTap,
-    required this.onLike,
-    required this.onFavorite,
   });
 
   final int index;
@@ -1563,254 +1593,89 @@ class _LessonVideoCard extends StatelessWidget {
   final double progressPct;
   final int duration;
   final VoidCallback onTap;
-  final VoidCallback onLike;
-  final VoidCallback onFavorite;
-
-  String get _durationLabel => duration > 0 ? formatDuration(duration) : '—';
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final inProgress = !isCompleted && progressPct > 0 && canWatch;
     final likes = (lesson['likes'] as num?)?.toInt() ?? 0;
-    final saves = (lesson['favoritesCount'] as num?)?.toInt() ?? 0;
+    final durationLabel = duration > 0
+        ? formatDuration(duration)
+        : l10n.t('mobile.store.durationUnknown');
 
-    final (statusLabel, statusColor) = switch (true) {
-      _ when isCompleted => (l10n.t('quiz.passed'), Colors.greenAccent),
-      _ when inProgress => ('${progressPct.round()}%', AppTheme.accent),
-      _ when canWatch => (l10n.t('student.start'), AppTheme.muted),
-      _ => (l10n.t('common.locked'), Colors.orangeAccent),
+    final statusLabel = switch (true) {
+      true when isCompleted => l10n.t('quiz.passed'),
+      true when inProgress => '${progressPct.round()}%',
+      true when canWatch => l10n.t('student.start'),
+      _ => l10n.t('common.locked'),
     };
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: AppTheme.card,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isActive
-              ? AppTheme.accent.withValues(alpha: 0.6)
-              : isCompleted
-                  ? Colors.greenAccent.withValues(alpha: 0.3)
-                  : AppTheme.cardBorder,
-          width: isActive ? 1.5 : 1,
+    final metaParts = <String>[
+      durationLabel,
+      l10n.homeLikes(likes),
+      statusLabel,
+      if (showFreeBadge) l10n.t('common.free'),
+    ];
+
+    return SizedBox(
+      height: 60,
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.card,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isActive
+                ? AppTheme.accent.withValues(alpha: 0.55)
+                : AppTheme.cardBorder,
+          ),
         ),
-        boxShadow: isActive
-            ? [
-                BoxShadow(
-                  color: AppTheme.accent.withValues(alpha: 0.12),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ]
-            : null,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                LessonCover(
-                  lesson: lesson,
-                  index: index,
-                  width: 128,
-                  height: 72,
-                  borderRadius: 12,
-                  active: isActive,
-                  showPlay: canWatch,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${index + 1}. $title',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: isActive ? FontWeight.w800 : FontWeight.w700,
-                          color: AppTheme.foreground,
-                          height: 1.35,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Row(
+                children: [
+                  LessonListThumbnail(
+                    lesson: lesson,
+                    index: index,
+                    locked: !canWatch,
+                    progressPct: inProgress ? progressPct : 0,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: isActive ? FontWeight.w800 : FontWeight.w700,
+                            fontSize: 13,
+                            color: AppTheme.foreground,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 6,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          _LessonDetailChip(
-                            icon: Icons.schedule_rounded,
-                            label: _durationLabel,
-                          ),
-                          _LessonDetailChip(
-                            icon: Icons.thumb_up_alt_outlined,
-                            label: l10n.homeLikes(likes),
-                          ),
-                          _LessonDetailChip(
-                            icon: Icons.bookmark_border_rounded,
-                            label: l10n.homeSaves(saves),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: statusColor.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: statusColor.withValues(alpha: 0.3)),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  isCompleted
-                                      ? Icons.check_circle_rounded
-                                      : canWatch
-                                          ? Icons.play_circle_outline
-                                          : Icons.lock_outline,
-                                  size: 13,
-                                  color: statusColor,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  statusLabel,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: statusColor,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (showFreeBadge) ...[
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.greenAccent.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                l10n.t('common.free'),
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.greenAccent,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      if (inProgress) ...[
-                        const SizedBox(height: 10),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: LinearProgressIndicator(
-                            value: progressPct / 100,
-                            minHeight: 5,
-                            backgroundColor: AppTheme.cardBorder,
-                            color: AppTheme.accent,
+                        const SizedBox(height: 3),
+                        Text(
+                          metaParts.join(' · '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            color: AppTheme.muted,
                           ),
                         ),
                       ],
-                    ],
+                    ),
                   ),
-                ),
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _LessonActionButton(
-                      icon: lesson['likedByMe'] == true
-                          ? Icons.thumb_up
-                          : Icons.thumb_up_outlined,
-                      active: lesson['likedByMe'] == true,
-                      activeColor: AppTheme.accent,
-                      onTap: onLike,
-                    ),
-                    _LessonActionButton(
-                      icon: lesson['favoritedByMe'] == true
-                          ? Icons.favorite
-                          : Icons.favorite_border,
-                      active: lesson['favoritedByMe'] == true,
-                      activeColor: Colors.redAccent,
-                      onTap: onFavorite,
-                    ),
-                  ],
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LessonDetailChip extends StatelessWidget {
-  const _LessonDetailChip({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 13, color: AppTheme.muted),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: AppTheme.muted,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _LessonActionButton extends StatelessWidget {
-  const _LessonActionButton({
-    required this.icon,
-    required this.active,
-    required this.activeColor,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final bool active;
-  final Color activeColor;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: Icon(
-            icon,
-            size: 20,
-            color: active ? activeColor : AppTheme.muted,
           ),
         ),
       ),
