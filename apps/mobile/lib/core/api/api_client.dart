@@ -34,8 +34,14 @@ class ApiClient {
   }
 
   /// Server-relative URLs (e.g. `/uploads/...`) need the API origin prefixed.
-  static String absoluteUrl(String url) =>
-      url.startsWith('http') ? url : '$baseUrl$url';
+  static String absoluteUrl(String url) {
+    final u = url.trim();
+    if (u.isEmpty) return u;
+    if (u.startsWith('http://') || u.startsWith('https://')) return u;
+    if (u.startsWith('//')) return 'https:$u';
+    if (u.startsWith('/')) return '$baseUrl$u';
+    return '$baseUrl/$u';
+  }
 
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',

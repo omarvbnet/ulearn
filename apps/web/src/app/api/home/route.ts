@@ -1,6 +1,6 @@
 import { json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
-import { getDownloadUrl } from "@/lib/r2";
+import { resolvePublicMediaUrl } from "@/lib/r2";
 import { CourseRatingService } from "@/services/course-rating.service";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 import type { TeacherLevel } from "@prisma/client";
@@ -74,10 +74,8 @@ export async function GET(request: Request) {
 
   const adsOut = await Promise.all(
     ads.map(async (a) => {
-      let imageUrl = a.imageUrl;
-      if (!imageUrl && a.imageKey) {
-        imageUrl = (await getDownloadUrl(a.imageKey).catch(() => null)) ?? "";
-      }
+      const imageUrl =
+        (await resolvePublicMediaUrl(a.imageUrl, a.imageKey).catch(() => null)) ?? "";
       return {
         id: a.id,
         titleEn: a.titleEn,
@@ -85,6 +83,7 @@ export async function GET(request: Request) {
         titleKu: a.titleKu,
         titleTr: a.titleTr,
         imageUrl,
+        updatedAt: a.updatedAt,
         linkUrl: a.linkUrl,
         likes: a._count.likes,
         likedByMe: a.likes.length > 0,

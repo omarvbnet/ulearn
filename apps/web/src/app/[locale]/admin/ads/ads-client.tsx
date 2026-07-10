@@ -66,6 +66,9 @@ export function AdsClient() {
       });
       if (!put.ok) throw new Error("Upload failed");
 
+      const imageUrl =
+        (typeof publicUrl === "string" && publicUrl.trim()) || `/uploads/${key}`;
+
       const res = await fetch("/api/admin/ads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -75,7 +78,7 @@ export function AdsClient() {
           linkUrl: linkUrl || undefined,
           sortOrder: Number(sortOrder) || 0,
           imageKey: key,
-          imageUrl: publicUrl || "",
+          imageUrl,
         }),
       });
       if (!res.ok) throw new Error("Save failed");

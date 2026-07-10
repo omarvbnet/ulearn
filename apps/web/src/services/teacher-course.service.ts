@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { PUBLIC_LESSON_WHERE, PUBLIC_SHORT_VIDEO_WHERE } from "@/lib/video-visibility";
-import { getDownloadUrl } from "@/lib/r2";
+import { getDownloadUrl, resolvePublicMediaUrl } from "@/lib/r2";
 import { LoggingService } from "@/services/logging.service";
 import { NotificationService } from "@/services/notification.service";
 import type { CourseStatus, TeacherLevel } from "@prisma/client";
@@ -1057,13 +1057,14 @@ export class TeacherCourseService {
       url: string | null | undefined,
       key: string | null | undefined
     ) {
-      if (url) return url;
-      if (!key) return null;
+      const resolved = await resolvePublicMediaUrl(url, key).catch(() => null);
+      if (resolved) return resolved;
+      if (!key) return url?.trim() || null;
       const cached = thumbKeyCache.get(key);
       if (cached) return cached;
-      const resolved = await getDownloadUrl(key).catch(() => null);
-      if (resolved) thumbKeyCache.set(key, resolved);
-      return resolved;
+      const signed = await getDownloadUrl(key).catch(() => null);
+      if (signed) thumbKeyCache.set(key, signed);
+      return signed;
     }
 
     return Promise.all(
@@ -1078,7 +1079,7 @@ export class TeacherCourseService {
         const totalDurationSec = lessons.reduce((s, l) => s + (l.durationSec ?? 0), 0);
 
         const firstLesson = lessons[0];
-        let thumbnail = c.thumbnail;
+        let thumbnail = await resolveThumbUrl(c.thumbnail, null);
         if (!thumbnail && firstLesson) {
           thumbnail = await resolveThumbUrl(firstLesson.thumbnailUrl, firstLesson.thumbnailKey);
         }
@@ -1087,6 +1088,7 @@ export class TeacherCourseService {
           ...c,
           lessons,
           thumbnail,
+          updatedAt: c.updatedAt,
           likes: r.likes,
           dislikes: r.dislikes,
           myReaction: mine.get(c.id) ?? null,

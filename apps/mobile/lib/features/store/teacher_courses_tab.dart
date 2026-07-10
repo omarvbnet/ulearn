@@ -480,6 +480,7 @@ class _CourseManageCard extends StatelessWidget {
                         CachedImage(
                           url: thumb,
                           fit: BoxFit.cover,
+                          cacheVersion: course['updatedAt']?.toString(),
                           error: const _CoverFallback(),
                         )
                       else

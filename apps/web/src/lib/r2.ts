@@ -120,6 +120,29 @@ export async function getDownloadUrl(key: string, expiresIn = 3600) {
   return getSignedUrl(r2, command, { expiresIn });
 }
 
+/**
+ * Resolve a stable client-facing media URL from a stored public URL and/or object key.
+ * Prefers https public CDN, then stored relative/absolute URLs, then a fresh signed URL.
+ */
+export async function resolvePublicMediaUrl(
+  url?: string | null,
+  key?: string | null
+): Promise<string | null> {
+  const trimmed = url?.trim() || "";
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+  if (key && PUBLIC_URL) return `${PUBLIC_URL.replace(/\/$/, "")}/${key}`;
+  if (trimmed.startsWith("/")) return trimmed;
+  if (key) {
+    try {
+      return await getDownloadUrl(key, 60 * 60 * 12);
+    } catch {
+      return `/uploads/${key}`;
+    }
+  }
+  if (trimmed) return trimmed;
+  return null;
+}
+
 export async function deleteObject(key: string) {
   await r2.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
 }

@@ -119,7 +119,13 @@ export class MyCoursesService {
             subject: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
             lessons: {
               orderBy: { sortOrder: "asc" },
-              select: { id: true, title: true, durationSec: true, thumbnailUrl: true },
+              select: {
+                id: true,
+                title: true,
+                durationSec: true,
+                thumbnailUrl: true,
+                thumbnailKey: true,
+              },
             },
           },
         },
@@ -142,6 +148,7 @@ export class MyCoursesService {
       titleKu: string | null;
       titleTr: string | null;
       thumbnail: string | null;
+      updatedAt: Date | null;
       teacherName: string | null;
       teacherId: string | null;
       teacherLevel: string | null;
@@ -153,36 +160,52 @@ export class MyCoursesService {
       subject: { nameEn: string; nameAr: string; nameKu: string; nameTr: string } | null;
     };
 
-    const storeCourses: CourseItem[] = purchases.map((p) => {
-      const c = p.course;
-      const lessonIds = c.lessons.map((l) => l.id);
-      const prog = storeProgress.filter((pr) => lessonIds.includes(pr.lessonId));
-      const progressPct = pctFromProgress(c.lessons, prog);
-      const last = prog.sort(
-        (a, b) => b.lastWatchedAt.getTime() - a.lastWatchedAt.getTime()
-      )[0];
-      const resumeLessonId =
-        last?.lessonId ??
-        (prog.find((pr) => !pr.isCompleted)?.lessonId ?? c.lessons[0]?.id ?? null);
-      return {
-        type: "store" as const,
-        id: c.id,
-        titleEn: c.titleEn,
-        titleAr: c.titleAr,
-        titleKu: c.titleKu,
-        titleTr: c.titleTr,
-        thumbnail: c.thumbnail,
-        teacherName: c.teacher.user.fullLegalName,
-        teacherId: c.teacher.id,
-        teacherLevel: c.teacher.level,
-        lessonCount: c.lessons.length,
-        progressPct,
-        resumeLessonId,
-        lastWatchedAt: last?.lastWatchedAt ?? p.approvedAt ?? p.createdAt,
-        stage: c.stage,
-        subject: c.subject,
-      };
-    });
+    const { resolvePublicMediaUrl } = await import("@/lib/r2");
+
+    const storeCourses: CourseItem[] = await Promise.all(
+      purchases.map(async (p) => {
+        const c = p.course;
+        const lessonIds = c.lessons.map((l) => l.id);
+        const prog = storeProgress.filter((pr) => lessonIds.includes(pr.lessonId));
+        const progressPct = pctFromProgress(c.lessons, prog);
+        const last = prog.sort(
+          (a, b) => b.lastWatchedAt.getTime() - a.lastWatchedAt.getTime()
+        )[0];
+        const resumeLessonId =
+          last?.lessonId ??
+          (prog.find((pr) => !pr.isCompleted)?.lessonId ?? c.lessons[0]?.id ?? null);
+
+        const firstLesson = c.lessons[0];
+        const thumbnail =
+          (await resolvePublicMediaUrl(c.thumbnail, null).catch(() => null)) ??
+          (firstLesson
+            ? await resolvePublicMediaUrl(
+                firstLesson.thumbnailUrl,
+                firstLesson.thumbnailKey
+              ).catch(() => null)
+            : null);
+
+        return {
+          type: "store" as const,
+          id: c.id,
+          titleEn: c.titleEn,
+          titleAr: c.titleAr,
+          titleKu: c.titleKu,
+          titleTr: c.titleTr,
+          thumbnail,
+          updatedAt: c.updatedAt,
+          teacherName: c.teacher.user.fullLegalName,
+          teacherId: c.teacher.id,
+          teacherLevel: c.teacher.level,
+          lessonCount: c.lessons.length,
+          progressPct,
+          resumeLessonId,
+          lastWatchedAt: last?.lastWatchedAt ?? p.approvedAt ?? p.createdAt,
+          stage: c.stage,
+          subject: c.subject,
+        };
+      })
+    );
 
     // ── Curriculum subscriptions ──
     const now = new Date();
@@ -252,6 +275,7 @@ export class MyCoursesService {
         titleKu: subject.nameKu,
         titleTr: subject.nameTr,
         thumbnail: null,
+        updatedAt: null,
         teacherName: null,
         teacherId: null,
         teacherLevel: null,

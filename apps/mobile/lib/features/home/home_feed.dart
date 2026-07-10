@@ -109,13 +109,34 @@ class HomeFeedState extends State<HomeFeed> {
             return type == 'store' && pct > 0 && pct < 100;
           })
           .take(12)
+          .map((c) => Map<String, dynamic>.from(c))
           .toList();
+
+      final homeCourses =
+          ((data['courses'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+      final homeById = {
+        for (final c in homeCourses) c['id']?.toString() ?? '': c,
+      };
+      for (final c in continueItems) {
+        final home = homeById[c['id']?.toString() ?? ''];
+        if (home == null) continue;
+        final thumb = c['thumbnail']?.toString();
+        final homeThumb = home['thumbnail']?.toString();
+        if ((thumb == null || thumb.isEmpty) && homeThumb != null && homeThumb.isNotEmpty) {
+          c['thumbnail'] = homeThumb;
+        } else if (homeThumb != null && homeThumb.isNotEmpty) {
+          // Prefer the live home cover so teacher updates show immediately.
+          c['thumbnail'] = homeThumb;
+        }
+        c['updatedAt'] = home['updatedAt'] ?? c['updatedAt'];
+      }
+
       if (!mounted) return;
       setState(() {
         _stage = data['stage'] as Map<String, dynamic>?;
         _stages = ((data['stages'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
         _ads = ((data['ads'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
-        _courses = ((data['courses'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+        _courses = homeCourses;
         _continueWatching = continueItems;
         _loading = false;
         _searching = false;
@@ -845,13 +866,16 @@ class _AdsCarouselState extends State<_AdsCarousel> {
                     fit: StackFit.expand,
                     children: [
                       if (imageUrl.isNotEmpty)
-                        CachedImage(
-                          url: imageUrl,
-                          fit: BoxFit.cover,
-                          error: const _CoverFallback(),
+                        Positioned.fill(
+                          child: CachedImage(
+                            url: imageUrl,
+                            fit: BoxFit.cover,
+                            cacheVersion: ad['updatedAt']?.toString(),
+                            error: const _CoverFallback(),
+                          ),
                         )
                       else
-                        const _CoverFallback(),
+                        const Positioned.fill(child: _CoverFallback()),
                       DecoratedBox(
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
@@ -1030,9 +1054,15 @@ class _ContinueWatchingRail extends StatelessWidget {
                             fit: StackFit.expand,
                             children: [
                               if (thumb != null && thumb.isNotEmpty)
-                                CachedImage(url: thumb, fit: BoxFit.cover)
+                                Positioned.fill(
+                                  child: CachedImage(
+                                    url: thumb,
+                                    fit: BoxFit.cover,
+                                    cacheVersion: c['updatedAt']?.toString(),
+                                  ),
+                                )
                               else
-                                const _CoverFallback(),
+                                const Positioned.fill(child: _CoverFallback()),
                               DecoratedBox(
                                 decoration: BoxDecoration(
                                   gradient: LinearGradient(
@@ -1267,6 +1297,7 @@ class CourseCard extends StatelessWidget {
                       CachedImage(
                         url: thumbnail,
                         fit: BoxFit.cover,
+                        cacheVersion: course['updatedAt']?.toString(),
                         placeholder: const _CoverFallback(),
                         error: const _CoverFallback(),
                       )
