@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -23,19 +24,21 @@ class TeacherCourseWizardScreen extends StatefulWidget {
 }
 
 class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
-  static const _steps = [
-    'Basics',
-    'Free videos',
-    'Quizzes',
-    'Document',
-    'Submit',
-  ];
-
   late int _step;
   String? _courseId;
   bool _loading = true;
   bool _busy = false;
   String? _busyLabel;
+  double? _busyProgress; // 0–1 for overlay bar
+  Timer? _busyUiTimer;
+
+  List<String> _stepLabels(dynamic l10n) => [
+        l10n.t('mobile.teacher.stepBasics'),
+        l10n.t('mobile.teacher.stepFreeVideos'),
+        l10n.t('mobile.teacher.stepQuizzes'),
+        l10n.t('mobile.teacher.stepDocument'),
+        l10n.t('mobile.teacher.stepSubmit'),
+      ];
 
   // Step 1
   final _titleCtrl = TextEditingController();
@@ -59,13 +62,14 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
   @override
   void initState() {
     super.initState();
-    _step = widget.initialStep.clamp(0, _steps.length - 1);
+    _step = widget.initialStep.clamp(0, 4);
     _courseId = widget.courseId;
     _bootstrap();
   }
 
   @override
   void dispose() {
+    _busyUiTimer?.cancel();
     _titleCtrl.dispose();
     _descCtrl.dispose();
     _priceCtrl.dispose();
@@ -101,7 +105,10 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
   int _suggestedStep(Map<String, dynamic>? r) {
     if (r == null) return 0;
     if (r['hasTitle'] != true || r['hasCover'] != true) return 0;
-    if (r['hasInterview'] != true || ((r['freeVideos'] as num?) ?? 0) < 2) return 1;
+    final sampleOk = r['hasSampleAccess'] == true ||
+        ((r['freeVideos'] as num?) ?? 0) >= 2 ||
+        ((r['timedFreeSec'] as num?) ?? 0) >= 120;
+    if (!sampleOk) return 1;
     if (((r['quizzes'] as num?) ?? 0) < 2) return 2;
     if (((r['documents'] as num?) ?? 0) < 1) return 3;
     return 4;
@@ -147,29 +154,71 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
   int get _freeCount =>
       _lessons.where((l) => l['isFreePreview'] == true && l['deletedAt'] == null).length;
 
+  int get _timedFreeSec {
+    var maxSec = 0;
+    for (final l in _lessons) {
+      if (l['isFreePreview'] == true) continue;
+      final s = (l['freePreviewSec'] as num?)?.toInt() ?? 0;
+      if (s > maxSec) maxSec = s;
+    }
+    return maxSec;
+  }
+
+  bool get _hasSampleAccess =>
+      _freeCount >= 2 ||
+      _timedFreeSec >= 120 ||
+      _readiness?['hasSampleAccess'] == true;
+
   bool get _hasInterview => _lessons.any((l) => l['isInterview'] == true);
 
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  void _setBusyUi(String label, {double? progress, bool force = false}) {
+    if (!mounted) return;
+    _busy = true;
+    _busyLabel = label;
+    if (progress != null) _busyProgress = progress.clamp(0.0, 1.0);
+
+    // Use a Timer so progress paints while idle (post-frame only runs after scroll).
+    if (force) {
+      _busyUiTimer?.cancel();
+      _busyUiTimer = null;
+      setState(() {});
+      return;
+    }
+    if (_busyUiTimer?.isActive ?? false) return;
+    _busyUiTimer = Timer(const Duration(milliseconds: 80), () {
+      _busyUiTimer = null;
+      if (mounted) setState(() {});
+    });
+  }
+
   Future<void> _saveBasicsAndNext() async {
+    final l10n = context.l10n;
     if (_titleCtrl.text.trim().isEmpty || _subjectId == null || _stageId == null) {
-      _toast('Fill title, subject, and stage');
+      _toast(l10n.t('mobile.teacher.fillBasics'));
       return;
     }
     final price = double.tryParse(_priceCtrl.text.trim());
     if (price == null || price < 0) {
-      _toast('Enter a valid price');
+      _toast(l10n.t('mobile.teacher.enterValidPrice'));
       return;
     }
 
     setState(() {
       _busy = true;
-      _busyLabel = 'Saving course…';
+      _busyLabel = l10n.t('mobile.teacher.savingCourse');
     });
     try {
       final api = context.read<ApiClient>();
       String? thumbnail = _coverUrl;
 
       if (_coverFile != null) {
-        setState(() => _busyLabel = 'Uploading cover…');
+        setState(() => _busyLabel = l10n.t('mobile.teacher.uploadingCover'));
         final size = await _coverFile!.length();
         final ext = _coverFile!.path.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
         final presign = await api.post('/api/admin/uploads', {
@@ -181,7 +230,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         });
         final uploadUrl = presign['uploadUrl']?.toString();
         final publicUrl = presign['publicUrl']?.toString();
-        if (uploadUrl == null) throw Exception('Cover upload failed');
+        if (uploadUrl == null) throw Exception(l10n.t('mobile.teacher.coverUploadFailed'));
         await api.putFile(
           uploadUrl,
           _coverFile!,
@@ -191,7 +240,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
       }
 
       if (thumbnail == null || thumbnail.isEmpty) {
-        _toast('Add a course cover image');
+        _toast(l10n.t('mobile.teacher.addCourseCover'));
         return;
       }
 
@@ -234,13 +283,15 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
   }
 
   Future<void> _uploadFreeVideo({required bool interview}) async {
+    FocusManager.instance.primaryFocus?.unfocus();
     if (_courseId == null) return;
+    final l10n = context.l10n;
     if (!interview && !_hasInterview) {
-      _toast('Upload the interview video first');
+      _toast(l10n.t('mobile.teacher.uploadInterviewFirst'));
       return;
     }
     if (_freeCount >= 2) {
-      _toast('Maximum 2 free preview videos');
+      _toast(l10n.t('mobile.teacher.maxFreePreviews'));
       return;
     }
 
@@ -249,21 +300,28 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
     final source = File(pick.files.first.path!);
 
     final titleCtrl = TextEditingController(
-      text: interview ? 'Interview / Intro' : 'Free sample',
+      text: interview ? l10n.t('mobile.teacher.interviewIntro') : l10n.t('mobile.teacher.freeSample'),
     );
     final title = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(interview ? 'Interview video' : 'Free sample video'),
+        title: Text(
+          interview
+              ? l10n.t('mobile.teacher.interviewVideoTitle')
+              : l10n.t('mobile.teacher.freeSampleVideoTitle'),
+        ),
         content: TextField(
           controller: titleCtrl,
-          decoration: const InputDecoration(labelText: 'Video title'),
+          decoration: InputDecoration(labelText: l10n.t('mobile.teacher.videoTitleLabel')),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: Text(context.l10n.cancel)),
           TextButton(
-            onPressed: () => Navigator.pop(ctx, titleCtrl.text.trim()),
-            child: const Text('Upload'),
+            onPressed: () {
+              FocusManager.instance.primaryFocus?.unfocus();
+              Navigator.pop(ctx, titleCtrl.text.trim());
+            },
+            child: Text(l10n.t('mobile.teacher.uploadBtn')),
           ),
         ],
       ),
@@ -272,22 +330,38 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
 
     setState(() {
       _busy = true;
-      _busyLabel = 'Processing video…';
+      _busyLabel = l10n.t('mobile.teacher.processingVideo');
+      _busyProgress = 0.02;
     });
     try {
       final api = context.read<ApiClient>();
       final upload = VideoUploadService(api);
       final wm = await upload.fetchWatermarkConfig(courseName: _titleCtrl.text.trim());
+      final sourceSize = await source.length();
       final processed = await VideoProcessService.processForUpload(
         source: source,
         watermark: wm,
         onProgress: (p) {
-          if (!mounted) return;
-          setState(() => _busyLabel = 'Processing ${(p * 100).round()}%');
+          _setBusyUi(
+            l10n.t('mobile.teacher.convertingVideo', {
+              'size': VideoProcessService.formatBytes(sourceSize),
+              'percent': '${(p * 100).round()}',
+            }),
+            progress: p * 0.55,
+          );
         },
       );
 
-      setState(() => _busyLabel = 'Uploading…');
+      final uploadSize = await processed.file.length();
+      _setBusyUi(
+        l10n.t('mobile.teacher.uploadingProgress', {
+          'sent': '0 MB',
+          'total': VideoProcessService.formatBytes(uploadSize),
+          'percent': '0',
+        }),
+        progress: 0.55,
+        force: true,
+      );
       final duration = await VideoCoverHelper.videoDurationSec(processed.file.path);
       final result = await upload.uploadCourseVideo(
         file: processed.file,
@@ -295,10 +369,20 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         scope: 'STORE_COURSE',
         durationSec: duration,
         onProgress: (sent, total) {
-          if (!mounted || total <= 0) return;
-          setState(() => _busyLabel = 'Uploading ${(sent * 100 / total).round()}%');
+          if (total <= 0) return;
+          final pct = (sent * 100 / total).round();
+          _setBusyUi(
+            l10n.t('mobile.teacher.uploadingProgress', {
+              'sent': _formatBytes(sent),
+              'total': _formatBytes(total),
+              'percent': '$pct',
+            }),
+            progress: 0.55 + (sent / total) * 0.45,
+          );
         },
       );
+
+      _setBusyUi(l10n.t('mobile.teacher.savingLesson'), progress: 0.98, force: true);
 
       await api.post('/api/teacher/courses/$_courseId/lessons', {
         'title': title,
@@ -312,7 +396,11 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
       await _reloadCourse();
       await _refreshReadiness();
       if (mounted) setState(() {});
-      _toast(interview ? 'Interview video added' : 'Free sample added');
+      _toast(
+        interview
+            ? l10n.t('mobile.teacher.interviewAdded')
+            : l10n.t('mobile.teacher.freeSampleAdded'),
+      );
     } catch (e) {
       _toast(e.toString());
     } finally {
@@ -320,6 +408,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         setState(() {
           _busy = false;
           _busyLabel = null;
+          _busyProgress = null;
         });
       }
     }
@@ -327,9 +416,10 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
 
   Future<void> _saveQuiz() async {
     if (_courseId == null) return;
+    final l10n = context.l10n;
     final questions = _quizQs.map((q) => q.toPayload()).whereType<Map<String, dynamic>>().toList();
     if (_quizTitleCtrl.text.trim().isEmpty || questions.isEmpty) {
-      _toast('Add quiz title and at least one valid question');
+      _toast(l10n.t('mobile.teacher.quizTitleRequired'));
       return;
     }
     setState(() => _busy = true);
@@ -348,7 +438,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
       await _reloadCourse();
       await _refreshReadiness();
       if (mounted) setState(() {});
-      _toast('Quiz saved');
+      _toast(l10n.t('mobile.teacher.quizSaved'));
     } catch (e) {
       _toast(e.toString());
     } finally {
@@ -357,7 +447,9 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
   }
 
   Future<void> _uploadDocument() async {
+    FocusManager.instance.primaryFocus?.unfocus();
     if (_courseId == null) return;
+    final l10n = context.l10n;
     final pick = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['pdf'],
@@ -368,7 +460,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
 
     setState(() {
       _busy = true;
-      _busyLabel = 'Uploading document…';
+      _busyLabel = l10n.t('mobile.teacher.uploadingDocument');
     });
     try {
       final api = context.read<ApiClient>();
@@ -383,7 +475,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
       final uploadUrl = presign['uploadUrl']?.toString();
       final key = presign['key']?.toString();
       final publicUrl = presign['publicUrl']?.toString();
-      if (uploadUrl == null || key == null) throw Exception('Upload failed');
+      if (uploadUrl == null || key == null) throw Exception(l10n.t('mobile.teacher.uploadFailed'));
       await api.putFile(uploadUrl, file, 'application/pdf');
       await api.post('/api/teacher/courses/$_courseId/documents', {
         'title': name.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), ''),
@@ -404,7 +496,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         };
       } catch (_) {}
       if (mounted) setState(() {});
-      _toast('Document uploaded');
+      _toast(l10n.t('mobile.teacher.documentUploaded'));
     } catch (e) {
       _toast(e.toString());
     } finally {
@@ -419,17 +511,22 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
 
   Future<void> _submitForReview() async {
     if (_courseId == null) return;
+    final l10n = context.l10n;
     setState(() => _busy = true);
     try {
       await _refreshReadiness();
       if (_readiness?['ready'] != true) {
         final missing = ((_readiness?['missing'] as List?) ?? []).join(', ');
-        _toast(missing.isEmpty ? 'Course is not ready' : 'Missing: $missing');
+        _toast(
+          missing.isEmpty
+              ? l10n.t('mobile.teacher.courseNotReady')
+              : l10n.t('mobile.teacher.missingItems', {'items': missing}),
+        );
         return;
       }
       await context.read<ApiClient>().post('/api/teacher/courses/$_courseId/submit', {});
       if (!mounted) return;
-      _toast('Submitted for review');
+      _toast(l10n.t('mobile.teacher.submittedForReview'));
       Navigator.pop(context, true);
     } on ApiException catch (e) {
       _toast(e.message);
@@ -453,7 +550,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
             _stageId != null &&
             (_coverFile != null || (_coverUrl != null && _coverUrl!.isNotEmpty));
       case 1:
-        return _hasInterview && _freeCount >= 2;
+        return _hasSampleAccess;
       case 2:
         return _quizzes.length >= 2;
       case 3:
@@ -471,7 +568,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
     if (_step < 4) {
       await _refreshReadiness();
       if (!_canGoNext()) {
-        _toast('Complete this step before continuing');
+        _toast(context.l10n.t('mobile.teacher.completeStepFirst'));
         return;
       }
       setState(() => _step++);
@@ -484,13 +581,17 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final locale = context.localeCode;
+    final steps = _stepLabels(l10n);
 
-    return Scaffold(
+    return GestureDetector(
+      onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+      behavior: HitTestBehavior.translucent,
+      child: Scaffold(
       appBar: AppBar(
-        title: Text(l10n.t('mobile.teacher.newCourse')),
+        title: Text(l10n.t('mobile.teacher.wizardTitle')),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(72),
-          child: _StepHeader(steps: _steps, current: _step),
+          child: _StepHeader(steps: steps, current: _step),
         ),
       ),
       body: _loading
@@ -509,6 +610,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
               : Stack(
                   children: [
                     ListView(
+                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                       padding: const EdgeInsets.fromLTRB(20, 16, 20, 120),
                       children: [
                         if (_step == 0) _buildBasics(locale),
@@ -523,15 +625,55 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
                         child: ColoredBox(
                           color: Colors.black54,
                           child: Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const CircularProgressIndicator(color: AppTheme.accent),
-                                if (_busyLabel != null) ...[
-                                  const SizedBox(height: 12),
-                                  Text(_busyLabel!, style: const TextStyle(color: Colors.white)),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 32),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  SizedBox(
+                                    width: 56,
+                                    height: 56,
+                                    child: CircularProgressIndicator(
+                                      value: _busyProgress,
+                                      color: AppTheme.accent,
+                                      backgroundColor: Colors.white24,
+                                      strokeWidth: 5,
+                                    ),
+                                  ),
+                                  if (_busyLabel != null) ...[
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      _busyLabel!,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                  ],
+                                  if (_busyProgress != null) ...[
+                                    const SizedBox(height: 14),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: LinearProgressIndicator(
+                                        value: _busyProgress!.clamp(0.02, 1.0),
+                                        minHeight: 8,
+                                        backgroundColor: Colors.white12,
+                                        color: AppTheme.accent,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      '${(_busyProgress! * 100).round()}%',
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
                                 ],
-                              ],
+                              ),
                             ),
                           ),
                         ),
@@ -548,58 +690,69 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
                     if (_step > 0)
                       OutlinedButton(
                         onPressed: _busy ? null : () => setState(() => _step--),
-                        child: const Text('Back'),
+                        child: Text(l10n.t('mobile.teacher.back')),
                       ),
                     const Spacer(),
                     FilledButton(
-                      onPressed: _busy ? null : _next,
+                      onPressed: _busy
+                          ? null
+                          : () {
+                              FocusManager.instance.primaryFocus?.unfocus();
+                              _next();
+                            },
                       style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.accent,
                         foregroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                       ),
-                      child: Text(_step == 4 ? 'Submit for review' : 'Continue'),
+                      child: Text(
+                        _step == 4
+                            ? l10n.t('mobile.teacher.submitForReview')
+                            : l10n.t('mobile.teacher.continueBtn'),
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
+      ),
     );
   }
 
   Widget _buildBasics(String locale) {
+    final l10n = context.l10n;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Course name & cover',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+        Text(
+          l10n.t('mobile.teacher.basicsTitle'),
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 6),
-        const Text(
-          'Start with a clear title and an eye-catching cover students will see in the store.',
-          style: TextStyle(color: AppTheme.muted, height: 1.4),
+        Text(
+          l10n.t('mobile.teacher.basicsHint'),
+          style: const TextStyle(color: AppTheme.muted, height: 1.4),
         ),
         const SizedBox(height: 18),
         TextField(
           controller: _titleCtrl,
-          decoration: const InputDecoration(labelText: 'Course title'),
+          decoration: InputDecoration(labelText: l10n.t('mobile.teacher.courseTitle')),
         ),
         const SizedBox(height: 12),
         TextField(
           controller: _descCtrl,
           maxLines: 3,
-          decoration: const InputDecoration(labelText: 'Description (optional)'),
+          decoration: InputDecoration(labelText: l10n.t('mobile.teacher.courseDescription')),
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
           value: _subjectId,
-          decoration: const InputDecoration(labelText: 'Subject'),
+          decoration: InputDecoration(labelText: l10n.t('mobile.teacher.subjectLabel')),
           items: _specialties
               .map(
                 (s) => DropdownMenuItem(
                   value: s['id']?.toString(),
-                  child: Text(localizedName(s, locale)),
+                  child: Text(localizedText(s, locale, prefix: 'name')),
                 ),
               )
               .toList(),
@@ -608,12 +761,12 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
           value: _stageId,
-          decoration: const InputDecoration(labelText: 'Stage'),
+          decoration: InputDecoration(labelText: l10n.t('mobile.teacher.stageLabel')),
           items: _stages
               .map(
                 (s) => DropdownMenuItem(
                   value: s['id']?.toString(),
-                  child: Text(localizedName(s, locale)),
+                  child: Text(localizedText(s, locale, prefix: 'name')),
                 ),
               )
               .toList(),
@@ -623,7 +776,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         TextField(
           controller: _priceCtrl,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'Price (IQD)'),
+          decoration: InputDecoration(labelText: l10n.t('mobile.teacher.coursePrice')),
         ),
         const SizedBox(height: 16),
         GestureDetector(
@@ -644,12 +797,12 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
                       : null),
             ),
             child: _coverFile == null && _coverUrl == null
-                ? const Column(
+                ? Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.add_photo_alternate_outlined, size: 40, color: AppTheme.muted),
-                      SizedBox(height: 8),
-                      Text('Tap to add course cover', style: TextStyle(color: AppTheme.muted)),
+                      const Icon(Icons.add_photo_alternate_outlined, size: 40, color: AppTheme.muted),
+                      const SizedBox(height: 8),
+                      Text(l10n.t('mobile.teacher.tapToAddCover'), style: const TextStyle(color: AppTheme.muted)),
                     ],
                   )
                 : Align(
@@ -657,7 +810,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
                     child: Padding(
                       padding: const EdgeInsets.all(10),
                       child: Chip(
-                        label: const Text('Change'),
+                        label: Text(l10n.t('mobile.teacher.changeCover')),
                         backgroundColor: Colors.black54,
                         labelStyle: const TextStyle(color: Colors.white, fontSize: 12),
                       ),
@@ -670,27 +823,40 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
   }
 
   Widget _buildVideos() {
+    final l10n = context.l10n;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Free preview videos',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+        Text(
+          l10n.t('mobile.teacher.videosTitle'),
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 6),
-        const Text(
-          'Upload an interview / intro video first, then one more free sample. Both are visible before purchase.',
-          style: TextStyle(color: AppTheme.muted, height: 1.4),
+        Text(
+          l10n.t('mobile.teacher.videosHintOptional'),
+          style: const TextStyle(color: AppTheme.muted, height: 1.4),
         ),
         const SizedBox(height: 16),
         _RequirementChip(
-          label: 'Interview',
+          label: l10n.t('mobile.teacher.interviewBadge'),
           done: _hasInterview,
         ),
         const SizedBox(height: 8),
         _RequirementChip(
-          label: 'Free videos ($_freeCount / 2)',
+          label: l10n.t('mobile.teacher.freeVideosCount', {'count': '$_freeCount'}),
           done: _freeCount >= 2,
+        ),
+        const SizedBox(height: 8),
+        _RequirementChip(
+          label: l10n.t('mobile.teacher.timedFreeCount', {
+            'minutes': '${(_timedFreeSec / 60).floor()}',
+          }),
+          done: _timedFreeSec >= 120,
+        ),
+        const SizedBox(height: 8),
+        _RequirementChip(
+          label: l10n.t('mobile.teacher.sampleAccessOk'),
+          done: _hasSampleAccess,
         ),
         const SizedBox(height: 16),
         ..._lessons.where((l) => l['isFreePreview'] == true).map((l) {
@@ -702,8 +868,12 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
                 interview ? Icons.mic_rounded : Icons.play_circle_outline,
                 color: AppTheme.accent,
               ),
-              title: Text(l['title']?.toString() ?? 'Video'),
-              subtitle: Text(interview ? 'Interview / Intro' : 'Free sample'),
+              title: Text(l['title']?.toString() ?? l10n.t('mobile.teacher.videoFallback')),
+              subtitle: Text(
+                interview
+                    ? l10n.t('mobile.teacher.interviewIntro')
+                    : l10n.t('mobile.teacher.freeSample'),
+              ),
             ),
           );
         }),
@@ -712,14 +882,14 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
           FilledButton.icon(
             onPressed: _busy ? null : () => _uploadFreeVideo(interview: true),
             icon: const Icon(Icons.mic_rounded),
-            label: const Text('Upload interview video'),
+            label: Text(l10n.t('mobile.teacher.uploadInterview')),
             style: FilledButton.styleFrom(backgroundColor: AppTheme.accent, foregroundColor: Colors.black),
           )
         else if (_freeCount < 2)
           FilledButton.icon(
             onPressed: _busy ? null : () => _uploadFreeVideo(interview: false),
             icon: const Icon(Icons.video_call_outlined),
-            label: const Text('Upload free sample video'),
+            label: Text(l10n.t('mobile.teacher.uploadFreeSample')),
             style: FilledButton.styleFrom(backgroundColor: AppTheme.accent, foregroundColor: Colors.black),
           ),
       ],
@@ -727,34 +897,38 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
   }
 
   Widget _buildQuizzes() {
+    final l10n = context.l10n;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Quizzes',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+        Text(
+          l10n.t('mobile.teacher.quizzesTitle'),
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 6),
         Text(
-          'Add at least 2 quizzes (${_quizzes.length} / 2).',
+          l10n.t('mobile.teacher.quizzesHint', {'count': '${_quizzes.length}'}),
           style: const TextStyle(color: AppTheme.muted, height: 1.4),
         ),
         const SizedBox(height: 12),
         ..._quizzes.map(
-          (q) => Card(
-            color: AppTheme.card,
-            child: ListTile(
-              leading: const Icon(Icons.quiz_outlined, color: AppTheme.accent),
-              title: Text(q['titleEn']?.toString() ?? 'Quiz'),
-              subtitle: Text('${(q['_count'] as Map?)?['questions'] ?? q['questionCount'] ?? '?'} questions'),
-            ),
-          ),
+          (q) {
+            final qCount = (q['_count'] as Map?)?['questions'] ?? q['questionCount'] ?? '?';
+            return Card(
+              color: AppTheme.card,
+              child: ListTile(
+                leading: const Icon(Icons.quiz_outlined, color: AppTheme.accent),
+                title: Text(q['titleEn']?.toString() ?? l10n.t('mobile.teacher.quizzesTitle')),
+                subtitle: Text(l10n.t('mobile.teacher.questionsCount', {'count': '$qCount'})),
+              ),
+            );
+          },
         ),
         if (_quizzes.length < 2) ...[
           const SizedBox(height: 16),
           TextField(
             controller: _quizTitleCtrl,
-            decoration: const InputDecoration(labelText: 'New quiz title'),
+            decoration: InputDecoration(labelText: l10n.t('mobile.teacher.newQuizTitle')),
           ),
           const SizedBox(height: 12),
           ..._quizQs.asMap().entries.map((e) {
@@ -769,15 +943,26 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
                   children: [
                     TextField(
                       controller: q.textCtrl,
-                      decoration: InputDecoration(labelText: 'Question ${i + 1}'),
+                      decoration: InputDecoration(
+                        labelText: l10n.t('mobile.studio.questionNumber', {'n': '${i + 1}'}),
+                      ),
                     ),
                     const SizedBox(height: 8),
-                    TextField(controller: q.optA, decoration: const InputDecoration(labelText: 'Option A')),
-                    TextField(controller: q.optB, decoration: const InputDecoration(labelText: 'Option B')),
-                    TextField(controller: q.optC, decoration: const InputDecoration(labelText: 'Option C (optional)')),
+                    TextField(
+                      controller: q.optA,
+                      decoration: InputDecoration(labelText: l10n.t('mobile.teacher.optionA')),
+                    ),
+                    TextField(
+                      controller: q.optB,
+                      decoration: InputDecoration(labelText: l10n.t('mobile.teacher.optionB')),
+                    ),
+                    TextField(
+                      controller: q.optC,
+                      decoration: InputDecoration(labelText: l10n.t('mobile.teacher.optionCOptional')),
+                    ),
                     DropdownButtonFormField<String>(
                       value: q.correct,
-                      decoration: const InputDecoration(labelText: 'Correct answer'),
+                      decoration: InputDecoration(labelText: l10n.t('mobile.studio.correctAnswer')),
                       items: const [
                         DropdownMenuItem(value: 'A', child: Text('A')),
                         DropdownMenuItem(value: 'B', child: Text('B')),
@@ -794,12 +979,12 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
           TextButton.icon(
             onPressed: () => setState(() => _quizQs.add(_WizardQuizQ())),
             icon: const Icon(Icons.add),
-            label: const Text('Add question'),
+            label: Text(l10n.t('mobile.studio.addQuestion')),
           ),
           FilledButton(
             onPressed: _busy ? null : _saveQuiz,
             style: FilledButton.styleFrom(backgroundColor: AppTheme.accent, foregroundColor: Colors.black),
-            child: const Text('Save quiz'),
+            child: Text(l10n.t('mobile.studio.saveQuiz')),
           ),
         ],
       ],
@@ -807,18 +992,19 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
   }
 
   Widget _buildDocument() {
+    final l10n = context.l10n;
     final docs = _materials;
     final docCount = ((_readiness?['documents'] as num?) ?? docs.length).toInt();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Course document',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+        Text(
+          l10n.t('mobile.teacher.documentTitle'),
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 6),
         Text(
-          'Upload at least one PDF ($docCount / 1).',
+          l10n.t('mobile.teacher.documentCountHint', {'count': '$docCount'}),
           style: const TextStyle(color: AppTheme.muted, height: 1.4),
         ),
         const SizedBox(height: 12),
@@ -827,7 +1013,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
             color: AppTheme.card,
             child: ListTile(
               leading: const Icon(Icons.picture_as_pdf, color: AppTheme.accent),
-              title: Text(d['title']?.toString() ?? 'Document'),
+              title: Text(d['title']?.toString() ?? l10n.t('mobile.teacher.documentFallback')),
             ),
           ),
         ),
@@ -835,7 +1021,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         FilledButton.icon(
           onPressed: _busy ? null : _uploadDocument,
           icon: const Icon(Icons.upload_file),
-          label: const Text('Upload PDF'),
+          label: Text(l10n.t('mobile.teacher.uploadPdf')),
           style: FilledButton.styleFrom(backgroundColor: AppTheme.accent, foregroundColor: Colors.black),
         ),
       ],
@@ -843,40 +1029,49 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
   }
 
   Widget _buildSubmit() {
+    final l10n = context.l10n;
     final r = _readiness;
     final missing = ((r?['missing'] as List?) ?? []).cast<String>();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Review & submit',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+        Text(
+          l10n.t('mobile.teacher.submitTitle'),
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 6),
-        const Text(
-          'Confirm everything looks good, then send the course to admin review.',
-          style: TextStyle(color: AppTheme.muted, height: 1.4),
+        Text(
+          l10n.t('mobile.teacher.submitHint'),
+          style: const TextStyle(color: AppTheme.muted, height: 1.4),
         ),
         const SizedBox(height: 16),
-        _RequirementChip(label: 'Title', done: r?['hasTitle'] == true),
-        _RequirementChip(label: 'Cover', done: r?['hasCover'] == true),
-        _RequirementChip(label: 'Interview video', done: r?['hasInterview'] == true),
+        _RequirementChip(label: l10n.t('mobile.teacher.checklistTitle'), done: r?['hasTitle'] == true),
+        _RequirementChip(label: l10n.t('mobile.teacher.checklistCover'), done: r?['hasCover'] == true),
         _RequirementChip(
-          label: 'Free videos (${r?['freeVideos'] ?? 0} / 2)',
-          done: ((r?['freeVideos'] as num?) ?? 0) >= 2,
+          label: l10n.t('mobile.teacher.sampleAccessChecklist', {
+            'videos': '${r?['freeVideos'] ?? 0}',
+            'minutes': '${(((r?['timedFreeSec'] as num?) ?? 0) / 60).floor()}',
+          }),
+          done: r?['hasSampleAccess'] == true ||
+              ((r?['freeVideos'] as num?) ?? 0) >= 2 ||
+              ((r?['timedFreeSec'] as num?) ?? 0) >= 120,
         ),
         _RequirementChip(
-          label: 'Quizzes (${r?['quizzes'] ?? 0} / 2)',
+          label: l10n.t('mobile.teacher.quizzesHint', {
+            'count': '${r?['quizzes'] ?? 0}',
+          }),
           done: ((r?['quizzes'] as num?) ?? 0) >= 2,
         ),
         _RequirementChip(
-          label: 'Documents (${r?['documents'] ?? 0} / 1)',
+          label: l10n.t('mobile.teacher.documentCountHint', {
+            'count': '${r?['documents'] ?? 0}',
+          }),
           done: ((r?['documents'] as num?) ?? 0) >= 1,
         ),
         if (missing.isNotEmpty) ...[
           const SizedBox(height: 16),
           Text(
-            'Still missing:\n• ${missing.join('\n• ')}',
+            l10n.t('mobile.teacher.stillMissing', {'items': missing.join('\n• ')}),
             style: const TextStyle(color: Colors.orangeAccent, height: 1.5),
           ),
         ],

@@ -25,6 +25,8 @@ class CourseInlinePlayer extends StatefulWidget {
     this.autoPlay = true,
     this.initiallyCompleted = false,
     this.onCompleted,
+    this.freePreviewLimitSec,
+    this.onPreviewLimitReached,
   });
 
   final String url;
@@ -33,6 +35,9 @@ class CourseInlinePlayer extends StatefulWidget {
   final bool autoPlay;
   final bool initiallyCompleted;
   final VoidCallback? onCompleted;
+  /// When set, non-purchasers are stopped at this second and [onPreviewLimitReached] fires.
+  final int? freePreviewLimitSec;
+  final VoidCallback? onPreviewLimitReached;
 
   @override
   State<CourseInlinePlayer> createState() => _CourseInlinePlayerState();
@@ -49,6 +54,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   bool _completionSaved = false;
   bool _showCompleteFlash = false;
   bool _lessonWasCompleted = false;
+  bool _previewLimitHit = false;
   StreamSubscription<bool>? _castSub;
 
   @override
@@ -70,6 +76,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       _lessonWasCompleted = widget.initiallyCompleted;
       _completionSaved = widget.initiallyCompleted;
       _showCompleteFlash = false;
+      _previewLimitHit = false;
       _loading = true;
       _error = null;
       _init();
@@ -80,14 +87,26 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   }
 
   void _onControllerTick() {
-    if (mounted) setState(() {});
+    // Avoid rebuilding the whole player on every frame — controls listen separately.
     _onPlaybackUpdate();
   }
 
   void _onPlaybackUpdate() {
     final c = _controller;
-    if (c == null || !c.value.isInitialized || _completionSaved) return;
+    if (c == null || !c.value.isInitialized) return;
     final v = c.value;
+    final limit = widget.freePreviewLimitSec;
+    if (limit != null && limit > 0 && !_previewLimitHit) {
+      if (v.position.inSeconds >= limit) {
+        _previewLimitHit = true;
+        c.pause();
+        c.seekTo(Duration(seconds: limit));
+        widget.onPreviewLimitReached?.call();
+        if (mounted) setState(() {});
+        return;
+      }
+    }
+    if (_completionSaved) return;
     final duration = v.duration.inSeconds;
     if (duration <= 0) return;
     final nearEnd = v.isCompleted || v.position.inSeconds >= duration - 2;
@@ -139,12 +158,17 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     )..addListener(() {
         if (mounted) setState(() {});
       });
+
+    // Start network/file controller while refreshing protection identity.
+    final controllerFuture = CourseVideoCache.createController(widget.url);
     await ensureFreshProtectionIdentity(
       auth,
       _protection!,
       l10n.t('mobile.roles.student'),
     );
-    await _protection!.enable();
+
+    final enableFuture = _protection!.enable();
+    final controller = await controllerFuture;
 
     if (Platform.isAndroid) {
       _castSub ??= CourseCastService.castingStream.listen((casting) {
@@ -153,15 +177,21 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     }
 
     try {
-      CourseVideoCache.prefetch(widget.url);
-      _controller = await CourseVideoCache.createController(widget.url);
-      await _controller!.initialize();
-      if (!mounted) return;
+      await Future.wait([
+        enableFuture,
+        controller.initialize(),
+      ]);
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      _controller = controller;
       if (widget.autoPlay) await _controller!.play();
       _controller!.addListener(_onControllerTick);
       setState(() => _loading = false);
       _startProgressTimer();
     } catch (_) {
+      await controller.dispose();
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -263,16 +293,19 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
                 AnimatedOpacity(
                   opacity: _showControls ? 1 : 0,
                   duration: const Duration(milliseconds: 220),
-                  child: _ControlsOverlay(
-                    controller: _controller!,
-                    protection: _protection,
-                    speed: _speed,
-                    onSpeed: (s) {
-                      setState(() => _speed = s);
-                      _controller!.setPlaybackSpeed(s);
-                    },
-                    onFullscreen: _enterFullscreen,
-                    onCast: _openCast,
+                  child: ValueListenableBuilder<VideoPlayerValue>(
+                    valueListenable: _controller!,
+                    builder: (context, _, child) => _ControlsOverlay(
+                      controller: _controller!,
+                      protection: _protection,
+                      speed: _speed,
+                      onSpeed: (s) {
+                        setState(() => _speed = s);
+                        _controller!.setPlaybackSpeed(s);
+                      },
+                      onFullscreen: _enterFullscreen,
+                      onCast: _openCast,
+                    ),
                   ),
                 ),
                 AnimatedOpacity(
@@ -308,6 +341,34 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
                     ),
                   ),
                 ),
+                if (_previewLimitHit)
+                  Container(
+                    color: Colors.black.withValues(alpha: 0.72),
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.lock_clock_rounded, color: AppTheme.accent, size: 40),
+                        const SizedBox(height: 12),
+                        Text(
+                          context.l10n.t('mobile.store.previewEnded'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          context.l10n.t('mobile.store.previewEndedHint'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Colors.white70, height: 1.35),
+                        ),
+                      ],
+                    ),
+                  ),
               ],
             ),
           ),
@@ -444,13 +505,11 @@ class _FullscreenPlayerState extends State<_FullscreenPlayer> {
       DeviceOrientation.landscapeRight,
     ]);
     widget.protection.addListener(_repaint);
-    widget.controller.addListener(_repaint);
   }
 
   @override
   void dispose() {
     widget.protection.removeListener(_repaint);
-    widget.controller.removeListener(_repaint);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     super.dispose();
@@ -483,76 +542,77 @@ class _FullscreenPlayerState extends State<_FullscreenPlayer> {
               AnimatedOpacity(
                 opacity: _showControls ? 1 : 0,
                 duration: const Duration(milliseconds: 220),
-                child: Column(
-                  children: [
-                    AppBar(
-                      backgroundColor: Colors.black54,
-                      leading: IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                      title: Text(widget.title, style: const TextStyle(color: Colors.white)),
-                      actions: [
-                        IconButton(
-                          icon: Icon(
-                            widget.protection.isCasting
-                                ? Icons.cast_connected
-                                : Icons.cast_outlined,
-                            color: widget.protection.isCasting
-                                ? AppTheme.accent
-                                : Colors.white70,
-                          ),
-                          onPressed: () => openCourseCastScreen(
-                            context,
-                            url: widget.videoUrl,
-                            title: widget.title,
-                            protection: widget.protection,
-                            lessonId: widget.lessonId,
-                            positionMs: widget.controller.value.position.inMilliseconds,
-                            onPause: () => widget.controller.pause(),
-                            onResume: () => widget.controller.play(),
-                          ),
+                child: ValueListenableBuilder<VideoPlayerValue>(
+                  valueListenable: widget.controller,
+                  builder: (context, value, _) => Column(
+                    children: [
+                      AppBar(
+                        backgroundColor: Colors.black54,
+                        leading: IconButton(
+                          icon: const Icon(Icons.arrow_back, color: Colors.white),
+                          onPressed: () => Navigator.of(context).pop(),
                         ),
-                      ],
-                    ),
-                    const Spacer(),
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        children: [
-                          VideoProgressIndicator(widget.controller, allowScrubbing: true),
-                          Row(
-                            children: [
-                              IconButton(
-                                icon: Icon(
-                                  widget.controller.value.isPlaying
-                                      ? Icons.pause
-                                      : Icons.play_arrow,
-                                  color: Colors.white,
-                                  size: 32,
-                                ),
-                                onPressed: () => widget.controller.value.isPlaying
-                                    ? widget.controller.pause()
-                                    : widget.controller.play(),
-                              ),
-                              PopupMenuButton<double>(
-                                initialValue: widget.speed,
-                                onSelected: widget.onSpeed,
-                                itemBuilder: (_) => [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
-                                    .map((s) =>
-                                        PopupMenuItem(value: s, child: Text('${s}x')))
-                                    .toList(),
-                                child: Text(
-                                  '${widget.speed}x',
-                                  style: const TextStyle(color: Colors.white),
-                                ),
-                              ),
-                            ],
+                        title: Text(widget.title, style: const TextStyle(color: Colors.white)),
+                        actions: [
+                          IconButton(
+                            icon: Icon(
+                              widget.protection.isCasting
+                                  ? Icons.cast_connected
+                                  : Icons.cast_outlined,
+                              color: widget.protection.isCasting
+                                  ? AppTheme.accent
+                                  : Colors.white70,
+                            ),
+                            onPressed: () => openCourseCastScreen(
+                              context,
+                              url: widget.videoUrl,
+                              title: widget.title,
+                              protection: widget.protection,
+                              lessonId: widget.lessonId,
+                              positionMs: widget.controller.value.position.inMilliseconds,
+                              onPause: () => widget.controller.pause(),
+                              onResume: () => widget.controller.play(),
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                  ],
+                      const Spacer(),
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          children: [
+                            VideoProgressIndicator(widget.controller, allowScrubbing: true),
+                            Row(
+                              children: [
+                                IconButton(
+                                  icon: Icon(
+                                    value.isPlaying ? Icons.pause : Icons.play_arrow,
+                                    color: Colors.white,
+                                    size: 32,
+                                  ),
+                                  onPressed: () => value.isPlaying
+                                      ? widget.controller.pause()
+                                      : widget.controller.play(),
+                                ),
+                                PopupMenuButton<double>(
+                                  initialValue: widget.speed,
+                                  onSelected: widget.onSpeed,
+                                  itemBuilder: (_) => [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+                                      .map((s) =>
+                                          PopupMenuItem(value: s, child: Text('${s}x')))
+                                      .toList(),
+                                  child: Text(
+                                    '${widget.speed}x',
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],

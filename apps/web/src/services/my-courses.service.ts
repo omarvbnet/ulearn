@@ -545,9 +545,19 @@ export class MyCoursesService {
       },
     });
     const isOwner = lesson.course.teacher.userId === input.userId;
-    const isFree = lesson.course.price <= 0 || lesson.isFreePreview;
+    const timedFree =
+      !lesson.isFreePreview &&
+      typeof lesson.freePreviewSec === "number" &&
+      lesson.freePreviewSec > 0;
+    const isFree = lesson.course.price <= 0 || lesson.isFreePreview || timedFree;
     if (!purchased && !isFree && !isOwner) {
       return { success: false as const, error: "NO_ACCESS" };
+    }
+
+    // Cap progress for timed free previews so completion can't be faked.
+    if (!purchased && !isOwner && timedFree && lesson.freePreviewSec != null) {
+      input.positionSec = Math.min(input.positionSec, lesson.freePreviewSec);
+      input.completed = false;
     }
 
     const existing = await prisma.courseLessonProgress.findUnique({

@@ -26,6 +26,7 @@ export async function GET(
   const owned = await ownTeacherCourse(auth.session.userId, id);
   if (!owned) return error("Course not found", 404, "NOT_FOUND");
 
+  await TeacherCourseService.ensureInterviewFromFreePreviews(id);
   const readiness = await TeacherCourseService.getCourseReadiness(id);
   return json({ readiness });
 }

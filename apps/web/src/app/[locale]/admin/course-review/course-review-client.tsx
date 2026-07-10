@@ -57,6 +57,9 @@ type Readiness = {
   hasCover: boolean;
   freeVideos: number;
   hasInterview: boolean;
+  timedFreeSec?: number;
+  hasTimedFree?: boolean;
+  hasSampleAccess?: boolean;
   quizzes: number;
   documents: number;
   ready: boolean;
@@ -472,11 +475,15 @@ export function CourseReviewClient() {
                   <li className={readiness.hasCover ? "text-accent" : "text-danger"}>
                     Cover {readiness.hasCover ? "✓" : "✗"}
                   </li>
-                  <li className={readiness.hasInterview ? "text-accent" : "text-danger"}>
-                    Interview {readiness.hasInterview ? "✓" : "✗"}
-                  </li>
-                  <li className={readiness.freeVideos >= 2 ? "text-accent" : "text-danger"}>
-                    Free videos {readiness.freeVideos}/2
+                  <li className={readiness.hasSampleAccess ? "text-accent" : "text-danger"}>
+                    Sample access {readiness.hasSampleAccess ? "✓" : "✗"}
+                    <span className="ms-1 text-xs text-muted">
+                      (free videos {readiness.freeVideos}/2
+                      {readiness.hasTimedFree
+                        ? ` · free minutes ${Math.floor((readiness.timedFreeSec ?? 0) / 60)}m`
+                        : " · or 2 free minutes"}
+                      )
+                    </span>
                   </li>
                   <li className={readiness.quizzes >= 2 ? "text-accent" : "text-danger"}>
                     Quizzes {readiness.quizzes}/2

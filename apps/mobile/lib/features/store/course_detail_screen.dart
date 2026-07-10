@@ -65,7 +65,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   bool _canWatch(Map<String, dynamic> lesson, bool unlocked) {
     if (lesson['canWatch'] == true && lesson['fileUrl'] != null) return true;
     final isPreview = lesson['isFreePreview'] == true;
-    return (unlocked || isPreview) && lesson['fileUrl'] != null;
+    final timed = (lesson['freePreviewSec'] as num?)?.toInt() ?? 0;
+    return (unlocked || isPreview || timed > 0) && lesson['fileUrl'] != null;
   }
 
   void _selectInitialLesson(List<Map<String, dynamic>> lessons, bool unlocked) {
@@ -127,10 +128,14 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         _error = null;
         _selectInitialLesson(lessons, unlocked);
       });
-      for (final l in lessons) {
-        final url = l['fileUrl']?.toString();
-        if (url != null && url.isNotEmpty) {
-          CourseVideoCache.prefetch(url);
+      final activeId = _activeLesson?['id']?.toString();
+      for (var i = 0; i < lessons.length; i++) {
+        if (lessons[i]['id']?.toString() == activeId) {
+          CourseVideoCache.prefetchAround(
+            lessons.map((l) => l['fileUrl']?.toString()).toList(),
+            i,
+          );
+          break;
         }
       }
       _maybeShowEvaluation();
@@ -285,6 +290,15 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       return;
     }
     setState(() => _activeLesson = lesson);
+    final lessons =
+        ((_course?['lessons'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+    final idx = lessons.indexWhere((l) => l['id'] == lesson['id']);
+    if (idx >= 0) {
+      CourseVideoCache.prefetchAround(
+        lessons.map((l) => l['fileUrl']?.toString()).toList(),
+        idx,
+      );
+    }
   }
 
   Map<String, dynamic>? _nextWatchableLesson(
@@ -671,6 +685,20 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                       lessonId: activeId,
                       initiallyCompleted: active != null && _isLessonCompleted(active),
                       onCompleted: active != null ? () => _onLessonCompleted(active) : null,
+                      freePreviewLimitSec: !unlocked &&
+                              active?['previewOnly'] == true &&
+                              (active?['freePreviewSec'] as num?) != null
+                          ? (active!['freePreviewSec'] as num).toInt()
+                          : null,
+                      onPreviewLimitReached: !unlocked
+                          ? () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(l10n.t('mobile.store.previewEndedHint')),
+                                ),
+                              );
+                            }
+                          : null,
                     ),
                     const SizedBox(height: 16),
                   ],
@@ -749,6 +777,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       final lessonIndex = item.lessonIndex ?? 0;
       final canWatch = _canWatch(lesson, unlocked);
       final isPreview = lesson['isFreePreview'] == true;
+      final freeSec = (lesson['freePreviewSec'] as num?)?.toInt() ?? 0;
       final isActive = activeId == lesson['id']?.toString();
       final isCompleted = _isLessonCompleted(lesson);
       final progressPct =
@@ -764,8 +793,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           title: title,
           lesson: lesson,
           canWatch: canWatch,
-          isPreview: isPreview,
-          showFreeBadge: isPreview && !unlocked,
+          isPreview: isPreview || freeSec > 0,
+          showFreeBadge: (isPreview || freeSec > 0) && !unlocked,
           isActive: isActive,
           isCompleted: isCompleted,
           progressPct: progressPct,

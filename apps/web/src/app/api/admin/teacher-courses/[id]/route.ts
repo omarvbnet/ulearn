@@ -75,6 +75,7 @@ export async function GET(
 
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
+  await TeacherCourseService.ensureInterviewFromFreePreviews(id);
   const readiness = await TeacherCourseService.getCourseReadiness(id);
 
   const lessons = await Promise.all(

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -24,13 +25,14 @@ class VideoCoverHelper {
   }
 
   /// Capture a frame ~1s into the video for use as cover art.
+  /// Times out so large iPhone MOV files cannot hang the upload UI forever.
   static Future<File?> thumbnailFromVideo(String videoPath) async {
     try {
       final thumb = await VideoCompress.getFileThumbnail(
         videoPath,
-        quality: 80,
+        quality: 70,
         position: 1000,
-      );
+      ).timeout(const Duration(seconds: 12));
       return thumb;
     } catch (_) {
       return null;
@@ -39,11 +41,15 @@ class VideoCoverHelper {
 
   /// Reads duration in seconds — tries video_player first, then video_compress.
   static Future<int?> videoDurationSec(String videoPath) async {
-    final fromPlayer = await _durationFromPlayer(videoPath);
-    if (fromPlayer != null && fromPlayer > 0) return fromPlayer;
+    try {
+      final fromPlayer = await _durationFromPlayer(videoPath)
+          .timeout(const Duration(seconds: 8));
+      if (fromPlayer != null && fromPlayer > 0) return fromPlayer;
+    } catch (_) {}
 
     try {
-      final info = await VideoCompress.getMediaInfo(videoPath);
+      final info = await VideoCompress.getMediaInfo(videoPath)
+          .timeout(const Duration(seconds: 8));
       final raw = info.duration ?? 0;
       if (raw <= 0) return null;
       // video_compress returns ms on most platforms; values under ~3h are often seconds.

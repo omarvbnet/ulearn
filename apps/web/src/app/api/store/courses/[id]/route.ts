@@ -120,7 +120,12 @@ export async function GET(
 
   const lessons = await Promise.all(
     course.lessons.map(async (l) => {
-      const canWatch = hasAccess || l.isFreePreview;
+      const freePreviewSec =
+        !l.isFreePreview && typeof l.freePreviewSec === "number" && l.freePreviewSec > 0
+          ? l.freePreviewSec
+          : null;
+      const canWatch = hasAccess || l.isFreePreview || freePreviewSec != null;
+      const previewOnly = !hasAccess && !l.isFreePreview && freePreviewSec != null;
       let fileUrl = canWatch ? l.fileUrl : null;
       if (canWatch && l.fileKey && !fileUrl) {
         fileUrl = await getDownloadUrl(l.fileKey).catch(() => null);
@@ -134,6 +139,8 @@ export async function GET(
       return {
         ...l,
         durationSec,
+        freePreviewSec,
+        previewOnly,
         fileKey: undefined,
         thumbnailKey: undefined,
         fileUrl,

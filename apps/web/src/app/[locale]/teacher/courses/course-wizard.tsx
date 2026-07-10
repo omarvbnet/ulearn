@@ -17,6 +17,9 @@ type Readiness = {
   hasCover: boolean;
   freeVideos: number;
   hasInterview: boolean;
+  timedFreeSec?: number;
+  hasTimedFree?: boolean;
+  hasSampleAccess?: boolean;
   quizzes: number;
   documents: number;
   ready: boolean;
@@ -28,6 +31,7 @@ type Lesson = {
   title: string;
   isFreePreview?: boolean;
   isInterview?: boolean;
+  freePreviewSec?: number | null;
   durationSec?: number | null;
 };
 
@@ -349,9 +353,14 @@ export function CourseWizard({
 
   async function next() {
     if (step === 0) return saveBasics();
-    if (step === 1 && !(hasInterview && freeCount >= 2)) {
-      toast("Add interview + one more free video", "error");
-      return;
+    if (step === 1) {
+      const timedOk = lessons.some(
+        (l) => !l.isFreePreview && (l.freePreviewSec ?? 0) >= 120
+      );
+      if (!(freeCount >= 2 || timedOk || readiness?.hasSampleAccess)) {
+        toast("Add 2 free videos, or at least 2 free minutes on a lesson", "error");
+        return;
+      }
     }
     if (step === 2 && quizzes.length < 2) {
       toast("Add at least 2 quizzes", "error");
@@ -516,8 +525,11 @@ export function CourseWizard({
               {[
                 ["Title", readiness?.hasTitle],
                 ["Cover", readiness?.hasCover],
-                ["Interview", readiness?.hasInterview],
-                [`Free videos (${readiness?.freeVideos ?? 0}/2)`, (readiness?.freeVideos ?? 0) >= 2],
+                [
+                  `Sample access (free videos ${readiness?.freeVideos ?? 0}/2 or 2 free minutes)`,
+                  readiness?.hasSampleAccess ??
+                    ((readiness?.freeVideos ?? 0) >= 2 || (readiness?.hasTimedFree ?? false)),
+                ],
                 [`Quizzes (${readiness?.quizzes ?? 0}/2)`, (readiness?.quizzes ?? 0) >= 2],
                 [`Documents (${readiness?.documents ?? 0}/1)`, (readiness?.documents ?? 0) >= 1],
               ].map(([label, ok]) => (

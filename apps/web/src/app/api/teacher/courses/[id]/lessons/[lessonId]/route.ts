@@ -13,6 +13,7 @@ const schema = z.object({
   durationSec: z.number().int().optional(),
   isFreePreview: z.boolean().optional(),
   isInterview: z.boolean().optional(),
+  freePreviewSec: z.number().int().min(0).max(3600).nullable().optional(),
   sortOrder: z.number().int().optional(),
   pdfTitle: z.string().optional(),
   pdfFileKey: z.string().optional(),
@@ -59,6 +60,39 @@ export async function PATCH(
       where: { courseId, isInterview: true, deletedAt: null, id: { not: lessonId } },
       data: { isInterview: false },
     });
+  } else if (lessonPatch.isFreePreview === true && !lesson.isInterview) {
+    // First free preview becomes the interview when none exists yet.
+    const hasInterview = await prisma.courseLesson.count({
+      where: { courseId, isInterview: true, deletedAt: null },
+    });
+    if (hasInterview === 0) {
+      lessonPatch.isInterview = true;
+      lessonPatch.sortOrder = 0;
+    }
+  }
+
+  // Interview lessons must remain free previews.
+  if (lesson.isInterview && lessonPatch.isFreePreview === false) {
+    return error(
+      "The interview video must stay free",
+      400,
+      "INTERVIEW_MUST_BE_FREE"
+    );
+  }
+
+  const becomingPaid =
+    lessonPatch.isFreePreview === false && lesson.isFreePreview === true;
+  if (becomingPaid) {
+    const remainingFree = await prisma.courseLesson.count({
+      where: { courseId, isFreePreview: true, deletedAt: null, id: { not: lessonId } },
+    });
+    if (remainingFree < 2) {
+      return error(
+        "A course must keep at least 2 free preview videos",
+        400,
+        "MIN_FREE_PREVIEWS"
+      );
+    }
   }
 
   const willBeFree =
@@ -73,6 +107,14 @@ export async function PATCH(
     if (previews >= 2 && !lesson.isFreePreview) {
       return error("A course can have at most 2 free preview lessons", 400, "FREE_PREVIEW_LIMIT");
     }
+  }
+
+  // Full free preview and timed free preview are mutually exclusive.
+  if (lessonPatch.isFreePreview === true || lessonPatch.isInterview === true) {
+    lessonPatch.freePreviewSec = null;
+  } else if (lessonPatch.freePreviewSec !== undefined) {
+    const sec = lessonPatch.freePreviewSec;
+    lessonPatch.freePreviewSec = sec != null && sec > 0 ? sec : null;
   }
 
   if (lesson.course.status === "APPROVED" && hasMediaChange) {

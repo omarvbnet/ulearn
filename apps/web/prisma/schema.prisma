@@ -366,6 +366,8 @@ model CourseLesson {
   durationSec   Int?
   sortOrder     Int      @default(0)
   isFreePreview Boolean  @default(false)
+  /// Partial free preview for non-purchasers (seconds from start). Null/0 = none.
+  freePreviewSec Int?
   isInterview   Boolean  @default(false)
   isHidden      Boolean  @default(false)
   deletedAt     DateTime?

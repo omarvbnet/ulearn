@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -12,6 +13,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/features/store/teacher_course_wizard_screen.dart';
 import 'package:ulearn/features/store/teacher_course_manage_screen.dart';
 import 'package:ulearn/features/store/teacher_quiz_tab.dart';
+import 'package:ulearn/features/store/widgets/free_minute_picker.dart';
 import 'package:ulearn/core/video/video_process_service.dart';
 import 'package:ulearn/core/video/video_upload_service.dart';
 
@@ -55,28 +57,30 @@ class _UploadPlan {
     preparing = _UploadSegment(cursor, cursor + 2);
     cursor = preparing.end;
 
+    // Compress/watermark is usually the longest phase — give it real bar weight
+    // so overall % doesn't look stuck while FFmpeg runs.
     if (compress) {
-      compressing = _UploadSegment(cursor, cursor + 18);
+      compressing = _UploadSegment(cursor, cursor + 40);
       cursor = compressing.end;
     } else {
       compressing = _UploadSegment(cursor, cursor);
     }
 
-    videoPresign = _UploadSegment(cursor, cursor + 3);
+    videoPresign = _UploadSegment(cursor, cursor + 2);
     cursor = videoPresign.end;
 
-    final videoWeight = includePdf ? 58 : 66;
+    final videoWeight = includePdf ? 38 : 44;
     videoUpload = _UploadSegment(cursor, cursor + videoWeight);
     cursor = videoUpload.end;
 
-    thumbnail = _UploadSegment(cursor, cursor + 3);
+    thumbnail = _UploadSegment(cursor, cursor + 2);
     cursor = thumbnail.end;
 
-    coverUpload = _UploadSegment(cursor, cursor + 5);
+    coverUpload = _UploadSegment(cursor, cursor + 4);
     cursor = coverUpload.end;
 
     if (includePdf) {
-      pdfUpload = _UploadSegment(cursor, cursor + 7);
+      pdfUpload = _UploadSegment(cursor, cursor + 5);
       cursor = pdfUpload.end;
     } else {
       pdfUpload = _UploadSegment(cursor, cursor);
@@ -112,8 +116,11 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   bool _loading = true;
   bool _uploading = false;
   StudioUploadProgress? _uploadProgress;
-  bool _progressFrameScheduled = false;
+  Timer? _progressUiTimer;
   bool _compressBeforeUpload = true;
+  /// paid | fullFree | timedFree
+  String _accessMode = 'paid';
+  int _freePreviewSec = 120;
 
   File? _pendingVideo;
   File? _pendingCover;
@@ -143,6 +150,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
 
   @override
   void dispose() {
+    _progressUiTimer?.cancel();
     _titleCtrl.dispose();
     _descCtrl.dispose();
     super.dispose();
@@ -156,6 +164,8 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       _pendingCover = null;
       _pendingPdf = null;
       _pendingDurationSec = null;
+      _accessMode = 'paid';
+      _freePreviewSec = 120;
     });
   }
 
@@ -167,25 +177,24 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   }) {
     if (!mounted) return;
     final clamped = percent.clamp(1, 100);
-    final next = StudioUploadProgress(
+    _uploadProgress = StudioUploadProgress(
       phase: phase,
       overallPercent: clamped,
       byteDetail: byteDetail,
     );
 
+    // Timer (not post-frame) so the bar updates even when the UI is idle —
+    // addPostFrameCallback only runs after scroll/input schedules a frame.
     if (force) {
-      _progressFrameScheduled = false;
-      setState(() => _uploadProgress = next);
+      _progressUiTimer?.cancel();
+      _progressUiTimer = null;
+      setState(() {});
       return;
     }
-
-    _uploadProgress = next;
-    if (_progressFrameScheduled) return;
-    _progressFrameScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _progressFrameScheduled = false;
-      if (!mounted || _uploadProgress == null) return;
-      setState(() {});
+    if (_progressUiTimer?.isActive ?? false) return;
+    _progressUiTimer = Timer(const Duration(milliseconds: 80), () {
+      _progressUiTimer = null;
+      if (mounted) setState(() {});
     });
   }
 
@@ -263,14 +272,17 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   Future<File?> _processVideoForUpload(_UploadPlan plan, {String? courseName}) async {
     final video = _pendingVideo;
     if (video == null) return null;
-    if (!_compressBeforeUpload) return video;
 
     final uploadService = VideoUploadService(context.read<ApiClient>());
     final wm = await uploadService.fetchWatermarkConfig(courseName: courseName);
+    final sourceBytes = await video.length();
 
     _setOverall(
       plan.compressing.start,
       StudioUploadPhase.compressing,
+      byteDetail: context.l10n.t('mobile.studio.convertingIphone', {
+        'size': VideoProcessService.formatBytes(sourceBytes),
+      }),
       force: true,
     );
     final result = await VideoProcessService.processForUpload(
@@ -281,10 +293,22 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
         _setOverall(
           plan.compressing.atRatio(p),
           StudioUploadPhase.compressing,
-          byteDetail: '${(p * 100).round()}%',
+          byteDetail: context.l10n.t('mobile.teacher.convertingVideo', {
+            'size': VideoProcessService.formatBytes(sourceBytes),
+            'percent': '${(p * 100).round()}',
+          }),
         );
       },
     );
+    if (mounted) {
+      _setOverall(
+        plan.compressing.end,
+        StudioUploadPhase.compressing,
+        byteDetail:
+            '${VideoProcessService.formatBytes(result.sourceBytes)} → ${VideoProcessService.formatBytes(result.outputBytes)}',
+        force: true,
+      );
+    }
     return result.file;
   }
 
@@ -346,6 +370,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       courseId: courseId,
       scope: scope,
       durationSec: _pendingDurationSec,
+      watermarkApplied: _compressBeforeUpload,
       onPhase: (phase) {
         if (!mounted) return;
         if (phase == 'presign') {
@@ -435,11 +460,32 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
 
     final duration = await VideoCoverHelper.videoDurationSec(source.path);
     if (!mounted) return;
+    final sizeLabel = VideoProcessService.formatBytes(await source.length());
+    final isMov = source.path.toLowerCase().endsWith('.mov');
     setState(() {
       _pendingVideo = source;
       _pendingCover = null;
       _pendingDurationSec = duration;
     });
+    if (isMov && _compressBeforeUpload) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.l10n.t('mobile.studio.compressOnHint', {'size': sizeLabel}),
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } else if (isMov && !_compressBeforeUpload) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.l10n.t('mobile.studio.compressOffHint', {'size': sizeLabel}),
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
   }
 
   Future<void> _pickCoverImage() async {
@@ -455,10 +501,22 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
 
   Future<void> _autoCoverFromVideo() async {
     if (_pendingVideo == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.l10n.t('mobile.studio.fromVideo'))),
+    );
     final cover = await VideoCoverHelper.thumbnailFromVideo(
       _pendingVideo!.path,
     );
-    if (mounted) setState(() => _pendingCover = cover);
+    if (!mounted) return;
+    if (cover == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.l10n.t('mobile.studio.coverFromVideoFailed')),
+        ),
+      );
+      return;
+    }
+    setState(() => _pendingCover = cover);
   }
 
   Future<File?> _prepareVideoForUpload(_UploadPlan plan) async {
@@ -468,20 +526,26 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       video = _pendingVideo;
     }
     if (video == null) return null;
+    // Compress / watermark only when the teacher turns the toggle on.
     if (!_compressBeforeUpload) return video;
     return _processVideoForUpload(plan, courseName: _selectedCourseTitle());
   }
 
-  Future<Map<String, String>?> _uploadCoverIfAny(
-    String folder,
-    _UploadPlan plan,
-  ) async {
-    if (_pendingCover == null) return null;
-    return _uploadCoverFile(_pendingCover!, folder, plan);
-  }
-
   Future<void> _uploadCourseVideo() async {
+    FocusManager.instance.primaryFocus?.unfocus();
     if (_courseId == null || _titleCtrl.text.trim().isEmpty) return;
+    if (_pendingVideo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.studioPickVideoFirst)),
+      );
+      return;
+    }
+    if (_pendingCover == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.t('mobile.studio.coverRequired'))),
+      );
+      return;
+    }
 
     final plan = _UploadPlan(
       compress: _compressBeforeUpload,
@@ -513,36 +577,26 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       );
       if (uploaded == null) throw Exception('Upload failed');
 
+      // Cover is required and already chosen — never auto-extract (that hangs on large MOV).
       _setOverall(
-        plan.thumbnail.start,
+        plan.coverUpload.start,
         StudioUploadPhase.uploadingCover,
-        byteDetail: null,
+        byteDetail: context.l10n.t('mobile.studio.uploadingCoverBusy'),
         force: true,
       );
-      if (_pendingCover == null) {
-        _pendingCover = await VideoCoverHelper.thumbnailFromVideo(
-          videoFile.path,
-        );
-      }
-      _pendingDurationSec ??= await VideoCoverHelper.videoDurationSec(
-        videoFile.path,
-      );
-      _setOverall(
-        plan.thumbnail.end,
-        StudioUploadPhase.uploadingCover,
-        byteDetail: null,
-        force: true,
-      );
-
-      final cover = await _uploadCoverIfAny('teacher-covers', plan);
+      final cover = await _uploadCoverFile(_pendingCover!, 'teacher-covers', plan);
+      if (cover == null) throw Exception('Cover upload failed');
 
       final payload = <String, dynamic>{
         'title': _titleCtrl.text.trim(),
         'fileKey': uploaded.objectKey,
         'videoAssetId': uploaded.videoId,
-        if (cover != null) 'thumbnailKey': cover['key'],
-        if (cover != null) 'thumbnailUrl': cover['url'],
+        'thumbnailKey': cover['key'],
+        'thumbnailUrl': cover['url'],
         if (_pendingDurationSec != null) 'durationSec': _pendingDurationSec,
+        'isFreePreview': _accessMode == 'fullFree',
+        if (_accessMode == 'timedFree') 'freePreviewSec': _freePreviewSec,
+        if (_accessMode != 'timedFree') 'freePreviewSec': null,
       };
 
       if (_pendingPdf != null) {
@@ -583,14 +637,28 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
         setState(() {
           _uploading = false;
           _uploadProgress = null;
-          _progressFrameScheduled = false;
+          _progressUiTimer?.cancel();
+          _progressUiTimer = null;
         });
       }
     }
   }
 
   Future<void> _uploadShort() async {
+    FocusManager.instance.primaryFocus?.unfocus();
     if (_titleCtrl.text.trim().isEmpty) return;
+    if (_pendingVideo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.studioPickVideoFirst)),
+      );
+      return;
+    }
+    if (_pendingCover == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.t('mobile.studio.coverRequired'))),
+      );
+      return;
+    }
 
     final plan = _UploadPlan(
       compress: _compressBeforeUpload,
@@ -622,27 +690,17 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       if (uploaded == null) throw Exception('Upload failed');
 
       _setOverall(
-        plan.thumbnail.start,
+        plan.coverUpload.start,
         StudioUploadPhase.uploadingCover,
-        byteDetail: null,
+        byteDetail: context.l10n.t('mobile.studio.uploadingCoverBusy'),
         force: true,
       );
-      if (_pendingCover == null) {
-        _pendingCover = await VideoCoverHelper.thumbnailFromVideo(
-          videoFile.path,
-        );
-      }
-      _pendingDurationSec ??= await VideoCoverHelper.videoDurationSec(
-        videoFile.path,
+      final cover = await _uploadCoverFile(
+        _pendingCover!,
+        'teacher-shorts-covers',
+        plan,
       );
-      _setOverall(
-        plan.thumbnail.end,
-        StudioUploadPhase.uploadingCover,
-        byteDetail: null,
-        force: true,
-      );
-
-      final cover = await _uploadCoverIfAny('teacher-shorts-covers', plan);
+      if (cover == null) throw Exception('Cover upload failed');
 
       _setOverall(
         plan.saving.start,
@@ -655,7 +713,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
         if (_descCtrl.text.trim().isNotEmpty)
           'description': _descCtrl.text.trim(),
         'fileKey': uploaded.objectKey,
-        if (cover != null) 'thumbnailUrl': cover['url'],
+        'thumbnailUrl': cover['url'],
         if (_pendingDurationSec != null) 'durationSec': _pendingDurationSec,
       });
       _setOverall(100, StudioUploadPhase.saving, byteDetail: null, force: true);
@@ -677,7 +735,8 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
         setState(() {
           _uploading = false;
           _uploadProgress = null;
-          _progressFrameScheduled = false;
+          _progressUiTimer?.cancel();
+          _progressUiTimer = null;
         });
       }
     }
@@ -686,7 +745,10 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    return DefaultTabController(
+    return GestureDetector(
+      onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+      behavior: HitTestBehavior.translucent,
+      child: DefaultTabController(
       length: 3,
       child: Scaffold(
         body: NestedScrollView(
@@ -793,6 +855,10 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                       onUpload: _uploadCourseVideo,
                       compressBeforeUpload: _compressBeforeUpload,
                       onCompressChanged: _setCompressBeforeUpload,
+                      accessMode: _accessMode,
+                      onAccessMode: (m) => setState(() => _accessMode = m),
+                      freePreviewSec: _freePreviewSec,
+                      onFreePreviewSec: (s) => setState(() => _freePreviewSec = s),
                     ),
                     TeacherQuizTab(
                       courses: _courses,
@@ -828,6 +894,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                 ),
         ),
       ),
+      ),
     );
   }
 }
@@ -858,6 +925,10 @@ class _UploadTab extends StatelessWidget {
     required this.onCompressChanged,
     this.isShort = false,
     this.shorts = const [],
+    this.accessMode = 'paid',
+    this.onAccessMode,
+    this.freePreviewSec = 120,
+    this.onFreePreviewSec,
   });
 
   final TextEditingController titleCtrl;
@@ -884,10 +955,15 @@ class _UploadTab extends StatelessWidget {
   final ValueChanged<bool> onCompressChanged;
   final bool isShort;
   final List<Map<String, dynamic>> shorts;
+  final String accessMode;
+  final ValueChanged<String>? onAccessMode;
+  final int freePreviewSec;
+  final ValueChanged<int>? onFreePreviewSec;
 
   bool get _canPublish =>
       titleCtrl.text.trim().isNotEmpty &&
       pendingVideo != null &&
+      pendingCover != null &&
       (isShort || courseId != null);
 
   String _formatDuration(int sec) {
@@ -908,8 +984,20 @@ class _UploadTab extends StatelessWidget {
     final overall = uploadProgress?.overallPercent ?? 0;
 
     return ListView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
       children: [
+        if (!isShort) ...[
+          ListenableBuilder(
+            listenable: titleCtrl,
+            builder: (context, _) => _StudioFlowSteps(
+              hasDetails: titleCtrl.text.trim().isNotEmpty && courseId != null,
+              hasMedia: pendingVideo != null && pendingCover != null,
+              hasAccess: true,
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
         _StudioHintBanner(
           icon: isShort ? Icons.movie_filter_outlined : Icons.school_outlined,
           title: isShort
@@ -929,6 +1017,7 @@ class _UploadTab extends StatelessWidget {
         ],
         const SizedBox(height: 16),
         _StudioSectionCard(
+          step: isShort ? null : '1',
           title: isShort
               ? l10n.t('mobile.studio.shortTitle')
               : l10n.t('mobile.studio.lessonTitle'),
@@ -996,6 +1085,7 @@ class _UploadTab extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         _StudioSectionCard(
+          step: isShort ? null : '2',
           title: l10n.studioVideoFile,
           icon: Icons.videocam_rounded,
           child: Column(
@@ -1032,11 +1122,17 @@ class _UploadTab extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         _StudioSectionCard(
-          title: l10n.studioCoverOptional,
+          step: isShort ? null : '2',
+          title: l10n.t('mobile.studio.coverRequiredTitle'),
           icon: Icons.image_rounded,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Text(
+                l10n.t('mobile.studio.coverRequiredHint'),
+                style: const TextStyle(color: AppTheme.muted, fontSize: 12.5, height: 1.4),
+              ),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(
@@ -1063,6 +1159,13 @@ class _UploadTab extends StatelessWidget {
                   ),
                 ],
               ),
+              if (pendingCover == null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  l10n.t('mobile.studio.coverRequired'),
+                  style: const TextStyle(color: Colors.orangeAccent, fontSize: 12),
+                ),
+              ],
               if (pendingCover != null) ...[
                 const SizedBox(height: 12),
                 ClipRRect(
@@ -1102,6 +1205,43 @@ class _UploadTab extends StatelessWidget {
           ),
         ),
         if (!isShort) ...[
+          const SizedBox(height: 14),
+          _StudioSectionCard(
+            step: '3',
+            title: l10n.t('mobile.studio.accessTitle'),
+            icon: Icons.lock_open_rounded,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  l10n.t('mobile.studio.accessHint'),
+                  style: const TextStyle(color: AppTheme.muted, fontSize: 12.5, height: 1.4),
+                ),
+                const SizedBox(height: 12),
+                _AccessModeCard(
+                  selected: accessMode,
+                  enabled: !uploading,
+                  onChanged: onAccessMode,
+                ),
+                if (accessMode == 'timedFree') ...[
+                  const SizedBox(height: 16),
+                  FreeMinutePicker(
+                    durationSec: pendingDurationSec ?? 600,
+                    valueSec: freePreviewSec,
+                    enabled: !uploading,
+                    onChanged: onFreePreviewSec ?? (_) {},
+                  ),
+                ],
+                if (accessMode == 'fullFree') ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    l10n.t('mobile.studio.fullFreeHint'),
+                    style: const TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.4),
+                  ),
+                ],
+              ],
+            ),
+          ),
           const SizedBox(height: 14),
           _StudioSectionCard(
             title: l10n.t('mobile.teacher.attachPdfOptional'),
@@ -1164,7 +1304,10 @@ class _UploadTab extends StatelessWidget {
             label: pendingVideo != null && !uploading
                 ? l10n.t('mobile.studio.mediaReady')
                 : l10n.t('student.videos'),
-            onPressed: onUpload,
+            onPressed: () {
+              FocusManager.instance.primaryFocus?.unfocus();
+              onUpload();
+            },
           ),
         ),
         if (isShort && shorts.isNotEmpty) ...[
@@ -1351,16 +1494,184 @@ class _UploadProgressCard extends StatelessWidget {
   }
 }
 
+class _StudioFlowSteps extends StatelessWidget {
+  const _StudioFlowSteps({
+    required this.hasDetails,
+    required this.hasMedia,
+    required this.hasAccess,
+  });
+
+  final bool hasDetails;
+  final bool hasMedia;
+  final bool hasAccess;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final steps = [
+      (l10n.t('mobile.studio.stepDetails'), hasDetails),
+      (l10n.t('mobile.studio.stepMedia'), hasMedia),
+      (l10n.t('mobile.studio.stepAccess'), hasAccess),
+    ];
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.cardBorder),
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < steps.length; i++) ...[
+            if (i > 0)
+              Expanded(
+                child: Container(
+                  height: 2,
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  color: steps[i].$2 || steps[i - 1].$2
+                      ? AppTheme.accent.withValues(alpha: 0.55)
+                      : AppTheme.cardBorder,
+                ),
+              ),
+            Column(
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  width: 28,
+                  height: 28,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: steps[i].$2 ? AppTheme.accent : AppTheme.cardBorder,
+                  ),
+                  child: steps[i].$2
+                      ? const Icon(Icons.check_rounded, size: 16, color: Colors.black)
+                      : Text(
+                          '${i + 1}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.muted,
+                          ),
+                        ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  steps[i].$1,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: steps[i].$2 ? AppTheme.accent : AppTheme.muted,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AccessModeCard extends StatelessWidget {
+  const _AccessModeCard({
+    required this.selected,
+    required this.onChanged,
+    this.enabled = true,
+  });
+
+  final String selected;
+  final ValueChanged<String>? onChanged;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final options = [
+      ('paid', Icons.lock_outline_rounded, l10n.t('mobile.studio.accessPaid'), l10n.t('mobile.studio.accessPaidHint')),
+      ('timedFree', Icons.timelapse_rounded, l10n.t('mobile.studio.accessTimed'), l10n.t('mobile.studio.accessTimedHint')),
+      ('fullFree', Icons.lock_open_rounded, l10n.t('mobile.studio.accessFullFree'), l10n.t('mobile.studio.accessFullFreeHint')),
+    ];
+    return Column(
+      children: [
+        for (final o in options) ...[
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: enabled && onChanged != null ? () => onChanged!(o.$1) : null,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: selected == o.$1
+                        ? AppTheme.accent
+                        : AppTheme.cardBorder,
+                    width: selected == o.$1 ? 1.6 : 1,
+                  ),
+                  color: selected == o.$1
+                      ? AppTheme.accent.withValues(alpha: 0.1)
+                      : Colors.white.withValues(alpha: 0.02),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      o.$2,
+                      color: selected == o.$1 ? AppTheme.accent : AppTheme.muted,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            o.$3,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: selected == o.$1 ? Colors.white : null,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            o.$4,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.muted,
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (selected == o.$1)
+                      const Icon(Icons.check_circle_rounded, color: AppTheme.accent, size: 20),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _StudioSectionCard extends StatelessWidget {
   const _StudioSectionCard({
     required this.title,
     required this.icon,
     required this.child,
+    this.step,
   });
 
   final String title;
   final IconData icon;
   final Widget child;
+  final String? step;
 
   @override
   Widget build(BuildContext context) {
@@ -1368,14 +1679,41 @@ class _StudioSectionCard extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
         color: AppTheme.card,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: AppTheme.cardBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
+              if (step != null) ...[
+                Container(
+                  width: 24,
+                  height: 24,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppTheme.accent.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    step!,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.accent,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(

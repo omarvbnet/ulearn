@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
@@ -186,8 +187,8 @@ class ApiClient {
     throw lastError ?? ApiException('Upload failed', 0);
   }
 
-  /// Starts the HTTP request first, then pipes the body so [onProgress]
-  /// reflects bytes actually flowing during the upload (not pre-buffered).
+  /// Starts the HTTP request first, then pipes the body with backpressure so
+  /// [onProgress] tracks bytes accepted by the network stack (not a memory buffer).
   Future<void> _streamPut({
     required http.Client client,
     required Uri target,
@@ -208,22 +209,40 @@ class ApiClient {
 
     onProgress?.call(0, contentLength);
 
-    // Start sending immediately; body streams as chunks are added.
+    // Start sending immediately; body streams as chunks are accepted.
     final responseFuture = client.send(request);
 
     var sent = 0;
-    try {
-      await for (final chunk in openBody()) {
-        request.sink.add(chunk);
-        sent += chunk.length;
-        onProgress?.call(sent.clamp(0, contentLength), contentLength);
+    var lastReported = 0;
+    final reportEvery = math.max(64 * 1024, contentLength ~/ 200); // ~0.5% or 64KB
+
+    void report(int value, {bool force = false}) {
+      if (onProgress == null) return;
+      if (!force && value < contentLength && value - lastReported < reportEvery) {
+        return;
       }
+      lastReported = value;
+      onProgress(value.clamp(0, contentLength), contentLength);
+    }
+
+    try {
+      await request.sink.addStream(
+        openBody().map((chunk) {
+          sent += chunk.length;
+          report(sent);
+          return chunk;
+        }),
+      );
       await request.sink.close();
     } catch (e) {
-      await request.sink.close();
+      try {
+        await request.sink.close();
+      } catch (_) {}
       rethrow;
     }
 
+    // Bytes are on the wire; wait for R2/S3 to acknowledge the object.
+    report(sent.clamp(0, contentLength), force: true);
     final response = await responseFuture.timeout(timeout);
     if (response.statusCode >= 400) {
       throw ApiException('Upload failed', response.statusCode);

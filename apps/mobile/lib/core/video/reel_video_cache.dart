@@ -135,17 +135,26 @@ class ReelVideoCache {
 
   static Future<VideoPlayerController> _createFresh(String resolved) async {
     try {
-      final file = await _manager.getSingleFile(resolved);
-      return VideoPlayerController.file(
-        file,
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-      );
-    } catch (_) {
-      return VideoPlayerController.networkUrl(
-        Uri.parse(resolved),
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-      );
+      final info = await _manager.getFileFromCache(resolved);
+      if (info != null && await info.file.exists()) {
+        return VideoPlayerController.file(
+          info.file,
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        );
+      }
+    } catch (_) {}
+
+    // Stream immediately; fill disk cache in the background.
+    if (!_prefetching.contains(resolved)) {
+      _prefetching.add(resolved);
+      _manager.downloadFile(resolved).whenComplete(() {
+        _prefetching.remove(resolved);
+      });
     }
+    return VideoPlayerController.networkUrl(
+      Uri.parse(resolved),
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+    );
   }
 
   /// Keep a recently used controller warm for fast swipe-back.

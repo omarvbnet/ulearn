@@ -19,6 +19,7 @@ const lessonSchema = z.object({
   sortOrder: z.number().int().optional(),
   isFreePreview: z.boolean().optional(),
   isInterview: z.boolean().optional(),
+  freePreviewSec: z.number().int().min(0).max(3600).nullable().optional(),
   pdfTitle: z.string().optional(),
   pdfFileKey: z.string().optional(),
   pdfFileUrl: z.string().optional(),
@@ -44,6 +45,12 @@ export async function POST(
 
   const isInterview = parsed.data.isInterview === true;
   const isFreePreview = isInterview || parsed.data.isFreePreview === true;
+  const freePreviewSec =
+    isFreePreview
+      ? null
+      : parsed.data.freePreviewSec != null && parsed.data.freePreviewSec > 0
+        ? parsed.data.freePreviewSec
+        : null;
 
   // Students may sample at most 2 free preview videos per paid course.
   if (isFreePreview) {
@@ -78,6 +85,7 @@ export async function POST(
       durationSec: parsed.data.durationSec,
       sortOrder: isInterview ? 0 : (parsed.data.sortOrder ?? (maxSort._max.sortOrder ?? -1) + 1),
       isFreePreview,
+      freePreviewSec,
       isInterview,
       videoAssetId: parsed.data.videoAssetId,
     },
@@ -136,6 +144,25 @@ export async function DELETE(
 
   const { lessonId } = (await request.json()) as { lessonId?: string };
   if (!lessonId) return error("lessonId is required", 422, "VALIDATION");
+
+  const lesson = await prisma.courseLesson.findFirst({
+    where: { id: lessonId, courseId: id, deletedAt: null },
+    select: { id: true, isFreePreview: true, isInterview: true },
+  });
+  if (!lesson) return error("Lesson not found", 404, "NOT_FOUND");
+
+  if (lesson.isFreePreview) {
+    const remainingFree = await prisma.courseLesson.count({
+      where: { courseId: id, isFreePreview: true, deletedAt: null, id: { not: lessonId } },
+    });
+    if (remainingFree < 2) {
+      return error(
+        "A course must keep at least 2 free preview videos",
+        400,
+        "MIN_FREE_PREVIEWS"
+      );
+    }
+  }
 
   await prisma.courseLesson.updateMany({
     where: { id: lessonId, courseId: id },

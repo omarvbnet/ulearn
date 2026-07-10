@@ -25,6 +25,7 @@ type Course = {
   status: string;
   reviewNotes: string | null;
   closedByLevel: boolean;
+  thumbnail?: string | null;
   stage: { nameEn: string };
   subject: { nameEn: string };
   lessons: Lesson[];
@@ -397,6 +398,7 @@ function EditCourseModal({ course, onClose, onDone, toast }: {
   toast: (msg: string, type?: "success" | "error" | "info") => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
   const [form, setForm] = useState({
     titleEn: course.titleEn,
     description: course.description ?? "",
@@ -406,22 +408,50 @@ function EditCourseModal({ course, onClose, onDone, toast }: {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    const res = await fetch(`/api/teacher/courses/${course.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        titleEn: form.titleEn,
-        description: form.description || undefined,
-        price: Number(form.price),
-      }),
-    });
-    setSaving(false);
-    if (res.ok) {
-      toast("Course updated — sent back for review if it was live");
-      onDone();
-    } else {
-      const d = await res.json().catch(() => ({}));
-      toast(d.error || "Failed to update course", "error");
+    try {
+      let thumbnail = course.thumbnail ?? undefined;
+      if (coverFile) {
+        const presign = await fetch("/api/admin/uploads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: coverFile.name,
+            contentType: coverFile.type || "image/jpeg",
+            size: coverFile.size,
+            category: "image",
+            folder: "teacher-covers",
+          }),
+        }).then((r) => r.json());
+        if (!presign.uploadUrl) throw new Error("Cover upload failed");
+        await fetch(presign.uploadUrl, {
+          method: "PUT",
+          headers: { "Content-Type": coverFile.type || "image/jpeg" },
+          body: coverFile,
+        });
+        thumbnail = presign.publicUrl ?? thumbnail;
+      }
+
+      const res = await fetch(`/api/teacher/courses/${course.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          titleEn: form.titleEn,
+          description: form.description || undefined,
+          price: Number(form.price),
+          ...(thumbnail ? { thumbnail } : {}),
+        }),
+      });
+      if (res.ok) {
+        toast("Course updated — sent back for review if it was live");
+        onDone();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        toast(d.error || "Failed to update course", "error");
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to update course", "error");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -447,6 +477,23 @@ function EditCourseModal({ course, onClose, onDone, toast }: {
           onChange={(e) => setForm({ ...form, price: e.target.value })}
           required
         />
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Course cover</label>
+          {(coverFile || course.thumbnail) && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={coverFile ? URL.createObjectURL(coverFile) : (course.thumbnail as string)}
+              alt=""
+              className="h-36 w-full rounded-lg object-cover"
+            />
+          )}
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)}
+            className="input file:me-3 file:rounded-lg file:border-0 file:bg-accent/15 file:px-3 file:py-1.5 file:text-sm file:text-accent"
+          />
+        </div>
         <Button type="submit" disabled={saving} className="w-full">
           {saving ? "Saving…" : "Save changes"}
         </Button>
@@ -631,7 +678,42 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
     if (res.ok) {
       setLessons(lessons.filter((l) => l.id !== lessonId));
       onChanged();
+    } else {
+      const d = await res.json().catch(() => ({}));
+      toast(d.error || "Could not remove lesson", "error");
     }
+  }
+
+  async function setLessonAccess(lesson: Lesson, makeFree: boolean) {
+    if (lesson.isInterview && !makeFree) {
+      toast("The interview video must remain free", "error");
+      return;
+    }
+    if (lesson.isFreePreview === makeFree) return;
+    const freeCount = lessons.filter((l) => l.isFreePreview).length;
+    if (!makeFree && lesson.isFreePreview && freeCount <= 2) {
+      toast("Keep at least 2 free preview videos", "error");
+      return;
+    }
+    if (makeFree && !lesson.isFreePreview && freeCount >= 2) {
+      toast("A course can have at most 2 free preview videos", "error");
+      return;
+    }
+    const res = await fetch(`/api/teacher/courses/${course.id}/lessons/${lesson.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isFreePreview: makeFree }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      toast(d.error || "Could not update access", "error");
+      return;
+    }
+    setLessons(
+      lessons.map((l) => (l.id === lesson.id ? { ...l, isFreePreview: makeFree } : l))
+    );
+    toast(makeFree ? "Marked as free preview" : "Marked as paid");
+    onChanged();
   }
 
   async function renameLesson(lesson: Lesson) {
@@ -719,6 +801,28 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
                   )}
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
+                  {!l.isInterview && (
+                    <>
+                      <button
+                        className={cn(
+                          "rounded px-2 py-0.5 text-xs",
+                          l.isFreePreview ? "bg-accent/20 text-accent" : "text-muted hover:underline"
+                        )}
+                        onClick={() => setLessonAccess(l, true)}
+                      >
+                        Free
+                      </button>
+                      <button
+                        className={cn(
+                          "rounded px-2 py-0.5 text-xs",
+                          !l.isFreePreview ? "bg-accent/20 text-accent" : "text-muted hover:underline"
+                        )}
+                        onClick={() => setLessonAccess(l, false)}
+                      >
+                        Paid
+                      </button>
+                    </>
+                  )}
                   <button className="text-xs text-muted hover:underline" onClick={() => moveLesson(i, -1)} disabled={i === 0}>
                     Up
                   </button>

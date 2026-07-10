@@ -10,8 +10,10 @@ const MIN_RATINGS_FOR_AUTO_LEVEL = 5;
 
 /** Each store course must have at least this many quizzes before going live. */
 export const MIN_COURSE_QUIZZES = 2;
-/** Required free preview lessons (including the interview). */
+/** Required free preview lessons (including the interview) — one approval path. */
 export const MIN_FREE_PREVIEW_VIDEOS = 2;
+/** Alternate approval path: at least this many free preview seconds on a lesson. */
+export const MIN_TIMED_FREE_PREVIEW_SEC = 120; // 2 minutes
 /** Required course documents (PDF / materials). */
 export const MIN_COURSE_DOCUMENTS = 1;
 
@@ -20,6 +22,11 @@ export type CourseReadiness = {
   hasCover: boolean;
   freeVideos: number;
   hasInterview: boolean;
+  /** Max freePreviewSec among non-full-free lessons. */
+  timedFreeSec: number;
+  hasTimedFree: boolean;
+  /** True if 2 full free videos OR ≥2 free minutes (or both). */
+  hasSampleAccess: boolean;
   quizzes: number;
   documents: number;
   ready: boolean;
@@ -390,6 +397,65 @@ export class TeacherCourseService {
     };
   }
 
+  /**
+   * If the course has free previews but none marked as interview,
+   * promote the first free preview (by sort order) to interview.
+   * Interview always counts as one of the required free videos.
+   */
+  static async ensureInterviewFromFreePreviews(courseId: string) {
+    const lessons = await prisma.courseLesson.findMany({
+      where: { courseId, deletedAt: null },
+      orderBy: { sortOrder: "asc" },
+      select: {
+        id: true,
+        isFreePreview: true,
+        isInterview: true,
+        fileKey: true,
+        fileUrl: true,
+        videoAssetId: true,
+        sortOrder: true,
+      },
+    });
+
+    const videoLessons = lessons.filter(
+      (l) => l.fileKey || l.fileUrl || l.videoAssetId
+    );
+    if (videoLessons.some((l) => l.isInterview && l.isFreePreview)) {
+      return { promoted: false as const };
+    }
+
+    const candidate = videoLessons.find((l) => l.isFreePreview) ?? null;
+    if (!candidate) {
+      return { promoted: false as const };
+    }
+
+    await prisma.$transaction([
+      prisma.courseLesson.updateMany({
+        where: { courseId, isInterview: true, deletedAt: null, id: { not: candidate.id } },
+        data: { isInterview: false },
+      }),
+      prisma.courseLesson.update({
+        where: { id: candidate.id },
+        data: {
+          isInterview: true,
+          isFreePreview: true,
+          sortOrder: 0,
+        },
+      }),
+      // Keep other lessons after the interview without colliding on sortOrder 0.
+      ...videoLessons
+        .filter((l) => l.id !== candidate.id)
+        .map((l, index) =>
+          prisma.courseLesson.update({
+            where: { id: l.id },
+            data: { sortOrder: index + 1 },
+          })
+        ),
+    ]);
+
+    return { promoted: true as const, lessonId: candidate.id };
+  }
+
   static async getCourseReadiness(courseId: string): Promise<CourseReadiness> {
     const course = await prisma.course.findFirst({
       where: { id: courseId, deletedAt: null },
@@ -401,6 +467,7 @@ export class TeacherCourseService {
           select: {
             isFreePreview: true,
             isInterview: true,
+            freePreviewSec: true,
             fileKey: true,
             fileUrl: true,
             videoAssetId: true,
@@ -419,6 +486,9 @@ export class TeacherCourseService {
         hasCover: false,
         freeVideos: 0,
         hasInterview: false,
+        timedFreeSec: 0,
+        hasTimedFree: false,
+        hasSampleAccess: false,
         quizzes: 0,
         documents: 0,
         ready: false,
@@ -431,6 +501,15 @@ export class TeacherCourseService {
     );
     const freeVideos = videoLessons.filter((l) => l.isFreePreview).length;
     const hasInterview = videoLessons.some((l) => l.isInterview && l.isFreePreview);
+    const timedFreeSec = videoLessons.reduce((max, l) => {
+      if (l.isFreePreview) return max;
+      const sec = typeof l.freePreviewSec === "number" ? l.freePreviewSec : 0;
+      return Math.max(max, sec);
+    }, 0);
+    const hasTimedFree = timedFreeSec >= MIN_TIMED_FREE_PREVIEW_SEC;
+    const hasEnoughFullFree = freeVideos >= MIN_FREE_PREVIEW_VIDEOS;
+    // Approve with 2 full free videos, OR ≥2 free minutes on a lesson, OR both.
+    const hasSampleAccess = hasEnoughFullFree || hasTimedFree;
     const quizzes = await this.countValidCourseQuizzes(courseId);
     const documents = course.materials.length;
     const hasTitle = Boolean(course.titleEn?.trim() && course.titleEn.trim().length >= 2);
@@ -439,9 +518,10 @@ export class TeacherCourseService {
     const missing: string[] = [];
     if (!hasTitle) missing.push("Course title");
     if (!hasCover) missing.push("Course cover image");
-    if (!hasInterview) missing.push("Interview / intro free video");
-    if (freeVideos < MIN_FREE_PREVIEW_VIDEOS) {
-      missing.push(`At least ${MIN_FREE_PREVIEW_VIDEOS} free preview videos`);
+    if (!hasSampleAccess) {
+      missing.push(
+        `Add ${MIN_FREE_PREVIEW_VIDEOS} free preview videos, or at least ${MIN_TIMED_FREE_PREVIEW_SEC / 60} free minutes on a lesson (or both)`
+      );
     }
     if (quizzes < MIN_COURSE_QUIZZES) {
       missing.push(`At least ${MIN_COURSE_QUIZZES} quizzes with questions`);
@@ -455,6 +535,9 @@ export class TeacherCourseService {
       hasCover,
       freeVideos,
       hasInterview,
+      timedFreeSec,
+      hasTimedFree,
+      hasSampleAccess,
       quizzes,
       documents,
       ready: missing.length === 0,
@@ -471,6 +554,7 @@ export class TeacherCourseService {
       return { success: false as const, error: "INVALID_STATUS" as const };
     }
 
+    await this.ensureInterviewFromFreePreviews(courseId);
     const readiness = await this.getCourseReadiness(courseId);
     if (!readiness.ready) {
       return { success: false as const, error: "NOT_READY" as const, readiness };
@@ -624,6 +708,7 @@ export class TeacherCourseService {
       if (!course.teacher.isActive) {
         return { success: false as const, error: "TEACHER_BLOCKED" };
       }
+      await this.ensureInterviewFromFreePreviews(courseId);
       const readiness = await this.getCourseReadiness(courseId);
       if (!readiness.ready) {
         return {

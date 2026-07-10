@@ -29,6 +29,21 @@ class VideoUploadService {
 
   final ApiClient _api;
 
+  static String contentTypeFor(File file) {
+    final name = file.path.toLowerCase();
+    if (name.endsWith('.mov')) return 'video/quicktime';
+    if (name.endsWith('.webm')) return 'video/webm';
+    if (name.endsWith('.m4v')) return 'video/x-m4v';
+    if (name.endsWith('.mkv')) return 'video/x-matroska';
+    return 'video/mp4';
+  }
+
+  static String filenameFor(File file) {
+    final name = file.path.split(Platform.pathSeparator).last;
+    if (name.contains('.')) return name;
+    return '$name.mp4';
+  }
+
   Future<VideoUploadResult> uploadCourseVideo({
     required File file,
     String? courseId,
@@ -37,18 +52,20 @@ class VideoUploadService {
     int? width,
     int? height,
     String? courseLessonId,
+    bool watermarkApplied = false,
     UploadProgressCallback? onProgress,
     void Function(String phase)? onPhase,
   }) async {
-    final name = file.path.split(Platform.pathSeparator).last;
     final size = await file.length();
+    final contentType = contentTypeFor(file);
+    final filename = filenameFor(file);
 
     onPhase?.call('presign');
     final session = await _api.post('/api/videos/upload-url', {
       if (courseId != null) 'courseId': courseId,
       'scope': scope,
-      'filename': name.endsWith('.mp4') ? name : '$name.mp4',
-      'contentType': 'video/mp4',
+      'filename': filename,
+      'contentType': contentType,
       'size': size,
     });
 
@@ -63,7 +80,7 @@ class VideoUploadService {
     await _api.putFile(
       uploadUrl,
       file,
-      'video/mp4',
+      contentType,
       onProgress: onProgress,
     );
 
@@ -73,7 +90,7 @@ class VideoUploadService {
       if (durationSec != null) 'durationSec': durationSec,
       if (width != null) 'width': width,
       if (height != null) 'height': height,
-      'watermarkApplied': true,
+      'watermarkApplied': watermarkApplied,
       if (courseLessonId != null) 'courseLessonId': courseLessonId,
     });
 
