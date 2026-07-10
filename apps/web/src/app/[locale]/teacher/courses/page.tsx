@@ -5,6 +5,7 @@ import { EmptyState, Modal, SkeletonRows, useToast } from "@/components/overlay"
 import { cn } from "@/lib/utils";
 import { captureVideoThumbnail } from "@/lib/video-thumbnail";
 import { fetchWatermarkConfig, processVideoForUpload, uploadVideoDirect } from "@/lib/video-process";
+import { CourseWizard } from "./course-wizard";
 import { useCallback, useEffect, useState } from "react";
 
 type Lesson = {
@@ -12,6 +13,7 @@ type Lesson = {
   title: string;
   durationSec: number | null;
   isFreePreview: boolean;
+  isInterview?: boolean;
 };
 
 type Course = {
@@ -44,6 +46,7 @@ type Meta = {
 };
 
 const STATUS_BADGE: Record<string, string> = {
+  DRAFT: "PENDING",
   PENDING_REVIEW: "PENDING",
   APPROVED: "APPROVED",
   REJECTED: "SUSPENDED",
@@ -55,6 +58,7 @@ export default function TeacherCoursesPage() {
   const [courses, setCourses] = useState<Course[] | null>(null);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [wizardCourseId, setWizardCourseId] = useState<string | undefined>();
   const [lessonsFor, setLessonsFor] = useState<Course | null>(null);
   const [quizzesFor, setQuizzesFor] = useState<Course | null>(null);
   const [editFor, setEditFor] = useState<Course | null>(null);
@@ -99,6 +103,7 @@ export default function TeacherCoursesPage() {
                   toast("Set your teaching specialties first (up to 3)", "error");
                   return;
                 }
+                setWizardCourseId(undefined);
                 setShowCreate(true);
               }}
             >
@@ -175,13 +180,29 @@ export default function TeacherCoursesPage() {
                   Admin: {c.reviewNotes}
                 </p>
               )}
-              {c._count.quizzes < 2 && (
+              {c.status === "DRAFT" && (
+                <p className="mt-2 rounded-lg bg-sky-500/10 p-2 text-sm text-sky-200">
+                  Draft — finish the wizard checklist, then submit for review.
+                </p>
+              )}
+              {c._count.quizzes < 2 && c.status !== "DRAFT" && (
                 <p className="mt-2 rounded-lg bg-amber-500/10 p-2 text-sm text-amber-200">
                   Add at least 2 quizzes before this course can be approved.
                 </p>
               )}
               <div className="mt-3 flex flex-wrap gap-2">
-                {c.status !== "APPROVED" && (
+                {(c.status === "DRAFT" || c.status === "REJECTED") && (
+                  <Button
+                    className="!px-3 !py-1.5 text-xs"
+                    onClick={() => {
+                      setWizardCourseId(c.id);
+                      setShowCreate(true);
+                    }}
+                  >
+                    {c.status === "DRAFT" ? "Continue wizard" : "Fix & resubmit"}
+                  </Button>
+                )}
+                {c.status !== "APPROVED" && c.status !== "DRAFT" && (
                   <p className="w-full rounded-lg bg-amber-500/10 p-2 text-xs text-amber-200">
                     Editing is allowed, but videos and PDFs stay hidden until admin approval.
                   </p>
@@ -221,14 +242,18 @@ export default function TeacherCoursesPage() {
       )}
 
       {showCreate && meta && (
-        <CreateCourseModal
+        <CourseWizard
           meta={meta}
-          onClose={() => setShowCreate(false)}
+          courseId={wizardCourseId}
+          onClose={() => {
+            setShowCreate(false);
+            setWizardCourseId(undefined);
+          }}
           onDone={() => {
             setShowCreate(false);
+            setWizardCourseId(undefined);
             load();
           }}
-          toast={toast}
         />
       )}
 
@@ -430,120 +455,6 @@ function EditCourseModal({ course, onClose, onDone, toast }: {
   );
 }
 
-function CreateCourseModal({ meta, onClose, onDone, toast }: {
-  meta: Meta;
-  onClose: () => void;
-  onDone: () => void;
-  toast: (msg: string, type?: "success" | "error" | "info") => void;
-}) {
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    titleEn: "",
-    titleAr: "",
-    description: "",
-    subjectId: "",
-    stageId: "",
-    price: "",
-  });
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    const res = await fetch("/api/teacher/courses", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        titleEn: form.titleEn,
-        titleAr: form.titleAr || undefined,
-        description: form.description || undefined,
-        subjectId: form.subjectId,
-        stageId: form.stageId,
-        price: Number(form.price),
-      }),
-    });
-    setSaving(false);
-    if (res.ok) {
-      toast("Course submitted for admin review");
-      onDone();
-    } else {
-      const d = await res.json().catch(() => ({}));
-      toast(
-        d.code === "SUBJECT_NOT_ASSIGNED"
-          ? "You can only create courses in your assigned subjects"
-          : d.error || "Failed to create course",
-        "error"
-      );
-    }
-  }
-
-  return (
-    <Modal open onClose={onClose} title="New Course">
-      <form onSubmit={submit} className="space-y-4">
-        <Input
-          label="Title (English)"
-          value={form.titleEn}
-          onChange={(e) => setForm({ ...form, titleEn: e.target.value })}
-          required
-        />
-        <Input
-          label="Title (Arabic)"
-          value={form.titleAr}
-          onChange={(e) => setForm({ ...form, titleAr: e.target.value })}
-          dir="rtl"
-        />
-        <Textarea
-          label="Description"
-          value={form.description}
-          onChange={(e) => setForm({ ...form, description: e.target.value })}
-        />
-        <Select
-          label="Subject (your specialization)"
-          value={form.subjectId}
-          onChange={(e) => setForm({ ...form, subjectId: e.target.value })}
-          required
-        >
-          <option value="">—</option>
-          {meta.subjects.length === 0 ? (
-            <option value="" disabled>
-              Add specialties on your profile first
-            </option>
-          ) : (
-            meta.subjects.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.nameEn}
-              </option>
-            ))
-          )}
-        </Select>
-        <Select
-          label="Students' stage"
-          value={form.stageId}
-          onChange={(e) => setForm({ ...form, stageId: e.target.value })}
-          required
-        >
-          <option value="">—</option>
-          {meta.stages.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.nameEn}
-            </option>
-          ))}
-        </Select>
-        <Input
-          label="Course price (IQD)"
-          type="number"
-          min="0"
-          value={form.price}
-          onChange={(e) => setForm({ ...form, price: e.target.value })}
-          required
-        />
-        <Button type="submit" disabled={saving} className="w-full">
-          {saving ? "Submitting…" : "Submit for Review"}
-        </Button>
-      </form>
-    </Modal>
-  );
-}
-
 function LessonsModal({ course, onClose, onChanged, toast }: {
   course: Course;
   onClose: () => void;
@@ -555,8 +466,68 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
   const [file, setFile] = useState<File | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [preview, setPreview] = useState(false);
+  const [asInterview, setAsInterview] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [replacingId, setReplacingId] = useState<string | null>(null);
+
+  async function uploadVideo(videoFile: File) {
+    const watermark = await fetchWatermarkConfig();
+    const processed = await processVideoForUpload(videoFile, {
+      watermark,
+      courseName: course.titleEn,
+      onProgress: setProgress,
+    });
+
+    let thumbnailKey: string | undefined;
+    let thumbnailUrl: string | undefined;
+    let durationSec: number | undefined;
+
+    try {
+      const captured = await captureVideoThumbnail(processed.file);
+      durationSec = captured.durationSec;
+      const thumbName = `${videoFile.name.replace(/\.[^.]+$/, "")}-cover.jpg`;
+      const thumbPresign = await fetch("/api/admin/uploads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: thumbName,
+          contentType: "image/jpeg",
+          size: captured.blob.size,
+          category: "image",
+          folder: "teacher-courses/covers",
+        }),
+      });
+      if (thumbPresign.ok) {
+        const thumb = await thumbPresign.json();
+        await fetch(thumb.uploadUrl, {
+          method: "PUT",
+          headers: { "Content-Type": "image/jpeg" },
+          body: captured.blob,
+        });
+        thumbnailKey = thumb.key;
+        thumbnailUrl = thumb.publicUrl;
+      }
+    } catch {
+      // Procedural covers still render on mobile when no thumbnail is stored.
+    }
+
+    setProgress(0);
+    const uploaded = await uploadVideoDirect({
+      file: processed.file,
+      courseId: course.id,
+      scope: "STORE_COURSE",
+      durationSec,
+      onProgress: setProgress,
+    });
+    return {
+      fileKey: uploaded.objectKey,
+      videoAssetId: uploaded.videoId,
+      thumbnailKey,
+      thumbnailUrl,
+      durationSec,
+    };
+  }
 
   async function addLesson(e: React.FormEvent) {
     e.preventDefault();
@@ -571,56 +542,15 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
       let durationSec: number | undefined;
       let pdfFileKey: string | undefined;
       let pdfFileUrl: string | undefined;
-
       let videoAssetId: string | undefined;
 
       if (file) {
-        const watermark = await fetchWatermarkConfig();
-        const processed = await processVideoForUpload(file, {
-          watermark,
-          courseName: course.titleEn,
-          onProgress: setProgress,
-        });
-
-        try {
-          const captured = await captureVideoThumbnail(processed.file);
-          durationSec = captured.durationSec;
-          const thumbName = `${file.name.replace(/\.[^.]+$/, "")}-cover.jpg`;
-          const thumbPresign = await fetch("/api/admin/uploads", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              filename: thumbName,
-              contentType: "image/jpeg",
-              size: captured.blob.size,
-              category: "image",
-              folder: "teacher-courses/covers",
-            }),
-          });
-          if (thumbPresign.ok) {
-            const thumb = await thumbPresign.json();
-            await fetch(thumb.uploadUrl, {
-              method: "PUT",
-              headers: { "Content-Type": "image/jpeg" },
-              body: captured.blob,
-            });
-            thumbnailKey = thumb.key;
-            thumbnailUrl = thumb.publicUrl;
-          }
-        } catch {
-          // Procedural covers still render on mobile when no thumbnail is stored.
-        }
-
-        setProgress(0);
-        const uploaded = await uploadVideoDirect({
-          file: processed.file,
-          courseId: course.id,
-          scope: "STORE_COURSE",
-          durationSec,
-          onProgress: setProgress,
-        });
-        fileKey = uploaded.objectKey;
-        videoAssetId = uploaded.videoId;
+        const uploaded = await uploadVideo(file);
+        fileKey = uploaded.fileKey;
+        videoAssetId = uploaded.videoAssetId;
+        thumbnailKey = uploaded.thumbnailKey;
+        thumbnailUrl = uploaded.thumbnailUrl;
+        durationSec = uploaded.durationSec;
       }
 
       if (pdfFile) {
@@ -656,8 +586,9 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
           thumbnailKey,
           thumbnailUrl,
           durationSec,
-          sortOrder: lessons.length,
-          isFreePreview: preview,
+          sortOrder: asInterview ? 0 : lessons.length,
+          isFreePreview: asInterview || preview,
+          isInterview: asInterview,
           ...(pdfFileKey
             ? {
                 pdfFileKey,
@@ -668,13 +599,20 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
             : {}),
         }),
       });
-      if (!res.ok) throw new Error("Failed to save lesson");
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || "Failed to save lesson");
+      }
       const { lesson } = await res.json();
-      setLessons([...lessons, lesson]);
+      const next = asInterview
+        ? [lesson, ...lessons.map((l) => ({ ...l, isInterview: false }))]
+        : [...lessons, lesson];
+      setLessons(next);
       setTitle("");
       setFile(null);
       setPdfFile(null);
       setPreview(false);
+      setAsInterview(false);
       toast(thumbnailUrl ? "Lesson added with smart cover" : "Lesson added");
       onChanged();
     } catch (err) {
@@ -696,28 +634,118 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
     }
   }
 
+  async function renameLesson(lesson: Lesson) {
+    const next = window.prompt("Rename lesson", lesson.title);
+    if (!next || !next.trim() || next.trim() === lesson.title) return;
+    const res = await fetch(`/api/teacher/courses/${course.id}/lessons/${lesson.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: next.trim() }),
+    });
+    if (!res.ok) {
+      toast("Rename failed", "error");
+      return;
+    }
+    setLessons(lessons.map((l) => (l.id === lesson.id ? { ...l, title: next.trim() } : l)));
+    onChanged();
+  }
+
+  async function moveLesson(index: number, dir: -1 | 1) {
+    const target = index + dir;
+    if (target < 0 || target >= lessons.length) return;
+    const next = [...lessons];
+    const [item] = next.splice(index, 1);
+    next.splice(target, 0, item);
+    // Keep interview at top when present
+    next.sort((a, b) => Number(!!b.isInterview) - Number(!!a.isInterview));
+    setLessons(next);
+    const res = await fetch(`/api/teacher/courses/${course.id}/lessons/reorder`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lessonIds: next.map((l) => l.id) }),
+    });
+    if (!res.ok) {
+      toast("Reorder failed", "error");
+      setLessons(lessons);
+      return;
+    }
+    onChanged();
+  }
+
+  async function replaceVideo(lessonId: string, videoFile: File) {
+    setReplacingId(lessonId);
+    setProgress(0);
+    try {
+      const uploaded = await uploadVideo(videoFile);
+      const res = await fetch(`/api/teacher/courses/${course.id}/lessons/${lessonId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileKey: uploaded.fileKey,
+          videoAssetId: uploaded.videoAssetId,
+          thumbnailKey: uploaded.thumbnailKey,
+          thumbnailUrl: uploaded.thumbnailUrl,
+          durationSec: uploaded.durationSec,
+        }),
+      });
+      if (!res.ok) throw new Error("Replace failed");
+      toast("Video replaced");
+      onChanged();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Replace failed", "error");
+    } finally {
+      setReplacingId(null);
+      setProgress(0);
+    }
+  }
+
   return (
     <Modal open onClose={onClose} title={`Lessons — ${course.titleEn}`} wide>
       <div className="space-y-4">
         {lessons.length > 0 && (
-          <ul className="max-h-56 space-y-2 overflow-y-auto">
+          <ul className="max-h-72 space-y-2 overflow-y-auto">
             {lessons.map((l, i) => (
               <li
                 key={l.id}
-                className="flex items-center justify-between rounded-lg border border-card-border px-3 py-2 text-sm"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-card-border px-3 py-2 text-sm"
               >
                 <span>
                   {i + 1}. {l.title}
-                  {l.isFreePreview && (
+                  {l.isInterview && (
+                    <span className="ms-2 text-xs text-accent">interview</span>
+                  )}
+                  {l.isFreePreview && !l.isInterview && (
                     <span className="ms-2 text-xs text-accent">free preview</span>
                   )}
                 </span>
-                <button
-                  className="text-danger hover:underline"
-                  onClick={() => removeLesson(l.id)}
-                >
-                  Remove
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button className="text-xs text-muted hover:underline" onClick={() => moveLesson(i, -1)} disabled={i === 0}>
+                    Up
+                  </button>
+                  <button className="text-xs text-muted hover:underline" onClick={() => moveLesson(i, 1)} disabled={i === lessons.length - 1}>
+                    Down
+                  </button>
+                  <button className="text-xs text-muted hover:underline" onClick={() => renameLesson(l)}>
+                    Rename
+                  </button>
+                  <label className="cursor-pointer text-xs text-accent hover:underline">
+                    {replacingId === l.id ? `Replacing… ${progress}%` : "Replace video"}
+                    <input
+                      type="file"
+                      accept="video/*"
+                      className="hidden"
+                      disabled={!!replacingId}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void replaceVideo(l.id, f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <button className="text-danger hover:underline" onClick={() => removeLesson(l.id)}>
+                    Remove
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -746,7 +774,20 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
-              checked={preview}
+              checked={asInterview}
+              onChange={(e) => {
+                setAsInterview(e.target.checked);
+                if (e.target.checked) setPreview(true);
+              }}
+              className="h-4 w-4 accent-[var(--accent)]"
+            />
+            Interview video (free preview, first position)
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={preview || asInterview}
+              disabled={asInterview}
               onChange={(e) => setPreview(e.target.checked)}
               className="h-4 w-4 accent-[var(--accent)]"
             />
@@ -760,7 +801,7 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
               />
             </div>
           )}
-          <Button type="submit" disabled={uploading} className="w-full">
+          <Button type="submit" disabled={uploading || !!replacingId} className="w-full">
             {uploading ? `Uploading… ${progress}%` : "Add Lesson"}
           </Button>
         </form>
@@ -917,6 +958,25 @@ function QuizzesModal({ course, onClose, onChanged, toast }: {
     }
   }
 
+  async function renameQuiz(quiz: CourseQuiz) {
+    const next = window.prompt("Rename quiz", quiz.titleEn);
+    if (!next || !next.trim() || next.trim() === quiz.titleEn) return;
+    const res = await fetch(`/api/teacher/courses/${course.id}/quizzes/${quiz.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ titleEn: next.trim() }),
+    });
+    if (!res.ok) {
+      toast("Rename failed", "error");
+      return;
+    }
+    setQuizzes(
+      (prev) =>
+        prev?.map((q) => (q.id === quiz.id ? { ...q, titleEn: next.trim() } : q)) ?? []
+    );
+    onChanged();
+  }
+
   return (
     <Modal open onClose={onClose} title={`Quizzes — ${course.titleEn}`} wide>
       <div className="space-y-4">
@@ -940,12 +1000,20 @@ function QuizzesModal({ course, onClose, onChanged, toast }: {
                     ({q._count.questions} questions · pass {q.passPercentage}%)
                   </span>
                 </span>
-                <button
-                  className="text-danger hover:underline"
-                  onClick={() => removeQuiz(q.id)}
-                >
-                  Remove
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="text-xs text-muted hover:underline"
+                    onClick={() => renameQuiz(q)}
+                  >
+                    Rename
+                  </button>
+                  <button
+                    className="text-danger hover:underline"
+                    onClick={() => removeQuiz(q.id)}
+                  >
+                    Remove
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

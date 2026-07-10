@@ -25,7 +25,22 @@ export async function GET(request: Request) {
       },
       stage: { select: { nameEn: true } },
       subject: { select: { nameEn: true } },
-      lessons: { select: { id: true, title: true, durationSec: true } },
+      lessons: {
+        where: { deletedAt: null },
+        orderBy: { sortOrder: "asc" },
+        select: {
+          id: true,
+          title: true,
+          durationSec: true,
+          isFreePreview: true,
+          isInterview: true,
+          sortOrder: true,
+        },
+      },
+      materials: {
+        where: { deletedAt: null },
+        select: { id: true },
+      },
       _count: {
         select: {
           purchases: { where: { status: "PAID" } },

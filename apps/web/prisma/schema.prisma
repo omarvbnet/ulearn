@@ -298,6 +298,7 @@ model TeacherProfile {
 }
 
 enum CourseStatus {
+  DRAFT
   PENDING_REVIEW
   APPROVED
   REJECTED
@@ -325,7 +326,7 @@ model Course {
   thumbnail     String?
   price         Float
   currency      String       @default("IQD")
-  status        CourseStatus @default(PENDING_REVIEW)
+  status        CourseStatus @default(DRAFT)
   reviewNotes   String?
   reviewedById  String?
   reviewedAt    DateTime?
@@ -365,6 +366,7 @@ model CourseLesson {
   durationSec   Int?
   sortOrder     Int      @default(0)
   isFreePreview Boolean  @default(false)
+  isInterview   Boolean  @default(false)
   isHidden      Boolean  @default(false)
   deletedAt     DateTime?
   createdAt     DateTime @default(now())

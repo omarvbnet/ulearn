@@ -1,6 +1,7 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { ADMIN_ROLES } from "@/lib/auth/session";
 import { TeacherCourseService } from "@/services/teacher-course.service";
+import { NextResponse } from "next/server";
 
 /** Admin: approve or reject a teacher course. */
 export async function POST(
@@ -27,12 +28,18 @@ export async function POST(
     notes
   );
   if (!result.success) {
-    if (result.error === "INSUFFICIENT_QUIZZES" && "required" in result) {
-      return error(
-        `Course needs at least ${result.required} quizzes (currently ${result.current})`,
-        422,
-        "INSUFFICIENT_QUIZZES"
+    if (result.error === "NOT_READY" && "readiness" in result) {
+      return NextResponse.json(
+        {
+          error: "Course is missing required content",
+          code: "NOT_READY",
+          readiness: result.readiness,
+        },
+        { status: 422 }
       );
+    }
+    if (result.error === "TEACHER_BLOCKED") {
+      return error("Teacher account is blocked", 400, "TEACHER_BLOCKED");
     }
     return error(result.error, 400, result.error);
   }

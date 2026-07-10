@@ -18,6 +18,7 @@ const lessonSchema = z.object({
   durationSec: z.number().int().optional(),
   sortOrder: z.number().int().optional(),
   isFreePreview: z.boolean().optional(),
+  isInterview: z.boolean().optional(),
   pdfTitle: z.string().optional(),
   pdfFileKey: z.string().optional(),
   pdfFileUrl: z.string().optional(),
@@ -41,15 +42,30 @@ export async function POST(
   const parsed = lessonSchema.safeParse(await request.json());
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
+  const isInterview = parsed.data.isInterview === true;
+  const isFreePreview = isInterview || parsed.data.isFreePreview === true;
+
   // Students may sample at most 2 free preview videos per paid course.
-  if (parsed.data.isFreePreview) {
+  if (isFreePreview) {
     const previews = await prisma.courseLesson.count({
-      where: { courseId: id, isFreePreview: true },
+      where: { courseId: id, isFreePreview: true, deletedAt: null },
     });
     if (previews >= 2) {
       return error("A course can have at most 2 free preview lessons", 400, "FREE_PREVIEW_LIMIT");
     }
   }
+
+  if (isInterview) {
+    await prisma.courseLesson.updateMany({
+      where: { courseId: id, isInterview: true, deletedAt: null },
+      data: { isInterview: false },
+    });
+  }
+
+  const maxSort = await prisma.courseLesson.aggregate({
+    where: { courseId: id, deletedAt: null },
+    _max: { sortOrder: true },
+  });
 
   const lesson = await prisma.courseLesson.create({
     data: {
@@ -60,11 +76,20 @@ export async function POST(
       thumbnailKey: parsed.data.thumbnailKey,
       thumbnailUrl: parsed.data.thumbnailUrl,
       durationSec: parsed.data.durationSec,
-      sortOrder: parsed.data.sortOrder,
-      isFreePreview: parsed.data.isFreePreview ?? false,
+      sortOrder: isInterview ? 0 : (parsed.data.sortOrder ?? (maxSort._max.sortOrder ?? -1) + 1),
+      isFreePreview,
+      isInterview,
       videoAssetId: parsed.data.videoAssetId,
     },
   });
+
+  if (isInterview) {
+    // Shift other lessons down so interview stays first.
+    await prisma.courseLesson.updateMany({
+      where: { courseId: id, id: { not: lesson.id }, deletedAt: null },
+      data: { sortOrder: { increment: 1 } },
+    });
+  }
 
   if (parsed.data.videoAssetId) {
     await prisma.videoAsset.update({

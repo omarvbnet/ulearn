@@ -111,3 +111,32 @@ export async function GET(
 
   return json({ documents });
 }
+
+/** Teacher: rename a course document. */
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireAuth(["TEACHER"]);
+  if (auth.error) return auth.error;
+
+  const { id } = await params;
+  const course = await ownCourse(auth.session.userId, id);
+  if (!course) return error("Course not found", 404, "NOT_FOUND");
+
+  const body = z
+    .object({
+      documentId: z.string().min(1),
+      title: z.string().min(1).max(200),
+    })
+    .safeParse(await request.json());
+  if (!body.success) return error("Invalid input", 422, "VALIDATION");
+
+  const updated = await prisma.courseMaterial.updateMany({
+    where: { id: body.data.documentId, courseId: id, deletedAt: null },
+    data: { title: body.data.title },
+  });
+  if (updated.count === 0) return error("Document not found", 404, "NOT_FOUND");
+
+  return json({ success: true });
+}

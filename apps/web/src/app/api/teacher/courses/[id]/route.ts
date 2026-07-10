@@ -28,6 +28,7 @@ export async function GET(
       stage: { select: { id: true, nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
       subject: { select: { id: true, nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
       lessons: {
+        where: { deletedAt: null },
         orderBy: { sortOrder: "asc" },
         include: {
           materials: {
@@ -43,6 +44,20 @@ export async function GET(
               lessonId: true,
             },
           },
+        },
+      },
+      materials: {
+        where: { deletedAt: null },
+        orderBy: { sortOrder: "asc" },
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          fileKey: true,
+          fileUrl: true,
+          mimeType: true,
+          fileSize: true,
+          lessonId: true,
         },
       },
       quizzes: {

@@ -10,6 +10,21 @@ const MIN_RATINGS_FOR_AUTO_LEVEL = 5;
 
 /** Each store course must have at least this many quizzes before going live. */
 export const MIN_COURSE_QUIZZES = 2;
+/** Required free preview lessons (including the interview). */
+export const MIN_FREE_PREVIEW_VIDEOS = 2;
+/** Required course documents (PDF / materials). */
+export const MIN_COURSE_DOCUMENTS = 1;
+
+export type CourseReadiness = {
+  hasTitle: boolean;
+  hasCover: boolean;
+  freeVideos: number;
+  hasInterview: boolean;
+  quizzes: number;
+  documents: number;
+  ready: boolean;
+  missing: string[];
+};
 
 /** Platform deduction (%) per teacher level — admin-configurable in settings. */
 export const DEDUCTION_SETTING_KEYS: Record<
@@ -214,7 +229,7 @@ export class TeacherCourseService {
         thumbnail: input.thumbnail,
         price: input.price,
         currency: input.currency || "IQD",
-        status: "PENDING_REVIEW",
+        status: "DRAFT",
       },
     });
 
@@ -259,10 +274,25 @@ export class TeacherCourseService {
       if (!allowed) return { success: false as const, error: "SUBJECT_NOT_ASSIGNED" };
     }
 
-    // Any content edit sends the course back to review.
+    // Meta edits: keep DRAFT as DRAFT; live/rejected courses re-enter review when appropriate.
+    const nextStatus =
+      course.status === "DRAFT"
+        ? "DRAFT"
+        : course.status === "APPROVED"
+          ? "PENDING_REVIEW"
+          : course.status === "REJECTED"
+            ? "REJECTED"
+            : course.status;
+
     const updated = await prisma.course.update({
       where: { id: courseId },
-      data: { ...input, status: "PENDING_REVIEW", reviewedAt: null, reviewNotes: null },
+      data: {
+        ...input,
+        status: nextStatus,
+        ...(nextStatus === "PENDING_REVIEW"
+          ? { reviewedAt: null, reviewNotes: null }
+          : {}),
+      },
     });
     return { success: true as const, course: updated };
   }
@@ -340,7 +370,8 @@ export class TeacherCourseService {
       [key: string]: unknown;
     },
   >(course: T) {
-    const canPreview = course.status === "APPROVED";
+    // Teachers always see their own media (draft wizard + manage).
+    const canPreview = true;
     return {
       ...course,
       canPreview,
@@ -357,6 +388,142 @@ export class TeacherCourseService {
         })),
       })),
     };
+  }
+
+  static async getCourseReadiness(courseId: string): Promise<CourseReadiness> {
+    const course = await prisma.course.findFirst({
+      where: { id: courseId, deletedAt: null },
+      select: {
+        titleEn: true,
+        thumbnail: true,
+        lessons: {
+          where: { deletedAt: null },
+          select: {
+            isFreePreview: true,
+            isInterview: true,
+            fileKey: true,
+            fileUrl: true,
+            videoAssetId: true,
+          },
+        },
+        materials: {
+          where: { deletedAt: null },
+          select: { id: true },
+        },
+      },
+    });
+
+    if (!course) {
+      return {
+        hasTitle: false,
+        hasCover: false,
+        freeVideos: 0,
+        hasInterview: false,
+        quizzes: 0,
+        documents: 0,
+        ready: false,
+        missing: ["Course not found"],
+      };
+    }
+
+    const videoLessons = course.lessons.filter(
+      (l) => l.fileKey || l.fileUrl || l.videoAssetId
+    );
+    const freeVideos = videoLessons.filter((l) => l.isFreePreview).length;
+    const hasInterview = videoLessons.some((l) => l.isInterview && l.isFreePreview);
+    const quizzes = await this.countValidCourseQuizzes(courseId);
+    const documents = course.materials.length;
+    const hasTitle = Boolean(course.titleEn?.trim() && course.titleEn.trim().length >= 2);
+    const hasCover = Boolean(course.thumbnail?.trim());
+
+    const missing: string[] = [];
+    if (!hasTitle) missing.push("Course title");
+    if (!hasCover) missing.push("Course cover image");
+    if (!hasInterview) missing.push("Interview / intro free video");
+    if (freeVideos < MIN_FREE_PREVIEW_VIDEOS) {
+      missing.push(`At least ${MIN_FREE_PREVIEW_VIDEOS} free preview videos`);
+    }
+    if (quizzes < MIN_COURSE_QUIZZES) {
+      missing.push(`At least ${MIN_COURSE_QUIZZES} quizzes with questions`);
+    }
+    if (documents < MIN_COURSE_DOCUMENTS) {
+      missing.push("At least one course document (PDF)");
+    }
+
+    return {
+      hasTitle,
+      hasCover,
+      freeVideos,
+      hasInterview,
+      quizzes,
+      documents,
+      ready: missing.length === 0,
+      missing,
+    };
+  }
+
+  static async submitForReview(courseId: string, teacherId: string) {
+    const course = await prisma.course.findFirst({
+      where: { id: courseId, teacherId, deletedAt: null },
+    });
+    if (!course) return { success: false as const, error: "NOT_FOUND" as const };
+    if (!["DRAFT", "REJECTED"].includes(course.status)) {
+      return { success: false as const, error: "INVALID_STATUS" as const };
+    }
+
+    const readiness = await this.getCourseReadiness(courseId);
+    if (!readiness.ready) {
+      return { success: false as const, error: "NOT_READY" as const, readiness };
+    }
+
+    const updated = await prisma.course.update({
+      where: { id: courseId },
+      data: {
+        status: "PENDING_REVIEW",
+        reviewNotes: null,
+        reviewedAt: null,
+        reviewedById: null,
+      },
+    });
+
+    return { success: true as const, course: updated, readiness };
+  }
+
+  /** Reorder lessons; interview lesson is forced to sortOrder 0. */
+  static async reorderLessons(courseId: string, teacherId: string, lessonIds: string[]) {
+    const course = await prisma.course.findFirst({
+      where: { id: courseId, teacherId, deletedAt: null },
+    });
+    if (!course) return { success: false as const, error: "NOT_FOUND" as const };
+
+    const lessons = await prisma.courseLesson.findMany({
+      where: { courseId, deletedAt: null, id: { in: lessonIds } },
+      select: { id: true, isInterview: true },
+    });
+    if (lessons.length !== lessonIds.length) {
+      return { success: false as const, error: "INVALID_LESSONS" as const };
+    }
+
+    const interview = lessons.find((l) => l.isInterview);
+    let ordered = [...lessonIds];
+    if (interview) {
+      ordered = [interview.id, ...ordered.filter((id) => id !== interview.id)];
+    }
+
+    await prisma.$transaction(
+      ordered.map((id, index) =>
+        prisma.courseLesson.update({
+          where: { id },
+          data: { sortOrder: index },
+        })
+      )
+    );
+
+    if (course.status === "APPROVED") {
+      await this.markCoursePendingReview(courseId);
+    }
+
+    return { success: true as const, lessonIds: ordered };
   }
 
   static async markCoursePendingReview(courseId: string) {
@@ -457,13 +624,12 @@ export class TeacherCourseService {
       if (!course.teacher.isActive) {
         return { success: false as const, error: "TEACHER_BLOCKED" };
       }
-      const quizCount = await this.countValidCourseQuizzes(courseId);
-      if (quizCount < MIN_COURSE_QUIZZES) {
+      const readiness = await this.getCourseReadiness(courseId);
+      if (!readiness.ready) {
         return {
           success: false as const,
-          error: "INSUFFICIENT_QUIZZES",
-          required: MIN_COURSE_QUIZZES,
-          current: quizCount,
+          error: "NOT_READY" as const,
+          readiness,
         };
       }
       if (course.teacher.level === "NEEDS_IMPROVEMENT") {

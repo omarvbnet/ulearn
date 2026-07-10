@@ -9,7 +9,7 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/media/video_cover_helper.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
-import 'package:ulearn/features/store/teacher_create_course_screen.dart';
+import 'package:ulearn/features/store/teacher_course_wizard_screen.dart';
 import 'package:ulearn/features/store/teacher_course_manage_screen.dart';
 import 'package:ulearn/features/store/teacher_quiz_tab.dart';
 import 'package:ulearn/core/video/video_process_service.dart';
@@ -719,7 +719,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                   onPressed: () async {
                     final created = await Navigator.of(context).push<bool>(
                       MaterialPageRoute(
-                        builder: (_) => const TeacherCreateCourseScreen(),
+                        builder: (_) => const TeacherCourseWizardScreen(),
                       ),
                     );
                     if (created == true && mounted) _load();
@@ -1622,6 +1622,7 @@ class _ShortVideoCard extends StatelessWidget {
 
   Color _statusColor(String status) {
     return switch (status.toUpperCase()) {
+      'DRAFT' => Colors.blueGrey,
       'APPROVED' || 'PUBLISHED' => Colors.greenAccent,
       'PENDING' || 'PENDING_REVIEW' => Colors.orangeAccent,
       'REJECTED' => Colors.redAccent,

@@ -14,6 +14,7 @@ type Course = {
   status: string;
   reviewNotes: string | null;
   createdAt: string;
+  thumbnail?: string | null;
   teacher: {
     id: string;
     level: string;
@@ -24,6 +25,42 @@ type Course = {
   subject: { nameEn: string };
   lessons: { id: string; title: string; durationSec: number | null }[];
   _count: { purchases: number; quizzes: number };
+};
+
+type CourseDetail = Omit<Course, "lessons" | "thumbnail"> & {
+  thumbnail: string | null;
+  lessons: {
+    id: string;
+    title: string;
+    durationSec: number | null;
+    fileUrl: string | null;
+    thumbnailUrl: string | null;
+    isFreePreview: boolean;
+    isInterview: boolean;
+  }[];
+  materials: {
+    id: string;
+    title: string;
+    type: string;
+    fileUrl: string | null;
+    mimeType: string | null;
+  }[];
+  quizzes: {
+    id: string;
+    titleEn: string;
+    _count: { questions: number };
+  }[];
+};
+
+type Readiness = {
+  hasTitle: boolean;
+  hasCover: boolean;
+  freeVideos: number;
+  hasInterview: boolean;
+  quizzes: number;
+  documents: number;
+  ready: boolean;
+  missing: string[];
 };
 
 type Purchase = {
@@ -65,6 +102,13 @@ const LEVEL_BADGE: Record<string, "APPROVED" | "PENDING" | "SUSPENDED"> = {
   NEEDS_IMPROVEMENT: "SUSPENDED",
 };
 
+function formatDuration(sec: number | null) {
+  if (!sec || sec <= 0) return null;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 export function CourseReviewClient() {
   const { toast } = useToast();
   const [tab, setTab] = useState("PENDING_REVIEW");
@@ -72,6 +116,9 @@ export function CourseReviewClient() {
   const [purchases, setPurchases] = useState<Purchase[] | null>(null);
   const [lessonUpdates, setLessonUpdates] = useState<LessonUpdate[] | null>(null);
   const [selected, setSelected] = useState<Course | null>(null);
+  const [detail, setDetail] = useState<CourseDetail | null>(null);
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [selectedUpdate, setSelectedUpdate] = useState<LessonUpdate | null>(null);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
@@ -100,6 +147,31 @@ export function CourseReviewClient() {
 
   useEffect(loadCourses, [loadCourses]);
 
+  useEffect(() => {
+    if (!selected) {
+      setDetail(null);
+      setReadiness(null);
+      return;
+    }
+    let cancelled = false;
+    setDetailLoading(true);
+    setDetail(null);
+    setReadiness(null);
+    fetch(`/api/admin/teacher-courses/${selected.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        setDetail(d.course);
+        setReadiness(d.readiness);
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
+
   async function review(decision: "APPROVED" | "REJECTED") {
     if (!selected) return;
     setBusy(true);
@@ -110,20 +182,26 @@ export function CourseReviewClient() {
     });
     setBusy(false);
     if (res.ok) {
-      toast(decision === "APPROVED" ? "Course approved and published" : "Course rejected");
+      toast(
+        decision === "APPROVED"
+          ? "Course approved and published"
+          : "Course rejected — teacher can edit and resubmit"
+      );
       setSelected(null);
       setNotes("");
       loadCourses();
     } else {
       const d = await res.json().catch(() => ({}));
-      toast(
-        d.code === "TEACHER_BLOCKED"
-          ? "Teacher account is blocked"
-          : d.code === "INSUFFICIENT_QUIZZES"
-            ? d.error || "Course needs at least 2 quizzes before approval"
-            : "Failed",
-        "error"
-      );
+      if (d.code === "NOT_READY" || d.code === "INSUFFICIENT_QUIZZES") {
+        const missing = d.readiness?.missing?.join(", ") || d.error || "Course is not ready";
+        toast(missing, "error");
+        if (d.readiness) setReadiness(d.readiness);
+      } else {
+        toast(
+          d.code === "TEACHER_BLOCKED" ? "Teacher account is blocked" : d.error || "Failed",
+          "error"
+        );
+      }
     }
   }
 
@@ -271,7 +349,10 @@ export function CourseReviewClient() {
               <Card
                 key={c.id}
                 className="card-hover cursor-pointer"
-                onClick={() => { setSelected(c); setNotes(c.reviewNotes ?? ""); }}
+                onClick={() => {
+                  setSelected(c);
+                  setNotes(c.reviewNotes ?? "");
+                }}
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -342,39 +423,190 @@ export function CourseReviewClient() {
       )}
 
       {selected && (
-        <Modal open onClose={() => setSelected(null)} title={selected.titleEn} wide>
-          <div className="space-y-4">
-            {selected.description && <p className="text-sm">{selected.description}</p>}
-            <div className="text-sm text-muted">
+        <Modal
+          open
+          onClose={() => setSelected(null)}
+          title={selected.titleEn}
+          wide
+        >
+          <div className="max-h-[75vh] space-y-5 overflow-y-auto pe-1">
+            {detailLoading && <p className="text-sm text-muted">Loading course detail…</p>}
+
+            {(detail?.thumbnail || selected.thumbnail) && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={(detail?.thumbnail || selected.thumbnail)!}
+                alt=""
+                className="h-40 w-full rounded-xl object-cover"
+              />
+            )}
+
+            {(detail?.description || selected.description) && (
+              <p className="text-sm">{detail?.description || selected.description}</p>
+            )}
+
+            <div className="grid gap-2 text-sm text-muted sm:grid-cols-2">
               <p>
                 Teacher: {selected.teacher.user.fullLegalName} (
                 {selected.teacher.level.replace(/_/g, " ")})
               </p>
+              <p dir="ltr">{selected.teacher.user.phone}</p>
               <p>
-                {selected.subject.nameEn} · {selected.stage.nameEn} · {selected.price}{" "}
-                {selected.currency}
+                {(detail?.subject || selected.subject).nameEn} ·{" "}
+                {(detail?.stage || selected.stage).nameEn}
+              </p>
+              <p className="font-semibold text-accent">
+                {selected.price} {selected.currency}
               </p>
             </div>
-            {selected.lessons.length > 0 && (
-              <ul className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-card-border p-3 text-sm">
-                {selected.lessons.map((l, i) => (
-                  <li key={l.id}>
-                    {i + 1}. {l.title}
+
+            {readiness && (
+              <div className="rounded-xl border border-card-border p-3">
+                <p className="mb-2 text-sm font-semibold">
+                  Readiness {readiness.ready ? "✓ Ready" : "— Incomplete"}
+                </p>
+                <ul className="grid gap-1 text-xs sm:grid-cols-2">
+                  <li className={readiness.hasTitle ? "text-accent" : "text-danger"}>
+                    Title {readiness.hasTitle ? "✓" : "✗"}
                   </li>
-                ))}
-              </ul>
+                  <li className={readiness.hasCover ? "text-accent" : "text-danger"}>
+                    Cover {readiness.hasCover ? "✓" : "✗"}
+                  </li>
+                  <li className={readiness.hasInterview ? "text-accent" : "text-danger"}>
+                    Interview {readiness.hasInterview ? "✓" : "✗"}
+                  </li>
+                  <li className={readiness.freeVideos >= 2 ? "text-accent" : "text-danger"}>
+                    Free videos {readiness.freeVideos}/2
+                  </li>
+                  <li className={readiness.quizzes >= 2 ? "text-accent" : "text-danger"}>
+                    Quizzes {readiness.quizzes}/2
+                  </li>
+                  <li className={readiness.documents >= 1 ? "text-accent" : "text-danger"}>
+                    Documents {readiness.documents}/1
+                  </li>
+                </ul>
+                {!readiness.ready && readiness.missing.length > 0 && (
+                  <p className="mt-2 text-xs text-danger">{readiness.missing.join(" · ")}</p>
+                )}
+              </div>
             )}
+
+            {detail && (
+              <>
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold">
+                    Lessons ({detail.lessons.length})
+                  </h3>
+                  {detail.lessons.length === 0 ? (
+                    <p className="text-sm text-muted">No lessons</p>
+                  ) : (
+                    <ul className="space-y-3">
+                      {detail.lessons.map((l, i) => (
+                        <li
+                          key={l.id}
+                          className="rounded-xl border border-card-border p-3"
+                        >
+                          <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+                            <span className="font-medium">
+                              {i + 1}. {l.title}
+                            </span>
+                            {l.isInterview && (
+                              <span className="rounded bg-accent/15 px-1.5 py-0.5 text-xs text-accent">
+                                Interview
+                              </span>
+                            )}
+                            {l.isFreePreview && !l.isInterview && (
+                              <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-xs text-sky-300">
+                                Free preview
+                              </span>
+                            )}
+                            {formatDuration(l.durationSec) && (
+                              <span className="text-xs text-muted">
+                                {formatDuration(l.durationSec)}
+                              </span>
+                            )}
+                          </div>
+                          {l.fileUrl ? (
+                            <video
+                              src={l.fileUrl}
+                              controls
+                              preload="metadata"
+                              className="max-h-48 w-full rounded-lg bg-black"
+                            />
+                          ) : (
+                            <p className="text-xs text-muted">No video URL</p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold">
+                    Quizzes ({detail.quizzes.length})
+                  </h3>
+                  {detail.quizzes.length === 0 ? (
+                    <p className="text-sm text-muted">No quizzes</p>
+                  ) : (
+                    <ul className="space-y-1 text-sm">
+                      {detail.quizzes.map((q) => (
+                        <li key={q.id}>
+                          {q.titleEn}{" "}
+                          <span className="text-muted">
+                            ({q._count.questions} questions)
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold">
+                    Documents ({detail.materials.length})
+                  </h3>
+                  {detail.materials.length === 0 ? (
+                    <p className="text-sm text-muted">No documents</p>
+                  ) : (
+                    <ul className="space-y-1 text-sm">
+                      {detail.materials.map((m) => (
+                        <li key={m.id}>
+                          {m.fileUrl ? (
+                            <a
+                              href={m.fileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-accent hover:underline"
+                            >
+                              {m.title}
+                            </a>
+                          ) : (
+                            m.title
+                          )}{" "}
+                          <span className="text-xs text-muted">({m.type})</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </>
+            )}
+
             <Textarea
               label="Review notes (sent to the teacher on rejection)"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
-            <div className="flex gap-3">
-              <Button disabled={busy} onClick={() => review("APPROVED")}>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                disabled={busy || (readiness ? !readiness.ready : false)}
+                onClick={() => review("APPROVED")}
+              >
                 Approve & Publish
               </Button>
               <Button variant="danger" disabled={busy} onClick={() => review("REJECTED")}>
-                Reject
+                Reject for edits
               </Button>
             </div>
           </div>

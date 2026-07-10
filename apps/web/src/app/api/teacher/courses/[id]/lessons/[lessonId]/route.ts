@@ -7,10 +7,12 @@ const schema = z.object({
   title: z.string().min(1).optional(),
   fileKey: z.string().optional(),
   fileUrl: z.string().optional(),
+  videoAssetId: z.string().optional(),
   thumbnailKey: z.string().optional(),
   thumbnailUrl: z.string().optional(),
   durationSec: z.number().int().optional(),
   isFreePreview: z.boolean().optional(),
+  isInterview: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
   pdfTitle: z.string().optional(),
   pdfFileKey: z.string().optional(),
@@ -44,15 +46,31 @@ export async function PATCH(
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
   const data = parsed.data;
-  const hasMediaChange = Boolean(data.fileKey || data.fileUrl || data.thumbnailUrl);
+  const hasMediaChange = Boolean(
+    data.fileKey || data.fileUrl || data.thumbnailUrl || data.videoAssetId
+  );
   const { pdfTitle, pdfFileKey, pdfFileUrl, pdfMimeType, pdfFileSize, removePdf, ...lessonPatch } =
     data;
 
-  if (lessonPatch.isFreePreview) {
-    const previews = await prisma.courseLesson.count({
-      where: { courseId, isFreePreview: true, id: { not: lessonId } },
+  if (lessonPatch.isInterview) {
+    lessonPatch.isFreePreview = true;
+    lessonPatch.sortOrder = 0;
+    await prisma.courseLesson.updateMany({
+      where: { courseId, isInterview: true, deletedAt: null, id: { not: lessonId } },
+      data: { isInterview: false },
     });
-    if (previews >= 2) {
+  }
+
+  const willBeFree =
+    lessonPatch.isFreePreview === true ||
+    (lessonPatch.isFreePreview === undefined &&
+      (lesson.isFreePreview || lessonPatch.isInterview === true));
+
+  if (willBeFree && lessonPatch.isFreePreview !== false) {
+    const previews = await prisma.courseLesson.count({
+      where: { courseId, isFreePreview: true, deletedAt: null, id: { not: lessonId } },
+    });
+    if (previews >= 2 && !lesson.isFreePreview) {
       return error("A course can have at most 2 free preview lessons", 400, "FREE_PREVIEW_LIMIT");
     }
   }
@@ -77,6 +95,13 @@ export async function PATCH(
     where: { id: lessonId },
     data: lessonPatch,
   });
+
+  if (data.videoAssetId) {
+    await prisma.videoAsset.update({
+      where: { id: data.videoAssetId },
+      data: { courseLessonId: lessonId, courseId },
+    });
+  }
 
   if (removePdf) {
     await prisma.courseMaterial.updateMany({
