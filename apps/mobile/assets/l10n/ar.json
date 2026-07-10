@@ -259,7 +259,9 @@
       "lessons": "{count} درس",
       "free": "مجاني",
       "duration": "{min} د",
-      "awaitingPayment": "بانتظار تأكيد الدفع"
+      "awaitingPayment": "بانتظار تأكيد الدفع",
+      "continueWatching": "متابعة المشاهدة",
+      "resumeCourse": "أكمل من حيث توقفت"
     },
     "profile": {
       "tapChangePhoto": "اضغط لتغيير الصورة",
@@ -419,7 +421,15 @@
       "tabShortQA": "أسئلة",
       "tabShortFiles": "ملفات",
       "previewEnded": "انتهت المعاينة المجانية",
-      "previewEndedHint": "اشترِ الدورة لمتابعة مشاهدة هذا الدرس."
+      "previewEndedHint": "اشترِ الدورة لمتابعة مشاهدة هذا الدرس.",
+      "resumeFrom": "متابعة من {time}",
+      "quizStep": "اختبار",
+      "quizAfterLesson": "اختبار بعد هذا الدرس",
+      "documentsStep": "مواد",
+      "lessonMaterials": "مواد الدرس",
+      "documentsAfterLesson": "راجع هذه المستندات قبل المتابعة",
+      "viewDocument": "عرض",
+      "continueLesson": "متابعة"
     },
     "products": {
       "title": "المتجر",
@@ -526,6 +536,11 @@
       "documentsSection": "المستندات",
       "documentFallback": "مستند",
       "noDocuments": "لا توجد مستندات للدورة بعد.",
+      "placeAfterVideo": "عرض بعد الفيديو",
+      "placeOptionalHint": "اختياري — اتركه في نهاية الدورة إن لم يرتبط بفيديو",
+      "afterVideoLabel": "الموضع",
+      "courseLevelDoc": "للدورة كاملة (ليس بعد فيديو)",
+      "alignmentSaved": "تم تحديث الموضع",
       "interviewMustStayFree": "يجب أن يبقى فيديو المقابلة مجانياً.",
       "minFreePreviews": "أبقِ على الأقل فيديوهين للمعاينة المجانية.",
       "maxFreePreviews": "يمكن أن تحتوي الدورة على فيديوهين للمعاينة المجانية كحد أقصى.",

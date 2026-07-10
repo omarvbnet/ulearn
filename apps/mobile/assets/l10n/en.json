@@ -260,7 +260,9 @@
       "lessons": "{count} lessons",
       "free": "Free",
       "duration": "{min} min",
-      "awaitingPayment": "Awaiting payment confirmation"
+      "awaitingPayment": "Awaiting payment confirmation",
+      "continueWatching": "Continue watching",
+      "resumeCourse": "Pick up where you left off"
     },
     "profile": {
       "tapChangePhoto": "Tap to change photo",
@@ -419,7 +421,15 @@
       "courseRating": "{rating} course rating",
       "yourRating": "Your rating: {rating}★",
       "previewEnded": "Free preview ended",
-      "previewEndedHint": "Purchase the course to keep watching this lesson."
+      "previewEndedHint": "Purchase the course to keep watching this lesson.",
+      "resumeFrom": "Continue from {time}",
+      "quizStep": "Quiz",
+      "quizAfterLesson": "Quiz after this lesson",
+      "documentsStep": "Materials",
+      "lessonMaterials": "Lesson materials",
+      "documentsAfterLesson": "Review these documents before continuing",
+      "viewDocument": "View",
+      "continueLesson": "Continue"
     },
     "products": {
       "title": "Store",
@@ -526,6 +536,11 @@
       "documentsSection": "Documents",
       "documentFallback": "Document",
       "noDocuments": "No course documents yet.",
+      "placeAfterVideo": "Show after video",
+      "placeOptionalHint": "Optional — leave at end of course if not tied to a video",
+      "afterVideoLabel": "Placement",
+      "courseLevelDoc": "Whole course (not after a video)",
+      "alignmentSaved": "Placement updated",
       "interviewMustStayFree": "The interview video must remain free.",
       "minFreePreviews": "Keep at least 2 free preview videos.",
       "maxFreePreviews": "A course can have at most 2 free preview videos.",

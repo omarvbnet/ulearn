@@ -44,10 +44,26 @@ type CourseDetail = Omit<Course, "lessons" | "thumbnail"> & {
     type: string;
     fileUrl: string | null;
     mimeType: string | null;
+    lessonId?: string | null;
   }[];
   quizzes: {
     id: string;
     titleEn: string;
+    titleAr?: string | null;
+    afterLessonId?: string | null;
+    passPercentage?: number | null;
+    timeLimitSec?: number | null;
+    maxAttempts?: number | null;
+    questions: {
+      id: string;
+      textEn: string;
+      textAr?: string | null;
+      options: Record<string, string> | unknown;
+      correctKey: string;
+      points: number;
+      timeLimitSec?: number | null;
+      type?: string;
+    }[];
     _count: { questions: number };
   }[];
 };
@@ -556,15 +572,67 @@ export function CourseReviewClient() {
                   {detail.quizzes.length === 0 ? (
                     <p className="text-sm text-muted">No quizzes</p>
                   ) : (
-                    <ul className="space-y-1 text-sm">
-                      {detail.quizzes.map((q) => (
-                        <li key={q.id}>
-                          {q.titleEn}{" "}
-                          <span className="text-muted">
-                            ({q._count.questions} questions)
-                          </span>
-                        </li>
-                      ))}
+                    <ul className="space-y-3">
+                      {detail.quizzes.map((q) => {
+                        const afterLesson = detail.lessons.find((l) => l.id === q.afterLessonId);
+                        const questions = q.questions ?? [];
+                        return (
+                          <li
+                            key={q.id}
+                            className="rounded-xl border border-border bg-card/40 p-3"
+                          >
+                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                              <span className="font-medium">{q.titleEn}</span>
+                              <span className="text-xs text-muted">
+                                {questions.length || q._count.questions} questions
+                                {q.passPercentage != null ? ` · pass ${q.passPercentage}%` : ""}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-xs text-muted">
+                              {afterLesson
+                                ? `After video: ${afterLesson.title}`
+                                : "At end of course"}
+                            </p>
+                            {questions.length > 0 && (
+                              <ol className="mt-3 space-y-3">
+                                {questions.map((question, qi) => {
+                                  const options =
+                                    question.options &&
+                                    typeof question.options === "object" &&
+                                    !Array.isArray(question.options)
+                                      ? (question.options as Record<string, string>)
+                                      : {};
+                                  return (
+                                    <li key={question.id} className="text-sm">
+                                      <p className="font-medium text-foreground">
+                                        {qi + 1}. {question.textEn}
+                                      </p>
+                                      <ul className="mt-1.5 space-y-1 pl-1">
+                                        {Object.entries(options).map(([key, label]) => {
+                                          const correct = key === question.correctKey;
+                                          return (
+                                            <li
+                                              key={key}
+                                              className={
+                                                correct
+                                                  ? "rounded-md bg-accent/10 px-2 py-1 text-accent"
+                                                  : "px-2 py-0.5 text-muted"
+                                              }
+                                            >
+                                              <span className="font-semibold">{key}.</span> {label}
+                                              {correct ? " ✓" : ""}
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
+                                    </li>
+                                  );
+                                })}
+                              </ol>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </div>
@@ -577,23 +645,32 @@ export function CourseReviewClient() {
                     <p className="text-sm text-muted">No documents</p>
                   ) : (
                     <ul className="space-y-1 text-sm">
-                      {detail.materials.map((m) => (
-                        <li key={m.id}>
-                          {m.fileUrl ? (
-                            <a
-                              href={m.fileUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-accent hover:underline"
-                            >
-                              {m.title}
-                            </a>
-                          ) : (
-                            m.title
-                          )}{" "}
-                          <span className="text-xs text-muted">({m.type})</span>
-                        </li>
-                      ))}
+                      {detail.materials.map((m) => {
+                        const afterLesson = detail.lessons.find((l) => l.id === m.lessonId);
+                        return (
+                          <li key={m.id}>
+                            {m.fileUrl ? (
+                              <a
+                                href={m.fileUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-accent hover:underline"
+                              >
+                                {m.title}
+                              </a>
+                            ) : (
+                              m.title
+                            )}{" "}
+                            <span className="text-xs text-muted">
+                              ({m.type}
+                              {afterLesson
+                                ? ` · after: ${afterLesson.title}`
+                                : " · course-level"}
+                              )
+                            </span>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </div>

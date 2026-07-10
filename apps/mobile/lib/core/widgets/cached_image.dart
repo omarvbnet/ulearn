@@ -66,3 +66,12 @@ class CachedImage extends StatelessWidget {
 /// Cached circle avatar image provider helper.
 ImageProvider cachedImageProvider(String url) =>
     CachedNetworkImageProvider(ApiClient.absoluteUrl(url));
+
+/// Evict a URL from disk + memory image caches (e.g. after cover replace).
+Future<void> evictCachedImage(String? url) async {
+  if (url == null || url.isEmpty) return;
+  final resolved = ApiClient.absoluteUrl(url);
+  await CachedNetworkImage.evictFromCache(resolved);
+  imageCache.evict(CachedNetworkImageProvider(resolved));
+  imageCache.evict(NetworkImage(resolved));
+}

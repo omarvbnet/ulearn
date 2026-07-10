@@ -197,7 +197,10 @@ class _TeacherQuizTabState extends State<TeacherQuizTab> {
         const SizedBox(height: 14),
         DropdownButtonFormField<String?>(
           initialValue: _afterLessonId,
-          decoration: InputDecoration(labelText: l10n.t('student.videos')),
+          decoration: InputDecoration(
+            labelText: l10n.t('mobile.teacher.placeAfterVideo'),
+            helperText: l10n.t('mobile.teacher.placeOptionalHint'),
+          ),
           items: [
             DropdownMenuItem(value: null, child: Text(l10n.studioAtEndOfCourse)),
             ...lessons.map(

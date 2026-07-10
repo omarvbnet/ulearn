@@ -281,12 +281,22 @@ export class TeacherCourseService {
       if (!allowed) return { success: false as const, error: "SUBJECT_NOT_ASSIGNED" };
     }
 
-    // Meta edits: keep DRAFT as DRAFT; live/rejected courses re-enter review when appropriate.
+    // Cosmetic-only edits (cover, titles, description) stay live on APPROVED courses.
+    // Price / stage / subject changes that actually differ re-enter review.
+    const priceChanged =
+      input.price !== undefined && Number(input.price) !== Number(course.price);
+    const structuralChanged =
+      priceChanged ||
+      (input.stageId !== undefined && input.stageId !== course.stageId) ||
+      (input.subjectId !== undefined && input.subjectId !== course.subjectId);
+
     const nextStatus =
       course.status === "DRAFT"
         ? "DRAFT"
         : course.status === "APPROVED"
-          ? "PENDING_REVIEW"
+          ? structuralChanged
+            ? "PENDING_REVIEW"
+            : "APPROVED"
           : course.status === "REJECTED"
             ? "REJECTED"
             : course.status;
@@ -346,7 +356,13 @@ export class TeacherCourseService {
         quizzes: {
           where: { deletedAt: null },
           orderBy: { createdAt: "asc" },
-          include: { _count: { select: { questions: true } } },
+          select: {
+            id: true,
+            titleEn: true,
+            titleAr: true,
+            afterLessonId: true,
+            _count: { select: { questions: true } },
+          },
         },
         _count: {
           select: {
@@ -822,7 +838,12 @@ export class TeacherCourseService {
       orderBy: { createdAt: "desc" },
       include: {
         teacher: {
-          select: { id: true, level: true, userId: true, user: { select: { fullLegalName: true } } },
+          select: {
+            id: true,
+            level: true,
+            userId: true,
+            user: { select: { fullLegalName: true, profilePhotoUrl: true } },
+          },
         },
         stage: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
         subject: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },

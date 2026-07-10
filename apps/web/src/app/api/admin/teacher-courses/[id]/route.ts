@@ -62,10 +62,28 @@ export async function GET(
           titleEn: true,
           titleAr: true,
           afterLessonId: true,
+          passPercentage: true,
+          timeLimitSec: true,
+          maxAttempts: true,
+          questions: {
+            where: { deletedAt: null },
+            orderBy: { sortOrder: "asc" },
+            select: {
+              id: true,
+              textEn: true,
+              textAr: true,
+              textKu: true,
+              textTr: true,
+              options: true,
+              correctKey: true,
+              points: true,
+              timeLimitSec: true,
+              type: true,
+            },
+          },
           _count: { select: { questions: { where: { deletedAt: null } } } },
         },
-      },
-      _count: {
+      },      _count: {
         select: {
           purchases: { where: { status: "PAID" } },
         },

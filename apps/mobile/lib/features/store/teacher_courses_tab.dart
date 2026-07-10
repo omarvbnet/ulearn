@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/store/teacher_course_manage_screen.dart';
 import 'package:ulearn/features/store/teacher_course_wizard_screen.dart';
@@ -476,10 +477,10 @@ class _CourseManageCard extends StatelessWidget {
                     fit: StackFit.expand,
                     children: [
                       if (thumb != null && thumb.isNotEmpty)
-                        Image.network(
-                          thumb,
+                        CachedImage(
+                          url: thumb,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _CoverFallback(),
+                          error: const _CoverFallback(),
                         )
                       else
                         const _CoverFallback(),

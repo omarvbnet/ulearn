@@ -11,6 +11,7 @@ import 'package:ulearn/core/media/video_cover_helper.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/video_process_service.dart';
 import 'package:ulearn/core/video/video_upload_service.dart';
+import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/features/store/teacher_course_wizard_screen.dart';
 import 'package:ulearn/features/store/teacher_lesson_upload_screen.dart';
 import 'package:ulearn/features/store/widgets/free_minute_picker.dart';
@@ -157,6 +158,16 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
         'price': double.tryParse(_priceCtrl.text.trim()) ?? 0,
         if (thumbnail != null && thumbnail.isNotEmpty) 'thumbnail': thumbnail,
       });
+      if (thumbnail != null && thumbnail.isNotEmpty) {
+        await evictCachedImage(_coverUrl);
+        await evictCachedImage(thumbnail);
+      }
+      if (mounted) {
+        setState(() {
+          _coverUrl = thumbnail;
+          _pendingCover = null;
+        });
+      }
       _toast(context.l10n.t('mobile.teacher.courseUpdated'));
       _load();
     } catch (e) {
@@ -374,6 +385,93 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
       '/api/teacher/courses/${widget.courseId}/quizzes/${quiz['id']}',
       {'titleEn': title},
     );
+    _load();
+  }
+
+  String _lessonTitleById(String? id) {
+    if (id == null || id.isEmpty) return context.l10n.studioAtEndOfCourse;
+    for (final l in _lessons) {
+      if (l['id']?.toString() == id) {
+        return l['title']?.toString() ?? context.l10n.t('student.videos');
+      }
+    }
+    return context.l10n.studioAtEndOfCourse;
+  }
+
+  Future<String?> _pickAfterLesson({String? currentId, required bool allowCourseLevel}) async {
+    final l10n = context.l10n;
+    return showModalBottomSheet<String?>(
+      context: context,
+      backgroundColor: AppTheme.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                child: Text(
+                  l10n.t('mobile.teacher.placeAfterVideo'),
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                ),
+              ),
+              if (allowCourseLevel)
+                ListTile(
+                  leading: Icon(
+                    currentId == null ? Icons.check_circle : Icons.radio_button_unchecked,
+                    color: AppTheme.accent,
+                  ),
+                  title: Text(l10n.studioAtEndOfCourse),
+                  subtitle: Text(l10n.t('mobile.teacher.placeOptionalHint')),
+                  onTap: () => Navigator.pop(ctx, ''),
+                ),
+              ..._lessons.map((l) {
+                final id = l['id']?.toString() ?? '';
+                final selected = currentId == id;
+                return ListTile(
+                  leading: Icon(
+                    selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                    color: AppTheme.accent,
+                  ),
+                  title: Text(l['title']?.toString() ?? l10n.t('student.videos')),
+                  onTap: () => Navigator.pop(ctx, id),
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _alignQuiz(Map<String, dynamic> quiz) async {
+    final current = quiz['afterLessonId']?.toString();
+    final picked = await _pickAfterLesson(currentId: current, allowCourseLevel: true);
+    if (picked == null || !mounted) return;
+    await context.read<ApiClient>().patch(
+      '/api/teacher/courses/${widget.courseId}/quizzes/${quiz['id']}',
+      {'afterLessonId': picked.isEmpty ? null : picked},
+    );
+    _toast(context.l10n.t('mobile.teacher.alignmentSaved'));
+    _load();
+  }
+
+  Future<void> _alignDocument(Map<String, dynamic> doc) async {
+    final current = doc['lessonId']?.toString();
+    final picked = await _pickAfterLesson(currentId: current, allowCourseLevel: true);
+    if (picked == null || !mounted) return;
+    await context.read<ApiClient>().patch(
+      '/api/teacher/courses/${widget.courseId}/documents',
+      {
+        'documentId': doc['id'],
+        'lessonId': picked.isEmpty ? null : picked,
+      },
+    );
+    _toast(context.l10n.t('mobile.teacher.alignmentSaved'));
     _load();
   }
 
@@ -689,52 +787,53 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
                         const SizedBox(height: 8),
                         GestureDetector(
                           onTap: _pickCourseCover,
-                          child: Container(
-                            height: 160,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: AppTheme.cardBorder),
-                              color: AppTheme.card,
-                              image: _pendingCover != null
-                                  ? DecorationImage(
-                                      image: FileImage(_pendingCover!),
-                                      fit: BoxFit.cover,
-                                    )
-                                  : (_coverUrl != null && _coverUrl!.isNotEmpty
-                                      ? DecorationImage(
-                                          image: NetworkImage(_coverUrl!),
-                                          fit: BoxFit.cover,
-                                        )
-                                      : null),
-                            ),
-                            child: _pendingCover == null &&
-                                    (_coverUrl == null || _coverUrl!.isEmpty)
-                                ? Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      const Icon(Icons.add_photo_alternate_outlined,
-                                          size: 36, color: AppTheme.muted),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        l10n.t('mobile.teacher.tapToChangeCover'),
-                                        style: const TextStyle(color: AppTheme.muted),
-                                      ),
-                                    ],
-                                  )
-                                : Align(
-                                    alignment: Alignment.bottomRight,
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(10),
-                                      child: Chip(
-                                        label: Text(l10n.t('mobile.teacher.changeCover')),
-                                        backgroundColor: Colors.black54,
-                                        labelStyle: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: Container(
+                              height: 160,
+                              decoration: BoxDecoration(
+                                border: Border.all(color: AppTheme.cardBorder),
+                                color: AppTheme.card,
+                              ),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  if (_pendingCover != null)
+                                    Image.file(_pendingCover!, fit: BoxFit.cover)
+                                  else if (_coverUrl != null && _coverUrl!.isNotEmpty)
+                                    CachedImage(url: _coverUrl!, fit: BoxFit.cover)
+                                  else
+                                    Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        const Icon(Icons.add_photo_alternate_outlined,
+                                            size: 36, color: AppTheme.muted),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          l10n.t('mobile.teacher.tapToChangeCover'),
+                                          style: const TextStyle(color: AppTheme.muted),
+                                        ),
+                                      ],
+                                    ),
+                                  if (_pendingCover != null ||
+                                      (_coverUrl != null && _coverUrl!.isNotEmpty))
+                                    Align(
+                                      alignment: Alignment.bottomRight,
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(10),
+                                        child: Chip(
+                                          label: Text(l10n.t('mobile.teacher.changeCover')),
+                                          backgroundColor: Colors.black54,
+                                          labelStyle: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                          ),
                                         ),
                                       ),
                                     ),
-                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -896,17 +995,27 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
                           final qCount = (quiz['_count'] as Map?)?['questions'] as num? ??
                               (quiz['questions'] as List?)?.length ??
                               0;
+                          final afterId = quiz['afterLessonId']?.toString();
                           return Card(
                             margin: const EdgeInsets.only(bottom: 10),
                             child: ListTile(
                               title: Text(quiz['titleEn']?.toString() ?? ''),
-                              subtitle: Text('$qCount ${l10n.t('quiz.questions').toLowerCase()}'),
+                              subtitle: Text(
+                                '$qCount ${l10n.t('quiz.questions').toLowerCase()}\n'
+                                '${l10n.t('mobile.teacher.afterVideoLabel')}: ${_lessonTitleById(afterId)}',
+                              ),
+                              isThreeLine: true,
                               trailing: PopupMenuButton<String>(
                                 onSelected: (v) {
                                   if (v == 'rename') _renameQuiz(quiz);
+                                  if (v == 'align') _alignQuiz(quiz);
                                   if (v == 'delete') _deleteQuiz(quiz['id'].toString());
                                 },
                                 itemBuilder: (_) => [
+                                  PopupMenuItem(
+                                    value: 'align',
+                                    child: Text(l10n.t('mobile.teacher.placeAfterVideo')),
+                                  ),
                                   PopupMenuItem(
                                     value: 'rename',
                                     child: Text(l10n.t('mobile.teacher.rename')),
@@ -928,20 +1037,39 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
                             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
                         const SizedBox(height: 10),
                         ..._documents.map(
-                          (doc) => Card(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            child: ListTile(
-                              leading: const Icon(Icons.picture_as_pdf, color: AppTheme.accent),
-                              title: Text(
-                                doc['title']?.toString() ??
-                                    l10n.t('mobile.teacher.documentFallback'),
+                          (doc) {
+                            final lessonId = doc['lessonId']?.toString();
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              child: ListTile(
+                                leading: const Icon(Icons.picture_as_pdf, color: AppTheme.accent),
+                                title: Text(
+                                  doc['title']?.toString() ??
+                                      l10n.t('mobile.teacher.documentFallback'),
+                                ),
+                                subtitle: Text(
+                                  '${l10n.t('mobile.teacher.afterVideoLabel')}: '
+                                  '${lessonId == null || lessonId.isEmpty ? l10n.t('mobile.teacher.courseLevelDoc') : _lessonTitleById(lessonId)}',
+                                ),
+                                trailing: PopupMenuButton<String>(
+                                  onSelected: (v) {
+                                    if (v == 'align') _alignDocument(doc);
+                                    if (v == 'rename') _renameDocument(doc);
+                                  },
+                                  itemBuilder: (_) => [
+                                    PopupMenuItem(
+                                      value: 'align',
+                                      child: Text(l10n.t('mobile.teacher.placeAfterVideo')),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'rename',
+                                      child: Text(l10n.t('mobile.teacher.rename')),
+                                    ),
+                                  ],
+                                ),
                               ),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.edit_outlined),
-                                onPressed: () => _renameDocument(doc),
-                              ),
-                            ),
-                          ),
+                            );
+                          },
                         ),
                         if (_documents.isEmpty)
                           Text(

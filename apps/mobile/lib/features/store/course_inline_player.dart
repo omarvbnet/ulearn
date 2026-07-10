@@ -27,6 +27,7 @@ class CourseInlinePlayer extends StatefulWidget {
     this.onCompleted,
     this.freePreviewLimitSec,
     this.onPreviewLimitReached,
+    this.initialPositionSec,
   });
 
   final String url;
@@ -38,6 +39,8 @@ class CourseInlinePlayer extends StatefulWidget {
   /// When set, non-purchasers are stopped at this second and [onPreviewLimitReached] fires.
   final int? freePreviewLimitSec;
   final VoidCallback? onPreviewLimitReached;
+  /// Resume playback from this second when the lesson is incomplete.
+  final int? initialPositionSec;
 
   @override
   State<CourseInlinePlayer> createState() => _CourseInlinePlayerState();
@@ -55,6 +58,8 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   bool _showCompleteFlash = false;
   bool _lessonWasCompleted = false;
   bool _previewLimitHit = false;
+  bool _didSeekResume = false;
+  bool _showResumeChip = false;
   StreamSubscription<bool>? _castSub;
 
   @override
@@ -77,6 +82,8 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       _completionSaved = widget.initiallyCompleted;
       _showCompleteFlash = false;
       _previewLimitHit = false;
+      _didSeekResume = false;
+      _showResumeChip = false;
       _loading = true;
       _error = null;
       _init();
@@ -186,6 +193,19 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
         return;
       }
       _controller = controller;
+      final resumeSec = widget.initialPositionSec ?? 0;
+      if (!_lessonWasCompleted && resumeSec > 5 && !_didSeekResume) {
+        final duration = controller.value.duration.inSeconds;
+        final target = duration > 0 ? resumeSec.clamp(0, duration - 2) : resumeSec;
+        if (target > 5) {
+          await controller.seekTo(Duration(seconds: target));
+          _didSeekResume = true;
+          _showResumeChip = true;
+          Future.delayed(const Duration(seconds: 4), () {
+            if (mounted) setState(() => _showResumeChip = false);
+          });
+        }
+      }
       if (widget.autoPlay) await _controller!.play();
       _controller!.addListener(_onControllerTick);
       setState(() => _loading = false);
@@ -369,12 +389,53 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
                       ],
                     ),
                   ),
+                if (_showResumeChip)
+                  Positioned(
+                    top: 12,
+                    left: 12,
+                    child: AnimatedOpacity(
+                      opacity: _showResumeChip ? 1 : 0,
+                      duration: const Duration(milliseconds: 250),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(99),
+                          border: Border.all(color: AppTheme.accent.withValues(alpha: 0.5)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.history_rounded, size: 14, color: AppTheme.accent),
+                            const SizedBox(width: 6),
+                            Text(
+                              context.l10n.t('mobile.store.resumeFrom', {
+                                'time': _formatResumeTime(widget.initialPositionSec ?? 0),
+                              }),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
         ),
       ),
     );
+  }
+
+  String _formatResumeTime(int sec) {
+    final m = sec ~/ 60;
+    final s = sec % 60;
+    if (m <= 0) return '${s}s';
+    return '${m}m ${s.toString().padLeft(2, '0')}s';
   }
 }
 

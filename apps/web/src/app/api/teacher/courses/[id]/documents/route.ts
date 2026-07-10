@@ -127,14 +127,29 @@ export async function PATCH(
   const body = z
     .object({
       documentId: z.string().min(1),
-      title: z.string().min(1).max(200),
+      title: z.string().min(1).max(200).optional(),
+      lessonId: z.string().nullable().optional(),
     })
     .safeParse(await request.json());
   if (!body.success) return error("Invalid input", 422, "VALIDATION");
 
+  if (body.data.title === undefined && body.data.lessonId === undefined) {
+    return error("title or lessonId is required", 422, "VALIDATION");
+  }
+
+  if (body.data.lessonId) {
+    const lesson = await prisma.courseLesson.findFirst({
+      where: { id: body.data.lessonId, courseId: id, deletedAt: null },
+    });
+    if (!lesson) return error("Lesson not found", 404, "NOT_FOUND");
+  }
+
   const updated = await prisma.courseMaterial.updateMany({
     where: { id: body.data.documentId, courseId: id, deletedAt: null },
-    data: { title: body.data.title },
+    data: {
+      ...(body.data.title !== undefined ? { title: body.data.title } : {}),
+      ...(body.data.lessonId !== undefined ? { lessonId: body.data.lessonId } : {}),
+    },
   });
   if (updated.count === 0) return error("Document not found", 404, "NOT_FOUND");
 

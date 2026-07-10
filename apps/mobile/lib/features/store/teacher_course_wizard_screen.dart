@@ -10,6 +10,7 @@ import 'package:ulearn/core/media/video_cover_helper.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/video_process_service.dart';
 import 'package:ulearn/core/video/video_upload_service.dart';
+import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 
 /// 5-step course creation wizard: basics → free videos → quizzes → document → submit.
@@ -58,6 +59,8 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
   // Step 3 quiz draft
   final _quizTitleCtrl = TextEditingController();
   final List<_WizardQuizQ> _quizQs = [_WizardQuizQ()];
+  String? _quizAfterLessonId;
+  String? _docLessonId;
 
   @override
   void initState() {
@@ -266,6 +269,13 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         });
       }
 
+      if (thumbnail.isNotEmpty) {
+        await evictCachedImage(_coverUrl);
+        await evictCachedImage(thumbnail);
+        _coverUrl = thumbnail;
+        _coverFile = null;
+      }
+
       await _reloadCourse();
       await _refreshReadiness();
       if (!mounted) return;
@@ -426,9 +436,11 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
     try {
       await context.read<ApiClient>().post('/api/teacher/courses/$_courseId/quizzes', {
         'titleEn': _quizTitleCtrl.text.trim(),
+        if (_quizAfterLessonId != null) 'afterLessonId': _quizAfterLessonId,
         'questions': questions,
       });
       _quizTitleCtrl.clear();
+      _quizAfterLessonId = null;
       for (final q in _quizQs) {
         q.dispose();
       }
@@ -484,6 +496,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         'mimeType': 'application/pdf',
         'fileSize': size,
         'type': 'PDF',
+        if (_docLessonId != null) 'lessonId': _docLessonId,
       });
       await _reloadCourse();
       await _refreshReadiness();
@@ -790,22 +803,26 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: AppTheme.cardBorder),
               color: AppTheme.card,
-              image: _coverFile != null
-                  ? DecorationImage(image: FileImage(_coverFile!), fit: BoxFit.cover)
-                  : (_coverUrl != null
-                      ? DecorationImage(image: NetworkImage(_coverUrl!), fit: BoxFit.cover)
-                      : null),
             ),
-            child: _coverFile == null && _coverUrl == null
-                ? Column(
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (_coverFile != null)
+                  Image.file(_coverFile!, fit: BoxFit.cover)
+                else if (_coverUrl != null && _coverUrl!.isNotEmpty)
+                  CachedImage(url: _coverUrl!, fit: BoxFit.cover)
+                else
+                  Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       const Icon(Icons.add_photo_alternate_outlined, size: 40, color: AppTheme.muted),
                       const SizedBox(height: 8),
                       Text(l10n.t('mobile.teacher.tapToAddCover'), style: const TextStyle(color: AppTheme.muted)),
                     ],
-                  )
-                : Align(
+                  ),
+                if (_coverFile != null || (_coverUrl != null && _coverUrl!.isNotEmpty))
+                  Align(
                     alignment: Alignment.bottomRight,
                     child: Padding(
                       padding: const EdgeInsets.all(10),
@@ -816,6 +833,8 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
                       ),
                     ),
                   ),
+              ],
+            ),
           ),
         ),
       ],
@@ -914,12 +933,26 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         ..._quizzes.map(
           (q) {
             final qCount = (q['_count'] as Map?)?['questions'] ?? q['questionCount'] ?? '?';
+            final afterId = q['afterLessonId']?.toString();
+            String afterLabel = l10n.studioAtEndOfCourse;
+            if (afterId != null && afterId.isNotEmpty) {
+              for (final l in _lessons) {
+                if (l['id']?.toString() == afterId) {
+                  afterLabel = l['title']?.toString() ?? afterLabel;
+                  break;
+                }
+              }
+            }
             return Card(
               color: AppTheme.card,
               child: ListTile(
                 leading: const Icon(Icons.quiz_outlined, color: AppTheme.accent),
                 title: Text(q['titleEn']?.toString() ?? l10n.t('mobile.teacher.quizzesTitle')),
-                subtitle: Text(l10n.t('mobile.teacher.questionsCount', {'count': '$qCount'})),
+                subtitle: Text(
+                  '${l10n.t('mobile.teacher.questionsCount', {'count': '$qCount'})}\n'
+                  '${l10n.t('mobile.teacher.afterVideoLabel')}: $afterLabel',
+                ),
+                isThreeLine: true,
               ),
             );
           },
@@ -929,6 +962,27 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
           TextField(
             controller: _quizTitleCtrl,
             decoration: InputDecoration(labelText: l10n.t('mobile.teacher.newQuizTitle')),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String?>(
+            initialValue: _quizAfterLessonId,
+            decoration: InputDecoration(
+              labelText: l10n.t('mobile.teacher.placeAfterVideo'),
+              helperText: l10n.t('mobile.teacher.placeOptionalHint'),
+            ),
+            items: [
+              DropdownMenuItem(value: null, child: Text(l10n.studioAtEndOfCourse)),
+              ..._lessons.map(
+                (l) => DropdownMenuItem(
+                  value: l['id']?.toString(),
+                  child: Text(
+                    l['title']?.toString() ?? l10n.t('student.videos'),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ],
+            onChanged: (v) => setState(() => _quizAfterLessonId = v),
           ),
           const SizedBox(height: 12),
           ..._quizQs.asMap().entries.map((e) {
@@ -1009,13 +1063,47 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         ),
         const SizedBox(height: 12),
         ...docs.map(
-          (d) => Card(
-            color: AppTheme.card,
-            child: ListTile(
-              leading: const Icon(Icons.picture_as_pdf, color: AppTheme.accent),
-              title: Text(d['title']?.toString() ?? l10n.t('mobile.teacher.documentFallback')),
-            ),
+          (d) {
+            final lessonId = d['lessonId']?.toString();
+            String place = l10n.t('mobile.teacher.courseLevelDoc');
+            if (lessonId != null && lessonId.isNotEmpty) {
+              for (final l in _lessons) {
+                if (l['id']?.toString() == lessonId) {
+                  place = l['title']?.toString() ?? place;
+                  break;
+                }
+              }
+            }
+            return Card(
+              color: AppTheme.card,
+              child: ListTile(
+                leading: const Icon(Icons.picture_as_pdf, color: AppTheme.accent),
+                title: Text(d['title']?.toString() ?? l10n.t('mobile.teacher.documentFallback')),
+                subtitle: Text('${l10n.t('mobile.teacher.afterVideoLabel')}: $place'),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String?>(
+          initialValue: _docLessonId,
+          decoration: InputDecoration(
+            labelText: l10n.t('mobile.teacher.placeAfterVideo'),
+            helperText: l10n.t('mobile.teacher.placeOptionalHint'),
           ),
+          items: [
+            DropdownMenuItem(value: null, child: Text(l10n.t('mobile.teacher.courseLevelDoc'))),
+            ..._lessons.map(
+              (l) => DropdownMenuItem(
+                value: l['id']?.toString(),
+                child: Text(
+                  l['title']?.toString() ?? l10n.t('student.videos'),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ],
+          onChanged: (v) => setState(() => _docLessonId = v),
         ),
         const SizedBox(height: 12),
         FilledButton.icon(

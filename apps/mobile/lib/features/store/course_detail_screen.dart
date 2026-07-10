@@ -8,14 +8,17 @@ import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/lesson_cover.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
+import 'package:ulearn/features/quiz/quiz_inline_panel.dart';
+import 'package:ulearn/features/quiz/quiz_screen.dart';
 import 'package:ulearn/features/reels/teacher_profile_screen.dart';
-import 'package:ulearn/features/store/course_material_pdf_screen.dart';
+import 'package:ulearn/features/report/report_content_sheet.dart';
 import 'package:ulearn/features/store/course_evaluation_sheet.dart';
 import 'package:ulearn/features/store/course_inline_player.dart';
+import 'package:ulearn/features/store/course_material_pdf_screen.dart';
 import 'package:ulearn/features/store/lesson_qa_section.dart';
-import 'package:ulearn/features/quiz/quiz_screen.dart';
-import 'package:ulearn/features/report/report_content_sheet.dart';
 import 'package:ulearn/features/store/teacher_studio_screen.dart';
+
+enum _PlayerStage { playing, quiz, documents }
 
 /// Store course detail with inline free-video playback, smart lesson covers,
 /// fullscreen casting watermark, and per-video Q&A.
@@ -48,6 +51,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   bool _reacting = false;
   Map<String, dynamic>? _completion;
   bool _evaluationPromptShown = false;
+  _PlayerStage _playerStage = _PlayerStage.playing;
+  Map<String, dynamic>? _stageQuiz;
+  List<Map<String, dynamic>> _stageDocs = [];
 
   @override
   void initState() {
@@ -289,7 +295,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       );
       return;
     }
-    setState(() => _activeLesson = lesson);
+    setState(() {
+      _activeLesson = lesson;
+      _playerStage = _PlayerStage.playing;
+      _stageQuiz = null;
+      _stageDocs = [];
+    });
     final lessons =
         ((_course?['lessons'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
     final idx = lessons.indexWhere((l) => l['id'] == lesson['id']);
@@ -299,6 +310,64 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         idx,
       );
     }
+  }
+
+  List<Map<String, dynamic>> _docsForLesson(String? lessonId) {
+    if (lessonId == null) return const [];
+    return _materials
+        .where((m) => m['lessonId']?.toString() == lessonId)
+        .toList()
+      ..sort((a, b) =>
+          ((a['sortOrder'] as num?)?.toInt() ?? 0)
+              .compareTo((b['sortOrder'] as num?)?.toInt() ?? 0));
+  }
+
+  void _enterDocumentsOrAdvance(Map<String, dynamic> lesson) {
+    final docs = _docsForLesson(lesson['id']?.toString());
+    if (docs.isNotEmpty) {
+      setState(() {
+        _playerStage = _PlayerStage.documents;
+        _stageDocs = docs;
+        _stageQuiz = null;
+      });
+      return;
+    }
+    _advanceAfterLesson(lesson);
+  }
+
+  void _advanceAfterLesson(Map<String, dynamic> lesson) {
+    final lessons =
+        ((_course?['lessons'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+    final unlocked = _purchased ||
+        _course?['purchaseStatus'] == 'PAID' ||
+        ((_course?['price'] as num?)?.toDouble() ?? 0) <= 0 ||
+        _isOwnCourse;
+    final next = _nextWatchableLesson(lessons, unlocked, current: lesson);
+    if (next == null) {
+      setState(() {
+        _playerStage = _PlayerStage.playing;
+        _stageQuiz = null;
+        _stageDocs = [];
+      });
+      Future.delayed(const Duration(milliseconds: 400), () async {
+        if (!mounted) return;
+        await _load();
+      });
+      return;
+    }
+    setState(() {
+      _activeLesson = next;
+      _playerStage = _PlayerStage.playing;
+      _stageQuiz = null;
+      _stageDocs = [];
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.l10n.storeUpNext(next['title']?.toString() ?? '')),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   Map<String, dynamic>? _nextWatchableLesson(
@@ -400,13 +469,6 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   void _onLessonCompleted(Map<String, dynamic> lesson) {
-    final lessons =
-        ((_course?['lessons'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
-    final unlocked = _purchased ||
-        _course?['purchaseStatus'] == 'PAID' ||
-        ((_course?['price'] as num?)?.toDouble() ?? 0) <= 0 ||
-        _isOwnCourse;
-
     setState(() {
       lesson['isCompleted'] = true;
       lesson['completed'] = true;
@@ -414,64 +476,21 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     });
 
     final quiz = _quizAfterLesson(lesson['id']?.toString());
-    if (quiz != null) {
-      final locale = context.localeCode;
-      final quizTitle = localizedText(quiz, locale);
-      Future.delayed(const Duration(milliseconds: 700), () {
+    if (quiz != null && quiz['passedByMe'] != true) {
+      Future.delayed(const Duration(milliseconds: 600), () {
         if (!mounted) return;
-        showDialog<void>(
-          context: context,
-          builder: (ctx) {
-            final l10n = ctx.l10n;
-            return AlertDialog(
-            backgroundColor: AppTheme.card,
-            title: Text(l10n.storeVideoCompleted),
-            content: Text(l10n.storeReadyForQuiz(quizTitle)),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  final next = _nextWatchableLesson(lessons, unlocked, current: lesson);
-                  if (next != null && mounted) {
-                    setState(() => _activeLesson = next);
-                  }
-                },
-                child: Text(l10n.storeLater),
-              ),
-              FilledButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _openQuiz(quiz);
-                },
-                child: Text(l10n.storeGoToQuiz),
-              ),
-            ],
-          );
-          },
-        );
+        setState(() {
+          _playerStage = _PlayerStage.quiz;
+          _stageQuiz = quiz;
+          _stageDocs = [];
+        });
       });
       return;
     }
 
-    final next = _nextWatchableLesson(lessons, unlocked, current: lesson);
-    if (next == null) {
-      Future.delayed(const Duration(milliseconds: 900), () async {
-        if (!mounted) return;
-        await _load();
-      });
-      return;
-    }
-
-    Future.delayed(const Duration(milliseconds: 900), () {
+    Future.delayed(const Duration(milliseconds: 600), () {
       if (!mounted) return;
-      setState(() => _activeLesson = next);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.l10n.storeUpNext(next['title']?.toString() ?? '')),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      _enterDocumentsOrAdvance(lesson);
     });
   }
 
@@ -668,7 +687,75 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               ),
             ),
           ],
-          if (activeUrl != null && activeUrl.isNotEmpty)
+          if (_playerStage == _PlayerStage.quiz && _stageQuiz != null)
+            ClipRect(
+              child: AnimatedAlign(
+                alignment: Alignment.topCenter,
+                heightFactor: collapseVideo ? 0.0 : 1.0,
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeInOutCubic,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 320),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      child: QuizInlinePanel(
+                        key: ValueKey('quiz-panel-${_stageQuiz!['id']}'),
+                        quizId: _stageQuiz!['id'].toString(),
+                        title: localizedText(_stageQuiz!, context.localeCode),
+                        onFinished: () {
+                          final lesson = _activeLesson;
+                          if (lesson == null) return;
+                          setState(() {
+                            _stageQuiz!['passedByMe'] = true;
+                          });
+                          _enterDocumentsOrAdvance(lesson);
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
+              ),
+            )
+          else if (_playerStage == _PlayerStage.documents && _stageDocs.isNotEmpty)
+            ClipRect(
+              child: AnimatedAlign(
+                alignment: Alignment.topCenter,
+                heightFactor: collapseVideo ? 0.0 : 1.0,
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeInOutCubic,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _LessonDocumentsPanel(
+                      materials: _stageDocs,
+                      onView: (m) {
+                        final url = m['fileUrl']?.toString();
+                        if (url == null || url.isEmpty) return;
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => CourseMaterialPdfScreen(
+                              title: m['title']?.toString() ?? l10n.t('mobile.teacher.documentFallback'),
+                              url: ApiClient.absoluteUrl(url),
+                            ),
+                          ),
+                        );
+                      },
+                      onNext: () {
+                        final lesson = _activeLesson;
+                        if (lesson == null) return;
+                        _advanceAfterLesson(lesson);
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
+              ),
+            )
+          else if (activeUrl != null && activeUrl.isNotEmpty)
             ClipRect(
               child: AnimatedAlign(
                 alignment: Alignment.topCenter,
@@ -679,11 +766,14 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     CourseInlinePlayer(
-                      key: ValueKey(activeUrl),
+                      key: ValueKey('${activeUrl}_${active?['watchPositionSec']}'),
                       url: ApiClient.absoluteUrl(activeUrl),
                       title: active?['title']?.toString() ?? l10n.t('student.videos'),
                       lessonId: activeId,
                       initiallyCompleted: active != null && _isLessonCompleted(active),
+                      initialPositionSec: active != null && !_isLessonCompleted(active)
+                          ? (active['watchPositionSec'] as num?)?.toInt()
+                          : null,
                       onCompleted: active != null ? () => _onLessonCompleted(active) : null,
                       freePreviewLimitSec: !unlocked &&
                               active?['previewOnly'] == true &&
@@ -768,7 +858,30 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
             title: title,
             passPct: (quiz['passPercentage'] as num?)?.toInt() ?? 50,
             questionCount: (quiz['_count']?['questions'] as num?)?.toInt(),
-            onTap: () => _openQuiz(quiz),
+            onTap: () {
+              final afterId = quiz['afterLessonId']?.toString();
+              if (afterId != null) {
+                final lessons = ((_course?['lessons'] as List<dynamic>?) ?? [])
+                    .cast<Map<String, dynamic>>();
+                Map<String, dynamic>? lesson;
+                for (final l in lessons) {
+                  if (l['id']?.toString() == afterId) {
+                    lesson = l;
+                    break;
+                  }
+                }
+                if (lesson != null) {
+                  setState(() {
+                    _activeLesson = lesson;
+                    _playerStage = _PlayerStage.quiz;
+                    _stageQuiz = quiz;
+                    _stageDocs = [];
+                  });
+                  return;
+                }
+              }
+              _openQuiz(quiz);
+            },
           ),
         );
       }
@@ -2159,6 +2272,131 @@ class _EmptyTabPlaceholder extends StatelessWidget {
 }
 
 /// Compact lesson list row — mirrors quiz card layout (proven to render).
+class _LessonDocumentsPanel extends StatelessWidget {
+  const _LessonDocumentsPanel({
+    required this.materials,
+    required this.onView,
+    required this.onNext,
+  });
+
+  final List<Map<String, dynamic>> materials;
+  final ValueChanged<Map<String, dynamic>> onView;
+  final VoidCallback onNext;
+
+  String _sizeLabel(int? bytes) {
+    if (bytes == null || bytes <= 0) return '';
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: AppTheme.card,
+        border: Border.all(color: AppTheme.cardBorder),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.accent.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  l10n.t('mobile.store.documentsStep'),
+                  style: const TextStyle(
+                    color: AppTheme.accent,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                l10n.t('mobile.store.lessonMaterials'),
+                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            l10n.t('mobile.store.documentsAfterLesson'),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 12),
+          ...materials.map((m) {
+            final title = m['title']?.toString() ?? l10n.t('mobile.teacher.documentFallback');
+            final size = _sizeLabel((m['fileSize'] as num?)?.toInt());
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Material(
+                color: AppTheme.primary.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => onView(m),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: AppTheme.accent.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.picture_as_pdf_rounded, color: AppTheme.accent),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                              if (size.isNotEmpty)
+                                Text(size, style: const TextStyle(color: AppTheme.muted, fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                        FilledButton.tonal(
+                          onPressed: () => onView(m),
+                          child: Text(l10n.t('mobile.store.viewDocument')),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: onNext,
+            icon: const Icon(Icons.arrow_forward_rounded),
+            label: Text(l10n.t('common.next')),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Compact lesson list row — mirrors quiz card layout (proven to render).
 class _LessonVideoCard extends StatelessWidget {
   const _LessonVideoCard({
     required this.index,
@@ -2189,7 +2427,8 @@ class _LessonVideoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final inProgress = !isCompleted && progressPct > 0 && canWatch;
+    final watchPos = (lesson['watchPositionSec'] as num?)?.toInt() ?? 0;
+    final inProgress = !isCompleted && (progressPct > 0 || watchPos > 0) && canWatch;
     final likes = (lesson['likes'] as num?)?.toInt() ?? 0;
     final durationLabel = duration > 0
         ? formatDuration(duration)
@@ -2197,7 +2436,7 @@ class _LessonVideoCard extends StatelessWidget {
 
     final statusLabel = switch (true) {
       true when isCompleted => l10n.t('quiz.passed'),
-      true when inProgress => '${progressPct.round()}%',
+      true when inProgress => l10n.t('mobile.store.continueLesson'),
       true when canWatch => l10n.t('student.start'),
       _ => l10n.t('common.locked'),
     };

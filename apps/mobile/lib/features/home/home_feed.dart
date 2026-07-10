@@ -53,6 +53,7 @@ class HomeFeedState extends State<HomeFeed> {
   List<Map<String, dynamic>> _stages = [];
   List<Map<String, dynamic>> _ads = [];
   List<Map<String, dynamic>> _courses = [];
+  List<Map<String, dynamic>> _continueWatching = [];
   bool _loading = true;
   bool _searching = false;
   String? _error;
@@ -94,13 +95,28 @@ class HomeFeedState extends State<HomeFeed> {
       final query = params.isEmpty
           ? ''
           : '?${params.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&')}';
-      final data = await context.read<ApiClient>().get('/api/home$query');
+      final api = context.read<ApiClient>();
+      final data = await api.get('/api/home$query');
+      Map<String, dynamic> myCourses = {};
+      try {
+        myCourses = await api.get('/api/my-courses?sort=recent&minProgress=1');
+      } catch (_) {}
+      final continueItems = ((myCourses['courses'] as List<dynamic>?) ?? [])
+          .cast<Map<String, dynamic>>()
+          .where((c) {
+            final pct = (c['progressPct'] as num?)?.toDouble() ?? 0;
+            final type = c['type']?.toString() ?? 'store';
+            return type == 'store' && pct > 0 && pct < 100;
+          })
+          .take(12)
+          .toList();
       if (!mounted) return;
       setState(() {
         _stage = data['stage'] as Map<String, dynamic>?;
         _stages = ((data['stages'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
         _ads = ((data['ads'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
         _courses = ((data['courses'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+        _continueWatching = continueItems;
         _loading = false;
         _searching = false;
         _error = null;
@@ -364,6 +380,17 @@ class HomeFeedState extends State<HomeFeed> {
               ),
             ),
           ],
+          if (_continueWatching.isNotEmpty && !_hasActiveFilters) ...[
+            const SizedBox(height: 8),
+            StaggeredItem(
+              index: 3,
+              child: _ContinueWatchingRail(
+                courses: _continueWatching,
+                locale: locale,
+                onOpen: _openCourse,
+              ),
+            ),
+          ],
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
             child: Row(
@@ -437,7 +464,7 @@ class HomeFeedState extends State<HomeFeed> {
             ),
           ..._courses.asMap().entries.map(
                 (e) => StaggeredItem(
-                  index: e.key + 3,
+                  index: e.key + 4,
                   child: CourseCard(
                     course: e.value,
                     locale: locale,
@@ -937,6 +964,224 @@ class _AdLikeButton extends StatelessWidget {
   }
 }
 
+// ── Continue watching ──────────────────────────────────────────
+
+class _ContinueWatchingRail extends StatelessWidget {
+  const _ContinueWatchingRail({
+    required this.courses,
+    required this.locale,
+    required this.onOpen,
+  });
+
+  final List<Map<String, dynamic>> courses;
+  final String locale;
+  final ValueChanged<Map<String, dynamic>> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
+          child: Row(
+            children: [
+              Container(
+                width: 4,
+                height: 18,
+                decoration: BoxDecoration(
+                  gradient: AppTheme.gradient,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                l10n.t('mobile.home.continueWatching'),
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 168,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: courses.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemBuilder: (context, i) {
+              final c = courses[i];
+              final title = localizedText(c, locale);
+              final thumb = c['thumbnail']?.toString();
+              final progress = ((c['progressPct'] as num?)?.toDouble() ?? 0).clamp(0, 100) / 100;
+              return InkWell(
+                onTap: () => onOpen(c),
+                borderRadius: BorderRadius.circular(16),
+                child: SizedBox(
+                  width: 220,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              if (thumb != null && thumb.isNotEmpty)
+                                CachedImage(url: thumb, fit: BoxFit.cover)
+                              else
+                                const _CoverFallback(),
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.transparent,
+                                      Colors.black.withValues(alpha: 0.72),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                left: 10,
+                                right: 10,
+                                bottom: 10,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      title,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13,
+                                        height: 1.25,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(99),
+                                      child: LinearProgressIndicator(
+                                        value: progress,
+                                        minHeight: 4,
+                                        backgroundColor: Colors.white24,
+                                        valueColor: const AlwaysStoppedAnimation(AppTheme.accent),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Positioned(
+                                top: 8,
+                                left: 8,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.55),
+                                    borderRadius: BorderRadius.circular(99),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.play_arrow_rounded, size: 14, color: Colors.white),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        '${(progress * 100).round()}%',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        l10n.t('mobile.home.resumeCourse'),
+                        style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TeacherAvatar extends StatelessWidget {
+  const _TeacherAvatar({required this.name, this.photoUrl});
+
+  final String name;
+  final String? photoUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final letter = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    if (photoUrl != null && photoUrl!.isNotEmpty) {
+      return ClipOval(
+        child: SizedBox(
+          width: 30,
+          height: 30,
+          child: CachedImage(
+            url: photoUrl!,
+            fit: BoxFit.cover,
+            width: 30,
+            height: 30,
+            error: Container(
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: AppTheme.gradient,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                letter,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return Container(
+      width: 30,
+      height: 30,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: AppTheme.gradient,
+      ),
+      child: Center(
+        child: Text(
+          letter,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 13,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ── Course card ────────────────────────────────────────────────
 
 class CourseCard extends StatelessWidget {
@@ -1148,23 +1393,10 @@ class CourseCard extends StatelessWidget {
                   // Teacher + rating row.
                   Row(
                     children: [
-                      Container(
-                        width: 30,
-                        height: 30,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: AppTheme.gradient,
-                        ),
-                        child: Center(
-                          child: Text(
-                            teacherName.isNotEmpty ? teacherName[0].toUpperCase() : '?',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
+                      _TeacherAvatar(
+                        name: teacherName,
+                        photoUrl: (teacher?['user'] as Map<String, dynamic>?)?['profilePhotoUrl']
+                            ?.toString(),
                       ),
                       const SizedBox(width: 8),
                       Expanded(

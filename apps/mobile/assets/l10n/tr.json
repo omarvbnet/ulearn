@@ -259,7 +259,9 @@
       "lessons": "{count} ders",
       "free": "Ücretsiz",
       "duration": "{min} dk",
-      "awaitingPayment": "Ödeme onayı bekleniyor"
+      "awaitingPayment": "Ödeme onayı bekleniyor",
+      "continueWatching": "İzlemeye devam et",
+      "resumeCourse": "Kaldığınız yerden devam edin"
     },
     "profile": {
       "tapChangePhoto": "Fotoğrafı değiştirmek için dokunun",
@@ -419,7 +421,15 @@
       "tabShortQA": "S&C",
       "tabShortFiles": "Dosya",
       "previewEnded": "Ücretsiz önizleme bitti",
-      "previewEndedHint": "Bu dersi izlemeye devam etmek için kursu satın alın."
+      "previewEndedHint": "Bu dersi izlemeye devam etmek için kursu satın alın.",
+      "resumeFrom": "{time} noktasından devam",
+      "quizStep": "Sınav",
+      "quizAfterLesson": "Bu dersten sonra sınav",
+      "documentsStep": "Materyaller",
+      "lessonMaterials": "Ders materyalleri",
+      "documentsAfterLesson": "Devam etmeden önce bu belgeleri inceleyin",
+      "viewDocument": "Görüntüle",
+      "continueLesson": "Devam et"
     },
     "products": {
       "title": "Mağaza",
@@ -526,6 +536,11 @@
       "documentsSection": "Belgeler",
       "documentFallback": "Belge",
       "noDocuments": "Henüz kurs belgesi yok.",
+      "placeAfterVideo": "Videodan sonra göster",
+      "placeOptionalHint": "İsteğe bağlı — bir videoya bağlı değilse kurs sonunda bırakın",
+      "afterVideoLabel": "Konum",
+      "courseLevelDoc": "Tüm kurs (videodan sonra değil)",
+      "alignmentSaved": "Konum güncellendi",
       "interviewMustStayFree": "Röportaj videosu ücretsiz kalmalıdır.",
       "minFreePreviews": "En az 2 ücretsiz önizleme videosu bırakın.",
       "maxFreePreviews": "Bir kursta en fazla 2 ücretsiz önizleme videosu olabilir.",

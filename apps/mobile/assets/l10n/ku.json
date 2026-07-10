@@ -259,7 +259,9 @@
       "lessons": "{count} وانە",
       "free": "بەخۆڕایی",
       "duration": "{min} خ",
-      "awaitingPayment": "چاوەڕێی پشتڕاستکردنەوەی پارەدان"
+      "awaitingPayment": "چاوەڕێی پشتڕاستکردنەوەی پارەدان",
+      "continueWatching": "بەردەوامبوون لە بینین",
+      "resumeCourse": "لەو شوێنەوە دەستپێبکەوە کە وەستایت"
     },
     "profile": {
       "tapChangePhoto": "بۆ گۆڕینی وێنە دەست لێبدە",
@@ -419,7 +421,15 @@
       "tabShortQA": "پرسیار",
       "tabShortFiles": "فایل",
       "previewEnded": "پێشبینینی خۆڕایی کۆتایی هات",
-      "previewEndedHint": "خولەکە بکڕە بۆ بەردەوامبوون لە بینینی ئەم وانەیە."
+      "previewEndedHint": "خولەکە بکڕە بۆ بەردەوامبوون لە بینینی ئەم وانەیە.",
+      "resumeFrom": "بەردەوامبوون لە {time}",
+      "quizStep": "تاقیکردنەوە",
+      "quizAfterLesson": "تاقیکردنەوە دوای ئەم وانەیە",
+      "documentsStep": "بەڵگەنامە",
+      "lessonMaterials": "کەرەستەی وانە",
+      "documentsAfterLesson": "پێش بەردەوامبوون ئەم بەڵگەنامانە ببینە",
+      "viewDocument": "بینین",
+      "continueLesson": "بەردەوامبوون"
     },
     "products": {
       "title": "فرۆشگا",
@@ -526,6 +536,11 @@
       "documentsSection": "بەڵگەنامەکان",
       "documentFallback": "بەڵگەنامە",
       "noDocuments": "هێشتا بەڵگەنامەی خول نییە.",
+      "placeAfterVideo": "دوای ڤیدیۆ پیشان بدە",
+      "placeOptionalHint": "ئارەزوومەندانە — ئەگەر بە ڤیدیۆیەکەوە نەبەستراوە لە کۆتایی خول بهێڵەوە",
+      "afterVideoLabel": "شوێن",
+      "courseLevelDoc": "هەموو خول (نەک دوای ڤیدیۆ)",
+      "alignmentSaved": "شوێن نوێکرایەوە",
       "interviewMustStayFree": "ڤیدیۆی چاوپێکەوتن دەبێت خۆڕایی بمێنێتەوە.",
       "minFreePreviews": "لانیکەم 2 ڤیدیۆی پێشبینینی خۆڕایی بهێڵەوە.",
       "maxFreePreviews": "خول دەتوانێت زۆرترین 2 ڤیدیۆی پێشبینینی خۆڕایی هەبێت.",
