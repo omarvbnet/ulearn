@@ -1,6 +1,6 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { STAFF_ROLES } from "@/lib/auth/session";
-import { buildKey, getUploadUrl, maxSizeLabel, validateFile } from "@/lib/r2";
+import { buildKey, getUploadUrl, maxSizeLabel, mediaProxyPath, validateFile } from "@/lib/r2";
 
 const r2Configured = Boolean(process.env.R2_ENDPOINT && process.env.R2_ACCESS_KEY_ID);
 
@@ -52,8 +52,10 @@ export async function POST(request: Request) {
     size,
   });
   return json({
-    ...upload,
-    // Always give clients a displayable URL (CDN or same-origin media proxy).
-    publicUrl: upload.publicUrl ?? `/api/media?key=${encodeURIComponent(key)}`,
+    uploadUrl: upload.uploadUrl,
+    key: upload.key,
+    expiresIn: upload.expiresIn,
+    // Same-origin gateway — works even when the R2 bucket is private.
+    publicUrl: mediaProxyPath(key),
   });
 }

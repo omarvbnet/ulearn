@@ -109,8 +109,16 @@ export function ProductsClient() {
     });
     if (!put.ok) throw new Error("Upload failed");
     const displayUrl =
-      (typeof publicUrl === "string" && publicUrl.trim()) ||
-      `/api/media?key=${encodeURIComponent(key)}`;
+      (typeof publicUrl === "string" && publicUrl.trim().startsWith("http")
+        ? publicUrl.trim()
+        : null) ||
+      (typeof publicUrl === "string" && publicUrl.trim().startsWith("/api/media/")
+        ? publicUrl.trim()
+        : null) ||
+      `/api/media/${String(key)
+        .split("/")
+        .map((p: string) => encodeURIComponent(p))
+        .join("/")}`;
     return { key, publicUrl: displayUrl };
   }
 

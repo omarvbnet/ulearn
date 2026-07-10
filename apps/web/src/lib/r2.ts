@@ -7,9 +7,32 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { r2Client, R2_BUCKET } from "@/lib/r2-client";
 
+export { r2Client };
+export const r2Bucket = R2_BUCKET;
+
 const r2 = r2Client;
 const BUCKET = R2_BUCKET;
-const PUBLIC_URL = process.env.R2_PUBLIC_URL || "";
+const PUBLIC_URL = (process.env.R2_PUBLIC_URL || "").replace(/\/$/, "");
+
+export function isR2Configured() {
+  return Boolean(process.env.R2_ENDPOINT && process.env.R2_ACCESS_KEY_ID);
+}
+
+/** R2 object key prefixes used by this app (must match bucket folders). */
+export const R2_KEY_PREFIXES = [
+  "ads/",
+  "diagnostics/",
+  "intro-outro/",
+  "lessons/",
+  "profile-photos/",
+  "stage-certificates/",
+  "teacher-course-pdfs/",
+  "teacher-courses/",
+  "teacher-covers/",
+  "teacher-shorts-covers/",
+  "teacher-shorts/",
+  "videos/",
+] as const;
 
 const ALLOWED_MIME: Record<string, string[]> = {
   image: ["image/jpeg", "image/png", "image/webp", "image/gif"],
@@ -120,41 +143,58 @@ export async function getDownloadUrl(key: string, expiresIn = 3600) {
   return getSignedUrl(r2, command, { expiresIn });
 }
 
-const r2Configured = () =>
-  Boolean(process.env.R2_ENDPOINT && process.env.R2_ACCESS_KEY_ID);
-
-/** Stable same-origin proxy path — works for Flutter absoluteUrl and admin <img>. */
+/** Same-origin media path — path style avoids query-string issues in image caches. */
 export function mediaProxyPath(key: string) {
-  return `/api/media?key=${encodeURIComponent(key)}`;
+  const clean = key.replace(/^\/+/, "");
+  return `/api/media/${clean
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/")}`;
 }
 
-/** Pull an object key out of `/uploads/...` or `/api/media?key=` URLs. */
+/** Pull an R2 object key from a stored URL and/or explicit key. */
 export function extractStorageKey(
   url?: string | null,
   key?: string | null
 ): string | null {
-  const direct = key?.trim();
+  const direct = key?.trim().replace(/^\/+/, "");
   if (direct) return direct;
 
   const raw = url?.trim() || "";
   if (!raw) return null;
 
   try {
-    const pathOnly = raw.startsWith("http://") || raw.startsWith("https://")
-      ? new URL(raw).pathname
-      : raw.split("?")[0];
+    let pathOnly = raw;
+    if (raw.startsWith("http://") || raw.startsWith("https://")) {
+      const u = new URL(raw);
+      // /api/media?key=ads%2F...
+      const qKey = u.searchParams.get("key");
+      if (qKey?.trim()) return qKey.trim().replace(/^\/+/, "");
+      pathOnly = u.pathname;
+    } else if (raw.includes("?")) {
+      const u = new URL(raw, "http://local");
+      const qKey = u.searchParams.get("key");
+      if (qKey?.trim()) return qKey.trim().replace(/^\/+/, "");
+      pathOnly = u.pathname;
+    }
 
-    if (pathOnly.startsWith("/uploads/")) {
-      const k = decodeURIComponent(pathOnly.slice("/uploads/".length));
+    const decoded = decodeURIComponent(pathOnly);
+
+    if (decoded.startsWith("/uploads/")) {
+      const k = decoded.slice("/uploads/".length);
       return k || null;
     }
 
-    if (raw.includes("/api/media")) {
-      const u = raw.startsWith("http")
-        ? new URL(raw)
-        : new URL(raw, "http://local");
-      const fromQuery = u.searchParams.get("key");
-      if (fromQuery?.trim()) return fromQuery.trim();
+    if (decoded.startsWith("/api/media/")) {
+      const k = decoded.slice("/api/media/".length);
+      return k || null;
+    }
+
+    // From CDN / any absolute path: find a known R2 folder prefix.
+    const stripped = decoded.replace(/^\/+/, "");
+    for (const prefix of R2_KEY_PREFIXES) {
+      const idx = stripped.indexOf(prefix);
+      if (idx >= 0) return stripped.slice(idx);
     }
   } catch {
     /* ignore */
@@ -163,9 +203,9 @@ export function extractStorageKey(
 }
 
 /**
- * Resolve a client-facing media URL from a stored public URL and/or object key.
- * Order: CDN (R2_PUBLIC_URL) → same-origin /api/media proxy → absolute http(s) → local /uploads.
- * Never trusts bare `/uploads/...` when R2 is configured (those files are not on the Next host).
+ * Resolve a client-facing media URL.
+ * When an R2 key is known, always return the same-origin `/api/media/...` gateway
+ * (streams via R2 credentials). Do not depend on R2_PUBLIC_URL being publicly reachable.
  */
 export async function resolvePublicMediaUrl(
   url?: string | null,
@@ -174,30 +214,21 @@ export async function resolvePublicMediaUrl(
   const storageKey = extractStorageKey(url, key);
   const trimmed = url?.trim() || "";
 
-  if (storageKey && PUBLIC_URL) {
-    return `${PUBLIC_URL.replace(/\/$/, "")}/${storageKey}`;
-  }
-
-  if (storageKey && r2Configured()) {
+  if (storageKey && isR2Configured()) {
     return mediaProxyPath(storageKey);
   }
 
+  if (storageKey && PUBLIC_URL) {
+    return `${PUBLIC_URL}/${storageKey}`;
+  }
+
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    // Rewrite our own dead /uploads absolute URLs when possible.
-    try {
-      const parsed = new URL(trimmed);
-      if (parsed.pathname.startsWith("/uploads/")) {
-        const k = decodeURIComponent(parsed.pathname.slice("/uploads/".length));
-        if (k && PUBLIC_URL) return `${PUBLIC_URL.replace(/\/$/, "")}/${k}`;
-        if (k && r2Configured()) return mediaProxyPath(k);
-      }
-    } catch {
-      /* keep original */
-    }
+    // Dead host /uploads absolute URLs → recover key when possible.
+    const recovered = extractStorageKey(trimmed, null);
+    if (recovered && isR2Configured()) return mediaProxyPath(recovered);
     return trimmed;
   }
 
-  // Local/dev disk uploads only.
   if (trimmed.startsWith("/")) return trimmed;
   if (trimmed) return trimmed;
   return null;
@@ -206,17 +237,27 @@ export async function resolvePublicMediaUrl(
 /** Best URL to persist after an upload completes. */
 export async function preferredStoredMediaUrl(
   key: string,
-  clientPublicUrl?: string | null
+  _clientPublicUrl?: string | null
 ): Promise<string> {
-  const fromClient = clientPublicUrl?.trim();
-  if (fromClient && (fromClient.startsWith("http://") || fromClient.startsWith("https://"))) {
-    if (!fromClient.includes("X-Amz-") && !fromClient.includes("/uploads/")) {
-      return fromClient;
+  if (isR2Configured()) return mediaProxyPath(key);
+  if (PUBLIC_URL) return `${PUBLIC_URL}/${key}`;
+  return `/uploads/${key}`;
+}
+
+/** Signed GET URL for large video/PDF objects (not for <img> tags). */
+export async function resolveSignedMediaUrl(
+  url?: string | null,
+  key?: string | null
+): Promise<string | null> {
+  const storageKey = extractStorageKey(url, key);
+  if (storageKey && isR2Configured()) {
+    try {
+      return await getDownloadUrl(storageKey, 60 * 60 * 6);
+    } catch {
+      return mediaProxyPath(storageKey);
     }
   }
-  if (PUBLIC_URL) return `${PUBLIC_URL.replace(/\/$/, "")}/${key}`;
-  if (r2Configured()) return mediaProxyPath(key);
-  return `/uploads/${key}`;
+  return resolvePublicMediaUrl(url, key);
 }
 
 export async function deleteObject(key: string) {

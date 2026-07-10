@@ -1,10 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { PUBLIC_SHORT_VIDEO_WHERE } from "@/lib/video-visibility";
-import { resolvePublicMediaUrl } from "@/lib/r2";
+import { resolvePublicMediaUrl, resolveSignedMediaUrl } from "@/lib/r2";
 
 async function resolveVideoUrl(fileKey: string | null, fileUrl: string | null) {
-  if (fileUrl?.startsWith("http")) return fileUrl;
-  return resolvePublicMediaUrl(fileUrl, fileKey);
+  if (fileUrl?.startsWith("http") && !fileUrl.includes("/uploads/")) {
+    // Prefer re-signing from key when available so private buckets still play.
+    if (fileKey) return resolveSignedMediaUrl(fileUrl, fileKey);
+    return fileUrl;
+  }
+  return resolveSignedMediaUrl(fileUrl, fileKey);
 }
 
 const userSelect = {

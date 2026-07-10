@@ -66,11 +66,18 @@ export function AdsClient() {
       });
       if (!put.ok) throw new Error("Upload failed");
 
-      // Prefer CDN public URL; otherwise store key and let APIs resolve via /api/media.
+      // Prefer CDN public URL; otherwise same-origin media gateway for R2 keys.
       const imageUrl =
         (typeof publicUrl === "string" && publicUrl.trim().startsWith("http")
           ? publicUrl.trim()
-          : null) || `/api/media?key=${encodeURIComponent(key)}`;
+          : null) ||
+        (typeof publicUrl === "string" && publicUrl.trim().startsWith("/api/media/")
+          ? publicUrl.trim()
+          : null) ||
+        `/api/media/${String(key)
+          .split("/")
+          .map((p: string) => encodeURIComponent(p))
+          .join("/")}`;
 
       const res = await fetch("/api/admin/ads", {
         method: "POST",

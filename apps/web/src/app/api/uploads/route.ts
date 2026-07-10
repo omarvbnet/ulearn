@@ -1,5 +1,5 @@
 import { error, json, requireAuth } from "@/lib/api";
-import { buildKey, getUploadUrl, maxSizeLabel, validateFile } from "@/lib/r2";
+import { buildKey, getUploadUrl, maxSizeLabel, mediaProxyPath, validateFile } from "@/lib/r2";
 
 const r2Configured = Boolean(process.env.R2_ENDPOINT && process.env.R2_ACCESS_KEY_ID);
 
@@ -47,7 +47,9 @@ export async function POST(request: Request) {
 
   const upload = await getUploadUrl({ key, contentType });
   return json({
-    ...upload,
-    publicUrl: upload.publicUrl ?? `/api/media?key=${encodeURIComponent(key)}`,
+    uploadUrl: upload.uploadUrl,
+    key: upload.key,
+    expiresIn: upload.expiresIn,
+    publicUrl: mediaProxyPath(key),
   });
 }

@@ -1,5 +1,5 @@
 import { error, json, requireAuth } from "@/lib/api";
-import { buildKey, getUploadUrl, maxSizeLabel, preferredStoredMediaUrl, validateFile } from "@/lib/r2";
+import { buildKey, getUploadUrl, maxSizeLabel, mediaProxyPath, preferredStoredMediaUrl, validateFile } from "@/lib/r2";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -47,8 +47,10 @@ export async function POST(request: Request) {
 
   const upload = await getUploadUrl({ key, contentType: body.contentType });
   return json({
-    ...upload,
-    publicUrl: upload.publicUrl ?? `/api/media?key=${encodeURIComponent(key)}`,
+    uploadUrl: upload.uploadUrl,
+    key: upload.key,
+    expiresIn: upload.expiresIn,
+    publicUrl: mediaProxyPath(key),
   });
 }
 
