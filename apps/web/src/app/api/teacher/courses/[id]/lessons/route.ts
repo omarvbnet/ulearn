@@ -23,6 +23,7 @@ const lessonSchema = z.object({
   pdfFileUrl: z.string().optional(),
   pdfMimeType: z.string().optional(),
   pdfFileSize: z.number().int().positive().optional(),
+  videoAssetId: z.string().optional(),
 });
 
 /** Teacher: add a lesson to own course. */
@@ -61,8 +62,16 @@ export async function POST(
       durationSec: parsed.data.durationSec,
       sortOrder: parsed.data.sortOrder,
       isFreePreview: parsed.data.isFreePreview ?? false,
+      videoAssetId: parsed.data.videoAssetId,
     },
   });
+
+  if (parsed.data.videoAssetId) {
+    await prisma.videoAsset.update({
+      where: { id: parsed.data.videoAssetId },
+      data: { courseLessonId: lesson.id, courseId: id },
+    });
+  }
 
   if (parsed.data.pdfFileKey || parsed.data.pdfFileUrl) {
     await TeacherCourseService.attachLessonPdf(id, lesson.id, {

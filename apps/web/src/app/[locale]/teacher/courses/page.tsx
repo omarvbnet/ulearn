@@ -4,6 +4,7 @@ import { Badge, Button, Card, Input, PageHeader, Select, StatCard, Textarea } fr
 import { EmptyState, Modal, SkeletonRows, useToast } from "@/components/overlay";
 import { cn } from "@/lib/utils";
 import { captureVideoThumbnail } from "@/lib/video-thumbnail";
+import { fetchWatermarkConfig, processVideoForUpload, uploadVideoDirect } from "@/lib/video-process";
 import { useCallback, useEffect, useState } from "react";
 
 type Lesson = {
@@ -565,45 +566,24 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
 
     try {
       let fileKey: string | undefined;
-      let fileUrl: string | undefined;
       let thumbnailKey: string | undefined;
       let thumbnailUrl: string | undefined;
       let durationSec: number | undefined;
       let pdfFileKey: string | undefined;
       let pdfFileUrl: string | undefined;
 
+      let videoAssetId: string | undefined;
+
       if (file) {
-        const presign = await fetch("/api/admin/uploads", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            filename: file.name,
-            contentType: file.type,
-            size: file.size,
-            category: "video",
-            folder: "teacher-courses",
-          }),
+        const watermark = await fetchWatermarkConfig();
+        const processed = await processVideoForUpload(file, {
+          watermark,
+          courseName: course.titleEn,
+          onProgress: setProgress,
         });
-        if (!presign.ok) throw new Error((await presign.json()).error);
-        const { uploadUrl, key, publicUrl } = await presign.json();
-
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open("PUT", uploadUrl);
-          xhr.setRequestHeader("Content-Type", file.type);
-          xhr.upload.onprogress = (ev) =>
-            ev.lengthComputable && setProgress(Math.round((ev.loaded / ev.total) * 100));
-          xhr.onload = () =>
-            xhr.status < 300 ? resolve() : reject(new Error("Upload failed"));
-          xhr.onerror = () => reject(new Error("Upload failed"));
-          xhr.send(file);
-        });
-
-        fileKey = key;
-        fileUrl = publicUrl;
 
         try {
-          const captured = await captureVideoThumbnail(file);
+          const captured = await captureVideoThumbnail(processed.file);
           durationSec = captured.durationSec;
           const thumbName = `${file.name.replace(/\.[^.]+$/, "")}-cover.jpg`;
           const thumbPresign = await fetch("/api/admin/uploads", {
@@ -630,6 +610,17 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
         } catch {
           // Procedural covers still render on mobile when no thumbnail is stored.
         }
+
+        setProgress(0);
+        const uploaded = await uploadVideoDirect({
+          file: processed.file,
+          courseId: course.id,
+          scope: "STORE_COURSE",
+          durationSec,
+          onProgress: setProgress,
+        });
+        fileKey = uploaded.objectKey;
+        videoAssetId = uploaded.videoId;
       }
 
       if (pdfFile) {
@@ -661,7 +652,7 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
         body: JSON.stringify({
           title: title.trim(),
           fileKey,
-          fileUrl,
+          videoAssetId,
           thumbnailKey,
           thumbnailUrl,
           durationSec,

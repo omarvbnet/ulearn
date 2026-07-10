@@ -19,19 +19,11 @@ export async function POST(
 
   if (!result.ok) {
     if (result.error === "NO_ACCESS") return error("No access", 403, "NO_ACCESS");
-    if (result.error === "FFMPEG_UNAVAILABLE" || result.error === "WATERMARK_UNAVAILABLE") {
-      return error(
-        "Video watermarking requires WATERMARK_SERVICE_URL on Vercel (see apps/watermark-worker)",
-        503,
-        "WATERMARK_UNAVAILABLE"
-      );
-    }
     return error("Lesson not found", 404, "NOT_FOUND");
   }
 
   return json({
     url: result.url,
-    cached: result.cached,
-    watermark: result.watermark,
+    watermarkApplied: result.watermarkApplied,
   });
 }

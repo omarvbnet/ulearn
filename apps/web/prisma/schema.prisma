@@ -91,6 +91,18 @@ enum ContentType {
   ATTACHMENT
 }
 
+enum VideoScope {
+  STORE_COURSE
+  CURRICULUM_LESSON
+  SHORT_VIDEO
+}
+
+enum VideoProcessingStatus {
+  PENDING_UPLOAD
+  READY
+  FAILED
+}
+
 // ─────────────────────────────────────────────
 // Geography
 // ─────────────────────────────────────────────
@@ -212,6 +224,7 @@ model User {
   contentReports        ContentReport[]
   adLikes              AdLike[]
   stageChangeRequests  StageChangeRequest[]  @relation("StageRequests")
+  videoAssets          VideoAsset[]
 
   @@index([role, status])
   @@index([countryId])
@@ -346,6 +359,7 @@ model CourseLesson {
   title         String
   fileKey       String?
   fileUrl       String?
+  videoAssetId  String?  @unique
   thumbnailKey  String?
   thumbnailUrl  String?
   durationSec   Int?
@@ -354,7 +368,8 @@ model CourseLesson {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  course    Course                 @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course     Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  videoAsset VideoAsset? @relation(fields: [videoAssetId], references: [id], onDelete: SetNull)
   likes     CourseLessonLike[]
   favorites CourseLessonFavorite[]
   questions CourseLessonQuestion[]
@@ -364,6 +379,37 @@ model CourseLesson {
   materials CourseMaterial[]
 
   @@index([courseId])
+}
+
+/// Direct-upload video metadata. Binary data lives only in Cloudflare R2.
+model VideoAsset {
+  id                String                @id @default(cuid())
+  scope             VideoScope
+  courseId          String?
+  courseLessonId    String?
+  uploadedById      String
+  objectKey         String
+  sourceFilename    String?
+  fileSize          BigInt?
+  durationSec       Int?
+  width             Int?
+  height            Int?
+  videoCodec        String?               @default("h264")
+  audioCodec        String?               @default("aac")
+  watermarkApplied  Boolean               @default(false)
+  processingStatus  VideoProcessingStatus @default(PENDING_UPLOAD)
+  processingError   String?
+  uploadedAt        DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  uploadedBy   User          @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  courseLesson CourseLesson?
+
+  @@index([scope])
+  @@index([courseId])
+  @@index([processingStatus])
+  @@index([uploadedById])
 }
 
 /// Supplementary files for a store course (PDFs, notes, attachments).

@@ -164,8 +164,116 @@ export function SettingsClient() {
 
       <DeductionsCard />
 
+      <VideoWatermarkCard />
+
       <IntroOutroCard />
     </div>
+  );
+}
+
+function VideoWatermarkCard() {
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [brandText, setBrandText] = useState("U Learn");
+  const [opacity, setOpacity] = useState("0.45");
+  const [fontSize, setFontSize] = useState("28");
+  const [position, setPosition] = useState("bottom-right");
+  const [includeCourseName, setIncludeCourseName] = useState(true);
+  const [includeInstructorName, setIncludeInstructorName] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/admin/video-watermark")
+      .then(async (r) => {
+        if (!r.ok) return;
+        const { config } = await r.json();
+        setBrandText(config.brandText ?? "U Learn");
+        setOpacity(String(config.opacity ?? 0.45));
+        setFontSize(String(config.fontSize ?? 28));
+        setPosition(config.position ?? "bottom-right");
+        setIncludeCourseName(config.includeCourseName ?? true);
+        setIncludeInstructorName(config.includeInstructorName ?? true);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    const res = await fetch("/api/admin/video-watermark", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        brandText,
+        opacity: Number(opacity),
+        fontSize: Number(fontSize),
+        position,
+        includeCourseName,
+        includeInstructorName,
+      }),
+    });
+    setSaving(false);
+    if (res.ok) toast("Video watermark settings saved");
+    else toast("Failed to save watermark settings", "error");
+  }
+
+  if (loading) return <Card><SkeletonRows rows={2} /></Card>;
+
+  return (
+    <Card className="space-y-4 md:col-span-2">
+      <div>
+        <h3 className="font-semibold">Video Watermark</h3>
+        <p className="mt-1 text-sm text-muted">
+          Burned into every uploaded lesson on device before direct R2 upload. Not a player overlay.
+        </p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Input label="Brand text" value={brandText} onChange={(e) => setBrandText(e.target.value)} />
+        <Select label="Position" value={position} onChange={(e) => setPosition(e.target.value)}>
+          <option value="bottom-right">Bottom right</option>
+          <option value="bottom-left">Bottom left</option>
+          <option value="top-right">Top right</option>
+          <option value="top-left">Top left</option>
+        </Select>
+        <Input
+          label="Opacity (0.1 – 1)"
+          type="number"
+          min="0.1"
+          max="1"
+          step="0.05"
+          value={opacity}
+          onChange={(e) => setOpacity(e.target.value)}
+        />
+        <Input
+          label="Font size (px)"
+          type="number"
+          min="12"
+          max="72"
+          value={fontSize}
+          onChange={(e) => setFontSize(e.target.value)}
+        />
+      </div>
+      <label className="flex items-center gap-3 text-sm">
+        <input
+          type="checkbox"
+          checked={includeCourseName}
+          onChange={(e) => setIncludeCourseName(e.target.checked)}
+          className="h-4 w-4 accent-[var(--accent)]"
+        />
+        Include course name in watermark
+      </label>
+      <label className="flex items-center gap-3 text-sm">
+        <input
+          type="checkbox"
+          checked={includeInstructorName}
+          onChange={(e) => setIncludeInstructorName(e.target.checked)}
+          className="h-4 w-4 accent-[var(--accent)]"
+        />
+        Include instructor name in watermark
+      </label>
+      <Button disabled={saving} onClick={save}>
+        {saving ? "Saving…" : "Save Watermark Settings"}
+      </Button>
+    </Card>
   );
 }
 

@@ -91,17 +91,23 @@ class ApiClient {
   }
 
   /// Raw binary PUT used for presigned/direct file uploads (small payloads).
-  /// [url] may be absolute (R2 presigned) or server-relative (dev fallback).
-  Future<void> putBytes(String url, Uint8List bytes, String contentType) async {
+  Future<void> putBytes(
+    String url,
+    Uint8List bytes,
+    String contentType, {
+    UploadProgressCallback? onProgress,
+  }) async {
     await _putWithRetry(
       url: url,
       contentType: contentType,
       contentLength: bytes.length,
       openBody: () => Stream.value(bytes),
+      onProgress: onProgress,
     );
   }
 
   /// Stream a file to a presigned/direct upload URL (videos & large files).
+  /// Progress callbacks fire while bytes are sent over the network.
   Future<void> putFile(
     String url,
     File file,
@@ -114,20 +120,13 @@ class ApiClient {
       url: url,
       contentType: contentType,
       contentLength: length,
-      openBody: () {
-        var sent = 0;
-        return file.openRead().map((chunk) {
-          sent += chunk.length;
-          onProgress?.call(sent, length);
-          return chunk;
-        });
-      },
+      openBody: () => file.openRead(),
+      onProgress: onProgress,
       timeout: timeout ?? _uploadTimeoutFor(length),
     );
   }
 
   Duration _uploadTimeoutFor(int bytes) {
-    // Minimum 15 minutes; add ~3 minutes per 50 MB.
     final extraMinutes = ((bytes / (50 * 1024 * 1024)) * 3).ceil();
     return Duration(minutes: 15 + extraMinutes);
   }
@@ -144,6 +143,7 @@ class ApiClient {
     required String contentType,
     required int contentLength,
     required Stream<List<int>> Function() openBody,
+    UploadProgressCallback? onProgress,
     Duration? timeout,
     int maxAttempts = 3,
   }) async {
@@ -155,22 +155,16 @@ class ApiClient {
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       final client = _uploadClient();
       try {
-        final request = http.StreamedRequest('PUT', target);
-        request.headers['Content-Type'] = contentType;
-        if (needsAuth && _token != null) {
-          request.headers['Authorization'] = 'Bearer $_token';
-          request.headers['Cookie'] = 'ulearn_session=$_token';
-        }
-        request.contentLength = contentLength;
-
-        await request.sink.addStream(openBody());
-        await request.sink.close();
-
-        final response = await client.send(request).timeout(effectiveTimeout);
-        if (response.statusCode >= 400) {
-          throw ApiException('Upload failed', response.statusCode);
-        }
-        await response.stream.drain();
+        await _streamPut(
+          client: client,
+          target: target,
+          contentType: contentType,
+          contentLength: contentLength,
+          needsAuth: needsAuth,
+          openBody: openBody,
+          onProgress: onProgress,
+          timeout: effectiveTimeout,
+        );
         return;
       } on ApiException {
         rethrow;
@@ -190,6 +184,52 @@ class ApiClient {
     }
 
     throw lastError ?? ApiException('Upload failed', 0);
+  }
+
+  /// Starts the HTTP request first, then pipes the body so [onProgress]
+  /// reflects bytes actually flowing during the upload (not pre-buffered).
+  Future<void> _streamPut({
+    required http.Client client,
+    required Uri target,
+    required String contentType,
+    required int contentLength,
+    required bool needsAuth,
+    required Stream<List<int>> Function() openBody,
+    UploadProgressCallback? onProgress,
+    required Duration timeout,
+  }) async {
+    final request = http.StreamedRequest('PUT', target);
+    request.contentLength = contentLength;
+    request.headers['Content-Type'] = contentType;
+    if (needsAuth && _token != null) {
+      request.headers['Authorization'] = 'Bearer $_token';
+      request.headers['Cookie'] = 'ulearn_session=$_token';
+    }
+
+    onProgress?.call(0, contentLength);
+
+    // Start sending immediately; body streams as chunks are added.
+    final responseFuture = client.send(request);
+
+    var sent = 0;
+    try {
+      await for (final chunk in openBody()) {
+        request.sink.add(chunk);
+        sent += chunk.length;
+        onProgress?.call(sent.clamp(0, contentLength), contentLength);
+      }
+      await request.sink.close();
+    } catch (e) {
+      await request.sink.close();
+      rethrow;
+    }
+
+    final response = await responseFuture.timeout(timeout);
+    if (response.statusCode >= 400) {
+      throw ApiException('Upload failed', response.statusCode);
+    }
+    await response.stream.drain();
+    onProgress?.call(contentLength, contentLength);
   }
 }
 

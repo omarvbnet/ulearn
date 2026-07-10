@@ -1,22 +1,14 @@
 import {
-  S3Client,
   PutObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { r2Client, R2_BUCKET } from "@/lib/r2-client";
 
-const r2 = new S3Client({
-  region: "auto",
-  endpoint: process.env.R2_ENDPOINT,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
-  },
-});
-
-const BUCKET = process.env.R2_BUCKET || "ulearn";
+const r2 = r2Client;
+const BUCKET = R2_BUCKET;
 const PUBLIC_URL = process.env.R2_PUBLIC_URL || "";
 
 const ALLOWED_MIME: Record<string, string[]> = {
@@ -119,6 +111,7 @@ export async function getUploadUrl(params: {
     uploadUrl: url,
     key: params.key,
     publicUrl: PUBLIC_URL ? `${PUBLIC_URL}/${params.key}` : undefined,
+    expiresIn,
   };
 }
 

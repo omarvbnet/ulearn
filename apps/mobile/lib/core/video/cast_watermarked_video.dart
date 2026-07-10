@@ -2,7 +2,7 @@ import 'package:ulearn/core/api/api_client.dart';
 
 enum CastLessonKind { store, curriculum }
 
-/// Fetches a server-generated MP4 with the viewer watermark burned into the video.
+/// Fetches a signed playback URL for casting (video already has platform watermark burned in).
 class CastWatermarkedVideo {
   CastWatermarkedVideo._();
 
