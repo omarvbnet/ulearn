@@ -96,7 +96,8 @@
     "activate": "چالاککردنی کۆد",
     "pending": "چاوەڕوان",
     "active": "چالاک",
-    "expired": "بەسەرچووە"
+    "expired": "بەسەرچووە",
+    "refresh": "نوێکردنەوە"
   },
   "student": {
     "welcome": "بەخێربێیت",
@@ -680,7 +681,29 @@
       "lockAfter": "دوای ئەوە قوفڵ",
       "stepDetails": "وردەکاری",
       "stepMedia": "میدیا",
-      "stepAccess": "دەستگەیشتن"
+      "stepAccess": "دەستگەیشتن",
+      "coursesTab": "خولەکان",
+      "coursesHubTitle": "خولەکانت",
+      "coursesHubHint": "ڕەشنووس و ئامادەیی بڵاوکردنەوە بەڕێوەببە و وانە زیاد بکە لە یەک شوێن.",
+      "filterAll": "هەموو",
+      "filterLive": "زیندوو",
+      "filterDraft": "ڕەشنووس",
+      "filterReview": "پێداچوونەوە",
+      "emptyCoursesTitle": "یەکەم خولەکەت دروست بکە",
+      "emptyCoursesHint": "ڕێنمایی دەست پێبکە بۆ بەرگ، نمونە، تاقیکردنەوە و بەڵگەنامە.",
+      "noCoursesInFilter": "لەم فلتەرەدا خول نییە",
+      "openManage": "بەڕێوەبردن",
+      "addVideo": "زیادکردنی ڤیدیۆ",
+      "continueDraft": "بەردەوامبوون لە ڕێنمایی",
+      "lessonsCount": "{count} وانە",
+      "quizzesCount": "{count} تاقیکردنەوە",
+      "studentsCount": "{count} خوێندکار",
+      "statusLive": "زیندوو",
+      "statusDraft": "ڕەشنووس",
+      "statusPending": "لە پێداچوونەوەدا",
+      "statusRejected": "ڕەتکراوەتەوە",
+      "statusClosed": "داخراو",
+      "studioHeroHint": "خولەکانی فرۆشگاکەت دروست بکە، جوان بکە و گەشە پێبدە"
     },
     "qa": {
       "postFailed": "Could not post your question",

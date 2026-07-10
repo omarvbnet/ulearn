@@ -96,7 +96,8 @@
     "activate": "Kodu Etkinleştir",
     "pending": "Beklemede",
     "active": "Aktif",
-    "expired": "Süresi Doldu"
+    "expired": "Süresi Doldu",
+    "refresh": "Yenile"
   },
   "student": {
     "welcome": "Hoş geldin",
@@ -680,7 +681,29 @@
       "lockAfter": "sonra kilit",
       "stepDetails": "Detaylar",
       "stepMedia": "Medya",
-      "stepAccess": "Erişim"
+      "stepAccess": "Erişim",
+      "coursesTab": "Kurslar",
+      "coursesHubTitle": "Kurslarınız",
+      "coursesHubHint": "Taslakları, yayın hazırlığını yönetin ve dersleri tek yerden ekleyin.",
+      "filterAll": "Tümü",
+      "filterLive": "Canlı",
+      "filterDraft": "Taslak",
+      "filterReview": "İnceleme",
+      "emptyCoursesTitle": "İlk kursunuzu oluşturun",
+      "emptyCoursesHint": "Kapak, ücretsiz örnekler, quizler ve belgeler için sihirbazı başlatın.",
+      "noCoursesInFilter": "Bu filtrede kurs yok",
+      "openManage": "Yönet",
+      "addVideo": "Video ekle",
+      "continueDraft": "Sihirbaza devam",
+      "lessonsCount": "{count} ders",
+      "quizzesCount": "{count} quiz",
+      "studentsCount": "{count} öğrenci",
+      "statusLive": "Canlı",
+      "statusDraft": "Taslak",
+      "statusPending": "İncelemede",
+      "statusRejected": "Reddedildi",
+      "statusClosed": "Kapalı",
+      "studioHeroHint": "Mağaza kurslarınızı oluşturun, geliştirin ve büyütün"
     },
     "qa": {
       "postFailed": "Could not post your question",

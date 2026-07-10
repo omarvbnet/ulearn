@@ -11,7 +11,7 @@ import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/media/video_cover_helper.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/features/store/teacher_course_wizard_screen.dart';
-import 'package:ulearn/features/store/teacher_course_manage_screen.dart';
+import 'package:ulearn/features/store/teacher_courses_tab.dart';
 import 'package:ulearn/features/store/teacher_quiz_tab.dart';
 import 'package:ulearn/features/store/widgets/free_minute_picker.dart';
 import 'package:ulearn/core/video/video_process_service.dart';
@@ -118,13 +118,9 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   StudioUploadProgress? _uploadProgress;
   Timer? _progressUiTimer;
   bool _compressBeforeUpload = true;
-  /// paid | fullFree | timedFree
-  String _accessMode = 'paid';
-  int _freePreviewSec = 120;
 
   File? _pendingVideo;
   File? _pendingCover;
-  File? _pendingPdf;
   int? _pendingDurationSec;
 
   @override
@@ -162,10 +158,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     setState(() {
       _pendingVideo = null;
       _pendingCover = null;
-      _pendingPdf = null;
       _pendingDurationSec = null;
-      _accessMode = 'paid';
-      _freePreviewSec = 120;
     });
   }
 
@@ -255,6 +248,21 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _refreshCourses() async {
+    try {
+      final data = await context.read<ApiClient>().get('/api/teacher/courses');
+      if (!mounted) return;
+      setState(() {
+        _courses = ((data['courses'] as List<dynamic>?) ?? [])
+            .cast<Map<String, dynamic>>();
+        if (_courseId != null &&
+            !_courses.any((c) => c['id']?.toString() == _courseId)) {
+          _courseId = _courses.isNotEmpty ? _courses.first['id']?.toString() : null;
+        }
+      });
+    } catch (_) {}
   }
 
   String? _selectedCourseTitle() {
@@ -393,34 +401,6 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     );
   }
 
-  Future<Map<String, String>?> _uploadPdfFile(File file, _UploadPlan plan) {
-    final name = file.path.split(Platform.pathSeparator).last;
-    return _uploadFile(
-      file,
-      name.toLowerCase().endsWith('.pdf') ? name : '$name.pdf',
-      'application/pdf',
-      category: 'document',
-      folder: 'teacher-course-pdfs',
-      progressPhase: StudioUploadPhase.uploadingPdf,
-      presignSegment: _UploadSegment(
-        plan.pdfUpload.start,
-        plan.pdfUpload.start + 1,
-      ),
-      uploadSegment: plan.pdfUpload,
-    );
-  }
-
-  Future<void> _pickPdf() async {
-    final pick = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['pdf'],
-    );
-    if (pick == null || pick.files.isEmpty) return;
-    final file = pick.files.first;
-    if (file.path != null && mounted)
-      setState(() => _pendingPdf = File(file.path!));
-  }
-
   Future<Map<String, String>?> _uploadCoverFile(
     File file,
     String folder,
@@ -529,119 +509,6 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     // Compress / watermark only when the teacher turns the toggle on.
     if (!_compressBeforeUpload) return video;
     return _processVideoForUpload(plan, courseName: _selectedCourseTitle());
-  }
-
-  Future<void> _uploadCourseVideo() async {
-    FocusManager.instance.primaryFocus?.unfocus();
-    if (_courseId == null || _titleCtrl.text.trim().isEmpty) return;
-    if (_pendingVideo == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.studioPickVideoFirst)),
-      );
-      return;
-    }
-    if (_pendingCover == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.t('mobile.studio.coverRequired'))),
-      );
-      return;
-    }
-
-    final plan = _UploadPlan(
-      compress: _compressBeforeUpload,
-      includePdf: _pendingPdf != null,
-    );
-
-    setState(() {
-      _uploading = true;
-      _uploadProgress = StudioUploadProgress(
-        phase: StudioUploadPhase.preparing,
-        overallPercent: 1,
-      );
-    });
-    try {
-      _setOverall(
-        plan.preparing.end,
-        StudioUploadPhase.preparing,
-        byteDetail: null,
-        force: true,
-      );
-      final videoFile = await _prepareVideoForUpload(plan);
-      if (videoFile == null) return;
-
-      final uploaded = await _uploadVideoToR2(
-        file: videoFile,
-        courseId: _courseId!,
-        scope: 'STORE_COURSE',
-        plan: plan,
-      );
-      if (uploaded == null) throw Exception('Upload failed');
-
-      // Cover is required and already chosen — never auto-extract (that hangs on large MOV).
-      _setOverall(
-        plan.coverUpload.start,
-        StudioUploadPhase.uploadingCover,
-        byteDetail: context.l10n.t('mobile.studio.uploadingCoverBusy'),
-        force: true,
-      );
-      final cover = await _uploadCoverFile(_pendingCover!, 'teacher-covers', plan);
-      if (cover == null) throw Exception('Cover upload failed');
-
-      final payload = <String, dynamic>{
-        'title': _titleCtrl.text.trim(),
-        'fileKey': uploaded.objectKey,
-        'videoAssetId': uploaded.videoId,
-        'thumbnailKey': cover['key'],
-        'thumbnailUrl': cover['url'],
-        if (_pendingDurationSec != null) 'durationSec': _pendingDurationSec,
-        'isFreePreview': _accessMode == 'fullFree',
-        if (_accessMode == 'timedFree') 'freePreviewSec': _freePreviewSec,
-        if (_accessMode != 'timedFree') 'freePreviewSec': null,
-      };
-
-      if (_pendingPdf != null) {
-        final pdf = await _uploadPdfFile(_pendingPdf!, plan);
-        if (pdf != null) {
-          payload['pdfFileKey'] = pdf['key'];
-          payload['pdfFileUrl'] = pdf['url'];
-          payload['pdfMimeType'] = 'application/pdf';
-          payload['pdfTitle'] = '${_titleCtrl.text.trim()} — PDF';
-        }
-      }
-
-      _setOverall(
-        plan.saving.start,
-        StudioUploadPhase.saving,
-        byteDetail: null,
-        force: true,
-      );
-      await context.read<ApiClient>().post(
-        '/api/teacher/courses/$_courseId/lessons',
-        payload,
-      );
-      _setOverall(100, StudioUploadPhase.saving, byteDetail: null, force: true);
-      if (!mounted) return;
-      _titleCtrl.clear();
-      _clearPendingMedia();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.studioVideoUploaded)));
-      _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.toString())));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _uploading = false;
-          _uploadProgress = null;
-          _progressUiTimer?.cancel();
-          _progressUiTimer = null;
-        });
-      }
-    }
   }
 
   Future<void> _uploadShort() async {
@@ -754,51 +621,58 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
         body: NestedScrollView(
           headerSliverBuilder: (context, innerBoxIsScrolled) => [
             SliverAppBar(
-              expandedHeight: 120,
+              expandedHeight: 132,
               pinned: true,
               stretch: true,
               title: Text(l10n.profileTeacherStudio),
               actions: [
                 IconButton(
-                  tooltip: l10n.t('mobile.teacher.manageCourse'),
-                  icon: const Icon(Icons.tune_rounded),
-                  onPressed: _courseId == null
-                      ? null
-                      : () async {
-                          await Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => TeacherCourseManageScreen(
-                                courseId: _courseId!,
-                              ),
-                            ),
-                          );
-                          if (mounted) _load();
-                        },
+                  tooltip: l10n.t('common.refresh'),
+                  icon: const Icon(Icons.refresh_rounded),
+                  onPressed: _loading ? null : () async {
+                    setState(() => _loading = true);
+                    await _load();
+                  },
                 ),
                 IconButton(
                   tooltip: l10n.t('mobile.teacher.newCourse'),
                   icon: const Icon(Icons.add_circle_outline),
                   onPressed: () async {
-                    final created = await Navigator.of(context).push<bool>(
+                    await Navigator.of(context).push<bool>(
                       MaterialPageRoute(
                         builder: (_) => const TeacherCourseWizardScreen(),
                       ),
                     );
-                    if (created == true && mounted) _load();
+                    if (mounted) _load();
                   },
                 ),
                 const SizedBox(width: 4),
               ],
               flexibleSpace: FlexibleSpaceBar(
                 background: Container(
-                  decoration: BoxDecoration(
+                  decoration: const BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
-                        AppTheme.primary.withValues(alpha: 0.35),
-                        AppTheme.background,
+                        Color(0xFF2A1050),
+                        Color(0xFF0C1628),
+                        Color(0xFF07070F),
                       ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                  child: Align(
+                    alignment: Alignment.bottomLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 56),
+                      child: Text(
+                        l10n.t('mobile.studio.studioHeroHint'),
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.72),
+                          fontSize: 13,
+                          height: 1.35,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -809,8 +683,8 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                 unselectedLabelColor: AppTheme.muted,
                 tabs: [
                   Tab(
-                    icon: const Icon(Icons.video_library_outlined, size: 20),
-                    text: l10n.t('student.videos'),
+                    icon: const Icon(Icons.menu_book_rounded, size: 20),
+                    text: l10n.t('mobile.studio.coursesTab'),
                   ),
                   Tab(
                     icon: const Icon(Icons.quiz_outlined, size: 20),
@@ -830,35 +704,9 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                 )
               : TabBarView(
                   children: [
-                    _UploadTab(
-                      titleCtrl: _titleCtrl,
-                      descCtrl: null,
-                      uploading: _uploading,
-                      uploadProgress: _uploadProgress,
-                      phaseLabel: _uploadProgress != null
-                          ? _phaseLabel(l10n, _uploadProgress!.phase)
-                          : null,
+                    TeacherCoursesTab(
                       courses: _courses,
-                      courseId: _courseId,
-                      onCourse: (id) => setState(() => _courseId = id),
-                      onSelectVideo: _selectVideo,
-                      onPickCover: _pickCoverImage,
-                      onAutoCover: _autoCoverFromVideo,
-                      onClearCover: _clearCover,
-                      onClearMedia: _clearPendingMedia,
-                      pendingVideo: _pendingVideo,
-                      pendingCover: _pendingCover,
-                      pendingPdf: _pendingPdf,
-                      onPickPdf: _pickPdf,
-                      onClearPdf: () => setState(() => _pendingPdf = null),
-                      pendingDurationSec: _pendingDurationSec,
-                      onUpload: _uploadCourseVideo,
-                      compressBeforeUpload: _compressBeforeUpload,
-                      onCompressChanged: _setCompressBeforeUpload,
-                      accessMode: _accessMode,
-                      onAccessMode: (m) => setState(() => _accessMode = m),
-                      freePreviewSec: _freePreviewSec,
-                      onFreePreviewSec: (s) => setState(() => _freePreviewSec = s),
+                      onRefresh: _refreshCourses,
                     ),
                     TeacherQuizTab(
                       courses: _courses,

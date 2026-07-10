@@ -96,7 +96,8 @@
     "activate": "تفعيل الرمز",
     "pending": "قيد الانتظار",
     "active": "نشط",
-    "expired": "منتهي"
+    "expired": "منتهي",
+    "refresh": "تحديث"
   },
   "student": {
     "welcome": "مرحباً",
@@ -680,7 +681,29 @@
       "lockAfter": "يُقفل بعد",
       "stepDetails": "التفاصيل",
       "stepMedia": "الوسائط",
-      "stepAccess": "الوصول"
+      "stepAccess": "الوصول",
+      "coursesTab": "الدورات",
+      "coursesHubTitle": "دوراتك",
+      "coursesHubHint": "أدِر المسودات وجاهزية النشر وأضف الدروس من مكان واحد.",
+      "filterAll": "الكل",
+      "filterLive": "منشورة",
+      "filterDraft": "مسودة",
+      "filterReview": "مراجعة",
+      "emptyCoursesTitle": "أنشئ دورتك الأولى",
+      "emptyCoursesHint": "ابدأ المعالج لإعداد الغلاف والعينات والاختبارات والمستندات.",
+      "noCoursesInFilter": "لا توجد دورات في هذا التصفية",
+      "openManage": "إدارة",
+      "addVideo": "إضافة فيديو",
+      "continueDraft": "متابعة المعالج",
+      "lessonsCount": "{count} دروس",
+      "quizzesCount": "{count} اختبارات",
+      "studentsCount": "{count} طلاب",
+      "statusLive": "منشورة",
+      "statusDraft": "مسودة",
+      "statusPending": "قيد المراجعة",
+      "statusRejected": "مرفوضة",
+      "statusClosed": "مغلقة",
+      "studioHeroHint": "ابنِ دوراتك في المتجر وحسّنها ونمِّها"
     },
     "qa": {
       "postFailed": "تعذّر نشر سؤالك",

@@ -97,7 +97,8 @@
     "activate": "Activate Code",
     "pending": "Pending",
     "active": "Active",
-    "expired": "Expired"
+    "expired": "Expired",
+    "refresh": "Refresh"
   },
   "student": {
     "welcome": "Welcome",
@@ -680,7 +681,29 @@
       "lockAfter": "locks after",
       "stepDetails": "Details",
       "stepMedia": "Media",
-      "stepAccess": "Access"
+      "stepAccess": "Access",
+      "coursesTab": "Courses",
+      "coursesHubTitle": "Your courses",
+      "coursesHubHint": "Manage drafts, publish readiness, and add lessons from one place.",
+      "filterAll": "All",
+      "filterLive": "Live",
+      "filterDraft": "Draft",
+      "filterReview": "Review",
+      "emptyCoursesTitle": "Create your first course",
+      "emptyCoursesHint": "Start the guided wizard to set cover, free samples, quizzes, and documents.",
+      "noCoursesInFilter": "No courses in this filter",
+      "openManage": "Manage",
+      "addVideo": "Add video",
+      "continueDraft": "Continue wizard",
+      "lessonsCount": "{count} lessons",
+      "quizzesCount": "{count} quizzes",
+      "studentsCount": "{count} students",
+      "statusLive": "Live",
+      "statusDraft": "Draft",
+      "statusPending": "In review",
+      "statusRejected": "Rejected",
+      "statusClosed": "Closed",
+      "studioHeroHint": "Build, polish, and grow your store courses"
     },
     "qa": {
       "postFailed": "Could not post your question",

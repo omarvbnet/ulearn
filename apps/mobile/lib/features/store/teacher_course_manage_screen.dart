@@ -12,6 +12,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/video_process_service.dart';
 import 'package:ulearn/core/video/video_upload_service.dart';
 import 'package:ulearn/features/store/teacher_course_wizard_screen.dart';
+import 'package:ulearn/features/store/teacher_lesson_upload_screen.dart';
 import 'package:ulearn/features/store/widgets/free_minute_picker.dart';
 
 /// Teacher: edit course metadata, reorder/rename/replace lessons, quizzes, documents.
@@ -759,6 +760,25 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
                         Text(
                           l10n.t('mobile.teacher.reorderHint'),
                           style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                        ),
+                        const SizedBox(height: 10),
+                        FilledButton.tonalIcon(
+                          onPressed: () async {
+                            final title = _titleCtrl.text.trim().isEmpty
+                                ? l10n.t('mobile.teacher.manageCourse')
+                                : _titleCtrl.text.trim();
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => TeacherLessonUploadScreen(
+                                  courseId: widget.courseId,
+                                  courseTitle: title,
+                                ),
+                              ),
+                            );
+                            _load();
+                          },
+                          icon: const Icon(Icons.upload_rounded),
+                          label: Text(l10n.t('mobile.studio.addVideo')),
                         ),
                         const SizedBox(height: 4),
                         Text(
