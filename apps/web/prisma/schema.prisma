@@ -365,6 +365,8 @@ model CourseLesson {
   durationSec   Int?
   sortOrder     Int      @default(0)
   isFreePreview Boolean  @default(false)
+  isHidden      Boolean  @default(false)
+  deletedAt     DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -379,6 +381,8 @@ model CourseLesson {
   materials CourseMaterial[]
 
   @@index([courseId])
+  @@index([deletedAt])
+  @@index([isHidden])
 }
 
 /// Direct-upload video metadata. Binary data lives only in Cloudflare R2.
@@ -528,6 +532,7 @@ model TeacherShortVideo {
   thumbnailUrl String?
   durationSec  Int?
   status       CourseStatus @default(PENDING_REVIEW)
+  isHidden     Boolean      @default(false)
   reviewNotes  String?
   reviewedAt   DateTime?
   createdAt    DateTime     @default(now())
@@ -541,6 +546,8 @@ model TeacherShortVideo {
 
   @@index([teacherId])
   @@index([status])
+  @@index([deletedAt])
+  @@index([isHidden])
 }
 
 model ShortVideoLike {

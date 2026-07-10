@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { PUBLIC_SHORT_VIDEO_WHERE } from "@/lib/video-visibility";
 import { getDownloadUrl } from "@/lib/r2";
 
 async function resolveVideoUrl(fileKey: string | null, fileUrl: string | null) {
@@ -165,8 +166,7 @@ export class ShortVideoService {
 
     const videos = await prisma.teacherShortVideo.findMany({
       where: {
-        status: "APPROVED",
-        deletedAt: null,
+        ...PUBLIC_SHORT_VIDEO_WHERE,
         OR: [{ fileUrl: { not: null } }, { fileKey: { not: null } }],
       },
       include: this.videoInclude(params.userId),
@@ -199,7 +199,7 @@ export class ShortVideoService {
 
   static async listSaved(userId: string) {
     const rows = await prisma.shortVideoSave.findMany({
-      where: { userId, video: { status: "APPROVED", deletedAt: null } },
+      where: { userId, video: PUBLIC_SHORT_VIDEO_WHERE },
       orderBy: { createdAt: "desc" },
       include: {
         video: { include: this.videoInclude(userId) },
@@ -214,7 +214,7 @@ export class ShortVideoService {
 
   static async toggleSave(videoId: string, userId: string) {
     const video = await prisma.teacherShortVideo.findFirst({
-      where: { id: videoId, status: "APPROVED", deletedAt: null },
+      where: { id: videoId, ...PUBLIC_SHORT_VIDEO_WHERE },
     });
     if (!video) return { success: false as const, error: "NOT_FOUND" as const };
 
@@ -238,7 +238,7 @@ export class ShortVideoService {
 
   static async listForTeacher(teacherId: string, userId: string) {
     const videos = await prisma.teacherShortVideo.findMany({
-      where: { teacherId, status: "APPROVED", deletedAt: null },
+      where: { teacherId, ...PUBLIC_SHORT_VIDEO_WHERE },
       orderBy: { createdAt: "desc" },
       include: this.videoInclude(userId),
     });
@@ -249,7 +249,7 @@ export class ShortVideoService {
 
   static async incrementView(videoId: string) {
     const video = await prisma.teacherShortVideo.findFirst({
-      where: { id: videoId, status: "APPROVED", deletedAt: null },
+      where: { id: videoId, ...PUBLIC_SHORT_VIDEO_WHERE },
     });
     if (!video) return { success: false as const, error: "NOT_FOUND" as const };
 
@@ -282,7 +282,7 @@ export class ShortVideoService {
 
   static async listComments(videoId: string, limit = 50) {
     const video = await prisma.teacherShortVideo.findFirst({
-      where: { id: videoId, status: "APPROVED", deletedAt: null },
+      where: { id: videoId, ...PUBLIC_SHORT_VIDEO_WHERE },
     });
     if (!video) return { success: false as const, error: "NOT_FOUND" as const };
 
@@ -310,7 +310,7 @@ export class ShortVideoService {
     parentId?: string;
   }) {
     const video = await prisma.teacherShortVideo.findFirst({
-      where: { id: params.videoId, status: "APPROVED", deletedAt: null },
+      where: { id: params.videoId, ...PUBLIC_SHORT_VIDEO_WHERE },
       select: {
         id: true,
         title: true,

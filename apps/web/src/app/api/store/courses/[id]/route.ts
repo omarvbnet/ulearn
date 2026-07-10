@@ -1,5 +1,6 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { PUBLIC_LESSON_WHERE } from "@/lib/video-visibility";
 import { CourseRatingService } from "@/services/course-rating.service";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 import { getDownloadUrl } from "@/lib/r2";
@@ -22,7 +23,7 @@ export async function GET(
       },
       stage: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
       subject: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
-      lessons: { orderBy: { sortOrder: "asc" } },
+      lessons: { orderBy: { sortOrder: "asc" }, where: PUBLIC_LESSON_WHERE },
     },
   });
   if (!course) return error("Course not found", 404, "NOT_FOUND");

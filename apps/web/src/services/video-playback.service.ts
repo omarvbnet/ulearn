@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { PUBLIC_LESSON_WHERE } from "@/lib/video-visibility";
 import { getDownloadUrl } from "@/lib/r2";
 import { VIDEO_PLAYBACK_EXPIRES_SEC } from "@/lib/r2-video";
 import { VideoAssetRepository } from "@/repositories/video-asset.repository";
@@ -47,7 +48,7 @@ export class VideoPlaybackService {
   /** Signed URL for a store lesson (legacy fileKey or VideoAsset). */
   static async getStoreLessonPlaybackUrl(userId: string, lessonId: string) {
     const lesson = await prisma.courseLesson.findFirst({
-      where: { id: lessonId, course: { deletedAt: null } },
+      where: { id: lessonId, ...PUBLIC_LESSON_WHERE, course: { deletedAt: null } },
       include: {
         course: { select: { id: true, price: true, teacher: { select: { userId: true } } } },
         videoAsset: true,

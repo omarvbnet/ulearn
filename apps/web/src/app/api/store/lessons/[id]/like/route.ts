@@ -1,5 +1,6 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { PUBLIC_LESSON_WHERE } from "@/lib/video-visibility";
 import { notifyTeacherVideoLike } from "@/services/engagement-notifications.service";
 import { getCurrentUser } from "@/lib/auth/session";
 
@@ -13,7 +14,7 @@ export async function POST(
 
   const { id } = await params;
   const lesson = await prisma.courseLesson.findFirst({
-    where: { id, course: { status: "APPROVED", deletedAt: null } },
+    where: { id, ...PUBLIC_LESSON_WHERE, course: { status: "APPROVED", deletedAt: null } },
     select: {
       id: true,
       title: true,

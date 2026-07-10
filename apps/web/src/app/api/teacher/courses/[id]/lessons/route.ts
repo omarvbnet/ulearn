@@ -112,7 +112,10 @@ export async function DELETE(
   const { lessonId } = (await request.json()) as { lessonId?: string };
   if (!lessonId) return error("lessonId is required", 422, "VALIDATION");
 
-  await prisma.courseLesson.deleteMany({ where: { id: lessonId, courseId: id } });
+  await prisma.courseLesson.updateMany({
+    where: { id: lessonId, courseId: id },
+    data: { deletedAt: new Date(), isHidden: true },
+  });
   if (course.status === "APPROVED") {
     await TeacherCourseService.markCoursePendingReview(id);
   }

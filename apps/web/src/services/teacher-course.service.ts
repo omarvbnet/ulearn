@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { PUBLIC_LESSON_WHERE, PUBLIC_SHORT_VIDEO_WHERE } from "@/lib/video-visibility";
 import { getDownloadUrl } from "@/lib/r2";
 import { LoggingService } from "@/services/logging.service";
 import { NotificationService } from "@/services/notification.service";
@@ -287,6 +288,7 @@ export class TeacherCourseService {
         stage: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
         subject: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
         lessons: {
+          where: { deletedAt: null },
           orderBy: { sortOrder: "asc" },
           include: {
             materials: {
@@ -574,6 +576,7 @@ export class TeacherCourseService {
         stage: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
         subject: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
         lessons: {
+          where: PUBLIC_LESSON_WHERE,
           orderBy: { sortOrder: "asc" },
           select: {
             id: true,
@@ -612,7 +615,7 @@ export class TeacherCourseService {
         _count: {
           select: {
             courses: { where: { status: "APPROVED", deletedAt: null } },
-            shortVideos: { where: { status: "APPROVED", deletedAt: null } },
+            shortVideos: { where: PUBLIC_SHORT_VIDEO_WHERE },
           },
         },
       },

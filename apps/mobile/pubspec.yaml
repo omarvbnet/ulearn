@@ -32,7 +32,7 @@ dependencies:
   flutter_to_airplay: ^2.1.0
   pdfx: ^2.9.2
   printing: ^5.14.3
-  ffmpeg_kit_flutter: ^6.0.3
+  ffmpeg_kit_flutter_new: ^4.3.2
 
 dev_dependencies:
   flutter_test:

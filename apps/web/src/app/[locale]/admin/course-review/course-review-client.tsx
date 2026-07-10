@@ -2,6 +2,7 @@
 
 import { Badge, Button, Card, PageHeader, Textarea } from "@/components/ui";
 import { EmptyState, Modal, SkeletonRows, Tabs, useToast } from "@/components/overlay";
+import { CourseVideosPanel } from "./course-videos-panel";
 import { useCallback, useEffect, useState } from "react";
 
 type Course = {
@@ -174,6 +175,7 @@ export function CourseReviewClient() {
         tabs={[
           { id: "PENDING_REVIEW", label: "Pending Review" },
           { id: "VIDEO_UPDATES", label: "Video Updates" },
+          { id: "COURSE_VIDEOS", label: "Course Videos" },
           { id: "APPROVED", label: "Live" },
           { id: "REJECTED", label: "Rejected" },
           { id: "CLOSED", label: "Closed" },
@@ -184,7 +186,9 @@ export function CourseReviewClient() {
       />
 
       <div className="mt-6">
-        {tab === "VIDEO_UPDATES" ? (
+        {tab === "COURSE_VIDEOS" ? (
+          <CourseVideosPanel />
+        ) : tab === "VIDEO_UPDATES" ? (
           lessonUpdates === null ? (
             <SkeletonRows rows={3} />
           ) : lessonUpdates.length === 0 ? (

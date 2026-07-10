@@ -1,5 +1,6 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { PUBLIC_SHORT_VIDEO_WHERE } from "@/lib/video-visibility";
 import { notifyTeacherShortVideoLike } from "@/services/engagement-notifications.service";
 import { getCurrentUser } from "@/lib/auth/session";
 
@@ -13,7 +14,7 @@ export async function POST(
 
   const { id } = await params;
   const video = await prisma.teacherShortVideo.findFirst({
-    where: { id, status: "APPROVED", deletedAt: null },
+    where: { id, ...PUBLIC_SHORT_VIDEO_WHERE },
     select: {
       id: true,
       title: true,
