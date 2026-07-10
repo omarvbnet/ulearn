@@ -1,6 +1,7 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { ADMIN_ROLES } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { resolvePublicMediaUrl } from "@/lib/r2";
 import { z } from "zod";
 
 /** Admin: list all advertisements. */
@@ -14,7 +15,16 @@ export async function GET() {
     include: { _count: { select: { likes: true } } },
   });
 
-  return json({ ads });
+  const resolved = await Promise.all(
+    ads.map(async (a) => ({
+      ...a,
+      imageUrl:
+        (await resolvePublicMediaUrl(a.imageUrl, a.imageKey).catch(() => null)) ??
+        a.imageUrl,
+    }))
+  );
+
+  return json({ ads: resolved });
 }
 
 const createSchema = z.object({

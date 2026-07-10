@@ -1,5 +1,5 @@
 import { error, json, requireAuth } from "@/lib/api";
-import { buildKey, getDownloadUrl, getUploadUrl, maxSizeLabel, validateFile } from "@/lib/r2";
+import { buildKey, getUploadUrl, maxSizeLabel, preferredStoredMediaUrl, validateFile } from "@/lib/r2";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -46,7 +46,10 @@ export async function POST(request: Request) {
   }
 
   const upload = await getUploadUrl({ key, contentType: body.contentType });
-  return json(upload);
+  return json({
+    ...upload,
+    publicUrl: upload.publicUrl ?? `/api/media?key=${encodeURIComponent(key)}`,
+  });
 }
 
 const patchSchema = z.object({
@@ -68,10 +71,7 @@ export async function PATCH(request: Request) {
     return error("Invalid photo key", 403, "FORBIDDEN");
   }
 
-  let url = profilePhotoUrl ?? null;
-  if (!url) {
-    url = (await getDownloadUrl(profilePhotoKey).catch(() => null)) ?? `/uploads/${profilePhotoKey}`;
-  }
+  const url = await preferredStoredMediaUrl(profilePhotoKey, profilePhotoUrl);
 
   const user = await prisma.user.update({
     where: { id: auth.session.userId },

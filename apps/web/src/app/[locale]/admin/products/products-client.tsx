@@ -108,7 +108,10 @@ export function ProductsClient() {
       body: file,
     });
     if (!put.ok) throw new Error("Upload failed");
-    return { key, publicUrl: publicUrl as string };
+    const displayUrl =
+      (typeof publicUrl === "string" && publicUrl.trim()) ||
+      `/api/media?key=${encodeURIComponent(key)}`;
+    return { key, publicUrl: displayUrl };
   }
 
   async function create(e: React.FormEvent) {

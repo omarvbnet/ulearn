@@ -842,7 +842,7 @@ export class TeacherCourseService {
             id: true,
             level: true,
             userId: true,
-            user: { select: { fullLegalName: true, profilePhotoUrl: true } },
+            user: { select: { fullLegalName: true, profilePhotoUrl: true, profilePhotoKey: true } },
           },
         },
         stage: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
@@ -876,7 +876,14 @@ export class TeacherCourseService {
         user: { status: "APPROVED", deletedAt: null },
       },
       include: {
-        user: { select: { fullLegalName: true, profilePhotoUrl: true, profileCoverPreset: true } },
+        user: {
+          select: {
+            fullLegalName: true,
+            profilePhotoUrl: true,
+            profilePhotoKey: true,
+            profileCoverPreset: true,
+          },
+        },
         subjects: {
           include: {
             subject: {
@@ -936,7 +943,11 @@ export class TeacherCourseService {
         id: teacher.id,
         userId: teacher.userId,
         name: teacher.user.fullLegalName,
-        profilePhotoUrl: teacher.user.profilePhotoUrl,
+        profilePhotoUrl:
+          (await resolvePublicMediaUrl(
+            teacher.user.profilePhotoUrl,
+            teacher.user.profilePhotoKey
+          ).catch(() => null)) ?? teacher.user.profilePhotoUrl,
         profileCoverPreset: teacher.user.profileCoverPreset,
         bio: teacher.bio,
         level: teacher.level,
@@ -1086,6 +1097,17 @@ export class TeacherCourseService {
 
         return {
           ...c,
+          teacher: {
+            ...c.teacher,
+            user: {
+              ...c.teacher.user,
+              profilePhotoUrl:
+                (await resolvePublicMediaUrl(
+                  c.teacher.user.profilePhotoUrl,
+                  (c.teacher.user as { profilePhotoKey?: string | null }).profilePhotoKey
+                ).catch(() => null)) ?? c.teacher.user.profilePhotoUrl,
+            },
+          },
           lessons,
           thumbnail,
           updatedAt: c.updatedAt,

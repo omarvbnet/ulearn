@@ -51,5 +51,9 @@ export async function POST(request: Request) {
     category,
     size,
   });
-  return json(upload);
+  return json({
+    ...upload,
+    // Always give clients a displayable URL (CDN or same-origin media proxy).
+    publicUrl: upload.publicUrl ?? `/api/media?key=${encodeURIComponent(key)}`,
+  });
 }

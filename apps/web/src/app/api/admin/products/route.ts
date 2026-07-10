@@ -2,6 +2,7 @@ import { error, json, requireAuth } from "@/lib/api";
 import { ADMIN_ROLES } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import type { ProductCategory } from "@prisma/client";
+import { resolvePublicMediaUrl } from "@/lib/r2";
 import { LoggingService } from "@/services/logging.service";
 import { z } from "zod";
 
@@ -16,7 +17,16 @@ export async function GET() {
     include: { _count: { select: { purchases: true } } },
   });
 
-  return json({ products });
+  const resolved = await Promise.all(
+    products.map(async (p) => ({
+      ...p,
+      imageUrl:
+        (await resolvePublicMediaUrl(p.imageUrl, p.imageKey).catch(() => null)) ??
+        p.imageUrl,
+    }))
+  );
+
+  return json({ products: resolved });
 }
 
 const createSchema = z.object({

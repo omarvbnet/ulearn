@@ -46,5 +46,8 @@ export async function POST(request: Request) {
   }
 
   const upload = await getUploadUrl({ key, contentType });
-  return json(upload);
+  return json({
+    ...upload,
+    publicUrl: upload.publicUrl ?? `/api/media?key=${encodeURIComponent(key)}`,
+  });
 }

@@ -1,7 +1,7 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { ADMIN_ROLES } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
-import { getDownloadUrl } from "@/lib/r2";
+import { getDownloadUrl, resolvePublicMediaUrl } from "@/lib/r2";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 
 /** Admin: full course detail for review (lessons, quizzes, documents, readiness). */
@@ -35,6 +35,7 @@ export async function GET(
           fileKey: true,
           fileUrl: true,
           thumbnailUrl: true,
+          thumbnailKey: true,
           durationSec: true,
           sortOrder: true,
           isFreePreview: true,
@@ -102,7 +103,10 @@ export async function GET(
       if (l.fileKey && !fileUrl) {
         fileUrl = await getDownloadUrl(l.fileKey).catch(() => null);
       }
-      return { ...l, fileUrl };
+      const thumbnailUrl =
+        (await resolvePublicMediaUrl(l.thumbnailUrl, l.thumbnailKey).catch(() => null)) ??
+        l.thumbnailUrl;
+      return { ...l, fileUrl, thumbnailUrl };
     })
   );
 
@@ -111,13 +115,23 @@ export async function GET(
       let fileUrl = m.fileUrl;
       if (m.fileKey && !fileUrl) {
         fileUrl = await getDownloadUrl(m.fileKey).catch(() => null);
+      } else if (m.fileKey) {
+        fileUrl =
+          (await resolvePublicMediaUrl(m.fileUrl, m.fileKey).catch(() => null)) ?? m.fileUrl;
       }
       return { ...m, fileUrl };
     })
   );
 
   return json({
-    course: { ...course, lessons, materials },
+    course: {
+      ...course,
+      thumbnail:
+        (await resolvePublicMediaUrl(course.thumbnail, null).catch(() => null)) ??
+        course.thumbnail,
+      lessons,
+      materials,
+    },
     readiness,
   });
 }

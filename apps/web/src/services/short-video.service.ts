@@ -1,17 +1,17 @@
 import { prisma } from "@/lib/prisma";
 import { PUBLIC_SHORT_VIDEO_WHERE } from "@/lib/video-visibility";
-import { getDownloadUrl } from "@/lib/r2";
+import { resolvePublicMediaUrl } from "@/lib/r2";
 
 async function resolveVideoUrl(fileKey: string | null, fileUrl: string | null) {
-  if (fileUrl) return fileUrl;
-  if (fileKey) return getDownloadUrl(fileKey).catch(() => null);
-  return null;
+  if (fileUrl?.startsWith("http")) return fileUrl;
+  return resolvePublicMediaUrl(fileUrl, fileKey);
 }
 
 const userSelect = {
   id: true,
   fullLegalName: true,
   profilePhotoUrl: true,
+  profilePhotoKey: true,
 } as const;
 
 const FRESH_BOOST_MS = 2 * 60 * 60 * 1000;
@@ -33,7 +33,11 @@ type RawVideo = {
     id: string;
     userId: string;
     level: string;
-    user: { fullLegalName: string | null; profilePhotoUrl: string | null };
+    user: {
+      fullLegalName: string | null;
+      profilePhotoUrl: string | null;
+      profilePhotoKey?: string | null;
+    };
   };
   _count?: { likes: number; comments: number; saves: number };
   likes?: { id: string }[];
@@ -43,12 +47,20 @@ type RawVideo = {
 
 export class ShortVideoService {
   static async mapVideo(v: RawVideo, userId?: string) {
+    const [fileUrl, thumbnailUrl, profilePhotoUrl] = await Promise.all([
+      resolveVideoUrl(v.fileKey, v.fileUrl),
+      resolvePublicMediaUrl(v.thumbnailUrl, null),
+      resolvePublicMediaUrl(
+        v.teacher.user.profilePhotoUrl,
+        v.teacher.user.profilePhotoKey ?? null
+      ),
+    ]);
     return {
       id: v.id,
       title: v.title,
       description: v.description,
-      fileUrl: await resolveVideoUrl(v.fileKey, v.fileUrl),
-      thumbnailUrl: v.thumbnailUrl,
+      fileUrl,
+      thumbnailUrl: thumbnailUrl ?? v.thumbnailUrl,
       durationSec: v.durationSec,
       viewCount: v.viewCount,
       createdAt: v.createdAt,
@@ -57,7 +69,7 @@ export class ShortVideoService {
         userId: v.teacher.userId,
         name: v.teacher.user.fullLegalName,
         level: v.teacher.level,
-        profilePhotoUrl: v.teacher.user.profilePhotoUrl,
+        profilePhotoUrl: profilePhotoUrl ?? v.teacher.user.profilePhotoUrl,
       },
       likes: v._count?.likes ?? 0,
       saves: v._count?.saves ?? 0,
@@ -74,7 +86,13 @@ export class ShortVideoService {
           id: true,
           userId: true,
           level: true,
-          user: { select: { fullLegalName: true, profilePhotoUrl: true } },
+          user: {
+            select: {
+              fullLegalName: true,
+              profilePhotoUrl: true,
+              profilePhotoKey: true,
+            },
+          },
         },
       },
       _count: {

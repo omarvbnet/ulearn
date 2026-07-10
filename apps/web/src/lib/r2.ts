@@ -120,27 +120,103 @@ export async function getDownloadUrl(key: string, expiresIn = 3600) {
   return getSignedUrl(r2, command, { expiresIn });
 }
 
+const r2Configured = () =>
+  Boolean(process.env.R2_ENDPOINT && process.env.R2_ACCESS_KEY_ID);
+
+/** Stable same-origin proxy path — works for Flutter absoluteUrl and admin <img>. */
+export function mediaProxyPath(key: string) {
+  return `/api/media?key=${encodeURIComponent(key)}`;
+}
+
+/** Pull an object key out of `/uploads/...` or `/api/media?key=` URLs. */
+export function extractStorageKey(
+  url?: string | null,
+  key?: string | null
+): string | null {
+  const direct = key?.trim();
+  if (direct) return direct;
+
+  const raw = url?.trim() || "";
+  if (!raw) return null;
+
+  try {
+    const pathOnly = raw.startsWith("http://") || raw.startsWith("https://")
+      ? new URL(raw).pathname
+      : raw.split("?")[0];
+
+    if (pathOnly.startsWith("/uploads/")) {
+      const k = decodeURIComponent(pathOnly.slice("/uploads/".length));
+      return k || null;
+    }
+
+    if (raw.includes("/api/media")) {
+      const u = raw.startsWith("http")
+        ? new URL(raw)
+        : new URL(raw, "http://local");
+      const fromQuery = u.searchParams.get("key");
+      if (fromQuery?.trim()) return fromQuery.trim();
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 /**
- * Resolve a stable client-facing media URL from a stored public URL and/or object key.
- * Prefers https public CDN, then stored relative/absolute URLs, then a fresh signed URL.
+ * Resolve a client-facing media URL from a stored public URL and/or object key.
+ * Order: CDN (R2_PUBLIC_URL) → same-origin /api/media proxy → absolute http(s) → local /uploads.
+ * Never trusts bare `/uploads/...` when R2 is configured (those files are not on the Next host).
  */
 export async function resolvePublicMediaUrl(
   url?: string | null,
   key?: string | null
 ): Promise<string | null> {
+  const storageKey = extractStorageKey(url, key);
   const trimmed = url?.trim() || "";
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
-  if (key && PUBLIC_URL) return `${PUBLIC_URL.replace(/\/$/, "")}/${key}`;
-  if (trimmed.startsWith("/")) return trimmed;
-  if (key) {
-    try {
-      return await getDownloadUrl(key, 60 * 60 * 12);
-    } catch {
-      return `/uploads/${key}`;
-    }
+
+  if (storageKey && PUBLIC_URL) {
+    return `${PUBLIC_URL.replace(/\/$/, "")}/${storageKey}`;
   }
+
+  if (storageKey && r2Configured()) {
+    return mediaProxyPath(storageKey);
+  }
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    // Rewrite our own dead /uploads absolute URLs when possible.
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.pathname.startsWith("/uploads/")) {
+        const k = decodeURIComponent(parsed.pathname.slice("/uploads/".length));
+        if (k && PUBLIC_URL) return `${PUBLIC_URL.replace(/\/$/, "")}/${k}`;
+        if (k && r2Configured()) return mediaProxyPath(k);
+      }
+    } catch {
+      /* keep original */
+    }
+    return trimmed;
+  }
+
+  // Local/dev disk uploads only.
+  if (trimmed.startsWith("/")) return trimmed;
   if (trimmed) return trimmed;
   return null;
+}
+
+/** Best URL to persist after an upload completes. */
+export async function preferredStoredMediaUrl(
+  key: string,
+  clientPublicUrl?: string | null
+): Promise<string> {
+  const fromClient = clientPublicUrl?.trim();
+  if (fromClient && (fromClient.startsWith("http://") || fromClient.startsWith("https://"))) {
+    if (!fromClient.includes("X-Amz-") && !fromClient.includes("/uploads/")) {
+      return fromClient;
+    }
+  }
+  if (PUBLIC_URL) return `${PUBLIC_URL.replace(/\/$/, "")}/${key}`;
+  if (r2Configured()) return mediaProxyPath(key);
+  return `/uploads/${key}`;
 }
 
 export async function deleteObject(key: string) {

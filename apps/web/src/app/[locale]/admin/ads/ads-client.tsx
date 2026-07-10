@@ -66,8 +66,11 @@ export function AdsClient() {
       });
       if (!put.ok) throw new Error("Upload failed");
 
+      // Prefer CDN public URL; otherwise store key and let APIs resolve via /api/media.
       const imageUrl =
-        (typeof publicUrl === "string" && publicUrl.trim()) || `/uploads/${key}`;
+        (typeof publicUrl === "string" && publicUrl.trim().startsWith("http")
+          ? publicUrl.trim()
+          : null) || `/api/media?key=${encodeURIComponent(key)}`;
 
       const res = await fetch("/api/admin/ads", {
         method: "POST",
