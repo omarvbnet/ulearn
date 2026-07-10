@@ -9,6 +9,7 @@ import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/course_video_cache.dart';
 import 'package:ulearn/core/video/course_cast_service.dart';
+import 'package:ulearn/core/video/media_cache_budget.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
@@ -67,6 +68,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     super.initState();
     _lessonWasCompleted = widget.initiallyCompleted;
     _completionSaved = widget.initiallyCompleted;
+    MediaCacheBudget.pin(widget.url);
     _init();
   }
 
@@ -74,6 +76,9 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   void didUpdateWidget(CourseInlinePlayer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.url != widget.url || oldWidget.lessonId != widget.lessonId) {
+      MediaCacheBudget.unpin(oldWidget.url);
+      CourseVideoCache.onPlaybackEnded(oldWidget.url);
+      MediaCacheBudget.pin(widget.url);
       _progressTimer?.cancel();
       _controller?.removeListener(_onControllerTick);
       _controller?.dispose();
@@ -210,6 +215,8 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       _controller!.addListener(_onControllerTick);
       setState(() => _loading = false);
       _startProgressTimer();
+      // Quietly cache the *next* lesson; cache this one after the user leaves.
+      CourseVideoCache.cacheAfterPlay(widget.url);
     } catch (_) {
       await controller.dispose();
       if (!mounted) return;
@@ -246,6 +253,8 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
 
   @override
   void dispose() {
+    MediaCacheBudget.unpin(widget.url);
+    CourseVideoCache.onPlaybackEnded(widget.url);
     _progressTimer?.cancel();
     _castSub?.cancel();
     _saveProgress();
@@ -304,7 +313,9 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                Center(child: VideoPlayer(_controller!)),
+                RepaintBoundary(
+                  child: Center(child: VideoPlayer(_controller!)),
+                ),
                 if (_protection != null) const VideoBrandLogo(markSize: 24),
                 if (_protection != null) DynamicWatermark(controller: _protection!),
                 if (_protection != null) CastingIdentityBanner(controller: _protection!),

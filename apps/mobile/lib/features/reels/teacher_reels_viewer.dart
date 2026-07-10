@@ -60,7 +60,7 @@ class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
     final urls = _videos.map((v) => v['fileUrl']?.toString()).toList();
     ReelVideoCache.prefetchAround(urls, index);
     final keep = <String>{};
-    for (var i = index - 1; i <= index + 2; i++) {
+    for (var i = index - 1; i <= index + 1; i++) {
       if (i < 0 || i >= _videos.length) continue;
       final url = _videos[i]['fileUrl']?.toString();
       if (url != null && url.isNotEmpty) keep.add(url);
@@ -231,7 +231,7 @@ class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
             controller: _pageCtrl,
             scrollDirection: Axis.vertical,
             physics: const PageScrollPhysics(parent: ClampingScrollPhysics()),
-            allowImplicitScrolling: true,
+            allowImplicitScrolling: false,
             onPageChanged: (index) {
               _currentIndex = index;
               _activeIndex.value = index;

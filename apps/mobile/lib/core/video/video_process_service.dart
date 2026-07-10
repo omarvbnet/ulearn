@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/ffprobe_kit.dart';
@@ -56,27 +57,42 @@ class VideoWatermarkSettings {
   }
 }
 
-/// Encode profile tuned for phone camera files (especially large iPhone .mov).
-class _EncodeProfile {
-  const _EncodeProfile({
-    required this.maxWidth,
-    required this.maxHeight,
-    required this.videoBitrate,
-    required this.audioBitrate,
+class _MediaProbe {
+  const _MediaProbe({
+    required this.durationMs,
+    required this.width,
+    required this.height,
     required this.fps,
   });
 
-  final int maxWidth;
-  final int maxHeight;
+  final int? durationMs;
+  final int width;
+  final int height;
+  final double fps;
+}
+
+/// Medium-quality encode that **keeps source resolution** and prioritizes speed
+/// (hardware H.264 when available, otherwise libx264 ultrafast).
+class _EncodeProfile {
+  const _EncodeProfile({
+    required this.width,
+    required this.height,
+    required this.videoBitrate,
+    required this.audioBitrate,
+    required this.fps,
+    required this.crf,
+  });
+
+  final int width;
+  final int height;
   final String videoBitrate;
   final String audioBitrate;
   final int fps;
+  /// Soft target for software encode (~23 = medium).
+  final int crf;
 }
 
-/// Client-side FFmpeg: converts iPhone MOV/HEVC → compact H.264 MP4 with watermark.
-///
-/// Large camera rolls (1GB+) are scaled to 720p@30fps with hardware encode when
-/// available so a ~1500 MB .mov typically becomes ~40–120 MB.
+/// Client-side FFmpeg: fast medium-quality H.264 MP4 at original resolution.
 class VideoProcessService {
   /// Always re-encode these — raw upload is too large / wrong container for R2.
   static bool mustProcess(File source) {
@@ -105,32 +121,34 @@ class VideoProcessService {
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
-  static _EncodeProfile _profileFor(int sourceBytes) {
-    // ~1.5 GB iPhone 4K/60fps → lean 720p lecture encode.
-    if (sourceBytes >= 800 * 1024 * 1024) {
-      return const _EncodeProfile(
-        maxWidth: 1280,
-        maxHeight: 720,
-        videoBitrate: '1600k',
-        audioBitrate: '96k',
-        fps: 30,
-      );
-    }
-    if (sourceBytes >= 200 * 1024 * 1024) {
-      return const _EncodeProfile(
-        maxWidth: 1280,
-        maxHeight: 720,
-        videoBitrate: '2000k',
-        audioBitrate: '96k',
-        fps: 30,
-      );
-    }
-    return const _EncodeProfile(
-      maxWidth: 1280,
-      maxHeight: 720,
-      videoBitrate: '2200k',
-      audioBitrate: '96k',
-      fps: 30,
+  /// Medium quality bitrate for the **actual** frame size (no downscale).
+  static String _mediumBitrate({
+    required int width,
+    required int height,
+    required double fps,
+  }) {
+    final pixels = math.max(1, width * height);
+    final f = fps.clamp(24.0, 60.0);
+    // ~0.09 bits/pixel/frame ≈ medium visual quality without crushing detail.
+    final bps = (pixels * f * 0.09).round();
+    final kbps = (bps / 1000).clamp(1000, 12000).round();
+    // Round to nearest 100k for cleaner encoder targets.
+    final rounded = ((kbps + 50) ~/ 100) * 100;
+    return '${rounded}k';
+  }
+
+  static _EncodeProfile _profileFor(_MediaProbe probe) {
+    final w = probe.width > 0 ? probe.width : 1280;
+    final h = probe.height > 0 ? probe.height : 720;
+    // Cap only extreme high-fps camera rolls for speed/size — resolution stays.
+    final fps = probe.fps > 30.5 ? 30 : probe.fps.round().clamp(24, 60);
+    return _EncodeProfile(
+      width: w,
+      height: h,
+      videoBitrate: _mediumBitrate(width: w, height: h, fps: fps.toDouble()),
+      audioBitrate: '128k',
+      fps: fps,
+      crf: 23,
     );
   }
 
@@ -158,44 +176,100 @@ class VideoProcessService {
   /// Escape single quotes for FFmpeg filter / path args.
   static String _q(String path) => path.replaceAll("'", r"'\''");
 
-  static List<_EncoderSpec> _encoderCandidates(String videoBitrate) {
+  static List<_EncoderSpec> _encoderCandidates({
+    required String videoBitrate,
+    required int crf,
+  }) {
     if (Platform.isIOS) {
       return [
         _EncoderSpec(
           name: 'h264_videotoolbox',
-          // Hardware encode — critical for multi‑GB iPhone MOV files.
+          // Hardware encode — fastest path on iPhone while keeping resolution.
           args:
               '-c:v h264_videotoolbox -b:v $videoBitrate -maxrate $videoBitrate '
-              '-bufsize 4M -realtime true -allow_sw 1 -pix_fmt yuv420p',
+              '-bufsize $videoBitrate -realtime true -allow_sw 1 '
+              '-profile:v main -pix_fmt yuv420p -bf 0 -g 60',
         ),
         _EncoderSpec(
           name: 'libx264-ultrafast',
           args:
-              '-c:v libx264 -preset ultrafast -crf 28 -threads 0 -pix_fmt yuv420p',
+              '-c:v libx264 -preset ultrafast -tune fastdecode -crf $crf '
+              '-threads 0 -bf 0 -g 60 -pix_fmt yuv420p',
         ),
       ];
     }
     return [
+      // Many Android ffmpeg-kit builds expose MediaCodec HW encode.
+      _EncoderSpec(
+        name: 'h264_mediacodec',
+        args:
+            '-c:v h264_mediacodec -b:v $videoBitrate -maxrate $videoBitrate '
+            '-bufsize $videoBitrate -pix_fmt yuv420p -bf 0 -g 60',
+      ),
       _EncoderSpec(
         name: 'libx264-ultrafast',
-        args: '-c:v libx264 -preset ultrafast -crf 28 -threads 0 -pix_fmt yuv420p',
+        args:
+            '-c:v libx264 -preset ultrafast -tune fastdecode -crf $crf '
+            '-threads 0 -bf 0 -g 60 -pix_fmt yuv420p',
       ),
     ];
   }
 
-  static Future<int?> _probeDurationMs(String path) async {
+  static Future<_MediaProbe> _probe(String path) async {
+    int? durationMs;
+    var width = 0;
+    var height = 0;
+    var fps = 30.0;
+
     try {
       final session = await FFprobeKit.getMediaInformation(path);
       final info = session.getMediaInformation();
-      final raw = info?.getDuration();
-      if (raw == null || raw.isEmpty) return null;
-      final sec = double.tryParse(raw);
-      if (sec == null || sec <= 0) return null;
-      if (sec > 10000) return sec.round();
-      return (sec * 1000).round();
-    } catch (_) {
-      return null;
+      final rawDur = info?.getDuration();
+      if (rawDur != null && rawDur.isNotEmpty) {
+        final sec = double.tryParse(rawDur);
+        if (sec != null && sec > 0) {
+          durationMs = sec > 10000 ? sec.round() : (sec * 1000).round();
+        }
+      }
+
+      final streams = info?.getStreams();
+      if (streams != null) {
+        for (final stream in streams) {
+          final type = stream.getType()?.toLowerCase() ?? '';
+          if (!type.contains('video')) continue;
+          width = stream.getWidth() ?? width;
+          height = stream.getHeight() ?? height;
+          final avg = stream.getAverageFrameRate();
+          final r = stream.getRealFrameRate();
+          fps = _parseFps(avg) ?? _parseFps(r) ?? fps;
+          break;
+        }
+      }
+    } catch (_) {}
+
+    // Even dimensions required by yuv420p — ±1px only, not a resolution change.
+    if (width > 0 && width.isOdd) width -= 1;
+    if (height > 0 && height.isOdd) height -= 1;
+
+    return _MediaProbe(
+      durationMs: durationMs,
+      width: width,
+      height: height,
+      fps: fps,
+    );
+  }
+
+  static double? _parseFps(String? raw) {
+    if (raw == null || raw.isEmpty || raw == '0/0') return null;
+    if (raw.contains('/')) {
+      final parts = raw.split('/');
+      if (parts.length == 2) {
+        final a = double.tryParse(parts[0]);
+        final b = double.tryParse(parts[1]);
+        if (a != null && b != null && b != 0) return a / b;
+      }
     }
+    return double.tryParse(raw);
   }
 
   static Future<({File file, int? width, int? height, int sourceBytes, int outputBytes})>
@@ -210,17 +284,27 @@ class VideoProcessService {
     final pos = _positionExpr(watermark.position);
     final alpha = watermark.opacity.clamp(0.1, 1.0).toStringAsFixed(2);
     final sourceBytes = await source.length();
-    final profile = _profileFor(sourceBytes);
-    final durationMs = await _probeDurationMs(source.path);
+    final probe = await _probe(source.path);
+    final profile = _profileFor(probe);
 
-    // fps=30 cuts 60fps iPhone footage in half; scale+drawtext in one filter graph.
-    final vf =
-        "fps=${profile.fps},"
-        "scale='min(${profile.maxWidth},iw)':'min(${profile.maxHeight},ih)':"
-        "force_original_aspect_ratio=decrease:flags=fast_bilinear,"
-        "drawtext=fontfile='${_q(font)}':text='${_q(label)}':"
-        "fontsize=${watermark.fontSize.clamp(18, 26)}:"
-        "fontcolor=white@$alpha:$pos:box=1:boxcolor=black@0.25:boxborderw=6";
+    // Keep original resolution. Only:
+    //  - optional fps cap (60→30) for speed/size
+    //  - even-dimension snap for H.264
+    //  - lightweight watermark
+    final filters = <String>[];
+    if (probe.fps > 30.5) {
+      filters.add('fps=${profile.fps}');
+    }
+    // Preserve size; force even dims without letterboxing/downscale.
+    filters.add(
+      "scale='trunc(iw/2)*2':'trunc(ih/2)*2':flags=fast_bilinear",
+    );
+    filters.add(
+      "drawtext=fontfile='${_q(font)}':text='${_q(label)}':"
+      "fontsize=${watermark.fontSize.clamp(18, 28)}:"
+      "fontcolor=white@$alpha:$pos:box=1:boxcolor=black@0.25:boxborderw=6",
+    );
+    final vf = filters.join(',');
 
     onProgress?.call(0.02);
 
@@ -228,7 +312,10 @@ class VideoProcessService {
     final input = _q(source.path);
 
     Object? lastError;
-    for (final encoder in _encoderCandidates(profile.videoBitrate)) {
+    for (final encoder in _encoderCandidates(
+      videoBitrate: profile.videoBitrate,
+      crf: profile.crf,
+    )) {
       final outPath =
           '${dir.path}/ulearn_delivery_${DateTime.now().millisecondsSinceEpoch}_${encoder.name}.mp4';
       final cmd =
@@ -240,15 +327,15 @@ class VideoProcessService {
         final file = await _executeWithProgress(
           cmd: cmd,
           outPath: outPath,
-          durationMs: durationMs,
+          durationMs: probe.durationMs,
           onProgress: onProgress,
         );
         onProgress?.call(1.0);
         final outBytes = await file.length();
         return (
           file: file,
-          width: profile.maxWidth,
-          height: profile.maxHeight,
+          width: profile.width,
+          height: profile.height,
           sourceBytes: sourceBytes,
           outputBytes: outBytes,
         );

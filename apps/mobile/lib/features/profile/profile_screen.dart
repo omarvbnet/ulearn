@@ -4,7 +4,9 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/video/media_cache_budget.dart';
 import 'package:ulearn/core/widgets/animations.dart';
+import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/features/profile/completed_courses_screen.dart';
 import 'package:ulearn/features/profile/favorites_screen.dart';
 import 'package:ulearn/features/profile/language_screen.dart';
@@ -29,6 +31,48 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _uploadingPhoto = false;
   bool _savingCover = false;
+  Future<String>? _cacheUsageFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _cacheUsageFuture = MediaCacheBudget.formatUsage();
+  }
+
+  void _refreshCacheUsage() {
+    setState(() {
+      _cacheUsageFuture = MediaCacheBudget.formatUsage();
+    });
+  }
+
+  Future<void> _clearMediaCache() async {
+    final l10n = context.l10n;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.card,
+        title: Text(l10n.profileStorageCacheClear),
+        content: Text(l10n.profileStorageCacheClearConfirm),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l10n.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l10n.profileStorageCacheClear),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await MediaCacheBudget.clearAll();
+    if (!mounted) return;
+    _refreshCacheUsage();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(l10n.profileStorageCacheCleared)),
+    );
+  }
 
   bool get _canEditPhoto {
     final role = context.read<AuthProvider>().user?.role;
@@ -77,8 +121,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (action == 'remove') {
       setState(() => _uploadingPhoto = true);
       try {
+        final oldUrl = context.read<AuthProvider>().user?.profilePhotoUrl;
         final data = await ProfilePhotoService.remove(context.read<ApiClient>());
         if (!mounted) return;
+        await evictCachedImage(oldUrl);
         context.read<AuthProvider>().applyUser(data['user'] as Map<String, dynamic>);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(context.l10n.profilePhotoRemoved)),
@@ -98,9 +144,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (action == 'pick') {
       setState(() => _uploadingPhoto = true);
       try {
+        final oldUrl = context.read<AuthProvider>().user?.profilePhotoUrl;
         final data = await ProfilePhotoService.uploadAndSave(context.read<ApiClient>());
         if (!mounted) return;
-        context.read<AuthProvider>().applyUser(data['user'] as Map<String, dynamic>);
+        final userJson = data['user'] as Map<String, dynamic>;
+        await evictCachedImage(oldUrl);
+        await evictCachedImage(userJson['profilePhotoUrl']?.toString());
+        context.read<AuthProvider>().applyUser(userJson);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(context.l10n.profilePhotoUpdated)),
         );
@@ -164,6 +214,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 size: 108,
                 editable: _canEditPhoto,
                 uploading: _uploadingPhoto,
+                cacheVersion: user.profilePhotoUrl,
                 onTap: _canEditPhoto ? _onAvatarTap : null,
               ),
               if (_canEditPhoto) ...[
@@ -419,6 +470,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const SizedBox(height: 16),
         StaggeredItem(
           index: user.role == 'TEACHER' || user.role == 'STUDENT' ? 5 : 4,
+          child: Card(
+            child: FutureBuilder<String>(
+              future: _cacheUsageFuture,
+              builder: (context, snap) {
+                final size = snap.data ?? '…';
+                return ListTile(
+                  leading: const Icon(Icons.storage_outlined, color: AppTheme.muted),
+                  title: Text(l10n.profileStorageCache),
+                  subtitle: Text(
+                    l10n.profileStorageCacheHint(size),
+                    style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                  ),
+                  trailing: TextButton(
+                    onPressed: _clearMediaCache,
+                    child: Text(l10n.profileStorageCacheClear),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        StaggeredItem(
+          index: user.role == 'TEACHER' || user.role == 'STUDENT' ? 6 : 5,
           child: Card(
             child: ListTile(
               leading: const Icon(Icons.logout, color: Colors.redAccent),

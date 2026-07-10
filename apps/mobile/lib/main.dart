@@ -1,11 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:fvp/fvp.dart' as fvp;
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/l10n/locale_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/video/media_cache_budget.dart';
 import 'package:ulearn/features/auth/login_screen.dart';
 import 'package:ulearn/features/home/home_screen.dart';
 import 'package:ulearn/features/auth/pending_screen.dart';
@@ -13,12 +17,21 @@ import 'package:ulearn/features/splash/splash_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Hardware-accelerated video (libmdk) for smooth course + shorts playback.
+  fvp.registerWith(options: {
+    'platforms': ['ios', 'android'],
+    'lowLatency': 1, // VOD: faster first frame / lower buffer delay
+    'fastSeek': true, // snappy scrub on reels
+    'tunnel': true, // Android MediaCodec → Surface (lower GPU cost)
+  });
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
     ),
   );
+  // Trim disk cache if a previous session left us over the 2.5 GB budget.
+  unawaited(MediaCacheBudget.enforce(force: true));
   runApp(const ULearnApp());
 }
 

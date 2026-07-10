@@ -43,10 +43,51 @@ function toWebStream(body: unknown): ReadableStream {
   return body as ReadableStream;
 }
 
+function isHeavyMedia(key: string): boolean {
+  const lower = key.toLowerCase();
+  return (
+    lower.startsWith("teacher-shorts/") ||
+    lower.startsWith("teacher-courses/") ||
+    lower.startsWith("videos/") ||
+    lower.startsWith("lessons/") ||
+    /\.(mp4|webm|mov|mkv|avi|m4v|mpg|mpeg|3gp)$/i.test(key)
+  );
+}
+
+function isImageKey(key: string): boolean {
+  return (
+    /\.(jpe?g|png|webp|gif|avif|heic|bmp)$/i.test(key) ||
+    key.startsWith("profile-photos/") ||
+    key.startsWith("ads/") ||
+    key.startsWith("teacher-covers/") ||
+    key.startsWith("teacher-shorts-covers/")
+  );
+}
+
+/** Proxy a signed R2 URL through this origin (no client-side 302). */
+async function proxySignedObject(key: string): Promise<Response> {
+  const signed = await getDownloadUrl(key, 60 * 60);
+  const upstream = await fetch(signed);
+  if (!upstream.ok || !upstream.body) {
+    return error("Media not found", 404, "NOT_FOUND");
+  }
+  const headers = new Headers();
+  headers.set(
+    "Content-Type",
+    upstream.headers.get("Content-Type") || guessContentType(key)
+  );
+  headers.set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+  const len = upstream.headers.get("Content-Length");
+  if (len) headers.set("Content-Length", len);
+  return new Response(upstream.body, { status: 200, headers });
+}
+
 /**
  * Stream (or redirect) an R2 object by key.
- * Images/PDFs stream through the API using R2 credentials so Flutter/admin
- * do not depend on a public CDN. Large videos redirect to a signed URL.
+ *
+ * Images always stay same-origin (stream or proxy) — Flutter's image cache
+ * often fails on cross-host 302 redirects to R2 signed URLs.
+ * Large videos may redirect to a signed URL for progressive playback.
  */
 export async function serveR2Object(key: string, request: Request): Promise<Response> {
   const safeKey = key.trim().replace(/^\/+/, "");
@@ -58,15 +99,10 @@ export async function serveR2Object(key: string, request: Request): Promise<Resp
     return Response.redirect(new URL(`/uploads/${safeKey}`, request.url), 302);
   }
 
-  const lower = safeKey.toLowerCase();
-  const isHeavy =
-    lower.startsWith("teacher-shorts/") ||
-    lower.startsWith("teacher-courses/") ||
-    lower.startsWith("videos/") ||
-    lower.startsWith("lessons/") ||
-    /\.(mp4|webm|mov|mkv|avi|m4v|mpg|mpeg|3gp)$/i.test(safeKey);
+  const heavy = isHeavyMedia(safeKey);
+  const image = isImageKey(safeKey);
 
-  if (isHeavy) {
+  if (heavy && !image) {
     try {
       const signed = await getDownloadUrl(safeKey, 60 * 60 * 6);
       return Response.redirect(signed, 302);
@@ -79,7 +115,10 @@ export async function serveR2Object(key: string, request: Request): Promise<Resp
     const obj = await r2Client.send(
       new GetObjectCommand({ Bucket: r2Bucket, Key: safeKey })
     );
-    if (!obj.Body) return error("Media not found", 404, "NOT_FOUND");
+    if (!obj.Body) {
+      if (image) return error("Media not found", 404, "NOT_FOUND");
+      return proxySignedObject(safeKey);
+    }
 
     const headers = new Headers();
     headers.set("Content-Type", obj.ContentType || guessContentType(safeKey));
@@ -89,6 +128,14 @@ export async function serveR2Object(key: string, request: Request): Promise<Resp
 
     return new Response(toWebStream(obj.Body), { status: 200, headers });
   } catch {
+    // Never 302 images to R2 — Flutter DecorationImage / cache managers break on it.
+    if (image) {
+      try {
+        return await proxySignedObject(safeKey);
+      } catch {
+        return error("Media not found", 404, "NOT_FOUND");
+      }
+    }
     try {
       const signed = await getDownloadUrl(safeKey, 60 * 60);
       return Response.redirect(signed, 302);

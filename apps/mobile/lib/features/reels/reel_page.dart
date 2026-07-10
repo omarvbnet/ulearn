@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/video/media_cache_budget.dart';
 import 'package:ulearn/core/video/reel_video_cache.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
@@ -77,11 +78,21 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
         }
       });
     if (widget.active) {
+      _pinActiveUrl();
       _initVideo();
     } else {
       _initializing = false;
       _prefetchSelf();
     }
+  }
+
+  void _pinActiveUrl() {
+    final url = widget.video['fileUrl']?.toString();
+    if (url != null && url.isNotEmpty) MediaCacheBudget.pin(url);
+  }
+
+  void _unpinUrl(String? url) {
+    if (url != null && url.isNotEmpty) MediaCacheBudget.unpin(url);
   }
 
   void _prefetchSelf() {
@@ -113,6 +124,9 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     if (c == null) return;
     final url = widget.video['fileUrl']?.toString();
     _controller = null;
+    if (url != null && url.isNotEmpty) {
+      ReelVideoCache.endStreaming(url);
+    }
     if (stash && url != null && url.isNotEmpty && !_disposed) {
       ReelVideoCache.stash(url, c);
     } else {
@@ -124,6 +138,7 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
   void didUpdateWidget(ReelPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.active && !oldWidget.active) {
+      _pinActiveUrl();
       if (_controller == null) {
         final url = widget.video['fileUrl']?.toString();
         setState(() {
@@ -132,22 +147,25 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
               url != null && url.isNotEmpty && !ReelVideoCache.isWarmReady(url);
         });
         _initVideo();
-    } else {
-      _resumePlayback();
-      _recordViewIfNeeded();
-    }
+      } else {
+        _resumePlayback();
+        _recordViewIfNeeded();
+      }
     } else if (!widget.active && oldWidget.active) {
+      _unpinUrl(widget.video['fileUrl']?.toString());
       _scrubMode = false;
       _releaseVideo(stash: true);
       if (mounted) setState(() {});
     }
     if (oldWidget.video['id'] != widget.video['id']) {
+      _unpinUrl(oldWidget.video['fileUrl']?.toString());
       _viewRecorded = false;
       _scrubMode = false;
       _releaseVideo(stash: false);
       _initializing = widget.active;
       _showLoadSkeleton = false;
       if (widget.active) {
+        _pinActiveUrl();
         _initVideo();
       } else {
         _prefetchSelf();
@@ -212,19 +230,25 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
 
       c.setLooping(true);
       c.setVolume(_muted ? 0 : 1);
-      await c.play();
-      _recordViewIfNeeded();
 
+      // Attach surface before play so the first decoded frame paints immediately.
       if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
         await ReelVideoCache.releaseController(c);
         return;
       }
-
       setState(() {
         _controller = c;
         _initializing = false;
         _showLoadSkeleton = false;
       });
+
+      await c.play();
+      _recordViewIfNeeded();
+
+      if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
+        _releaseVideo(stash: false);
+        return;
+      }
     } catch (_) {
       if (c != null) await ReelVideoCache.releaseController(c);
       if (mounted && gen == _initGeneration) {
@@ -240,6 +264,7 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
   void dispose() {
     _disposed = true;
     _initGeneration++;
+    _unpinUrl(widget.video['fileUrl']?.toString());
     _releaseVideo(stash: false);
     _likePulse.dispose();
     _heartBurst.dispose();
@@ -361,17 +386,9 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     if (_initializing && widget.active) {
       return _buildPoster();
     }
-    if (_controller != null && _controller!.value.isInitialized) {
-      return RepaintBoundary(
-        child: FittedBox(
-          fit: BoxFit.cover,
-          child: SizedBox(
-            width: _controller!.value.size.width,
-            height: _controller!.value.size.height,
-            child: VideoPlayer(_controller!),
-          ),
-        ),
-      );
+    final c = _controller;
+    if (c != null && c.value.isInitialized) {
+      return _StableReelSurface(controller: c);
     }
     return _buildPoster();
   }
@@ -863,6 +880,34 @@ class _ActionButton extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Isolates the video texture from overlay rebuilds (likes, mute, scrub).
+class _StableReelSurface extends StatelessWidget {
+  const _StableReelSurface({required this.controller});
+
+  final VideoPlayerController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = controller.value.size;
+    final w = size.width <= 0 ? 9.0 : size.width;
+    final h = size.height <= 0 ? 16.0 : size.height;
+    return RepaintBoundary(
+      child: ColoredBox(
+        color: Colors.black,
+        child: FittedBox(
+          fit: BoxFit.cover,
+          clipBehavior: Clip.hardEdge,
+          child: SizedBox(
+            width: w,
+            height: h,
+            child: VideoPlayer(controller),
+          ),
+        ),
       ),
     );
   }

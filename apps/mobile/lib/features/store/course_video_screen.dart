@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/video/course_video_cache.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
@@ -46,11 +47,16 @@ class _CourseVideoScreenState extends State<CourseVideoScreen> {
     await _protection!.enable();
 
     try {
-      _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+      _controller = await CourseVideoCache.createController(widget.url);
       await _controller!.initialize();
-      if (!mounted) return;
+      if (!mounted) {
+        await _controller?.dispose();
+        CourseVideoCache.endStreaming(widget.url);
+        return;
+      }
       await _controller!.play();
       setState(() => _loading = false);
+      CourseVideoCache.cacheAfterPlay(widget.url);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -62,6 +68,7 @@ class _CourseVideoScreenState extends State<CourseVideoScreen> {
 
   @override
   void dispose() {
+    CourseVideoCache.onPlaybackEnded(widget.url);
     _controller?.dispose();
     _protection?.disable();
     super.dispose();

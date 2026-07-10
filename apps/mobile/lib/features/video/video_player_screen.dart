@@ -9,6 +9,7 @@ import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/quiz/quiz_screen.dart';
 import 'package:ulearn/core/video/cast_watermarked_video.dart';
+import 'package:ulearn/core/video/course_video_cache.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
 import 'package:video_player/video_player.dart';
@@ -94,9 +95,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       }
 
       _videoUrl = url;
-      _controller = VideoPlayerController.networkUrl(Uri.parse(url));
+      _controller = await CourseVideoCache.createController(url);
       await _controller!.initialize();
-      if (!mounted) return;
+      if (!mounted) {
+        await _controller?.dispose();
+        CourseVideoCache.endStreaming(url);
+        return;
+      }
       if (resumeAt > 0) {
         await _controller!.seekTo(Duration(seconds: resumeAt));
       }
@@ -106,6 +111,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _progressTimer = Timer.periodic(const Duration(seconds: 10), (_) => _saveProgress());
 
       setState(() => _loading = false);
+      CourseVideoCache.cacheAfterPlay(url);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -146,6 +152,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
+    final url = _videoUrl;
+    if (url != null) CourseVideoCache.onPlaybackEnded(url);
     _controller?.removeListener(_onPlaybackUpdate);
     _progressTimer?.cancel();
     _saveProgress();

@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/video/image_cache_manager.dart';
 
 /// Disk + memory cached network image for faster scroll and repeat visits.
 class CachedImage extends StatelessWidget {
@@ -69,6 +70,7 @@ class CachedImage extends StatelessWidget {
 
     Widget image = CachedNetworkImage(
       imageUrl: _resolved,
+      cacheManager: UlearnImageCache.manager,
       cacheKey: cacheVersion != null && cacheVersion!.isNotEmpty
           ? '$_resolved|$cacheVersion'
           : _resolved,
@@ -95,6 +97,7 @@ ImageProvider cachedImageProvider(String url, {String? cacheVersion}) {
   final resolved = ApiClient.absoluteUrl(url);
   return CachedNetworkImageProvider(
     resolved,
+    cacheManager: UlearnImageCache.manager,
     cacheKey: cacheVersion != null && cacheVersion.isNotEmpty
         ? '$resolved|$cacheVersion'
         : resolved,
@@ -108,8 +111,17 @@ Future<void> evictCachedImage(String? url, {String? cacheVersion}) async {
   final key = cacheVersion != null && cacheVersion.isNotEmpty
       ? '$resolved|$cacheVersion'
       : resolved;
-  await CachedNetworkImage.evictFromCache(resolved);
-  await CachedNetworkImage.evictFromCache(key);
-  imageCache.evict(CachedNetworkImageProvider(resolved));
+  await CachedNetworkImage.evictFromCache(
+    resolved,
+    cacheKey: key,
+    cacheManager: UlearnImageCache.manager,
+  );
+  imageCache.evict(
+    CachedNetworkImageProvider(
+      resolved,
+      cacheKey: key,
+      cacheManager: UlearnImageCache.manager,
+    ),
+  );
   imageCache.evict(NetworkImage(resolved));
 }

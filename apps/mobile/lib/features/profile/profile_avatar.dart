@@ -1,7 +1,8 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/video/image_cache_manager.dart';
 
 /// Circular avatar with optional photo, initials fallback, and edit affordance.
 class ProfileAvatar extends StatelessWidget {
@@ -13,6 +14,8 @@ class ProfileAvatar extends StatelessWidget {
     this.editable = false,
     this.uploading = false,
     this.onTap,
+    /// Busts cache after a photo replace (e.g. user id + timestamp).
+    this.cacheVersion,
   });
 
   final String? name;
@@ -21,6 +24,7 @@ class ProfileAvatar extends StatelessWidget {
   final bool editable;
   final bool uploading;
   final VoidCallback? onTap;
+  final String? cacheVersion;
 
   String get _initials {
     final n = (name ?? '?').trim();
@@ -32,27 +36,78 @@ class ProfileAvatar extends StatelessWidget {
   }
 
   String? get _resolvedUrl {
-    final url = photoUrl;
+    final url = photoUrl?.trim();
     if (url == null || url.isEmpty) return null;
-    return ApiClient.absoluteUrl(url);
+    final absolute = ApiClient.absoluteUrl(url);
+    if (!absolute.startsWith('http')) return null;
+    return absolute;
+  }
+
+  Widget _initialsDisk() {
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: AppTheme.gradient,
+      ),
+      child: Text(
+        _initials.isEmpty ? '?' : _initials,
+        style: TextStyle(
+          fontSize: size * 0.32,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+
+  Widget _photo(String url) {
+    final dpr = WidgetsBinding.instance.platformDispatcher.views.isNotEmpty
+        ? WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio
+        : 2.0;
+    final mem = (size * dpr).round().clamp(64, 512);
+    final key = cacheVersion != null && cacheVersion!.isNotEmpty
+        ? '$url|$cacheVersion'
+        : url;
+
+    return CachedNetworkImage(
+      imageUrl: url,
+      cacheManager: UlearnImageCache.manager,
+      cacheKey: key,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
+      memCacheWidth: mem,
+      fadeInDuration: const Duration(milliseconds: 160),
+      fadeOutDuration: const Duration(milliseconds: 80),
+      placeholder: (_, _) => _initialsDisk(),
+      errorWidget: (_, _, _) => _initialsDisk(),
+      imageBuilder: (context, provider) => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          image: DecorationImage(image: provider, fit: BoxFit.cover),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final resolved = _resolvedUrl;
 
-    Widget avatar = Container(
+    Widget avatar = ClipOval(
+      child: resolved != null ? _photo(resolved) : _initialsDisk(),
+    );
+
+    avatar = Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        gradient: resolved == null ? AppTheme.gradient : null,
-        image: resolved != null
-            ? DecorationImage(
-                image: cachedImageProvider(resolved),
-                fit: BoxFit.cover,
-              )
-            : null,
         border: Border.all(
           color: editable ? AppTheme.accent.withValues(alpha: 0.6) : Colors.white24,
           width: editable ? 2.5 : 1,
@@ -65,18 +120,7 @@ class ProfileAvatar extends StatelessWidget {
           ),
         ],
       ),
-      child: resolved == null
-          ? Center(
-              child: Text(
-                _initials.isEmpty ? '?' : _initials,
-                style: TextStyle(
-                  fontSize: size * 0.32,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            )
-          : null,
+      child: avatar,
     );
 
     if (uploading) {
@@ -87,7 +131,7 @@ class ProfileAvatar extends StatelessWidget {
           Container(
             width: size,
             height: size,
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               color: Colors.black54,
               shape: BoxShape.circle,
             ),

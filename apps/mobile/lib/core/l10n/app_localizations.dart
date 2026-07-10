@@ -187,6 +187,13 @@ class AppLocalizations {
   String get profileLogoutConfirm => t('mobile.profile.logoutConfirm');
   String get profileLanguageTitle => t('mobile.profile.languageTitle');
   String get profileLanguageSaved => t('mobile.profile.languageSaved');
+  String get profileStorageCache => t('mobile.profile.storageCache');
+  String profileStorageCacheHint(String size) =>
+      t('mobile.profile.storageCacheHint', {'size': size});
+  String get profileStorageCacheClear => t('mobile.profile.storageCacheClear');
+  String get profileStorageCacheClearConfirm =>
+      t('mobile.profile.storageCacheClearConfirm');
+  String get profileStorageCacheCleared => t('mobile.profile.storageCacheCleared');
 
   String roleLabel(String role) => switch (role) {
         'STUDENT' => t('mobile.roles.student'),

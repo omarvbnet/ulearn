@@ -80,6 +80,10 @@ PODS:
   - flutter_to_airplay (0.0.1):
     - Flutter
     - Mux-Stats-AVPlayer
+  - fvp (0.36.1):
+    - Flutter
+    - FlutterMacOS
+    - mdk (~> 0.36.0)
   - GoogleDataTransport (10.1.0):
     - nanopb (~> 3.30910.0)
     - PromisesObjC (~> 2.4)
@@ -107,6 +111,7 @@ PODS:
   - GoogleUtilities/UserDefaults (8.1.2):
     - GoogleUtilities/Logger
     - GoogleUtilities/Privacy
+  - mdk (0.36.0)
   - Mux-Stats-AVPlayer (4.14.0):
     - Mux-Stats-Core (~> 5.13)
   - Mux-Stats-Core (5.13.0)
@@ -154,6 +159,7 @@ DEPENDENCIES:
   - flutter_native_splash (from `.symlinks/plugins/flutter_native_splash/ios`)
   - flutter_secure_storage (from `.symlinks/plugins/flutter_secure_storage/ios`)
   - flutter_to_airplay (from `.symlinks/plugins/flutter_to_airplay/ios`)
+  - fvp (from `.symlinks/plugins/fvp/darwin`)
   - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
   - pdfx (from `.symlinks/plugins/pdfx/ios`)
   - printing (from `.symlinks/plugins/printing/ios`)
@@ -175,6 +181,7 @@ SPEC REPOS:
     - FirebaseMessaging
     - GoogleDataTransport
     - GoogleUtilities
+    - mdk
     - Mux-Stats-AVPlayer
     - Mux-Stats-Core
     - nanopb
@@ -202,6 +209,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/flutter_secure_storage/ios"
   flutter_to_airplay:
     :path: ".symlinks/plugins/flutter_to_airplay/ios"
+  fvp:
+    :path: ".symlinks/plugins/fvp/darwin"
   package_info_plus:
     :path: ".symlinks/plugins/package_info_plus/ios"
   pdfx:
@@ -238,8 +247,10 @@ SPEC CHECKSUMS:
   flutter_native_splash: df59bb2e1421aa0282cb2e95618af4dcb0c56c29
   flutter_secure_storage: d33dac7ae2ea08509be337e775f6b59f1ff45f12
   flutter_to_airplay: 3194fe6e4ca6ba1d9529c3c4194c32b9610d990f
+  fvp: 31bd2864ea7d58413f843a87e4168f9d609bf4e3
   GoogleDataTransport: aae35b7ea0c09004c3797d53c8c41f66f219d6a7
   GoogleUtilities: 766ace00c6b10d8148408f329d10c4f051931850
+  mdk: 3bfb53e0bcc9643180eaa864360051f281e4c17b
   Mux-Stats-AVPlayer: 6a2fe64b4fa85f7e6e7d6885c4dcaed733c8d192
   Mux-Stats-Core: 1d9102a6dbd9ccb9f34c4ee9271355ddd7976eab
   nanopb: fad817b59e0457d11a5dfbde799381cd727c1275

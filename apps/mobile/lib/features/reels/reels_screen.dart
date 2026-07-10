@@ -158,7 +158,7 @@ class ReelsScreenState extends State<ReelsScreen> {
 
   void _trimWarmControllers(int center) {
     final keep = <String>{};
-    for (var i = center - 1; i <= center + 2; i++) {
+    for (var i = center - 1; i <= center + 1; i++) {
       if (i < 0 || i >= _videos.length) continue;
       final url = _videos[i]['fileUrl']?.toString();
       if (url != null && url.isNotEmpty) keep.add(url);
@@ -490,7 +490,7 @@ class ReelsScreenState extends State<ReelsScreen> {
             controller: _pageCtrl,
             scrollDirection: Axis.vertical,
             physics: const PageScrollPhysics(parent: ClampingScrollPhysics()),
-            allowImplicitScrolling: true,
+            allowImplicitScrolling: false,
             onPageChanged: _onPageChanged,
             itemCount: _videos.length,
             itemBuilder: (context, index) {

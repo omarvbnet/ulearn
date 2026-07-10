@@ -1,5 +1,13 @@
 import { error, json, requireAuth } from "@/lib/api";
-import { buildKey, getUploadUrl, maxSizeLabel, mediaProxyPath, preferredStoredMediaUrl, validateFile } from "@/lib/r2";
+import {
+  buildKey,
+  getUploadUrl,
+  maxSizeLabel,
+  mediaProxyPath,
+  preferredStoredMediaUrl,
+  resolvePublicMediaUrl,
+  validateFile,
+} from "@/lib/r2";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -91,7 +99,17 @@ export async function PATCH(request: Request) {
     },
   });
 
-  return json({ user });
+  const profilePhotoUrlResolved =
+    (await resolvePublicMediaUrl(user.profilePhotoUrl, user.profilePhotoKey).catch(
+      () => null
+    )) ?? user.profilePhotoUrl;
+
+  return json({
+    user: {
+      ...user,
+      profilePhotoUrl: profilePhotoUrlResolved,
+    },
+  });
 }
 
 /** Remove profile photo. */
