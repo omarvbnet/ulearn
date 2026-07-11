@@ -185,12 +185,22 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      final unavailable = context.l10n.t('mobile.ai.unavailable');
+      final msg = e.toString();
+      final fallback = context.l10n.t('mobile.ai.unavailable');
+      // Don't mask API/config failures as "not in materials".
+      final text = (msg.contains('ApiException') ||
+              msg.contains('No AI provider') ||
+              msg.contains('embed') ||
+              msg.contains('401') ||
+              msg.contains('403') ||
+              msg.contains('500'))
+          ? context.l10n.t('mobile.ai.errorGeneric')
+          : fallback;
       setState(() {
         _messages.add(
           _ChatBubble(
             role: 'assistant',
-            text: unavailable,
+            text: text,
           ),
         );
       });

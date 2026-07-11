@@ -860,7 +860,8 @@
       "attachFile": "Add file",
       "attachLimit": "You can attach up to 4 files.",
       "attachTooLarge": "Each file must be under 4 MB.",
-      "askAboutAttachments": "Please explain the attached file(s)."
+      "askAboutAttachments": "Please explain the attached file(s).",
+      "errorGeneric": "AI is temporarily unavailable. Please try again in a moment."
     },
     "error": {
       "generic": "Something went wrong",

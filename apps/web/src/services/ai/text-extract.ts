@@ -29,19 +29,16 @@ export async function extractTextFromBuffer(
 
   if (mime.includes("pdf") || lower.endsWith(".pdf")) {
     try {
-      const { PDFParse } = await import("pdf-parse");
-      const parser = new PDFParse({ data: buffer });
-      try {
-        const result = await parser.getText();
-        let text = result?.text || "";
-        if (text.trim().length < 40) {
-          const ocr = await OcrService.extractFromScannedPdf(buffer);
-          text = ocr || text;
-        }
-        return { text, pageCount: result?.total };
-      } finally {
-        await parser.destroy().catch(() => {});
+      // unpdf is Node/serverless-safe (pdf-parse v2 needs DOMMatrix / browser APIs).
+      const { extractText } = await import("unpdf");
+      const result = await extractText(new Uint8Array(buffer), { mergePages: true });
+      let text = Array.isArray(result.text) ? result.text.join("\n") : String(result.text || "");
+      const pageCount = typeof result.totalPages === "number" ? result.totalPages : undefined;
+      if (text.trim().length < 40) {
+        const ocr = await OcrService.extractFromScannedPdf(buffer);
+        text = ocr || text;
       }
+      return { text, pageCount };
     } catch (e) {
       throw new Error(e instanceof Error ? e.message : "PDF extract failed");
     }

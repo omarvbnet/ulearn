@@ -93,7 +93,8 @@ export class GeminiAdapter implements AiProviderAdapter {
   }
 
   async embed(config: ProviderConfig, text: string): Promise<EmbeddingResult> {
-    const model = "text-embedding-004";
+    // text-embedding-004 was shut down Jan 2026 — use gemini-embedding-001 @ 768 dims
+    const model = "gemini-embedding-001";
     const url = `${this.base(config)}/v1beta/models/${model}:embedContent?key=${encodeURIComponent(config.apiKey)}`;
     const res = await fetchJson(
       url,
@@ -103,6 +104,7 @@ export class GeminiAdapter implements AiProviderAdapter {
         body: JSON.stringify({
           model: `models/${model}`,
           content: { parts: [{ text: text.slice(0, 8000) }] },
+          outputDimensionality: EMBEDDING_DIMS,
         }),
       },
       config.timeoutMs

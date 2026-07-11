@@ -849,7 +849,8 @@
       "attachFile": "إضافة ملف",
       "attachLimit": "يمكنك إرفاق حتى 4 ملفات.",
       "attachTooLarge": "يجب أن يكون كل ملف أقل من 4 ميجابايت.",
-      "askAboutAttachments": "يرجى شرح الملفات المرفقة."
+      "askAboutAttachments": "يرجى شرح الملفات المرفقة.",
+      "errorGeneric": "المساعد الذكي غير متاح مؤقتاً. حاول مرة أخرى بعد لحظات."
     },
     "error": {
       "generic": "حدث خطأ",

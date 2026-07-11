@@ -13,7 +13,8 @@ import {
 } from "./types";
 
 const TOP_K = 10;
-const MIN_SIMILARITY = 0.58;
+/** Soft floor — too high (0.58+) rejects valid Arabic/cross-lang matches. */
+const MIN_SIMILARITY = 0.42;
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
 const MAX_ATTACHMENTS = 4;
@@ -158,23 +159,30 @@ export class AiChatService {
       }
     }
 
+    // Prefer stage for ranking; do NOT hard-filter language (docs may be EN while UI is AR).
     const hits = await VectorSearchService.search(qEmbed, {
       educationalStageId: stageId,
       subjectId: input.subjectId,
       courseId: input.courseId,
-      language,
       lesson: input.lesson,
       topK: TOP_K,
       minSimilarity: MIN_SIMILARITY,
+      // language used only as a soft boost inside rankAndCut when passed:
+      language: undefined,
+      preferLanguage: language,
     });
 
     const best = hits[0]?.similarity ?? 0;
     if (!hits.length && !hasAttachments) {
+      const readyCount = await prisma.kbDocument.count({
+        where: { status: "READY", deletedAt: null },
+      });
+      const emptyKb = readyCount === 0;
       return this.persistTurn({
         userId: input.userId,
         conversationId: input.conversationId,
         question,
-        answer: unavailable,
+        answer: emptyKb ? emptyKnowledgeBaseAnswer(language) : unavailable,
         citations: [],
         fromCache: false,
         attachmentNames: [],
@@ -354,6 +362,20 @@ function normalizeLang(raw?: string | null): string {
   if (v.startsWith("tr")) return "tr";
   if (v.startsWith("en")) return "en";
   return v.slice(0, 2) || "en";
+}
+
+function emptyKnowledgeBaseAnswer(language?: string | null): string {
+  const lang = normalizeLang(language);
+  switch (lang) {
+    case "ar":
+      return "قاعدة المعرفة فارغة أو ما زالت قيد المعالجة. اطلب من المسؤول رفع المواد التعليمية وإعادة معالجتها.";
+    case "ku":
+      return "بنکەی زانیاری بەتاڵە یان هێشتا لە پرۆسەدایە. داوا لە بەڕێوەبەر بکە ماددە فێرکارییەکان بار بکات و دووبارە پرۆسێس بکات.";
+    case "tr":
+      return "Bilgi tabanı boş veya hâlâ işleniyor. Yöneticiden eğitim materyallerini yüklemesini ve yeniden işlemesini isteyin.";
+    default:
+      return "The knowledge base is empty or still processing. Ask an admin to upload educational materials and reprocess them.";
+  }
 }
 
 function stageNameForLang(

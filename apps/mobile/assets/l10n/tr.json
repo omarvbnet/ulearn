@@ -849,7 +849,8 @@
       "attachFile": "Dosya ekle",
       "attachLimit": "En fazla 4 dosya ekleyebilirsiniz.",
       "attachTooLarge": "Her dosya 4 MB’dan küçük olmalıdır.",
-      "askAboutAttachments": "Lütfen eklenen dosyaları açıkla."
+      "askAboutAttachments": "Lütfen eklenen dosyaları açıkla.",
+      "errorGeneric": "YZ geçici olarak kullanılamıyor. Lütfen biraz sonra tekrar deneyin."
     },
     "error": {
       "generic": "Bir şeyler ters gitti",

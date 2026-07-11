@@ -16,6 +16,9 @@ export type SearchFilters = {
   educationalStageId?: string | null;
   subjectId?: string | null;
   courseId?: string | null;
+  /** Soft boost only — never exclude mismatched languages. */
+  preferLanguage?: string | null;
+  /** @deprecated Hard language filter — avoid; use preferLanguage. */
   language?: string | null;
   lesson?: string | null;
   topK?: number;
@@ -28,17 +31,18 @@ export class VectorSearchService {
     filters: SearchFilters = {}
   ): Promise<RetrievedChunk[]> {
     const topK = Math.min(filters.topK ?? 10, 12);
-    const minSim = filters.minSimilarity ?? 0.55;
+    const minSim = filters.minSimilarity ?? 0.42;
 
     // Prefer pgvector when available; fall back to Prisma float[] cosine.
     try {
       const vec = `[${queryEmbedding.join(",")}]`;
-      // Apply soft filters in SQL when present via unsafe params list.
       const params: unknown[] = [vec];
       const clauses: string[] = [];
       if (filters.educationalStageId) {
         params.push(filters.educationalStageId);
-        clauses.push(`AND (d."educationalStageId" = $${params.length} OR d."educationalStageId" IS NULL)`);
+        clauses.push(
+          `AND (d."educationalStageId" = $${params.length} OR d."educationalStageId" IS NULL)`
+        );
       }
       if (filters.subjectId) {
         params.push(filters.subjectId);
@@ -48,12 +52,7 @@ export class VectorSearchService {
         params.push(filters.courseId);
         clauses.push(`AND (d."courseId" = $${params.length} OR d."courseId" IS NULL)`);
       }
-      if (filters.language) {
-        params.push(filters.language);
-        clauses.push(
-          `AND (d.language = $${params.length} OR d.language IS NULL OR c.language = $${params.length})`
-        );
-      }
+      // Intentionally no hard language WHERE clause — multilingual corpus is common.
       params.push(topK * 3);
       const limitIdx = params.length;
 
@@ -108,7 +107,6 @@ export class VectorSearchService {
     }
   }
 
-  /** Portable cosine search when pgvector column is missing. */
   private static async fallbackSearch(
     queryEmbedding: number[],
     filters: SearchFilters,
@@ -120,12 +118,19 @@ export class VectorSearchService {
         status: "READY",
         deletedAt: null,
         ...(filters.educationalStageId
-          ? { OR: [{ educationalStageId: filters.educationalStageId }, { educationalStageId: null }] }
+          ? {
+              OR: [
+                { educationalStageId: filters.educationalStageId },
+                { educationalStageId: null },
+              ],
+            }
           : {}),
         ...(filters.subjectId
           ? { OR: [{ subjectId: filters.subjectId }, { subjectId: null }] }
           : {}),
-        ...(filters.courseId ? { OR: [{ courseId: filters.courseId }, { courseId: null }] } : {}),
+        ...(filters.courseId
+          ? { OR: [{ courseId: filters.courseId }, { courseId: null }] }
+          : {}),
       },
       select: { id: true, fileName: true },
       take: 200,
@@ -147,7 +152,7 @@ export class VectorSearchService {
         fileName: docMap.get(c.documentId) || "document",
         metadata: (c.metadata as Record<string, unknown>) || {},
       }))
-      .filter((c) => c.similarity >= minSim);
+      .filter((c) => c.similarity >= minSim * 0.85);
 
     return rankAndCut(scored, filters, topK, minSim);
   }
@@ -172,17 +177,28 @@ function rankAndCut(
   topK: number,
   minSim: number
 ): RetrievedChunk[] {
+  const preferLang = filters.preferLanguage || filters.language;
   const boosted = rows
     .map((r) => {
       let score = r.similarity;
       const meta = r.metadata;
       if (filters.subjectId && meta.subjectId === filters.subjectId) score += 0.05;
-      if (filters.educationalStageId && meta.educationalStageId === filters.educationalStageId)
+      if (
+        filters.educationalStageId &&
+        meta.educationalStageId === filters.educationalStageId
+      )
         score += 0.04;
-      if (filters.lesson && (meta.lesson === filters.lesson || String(meta.lesson || "").includes(filters.lesson)))
+      if (
+        filters.lesson &&
+        (meta.lesson === filters.lesson ||
+          String(meta.lesson || "").includes(filters.lesson))
+      )
         score += 0.06;
-      if (filters.language && (meta.language === filters.language || r.metadata.language === filters.language))
-        score += 0.02;
+      if (
+        preferLang &&
+        (meta.language === preferLang || r.metadata.language === preferLang)
+      )
+        score += 0.03;
       return { ...r, similarity: Math.min(score, 1) };
     })
     .filter((r) => r.similarity >= minSim)
