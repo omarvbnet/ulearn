@@ -116,8 +116,9 @@ class _HomeScreenState extends State<HomeScreen> {
           if (_index == 0)
             const Positioned(
               left: 0,
-              top: 0,
-              bottom: 78,
+              right: 0,
+              // Sit above floating tab bar with breathing room.
+              bottom: 88,
               child: AiWithULearnEntry(),
             ),
         ],

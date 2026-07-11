@@ -842,9 +842,14 @@
       "entryLabel": "AI مع U Learn",
       "title": "AI مع U Learn",
       "placeholder": "اسأل عن دروسك…",
-      "emptyHint": "اطرح سؤالاً مستنداً إلى المواد التعليمية في U Learn.",
+      "emptyHint": "اطرح سؤالاً مستنداً إلى المواد التعليمية في U Learn. يمكنك أيضاً إرفاق صور أو ملفات.",
       "thinking": "جاري التفكير…",
-      "unavailable": "The requested information is not available in the educational material uploaded to U Learn."
+      "unavailable": "المعلومات المطلوبة غير متوفرة في المواد التعليمية المرفوعة على U Learn.",
+      "attachPhoto": "إضافة صورة",
+      "attachFile": "إضافة ملف",
+      "attachLimit": "يمكنك إرفاق حتى 4 ملفات.",
+      "attachTooLarge": "يجب أن يكون كل ملف أقل من 4 ميجابايت.",
+      "askAboutAttachments": "يرجى شرح الملفات المرفقة."
     },
     "error": {
       "generic": "حدث خطأ",

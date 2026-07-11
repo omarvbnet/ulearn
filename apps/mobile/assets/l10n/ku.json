@@ -842,9 +842,14 @@
       "entryLabel": "AI لەگەڵ U Learn",
       "title": "AI لەگەڵ U Learn",
       "placeholder": "پرسیار لەسەر وانەکانت بکە…",
-      "emptyHint": "پرسیارێک بکە کە پشت بە ماددە فێرکارییەکانی U Learn ببەستێت.",
+      "emptyHint": "پرسیارێک بکە کە پشت بە ماددە فێرکارییەکانی U Learn ببەستێت. دەتوانیت وێنە یان فایلیش هاوپێچ بکەیت.",
       "thinking": "بیرکردنەوە…",
-      "unavailable": "The requested information is not available in the educational material uploaded to U Learn."
+      "unavailable": "زانیاری داواکراو لە ماددە فێرکارییەکانی بارکراو بۆ U Learn بەردەست نییە.",
+      "attachPhoto": "زیادکردنی وێنە",
+      "attachFile": "زیادکردنی فایل",
+      "attachLimit": "دەتوانیت تا 4 فایل هاوپێچ بکەیت.",
+      "attachTooLarge": "هەر فایلێک دەبێت کەمتر لە 4 مێگابایت بێت.",
+      "askAboutAttachments": "تکایە فایلە هاوپێچەکان ڕوون بکەرەوە."
     },
     "error": {
       "generic": "هەڵەیەک ڕوویدا",

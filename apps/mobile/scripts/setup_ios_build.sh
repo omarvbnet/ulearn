@@ -1,18 +1,31 @@
 #!/bin/bash
-# One-time setup: symlink build/ to /tmp to avoid Desktop iCloud codesign issues.
+# Keep Flutter's build/ off Desktop/iCloud so codesign doesn't fail with:
+#   "resource fork, Finder information, or similar detritus not allowed"
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TMP_BUILD="/tmp/ulearn-mobile-build"
+CACHE="${HOME}/Library/Caches/ulearn-mobile-build"
+LINK="${ROOT}/build"
 
-cd "$ROOT"
-mkdir -p "$TMP_BUILD"
+mkdir -p "${CACHE}"
+export COPYFILE_DISABLE=1
+xattr -cr "${CACHE}" 2>/dev/null || true
+dot_clean -m "${CACHE}" 2>/dev/null || true
 
-if [ -L "build" ] && [ "$(readlink build)" = "$TMP_BUILD" ]; then
-  echo "build/ already linked to $TMP_BUILD"
-  exit 0
+if [ -L "${LINK}" ]; then
+  target="$(readlink "${LINK}")"
+  if [ "${target}" = "${CACHE}" ] && [ -d "${CACHE}" ]; then
+    echo "build → ${CACHE} (ok)"
+    exit 0
+  fi
+  rm -f "${LINK}"
+elif [ -d "${LINK}" ]; then
+  # Preserve existing local build contents into cache once.
+  rsync -a "${LINK}/" "${CACHE}/" 2>/dev/null || true
+  rm -rf "${LINK}"
+elif [ -e "${LINK}" ]; then
+  rm -rf "${LINK}"
 fi
 
-rm -rf build
-ln -s "$TMP_BUILD" build
-echo "Linked build/ -> $TMP_BUILD"
+ln -s "${CACHE}" "${LINK}"
+echo "Linked ${LINK} → ${CACHE}"

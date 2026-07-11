@@ -853,9 +853,14 @@
       "entryLabel": "AI with U Learn",
       "title": "AI with U Learn",
       "placeholder": "Ask about your lessons…",
-      "emptyHint": "Ask a question grounded in U Learn educational materials.",
+      "emptyHint": "Ask a question grounded in U Learn educational materials. You can also attach photos or files.",
       "thinking": "Thinking…",
-      "unavailable": "The requested information is not available in the educational material uploaded to U Learn."
+      "unavailable": "The requested information is not available in the educational material uploaded to U Learn.",
+      "attachPhoto": "Add photo",
+      "attachFile": "Add file",
+      "attachLimit": "You can attach up to 4 files.",
+      "attachTooLarge": "Each file must be under 4 MB.",
+      "askAboutAttachments": "Please explain the attached file(s)."
     },
     "error": {
       "generic": "Something went wrong",

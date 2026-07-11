@@ -39,10 +39,26 @@ export class GeminiAdapter implements AiProviderAdapter {
     const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n");
     const contents = messages
       .filter((m) => m.role !== "system")
-      .map((m) => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }],
-      }));
+      .map((m) => {
+        const parts: { text?: string; inlineData?: { mimeType: string; data: string } }[] = [];
+        if (m.content?.trim()) parts.push({ text: m.content });
+        for (const p of m.parts || []) {
+          if (p.type === "text" && p.text.trim()) parts.push({ text: p.text });
+          if (p.type === "image" && p.dataBase64) {
+            parts.push({
+              inlineData: {
+                mimeType: p.mimeType || "image/jpeg",
+                data: p.dataBase64.replace(/^data:[^;]+;base64,/, ""),
+              },
+            });
+          }
+        }
+        if (!parts.length) parts.push({ text: m.content || "" });
+        return {
+          role: m.role === "assistant" ? "model" : "user",
+          parts,
+        };
+      });
 
     const url = `${this.base(config)}/v1beta/models/${model}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
     const res = await fetchJson(
@@ -121,6 +137,26 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
 
   async chat(config: ProviderConfig, messages: ChatMessage[]): Promise<ChatResult> {
     const url = `${this.base(config)}/chat/completions`;
+    const mapped = messages.map((m) => {
+      const images = (m.parts || []).filter((p) => p.type === "image");
+      if (!images.length) {
+        return { role: m.role, content: m.content };
+      }
+      return {
+        role: m.role,
+        content: [
+          ...(m.content?.trim()
+            ? [{ type: "text" as const, text: m.content }]
+            : []),
+          ...images.map((img) => ({
+            type: "image_url" as const,
+            image_url: {
+              url: `data:${img.mimeType};base64,${img.dataBase64.replace(/^data:[^;]+;base64,/, "")}`,
+            },
+          })),
+        ],
+      };
+    });
     const res = await fetchJson(
       url,
       {
@@ -131,7 +167,7 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
         },
         body: JSON.stringify({
           model: config.model || "gpt-4o-mini",
-          messages,
+          messages: mapped,
           temperature: config.temperature,
           max_tokens: config.maxTokens,
           top_p: config.topP ?? undefined,

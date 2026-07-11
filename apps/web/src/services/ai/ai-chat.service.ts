@@ -3,11 +3,20 @@ import { AiProviderService } from "./ai-provider.service";
 import { EmbeddingService } from "./embedding.service";
 import { VectorSearchService, type RetrievedChunk } from "./vector-search.service";
 import { StudentMemoryService } from "./student-memory.service";
-import { UNAVAILABLE_ANSWER } from "./types";
+import { extractTextFromBuffer } from "./text-extract";
+import {
+  languageInstruction,
+  unavailableAnswer,
+  type ChatAttachmentInput,
+  type ChatContentPart,
+  type ChatMessage,
+} from "./types";
 
 const TOP_K = 10;
 const MIN_SIMILARITY = 0.58;
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+const MAX_ATTACHMENTS = 4;
 
 export class AiChatService {
   static async listConversations(userId: string) {
@@ -35,68 +44,117 @@ export class AiChatService {
     stageId?: string | null;
     subjectId?: string | null;
     courseId?: string | null;
+    /** App UI language: en | ar | ku | tr */
     language?: string | null;
     lesson?: string | null;
+    attachments?: ChatAttachmentInput[];
   }) {
-    const question = input.question.trim();
+    const attachments = (input.attachments || []).slice(0, MAX_ATTACHMENTS);
+    for (const a of attachments) {
+      const approx = Math.ceil((a.dataBase64.length * 3) / 4);
+      if (approx > MAX_ATTACHMENT_BYTES) {
+        throw new Error(`Attachment too large: ${a.fileName} (max 4MB)`);
+      }
+    }
+
+    const question =
+      input.question.trim() ||
+      (attachments.length
+        ? "Please explain the attached file(s) and help me understand them in the context of my studies."
+        : "");
     if (!question) throw new Error("Question is required");
 
     const memory = await StudentMemoryService.getOrCreate(input.userId);
     const profile = await prisma.user.findUnique({
       where: { id: input.userId },
       select: {
+        fullLegalName: true,
         locale: true,
-        studentProfile: { select: { educationalStageId: true } },
+        studentProfile: {
+          select: {
+            educationalStageId: true,
+            grade: true,
+            educationalStage: {
+              select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true },
+            },
+          },
+        },
       },
     });
 
-    const stageId = input.stageId ?? profile?.studentProfile?.educationalStageId ?? null;
-    const language = input.language ?? profile?.locale?.toLowerCase() ?? null;
+    const language = normalizeLang(input.language || profile?.locale);
+    const stageId =
+      input.stageId ?? profile?.studentProfile?.educationalStageId ?? null;
+    const studentName = profile?.fullLegalName?.trim() || null;
+    const stage = profile?.studentProfile?.educationalStage;
+    const stageName = stage
+      ? stageNameForLang(stage, language)
+      : null;
+    const grade = profile?.studentProfile?.grade || null;
+
+    const unavailable = unavailableAnswer(language);
+    const hasAttachments = attachments.length > 0;
+    const processed = await processAttachments(attachments);
+
+    // Skip response cache when attachments are present (unique visual/doc context).
     const norm = EmbeddingService.normalizeQuestion(question);
-    const cacheKey = EmbeddingService.hashQuestion(norm, stageId, input.subjectId);
+    const cacheKey = EmbeddingService.hashQuestion(
+      `${norm}|${language}`,
+      stageId,
+      input.subjectId
+    );
 
-    const cached = await prisma.aiResponseCache.findUnique({ where: { cacheKey } });
-    if (cached && (!cached.expiresAt || cached.expiresAt > new Date())) {
-      await prisma.aiResponseCache.update({
-        where: { id: cached.id },
-        data: { hitCount: { increment: 1 } },
-      });
-      return this.persistTurn({
-        userId: input.userId,
-        conversationId: input.conversationId,
-        question,
-        answer: cached.answer,
-        citations: cached.citations,
-        fromCache: true,
-      });
-    }
-
-    // Near-duplicate cache via embedding distance
-    const qEmbed = await EmbeddingService.embedText(question, input.userId);
-    const nearCaches = await prisma.aiResponseCache.findMany({
-      where: {
-        stageId: stageId ?? undefined,
-        subjectId: input.subjectId ?? undefined,
-        expiresAt: { gt: new Date() },
-      },
-      take: 40,
-      orderBy: { createdAt: "desc" },
-    });
-    for (const c of nearCaches) {
-      if (!c.embedding?.length) continue;
-      if (EmbeddingService.cosineSimilarity(qEmbed, c.embedding) >= 0.96) {
+    if (!hasAttachments) {
+      const cached = await prisma.aiResponseCache.findUnique({ where: { cacheKey } });
+      if (cached && (!cached.expiresAt || cached.expiresAt > new Date())) {
         await prisma.aiResponseCache.update({
-          where: { id: c.id },
+          where: { id: cached.id },
           data: { hitCount: { increment: 1 } },
         });
         return this.persistTurn({
           userId: input.userId,
           conversationId: input.conversationId,
           question,
-          answer: c.answer,
-          citations: c.citations,
+          answer: cached.answer,
+          citations: cached.citations,
           fromCache: true,
+          attachmentNames: [],
         });
+      }
+    }
+
+    const qEmbed = await EmbeddingService.embedText(
+      [question, processed.textExcerpt].filter(Boolean).join("\n").slice(0, 8000),
+      input.userId
+    );
+
+    if (!hasAttachments) {
+      const nearCaches = await prisma.aiResponseCache.findMany({
+        where: {
+          stageId: stageId ?? undefined,
+          subjectId: input.subjectId ?? undefined,
+          expiresAt: { gt: new Date() },
+        },
+        take: 40,
+        orderBy: { createdAt: "desc" },
+      });
+      for (const c of nearCaches) {
+        if (!c.embedding?.length) continue;
+        if (EmbeddingService.cosineSimilarity(qEmbed, c.embedding) >= 0.96) {
+          await prisma.aiResponseCache.update({
+            where: { id: c.id },
+            data: { hitCount: { increment: 1 } },
+          });
+          return this.persistTurn({
+            userId: input.userId,
+            conversationId: input.conversationId,
+            question,
+            answer: c.answer,
+            citations: c.citations,
+            fromCache: true,
+            attachmentNames: [],
+          });
+        }
       }
     }
 
@@ -111,31 +169,47 @@ export class AiChatService {
     });
 
     const best = hits[0]?.similarity ?? 0;
-    if (!hits.length || best < MIN_SIMILARITY) {
+    if (!hits.length && !hasAttachments) {
       return this.persistTurn({
         userId: input.userId,
         conversationId: input.conversationId,
         question,
-        answer: UNAVAILABLE_ANSWER,
+        answer: unavailable,
         citations: [],
         fromCache: false,
+        attachmentNames: [],
       });
     }
 
-    const context = compressContext(hits);
+    const context = hits.length ? compressContext(hits) : "";
     const memoryBlurb = StudentMemoryService.toPromptBlurb(memory);
+    const studentBlurb = [
+      studentName ? `Student name: ${studentName}` : null,
+      stageName ? `Educational stage: ${stageName}` : null,
+      grade ? `Grade: ${grade}` : null,
+    ]
+      .filter(Boolean)
+      .join("; ");
+
     const system = [
       "You are U Learn Teaching Assistant.",
-      "Answer ONLY using the retrieved educational material below.",
-      "If the material does not contain the answer, reply exactly:",
-      UNAVAILABLE_ANSWER,
-      "Do not invent facts, formulas, or curriculum outside the context.",
+      languageInstruction(language),
+      studentBlurb ? `Know this student: ${studentBlurb}. Address them by name when natural.` : "",
+      memoryBlurb ? `Learning memory: ${memoryBlurb}` : "",
+      hasAttachments
+        ? "The student attached files/photos. Use them to understand the question (homework photo, worksheet, PDF notes)."
+        : "",
+      context
+        ? "For curriculum facts, answer ONLY using the retrieved educational material below (plus the attachments when relevant)."
+        : "No matching curriculum chunks were retrieved. If attachments are present, help with those; otherwise say the unavailable line.",
+      "If you cannot answer from retrieved material or attachments, reply exactly with this unavailable message (same language):",
+      unavailable,
+      "Do not invent curriculum facts outside retrieved material + attachments.",
       "Keep answers clear and educational. Cite document names/pages when helpful.",
-      memoryBlurb ? `Student learning context: ${memoryBlurb}` : "",
-      language ? `Prefer responding in locale/language: ${language}` : "",
-      "",
-      "Retrieved material:",
-      context,
+      context ? `\nRetrieved material:\n${context}` : "",
+      processed.textExcerpt
+        ? `\nExtracted text from attached documents:\n${processed.textExcerpt}`
+        : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -148,23 +222,29 @@ export class AiChatService {
         })
       : [];
 
-    const messages = [
-      { role: "system" as const, content: system },
-      ...history
-        .reverse()
-        .map((m) => ({
-          role: (m.role === "ASSISTANT" ? "assistant" : "user") as "assistant" | "user",
-          content: m.content,
-        })),
-      { role: "user" as const, content: question },
+    const userParts: ChatContentPart[] = [...processed.imageParts];
+    const messages: ChatMessage[] = [
+      { role: "system", content: system },
+      ...history.reverse().map((m) => ({
+        role: (m.role === "ASSISTANT" ? "assistant" : "user") as "assistant" | "user",
+        content: m.content,
+      })),
+      {
+        role: "user",
+        content: question,
+        parts: userParts.length ? userParts : undefined,
+      },
     ];
 
     const result = await AiProviderService.chat("TEACHING_ASSISTANT", messages, input.userId);
-    let answer = result.text.trim() || UNAVAILABLE_ANSWER;
+    let answer = result.text.trim() || unavailable;
 
-    // Soft guard: if model drifts and hits were borderline, force unavailable.
-    if (/i (don't|do not) have|not in (the )?(context|material)/i.test(answer) && best < 0.65) {
-      answer = UNAVAILABLE_ANSWER;
+    if (
+      !hasAttachments &&
+      /i (don't|do not) have|not in (the )?(context|material)/i.test(answer) &&
+      best < 0.65
+    ) {
+      answer = unavailable;
     }
 
     const citations = hits.slice(0, 6).map((h) => ({
@@ -173,36 +253,39 @@ export class AiChatService {
       similarity: Math.round(h.similarity * 1000) / 1000,
     }));
 
-    await prisma.aiResponseCache.upsert({
-      where: { cacheKey },
-      create: {
-        cacheKey,
-        questionNorm: norm,
-        stageId,
-        subjectId: input.subjectId ?? null,
-        answer,
-        citations,
-        embedding: qEmbed,
-        expiresAt: new Date(Date.now() + CACHE_TTL_MS),
-      },
-      update: {
-        answer,
-        citations,
-        embedding: qEmbed,
-        expiresAt: new Date(Date.now() + CACHE_TTL_MS),
-        hitCount: { increment: 1 },
-      },
-    });
+    if (!hasAttachments) {
+      await prisma.aiResponseCache.upsert({
+        where: { cacheKey },
+        create: {
+          cacheKey,
+          questionNorm: norm,
+          stageId,
+          subjectId: input.subjectId ?? null,
+          answer,
+          citations,
+          embedding: qEmbed,
+          expiresAt: new Date(Date.now() + CACHE_TTL_MS),
+        },
+        update: {
+          answer,
+          citations,
+          embedding: qEmbed,
+          expiresAt: new Date(Date.now() + CACHE_TTL_MS),
+          hitCount: { increment: 1 },
+        },
+      });
+    }
 
     void StudentMemoryService.recordQuestion(input.userId, question, input.subjectId);
 
     return this.persistTurn({
       userId: input.userId,
       conversationId: input.conversationId,
-      question,
+      question: attachmentAwareQuestionLabel(question, attachments),
       answer,
       citations,
       fromCache: false,
+      attachmentNames: attachments.map((a) => a.fileName),
     });
   }
 
@@ -213,6 +296,7 @@ export class AiChatService {
     answer: string;
     citations: unknown;
     fromCache: boolean;
+    attachmentNames: string[];
   }) {
     let conversationId = input.conversationId;
     if (!conversationId) {
@@ -236,6 +320,10 @@ export class AiChatService {
         userId: input.userId,
         role: "USER",
         content: input.question,
+        citations:
+          input.attachmentNames.length
+            ? ({ attachments: input.attachmentNames } as never)
+            : undefined,
       },
     });
 
@@ -257,6 +345,74 @@ export class AiChatService {
       fromCache: input.fromCache,
     };
   }
+}
+
+function normalizeLang(raw?: string | null): string {
+  const v = (raw || "en").toLowerCase();
+  if (v.startsWith("ar")) return "ar";
+  if (v.startsWith("ku") || v.startsWith("ckb")) return "ku";
+  if (v.startsWith("tr")) return "tr";
+  if (v.startsWith("en")) return "en";
+  return v.slice(0, 2) || "en";
+}
+
+function stageNameForLang(
+  stage: { nameEn: string; nameAr: string; nameKu: string; nameTr: string },
+  lang: string
+) {
+  const name =
+    lang === "ar"
+      ? stage.nameAr
+      : lang === "ku"
+        ? stage.nameKu
+        : lang === "tr"
+          ? stage.nameTr
+          : stage.nameEn;
+  return name || stage.nameEn;
+}
+
+function attachmentAwareQuestionLabel(question: string, attachments: ChatAttachmentInput[]) {
+  if (!attachments.length) return question;
+  const names = attachments.map((a) => a.fileName).join(", ");
+  return `${question}\n[attachments: ${names}]`;
+}
+
+async function processAttachments(attachments: ChatAttachmentInput[]): Promise<{
+  imageParts: ChatContentPart[];
+  textExcerpt: string;
+}> {
+  const imageParts: ChatContentPart[] = [];
+  const texts: string[] = [];
+
+  for (const a of attachments) {
+    const mime = (a.mimeType || "").toLowerCase();
+    const name = a.fileName || "file";
+    const raw = a.dataBase64.replace(/^data:[^;]+;base64,/, "");
+    const buffer = Buffer.from(raw, "base64");
+
+    if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(name)) {
+      imageParts.push({
+        type: "image",
+        mimeType: mime.startsWith("image/") ? mime : "image/jpeg",
+        dataBase64: raw,
+      });
+      continue;
+    }
+
+    try {
+      const extracted = await extractTextFromBuffer(buffer, mime, name);
+      if (extracted.text?.trim()) {
+        texts.push(`[${name}]\n${extracted.text.trim().slice(0, 12000)}`);
+      }
+    } catch {
+      texts.push(`[${name}] (could not extract text — unsupported or binary)`);
+    }
+  }
+
+  return {
+    imageParts,
+    textExcerpt: texts.join("\n\n---\n\n").slice(0, 20000),
+  };
 }
 
 function compressContext(hits: RetrievedChunk[]): string {
