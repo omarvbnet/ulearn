@@ -653,7 +653,7 @@ export class TeacherCourseService {
       where: { courseId, lessonId, deletedAt: null, type: "PDF" },
     });
     if (existing) {
-      return prisma.courseMaterial.update({
+      const updated = await prisma.courseMaterial.update({
         where: { id: existing.id },
         data: {
           title: pdf.title,
@@ -663,8 +663,11 @@ export class TeacherCourseService {
           fileSize: pdf.fileSize ?? null,
         },
       });
+      const { enqueueCourseMaterialIngest } = await import("@/services/ai/ingest-hooks");
+      enqueueCourseMaterialIngest(updated);
+      return updated;
     }
-    return prisma.courseMaterial.create({
+    const created = await prisma.courseMaterial.create({
       data: {
         courseId,
         lessonId,
@@ -676,6 +679,9 @@ export class TeacherCourseService {
         fileSize: pdf.fileSize ?? null,
       },
     });
+    const { enqueueCourseMaterialIngest } = await import("@/services/ai/ingest-hooks");
+    enqueueCourseMaterialIngest(created);
+    return created;
   }
 
   static async countValidCourseQuizzes(courseId: string) {

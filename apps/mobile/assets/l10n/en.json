@@ -849,6 +849,14 @@
     "pending": {
       "badge": "Pending Approval"
     },
+    "ai": {
+      "entryLabel": "AI with U Learn",
+      "title": "AI with U Learn",
+      "placeholder": "Ask about your lessons…",
+      "emptyHint": "Ask a question grounded in U Learn educational materials.",
+      "thinking": "Thinking…",
+      "unavailable": "The requested information is not available in the educational material uploaded to U Learn."
+    },
     "error": {
       "generic": "Something went wrong",
       "retry": "Retry"

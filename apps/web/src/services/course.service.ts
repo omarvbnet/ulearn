@@ -205,6 +205,9 @@ export class CourseService {
       newValue: { lessonId, type: content.type },
     });
 
+    const { enqueueLessonContentIngest } = await import("@/services/ai/ingest-hooks");
+    enqueueLessonContentIngest(item);
+
     return item;
   }
 

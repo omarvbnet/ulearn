@@ -838,6 +838,14 @@
     "pending": {
       "badge": "Onay Bekleniyor"
     },
+    "ai": {
+      "entryLabel": "U Learn ile YZ",
+      "title": "U Learn ile YZ",
+      "placeholder": "Derslerin hakkında sor…",
+      "emptyHint": "U Learn eğitim materyallerine dayanan bir soru sorun.",
+      "thinking": "Düşünüyor…",
+      "unavailable": "The requested information is not available in the educational material uploaded to U Learn."
+    },
     "error": {
       "generic": "Bir şeyler ters gitti",
       "retry": "Tekrar dene"

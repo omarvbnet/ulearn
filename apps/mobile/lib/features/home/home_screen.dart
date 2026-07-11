@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/widgets/apple_tab_bar.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
+import 'package:ulearn/features/ai/ai_with_ulearn_entry.dart';
 import 'package:ulearn/features/courses/my_courses_screen.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/notifications/notifications_screen.dart';
@@ -100,14 +101,25 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
-      body: IndexedStack(
-        index: _index,
+      body: Stack(
         children: [
-          const _TabSafeArea(child: HomeFeed()),
-          const _TabSafeArea(child: MyCoursesScreen()),
-          const _TabSafeArea(child: StoreScreen()),
-          ReelsScreen(isTabActive: _index == _reelsTabIndex, refreshTrigger: _reelsRefresh),
-          const _TabSafeArea(child: ProfileScreen()),
+          IndexedStack(
+            index: _index,
+            children: [
+              const _TabSafeArea(child: HomeFeed()),
+              const _TabSafeArea(child: MyCoursesScreen()),
+              const _TabSafeArea(child: StoreScreen()),
+              ReelsScreen(isTabActive: _index == _reelsTabIndex, refreshTrigger: _reelsRefresh),
+              const _TabSafeArea(child: ProfileScreen()),
+            ],
+          ),
+          if (_index == 0)
+            const Positioned(
+              left: 0,
+              top: 0,
+              bottom: 78,
+              child: AiWithULearnEntry(),
+            ),
         ],
       ),
       bottomNavigationBar: AppleTabBar(

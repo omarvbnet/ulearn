@@ -225,6 +225,10 @@ model User {
   adLikes              AdLike[]
   stageChangeRequests  StageChangeRequest[]  @relation("StageRequests")
   videoAssets          VideoAsset[]
+  aiConversations      AiConversation[]
+  aiUsageLogs          AiUsageLog[]
+  studentAiMemory      StudentAiMemory?
+  aiMessages           AiMessage[]
 
   @@index([role, status])
   @@index([countryId])
@@ -1520,4 +1524,244 @@ model DailyActivity {
 
   @@unique([userId, date])
   @@index([date])
+}
+
+// ─────────────────────────────────────────────
+// AI Knowledge Base & Provider Management (RAG)
+// ─────────────────────────────────────────────
+
+enum AiProviderType {
+  GEMINI
+  OPENAI
+  ANTHROPIC
+  OPENAI_COMPATIBLE
+}
+
+enum AiProviderStatus {
+  ENABLED
+  DISABLED
+}
+
+enum AiModuleKey {
+  TEACHING_ASSISTANT
+  EXAM_GENERATOR
+  OCR_ANALYSIS
+  EMBEDDING
+  RECOMMENDATION
+}
+
+enum KbSourceType {
+  COURSE_MATERIAL
+  LESSON_CONTENT
+  KB_UPLOAD
+}
+
+enum KbDocumentStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+  ARCHIVED
+}
+
+enum AiMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model AiProvider {
+  id               String           @id @default(cuid())
+  name             String
+  type             AiProviderType
+  /// AES-GCM encrypted API key (base64 payload).
+  apiKeyEncrypted  String?
+  baseUrl          String?
+  model            String
+  apiVersion       String?
+  timeoutMs        Int              @default(60000)
+  maxTokens        Int              @default(2048)
+  temperature      Float            @default(0.3)
+  topP             Float?
+  frequencyPenalty Float?
+  presencePenalty  Float?
+  streaming        Boolean          @default(true)
+  retryCount       Int              @default(2)
+  status           AiProviderStatus @default(ENABLED)
+  isDefault        Boolean          @default(false)
+  sortOrder        Int              @default(0)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  moduleAssignments AiModuleAssignment[]
+  usageLogs         AiUsageLog[]
+
+  @@index([status, isDefault])
+  @@index([type])
+}
+
+model AiModuleAssignment {
+  id         String      @id @default(cuid())
+  moduleKey  AiModuleKey @unique
+  providerId String
+  updatedAt  DateTime    @updatedAt
+
+  provider AiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+}
+
+model AiUsageLog {
+  id           String   @id @default(cuid())
+  providerId   String?
+  userId       String?
+  moduleKey    String?
+  success      Boolean
+  errorMessage String?
+  tokensIn     Int      @default(0)
+  tokensOut    Int      @default(0)
+  latencyMs    Int      @default(0)
+  costEstimate Float    @default(0)
+  createdAt    DateTime @default(now())
+
+  provider AiProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  user     User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([providerId, createdAt])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+model KbDocument {
+  id              String           @id @default(cuid())
+  sourceType      KbSourceType
+  /// CourseMaterial / LessonContent / standalone id
+  sourceId        String?
+  fileName        String
+  fileKey         String?
+  fileUrl         String?
+  mimeType        String?
+  language        String?
+  educationalStageId String?
+  grade           String?
+  subjectId       String?
+  semester        String?
+  chapter         String?
+  lesson          String?
+  topic           String?
+  courseId        String?
+  instructorId    String?
+  version         Int              @default(1)
+  status          KbDocumentStatus @default(PENDING)
+  errorMessage    String?
+  pageCount       Int?
+  chunkCount      Int              @default(0)
+  uploadedAt      DateTime         @default(now())
+  processedAt     DateTime?
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
+
+  chunks   KbChunk[]
+  versions KbDocumentVersion[]
+
+  @@index([sourceType, sourceId])
+  @@index([status])
+  @@index([educationalStageId, subjectId])
+  @@index([courseId])
+  @@index([language])
+}
+
+model KbDocumentVersion {
+  id         String   @id @default(cuid())
+  documentId String
+  version    Int
+  snapshot   Json
+  archivedAt DateTime @default(now())
+
+  document KbDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, version])
+}
+
+/// Chunk text + metadata. Embedding stored in pgvector column via raw SQL
+/// (see migration). Prisma keeps a float array mirror for portability.
+model KbChunk {
+  id         String   @id @default(cuid())
+  documentId String
+  chunkIndex Int
+  pageNumber Int?
+  text       String
+  language   String?
+  /// JSON metadata copy for filters (stage, subject, lesson, …)
+  metadata   Json
+  version    Int      @default(1)
+  /// Portable embedding copy (Gemini text-embedding-004 = 768 dims)
+  embedding  Float[]  @default([])
+  contentHash String?
+  createdAt  DateTime @default(now())
+
+  document KbDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, chunkIndex])
+  @@index([version])
+  @@index([contentHash])
+}
+
+model AiConversation {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String?
+  summary   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages AiMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+model AiMessage {
+  id             String        @id @default(cuid())
+  conversationId String
+  userId         String?
+  role           AiMessageRole
+  content        String
+  citations      Json?
+  createdAt      DateTime      @default(now())
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+}
+
+model StudentAiMemory {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  weakSubjects       String[] @default([])
+  strongSubjects     String[] @default([])
+  frequentQuestions  Json?
+  completedLessons   String[] @default([])
+  examResults        Json?
+  preferredStyle     String?
+  learningSpeed      String?
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AiResponseCache {
+  id              String   @id @default(cuid())
+  cacheKey        String   @unique
+  questionNorm    String
+  stageId         String?
+  subjectId       String?
+  answer          String
+  citations       Json?
+  embedding       Float[]  @default([])
+  hitCount        Int      @default(0)
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime?
+
+  @@index([stageId, subjectId])
+  @@index([expiresAt])
 }

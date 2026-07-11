@@ -838,6 +838,14 @@
     "pending": {
       "badge": "چاوەڕێی پەسەندکردن"
     },
+    "ai": {
+      "entryLabel": "AI لەگەڵ U Learn",
+      "title": "AI لەگەڵ U Learn",
+      "placeholder": "پرسیار لەسەر وانەکانت بکە…",
+      "emptyHint": "پرسیارێک بکە کە پشت بە ماددە فێرکارییەکانی U Learn ببەستێت.",
+      "thinking": "بیرکردنەوە…",
+      "unavailable": "The requested information is not available in the educational material uploaded to U Learn."
+    },
     "error": {
       "generic": "هەڵەیەک ڕوویدا",
       "retry": "دووبارە هەوڵ بدەرەوە"

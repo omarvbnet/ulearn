@@ -29,7 +29,10 @@
     "contentReports": "Content Reports",
     "stageRequests": "Stage Requests",
     "ads": "Advertisements",
-    "products": "Store Products"
+    "products": "Store Products",
+    "aiProviders": "AI Providers",
+    "aiKnowledge": "Knowledge Base",
+    "aiUsage": "AI Usage"
   },
   "auth": {
     "phone": "Mobile Number",

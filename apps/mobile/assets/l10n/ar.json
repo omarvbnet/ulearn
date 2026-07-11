@@ -838,6 +838,14 @@
     "pending": {
       "badge": "بانتظار الموافقة"
     },
+    "ai": {
+      "entryLabel": "AI مع U Learn",
+      "title": "AI مع U Learn",
+      "placeholder": "اسأل عن دروسك…",
+      "emptyHint": "اطرح سؤالاً مستنداً إلى المواد التعليمية في U Learn.",
+      "thinking": "جاري التفكير…",
+      "unavailable": "The requested information is not available in the educational material uploaded to U Learn."
+    },
     "error": {
       "generic": "حدث خطأ",
       "retry": "إعادة المحاولة"

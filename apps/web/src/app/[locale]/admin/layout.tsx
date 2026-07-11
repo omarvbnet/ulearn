@@ -33,6 +33,9 @@ export default async function AdminLayout({
         { href: `${base}/complaints`, label: t.nav.complaints, countKey: "complaints" },
         { href: `${base}/content-reports`, label: t.nav.contentReports, countKey: "contentReports" },
         { href: `${base}/analytics`, label: t.nav.analytics },
+        { href: `${base}/ai-providers`, label: t.nav.aiProviders },
+        { href: `${base}/ai-knowledge`, label: t.nav.aiKnowledge },
+        { href: `${base}/ai-usage`, label: t.nav.aiUsage },
         { href: `${base}/logs`, label: t.nav.logs },
         { href: `${base}/settings`, label: t.nav.settings },
       ]}

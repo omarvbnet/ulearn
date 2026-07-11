@@ -29,7 +29,10 @@
     "contentReports": "İçerik Bildirimleri",
     "stageRequests": "Aşama Talepleri",
     "ads": "Reklamlar",
-    "products": "Mağaza Ürünleri"
+    "products": "Mağaza Ürünleri",
+    "aiProviders": "YZ Sağlayıcıları",
+    "aiKnowledge": "Bilgi Tabanı",
+    "aiUsage": "YZ Kullanımı"
   },
   "auth": {
     "phone": "Telefon Numarası",

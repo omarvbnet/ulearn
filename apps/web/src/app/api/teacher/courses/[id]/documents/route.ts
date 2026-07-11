@@ -62,6 +62,9 @@ export async function POST(
     },
   });
 
+  const { enqueueCourseMaterialIngest } = await import("@/services/ai/ingest-hooks");
+  enqueueCourseMaterialIngest(document);
+
   return json({ document }, 201);
 }
 
