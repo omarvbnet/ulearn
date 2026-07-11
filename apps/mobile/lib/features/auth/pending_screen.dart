@@ -29,7 +29,7 @@ class PendingScreen extends StatelessWidget {
                 const SizedBox(height: 12),
                 Text(
                   l10n.authPendingMessage,
-                  style: const TextStyle(color: AppTheme.muted),
+                  style: TextStyle(color: AppTheme.muted),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),

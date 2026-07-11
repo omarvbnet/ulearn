@@ -948,6 +948,7 @@ export class TeacherCourseService {
             teacher.user.profilePhotoUrl,
             teacher.user.profilePhotoKey
           ).catch(() => null)) ?? teacher.user.profilePhotoUrl,
+        profilePhotoKey: teacher.user.profilePhotoKey,
         profileCoverPreset: teacher.user.profileCoverPreset,
         bio: teacher.bio,
         level: teacher.level,

@@ -162,7 +162,7 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
       maxChildSize: 0.92,
       builder: (context, dragCtrl) {
         return Container(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             color: AppTheme.card,
             borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
             border: Border(top: BorderSide(color: AppTheme.cardBorder)),
@@ -194,7 +194,7 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
                             widget.videoTitle,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                            style: TextStyle(color: AppTheme.muted, fontSize: 12),
                           ),
                         ],
                       ),
@@ -213,7 +213,7 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
                   ],
                 ),
               ),
-              const Divider(height: 1, color: AppTheme.cardBorder),
+              Divider(height: 1, color: AppTheme.cardBorder),
               Expanded(
                 child: _loading
                     ? const Padding(
@@ -232,7 +232,7 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
                                     size: 40, color: AppTheme.muted.withValues(alpha: 0.45)),
                                 const SizedBox(height: 10),
                                 Text(l10n.reelsFirstComment,
-                                    style: const TextStyle(color: AppTheme.muted)),
+                                    style: TextStyle(color: AppTheme.muted)),
                               ],
                             ),
                           )
@@ -264,19 +264,19 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
                                 (_replyTo!['user'] as Map?)?['fullLegalName']?.toString() ??
                                     l10n.t('mobile.roles.student'),
                           }),
-                          style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                          style: TextStyle(color: AppTheme.muted, fontSize: 12),
                         ),
                       ),
                       GestureDetector(
                         onTap: _cancelReply,
-                        child: const Icon(Icons.close, size: 18, color: AppTheme.muted),
+                        child: Icon(Icons.close, size: 18, color: AppTheme.muted),
                       ),
                     ],
                   ),
                 ),
               Container(
                 padding: EdgeInsets.fromLTRB(14, 10, 14, 12 + bottom),
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   color: AppTheme.background,
                   border: Border(top: BorderSide(color: AppTheme.cardBorder)),
                 ),

@@ -9,6 +9,7 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/l10n/locale_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/theme/theme_mode_provider.dart';
 import 'package:ulearn/core/video/media_cache_budget.dart';
 import 'package:ulearn/features/auth/login_screen.dart';
 import 'package:ulearn/features/home/home_screen.dart';
@@ -44,6 +45,7 @@ class ULearnApp extends StatelessWidget {
       providers: [
         Provider(create: (_) => ApiClient()),
         ChangeNotifierProvider(create: (_) => LocaleProvider()..init()),
+        ChangeNotifierProvider(create: (_) => ThemeModeProvider()..init()),
         ChangeNotifierProxyProvider<LocaleProvider, AuthProvider>(
           create: (ctx) => AuthProvider(ctx.read<ApiClient>()),
           update: (_, locale, auth) => auth!..attachLocale(locale),
@@ -86,11 +88,14 @@ class _LocalizedAppState extends State<_LocalizedApp> {
   @override
   Widget build(BuildContext context) {
     final locale = context.watch<LocaleProvider>();
+    final themeMode = context.watch<ThemeModeProvider>();
 
-    if (!locale.ready) {
+    if (!locale.ready || !themeMode.ready) {
       return MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.dark,
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: themeMode.ready ? themeMode.mode : ThemeMode.system,
         home: const SplashScreen(),
       );
     }
@@ -98,7 +103,9 @@ class _LocalizedAppState extends State<_LocalizedApp> {
     return MaterialApp(
       title: locale.l10n.brand,
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark,
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: themeMode.mode,
       locale: locale.flutterLocale,
       supportedLocales: const [
         Locale('ar'),

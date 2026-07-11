@@ -131,34 +131,32 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen>
                     onRefresh: _load,
                     child: NestedScrollView(
                       headerSliverBuilder: (context, innerScrolled) => [
-                        SliverOverlapAbsorber(
-                          handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
-                          sliver: SliverAppBar(
-                            expandedHeight: 188,
-                            pinned: true,
-                            stretch: true,
-                            elevation: 0,
-                            scrolledUnderElevation: 0,
-                            backgroundColor: AppTheme.background,
-                            foregroundColor: AppTheme.foreground,
-                            title: AnimatedOpacity(
-                              duration: const Duration(milliseconds: 180),
-                              opacity: innerScrolled ? 1 : 0,
-                              child: Text(
-                                name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 17,
-                                ),
+                        SliverAppBar(
+                          expandedHeight: 228,
+                          pinned: true,
+                          stretch: true,
+                          elevation: 0,
+                          scrolledUnderElevation: 0,
+                          backgroundColor: AppTheme.background,
+                          foregroundColor: AppTheme.foreground,
+                          title: AnimatedOpacity(
+                            duration: const Duration(milliseconds: 180),
+                            opacity: innerScrolled ? 1 : 0,
+                            child: Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 17,
                               ),
                             ),
-                            flexibleSpace: FlexibleSpaceBar(
-                              collapseMode: CollapseMode.parallax,
-                              background: _CoverHero(
-                                preset: (_teacher!['profileCoverPreset'] as num?)?.toInt(),
-                              ),
+                          ),
+                          flexibleSpace: FlexibleSpaceBar(
+                            collapseMode: CollapseMode.pin,
+                            background: _CoverHero(
+                              teacher: _teacher!,
+                              levelLabel: _levelLabel,
                             ),
                           ),
                         ),
@@ -167,7 +165,8 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen>
                             teacher: _teacher!,
                             locale: locale,
                             bioExpanded: _bioExpanded,
-                            onToggleBio: () => setState(() => _bioExpanded = !_bioExpanded),
+                            onToggleBio: () =>
+                                setState(() => _bioExpanded = !_bioExpanded),
                             levelLabel: _levelLabel,
                           ),
                         ),
@@ -212,17 +211,27 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen>
 // ─── Cover ───────────────────────────────────────────────────────────────────
 
 class _CoverHero extends StatelessWidget {
-  const _CoverHero({required this.preset});
+  const _CoverHero({
+    required this.teacher,
+    required this.levelLabel,
+  });
 
-  final int? preset;
+  final Map<String, dynamic> teacher;
+  final String Function(String level) levelLabel;
 
   @override
   Widget build(BuildContext context) {
+    final name =
+        teacher['name']?.toString() ?? context.l10n.t('student.teacher');
+    final level = teacher['level']?.toString() ?? '';
+    final photo = resolveProfilePhotoUrl(teacher);
+    final preset = (teacher['profileCoverPreset'] as num?)?.toInt();
+
     return Stack(
       fit: StackFit.expand,
+      clipBehavior: Clip.none,
       children: [
         TeacherCoverBanner(preset: preset),
-        // Soft vignette so the back button stays readable.
         const DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -235,12 +244,11 @@ class _CoverHero extends StatelessWidget {
             ),
           ),
         ),
-        // Blend into scaffold.
         Positioned(
           left: 0,
           right: 0,
           bottom: 0,
-          height: 72,
+          height: 120,
           child: DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -248,10 +256,56 @@ class _CoverHero extends StatelessWidget {
                 end: Alignment.bottomCenter,
                 colors: [
                   AppTheme.background.withValues(alpha: 0),
+                  AppTheme.background.withValues(alpha: 0.92),
                   AppTheme.background,
                 ],
               ),
             ),
+          ),
+        ),
+        Positioned(
+          left: 20,
+          right: 20,
+          bottom: 12,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              ProfileAvatar(
+                name: name,
+                photoUrl: photo,
+                size: 84,
+                cacheVersion:
+                    '${teacher['id']}_${teacher['profilePhotoKey'] ?? photo ?? ''}',
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.3,
+                          height: 1.15,
+                          color: AppTheme.foreground,
+                        ),
+                      ),
+                      if (level.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        _LevelBadge(label: levelLabel(level), level: level),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -278,9 +332,6 @@ class _IdentitySection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = context.l10n;
-    final name = teacher['name']?.toString() ?? l10n.t('student.teacher');
-    final level = teacher['level']?.toString() ?? '';
     final bio = (teacher['bio'] as String?)?.trim() ?? '';
     final rating = (teacher['rating'] as num?)?.toDouble();
     final ratingCount = (teacher['ratingCount'] as num?)?.toInt() ?? 0;
@@ -288,104 +339,52 @@ class _IdentitySection extends StatelessWidget {
         .cast<Map<String, dynamic>>();
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Overlap avatar onto the cover without clipping the photo.
-          SizedBox(
-            height: 56,
-            child: OverflowBox(
-              maxHeight: 92,
-              alignment: Alignment.topLeft,
-              child: Transform.translate(
-                offset: const Offset(0, -36),
-                child: ScaleIn(
-                  child: ProfileAvatar(
-                    name: name,
-                    photoUrl: teacher['profilePhotoUrl']?.toString(),
-                    size: 92,
-                    cacheVersion: teacher['id']?.toString(),
-                  ),
-                ),
-              ),
+          if (rating != null && rating > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _RatingPill(rating: rating, count: ratingCount),
             ),
-          ),
-          const SizedBox(height: 8),
-          StaggeredItem(
-            index: 0,
-            child: Text(
-              name,
-              style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.4,
-                height: 1.15,
-                color: AppTheme.foreground,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          StaggeredItem(
-            index: 1,
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                if (level.isNotEmpty) _LevelBadge(label: levelLabel(level), level: level),
-                if (rating != null && rating > 0)
-                  _RatingPill(rating: rating, count: ratingCount),
-              ],
-            ),
-          ),
           if (bio.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            StaggeredItem(
-              index: 2,
-              child: GestureDetector(
-                onTap: bio.length > 140 ? onToggleBio : null,
-                child: AnimatedSize(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  alignment: Alignment.topLeft,
-                  child: Text(
-                    bio,
-                    maxLines: bioExpanded ? 20 : 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: AppTheme.muted.withValues(alpha: 0.95),
-                      height: 1.55,
-                      fontSize: 14.5,
-                    ),
+            GestureDetector(
+              onTap: bio.length > 140 ? onToggleBio : null,
+              child: AnimatedSize(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topLeft,
+                child: Text(
+                  bio,
+                  maxLines: bioExpanded ? 20 : 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.muted.withValues(alpha: 0.95),
+                    height: 1.45,
+                    fontSize: 14,
                   ),
                 ),
               ),
             ),
+            const SizedBox(height: 10),
           ],
           if (subjects.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            StaggeredItem(
-              index: 3,
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: subjects
-                    .map(
-                      (s) => _SpecialtyChip(
-                        label: localizedText(s, locale, prefix: 'name'),
-                      ),
-                    )
-                    .toList(),
-              ),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: subjects
+                  .map(
+                    (s) => _SpecialtyChip(
+                      label: localizedText(s, locale, prefix: 'name'),
+                    ),
+                  )
+                  .toList(),
             ),
+            const SizedBox(height: 10),
           ],
-          const SizedBox(height: 18),
-          StaggeredItem(
-            index: 4,
-            child: _StatsStrip(teacher: teacher),
-          ),
-          const SizedBox(height: 4),
+          _StatsStrip(teacher: teacher),
+          const SizedBox(height: 8),
         ],
       ),
     );
@@ -464,7 +463,7 @@ class _RatingPill extends StatelessWidget {
           const SizedBox(width: 4),
           Text(
             rating.toStringAsFixed(1),
-            style: const TextStyle(
+            style: TextStyle(
               fontWeight: FontWeight.w800,
               fontSize: 12.5,
               color: AppTheme.foreground,
@@ -474,7 +473,7 @@ class _RatingPill extends StatelessWidget {
             const SizedBox(width: 4),
             Text(
               '($count)',
-              style: const TextStyle(color: AppTheme.muted, fontSize: 11.5),
+              style: TextStyle(color: AppTheme.muted, fontSize: 11.5),
             ),
           ],
         ],
@@ -504,7 +503,7 @@ class _SpecialtyChip extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 12.5,
           fontWeight: FontWeight.w600,
           color: AppTheme.foreground,
@@ -549,10 +548,10 @@ class _StatsStrip extends StatelessWidget {
     ];
 
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
       decoration: BoxDecoration(
         color: AppTheme.card,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppTheme.cardBorder),
       ),
       child: Row(
@@ -561,7 +560,7 @@ class _StatsStrip extends StatelessWidget {
             if (i > 0)
               Container(
                 width: 1,
-                height: 28,
+                height: 24,
                 color: AppTheme.cardBorder,
               ),
             Expanded(child: items[i]),
@@ -584,7 +583,7 @@ class _StatItem extends StatelessWidget {
       children: [
         Text(
           value,
-          style: const TextStyle(
+          style: TextStyle(
             fontWeight: FontWeight.w800,
             fontSize: 17,
             letterSpacing: -0.3,
@@ -597,7 +596,7 @@ class _StatItem extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.center,
-          style: const TextStyle(
+          style: TextStyle(
             color: AppTheme.muted,
             fontSize: 10.5,
             fontWeight: FontWeight.w500,
@@ -628,29 +627,29 @@ class _SegmentedTabDelegate extends SliverPersistentHeaderDelegate {
   final ValueChanged<int> onSelect;
 
   @override
-  double get minExtent => 64;
+  double get minExtent => 58;
 
   @override
-  double get maxExtent => 64;
+  double get maxExtent => 58;
 
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
     return Material(
       color: AppTheme.background,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
         child: Container(
-          padding: const EdgeInsets.all(4),
+          padding: const EdgeInsets.all(5),
           decoration: BoxDecoration(
             color: AppTheme.card,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppTheme.cardBorder),
           ),
           child: Row(
             children: [
               Expanded(
                 child: _SegTab(
-                  label: coursesLabel,
+                  icon: Icons.menu_book_rounded,
                   count: coursesCount,
                   selected: selectedIndex == 0,
                   onTap: () => onSelect(0),
@@ -658,7 +657,7 @@ class _SegmentedTabDelegate extends SliverPersistentHeaderDelegate {
               ),
               Expanded(
                 child: _SegTab(
-                  label: shortsLabel,
+                  icon: Icons.movie_filter_rounded,
                   count: shortsCount,
                   selected: selectedIndex == 1,
                   onTap: () => onSelect(1),
@@ -680,13 +679,13 @@ class _SegmentedTabDelegate extends SliverPersistentHeaderDelegate {
 
 class _SegTab extends StatelessWidget {
   const _SegTab({
-    required this.label,
+    required this.icon,
     required this.count,
     required this.selected,
     required this.onTap,
   });
 
-  final String label;
+  final IconData icon;
   final int count;
   final bool selected;
   final VoidCallback onTap;
@@ -715,21 +714,18 @@ class _SegTab extends StatelessWidget {
           borderRadius: BorderRadius.circular(11),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10),
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13.5,
-                    color: selected ? Colors.white : AppTheme.muted,
-                  ),
+                Icon(
+                  icon,
+                  size: 20,
+                  color: selected ? Colors.white : AppTheme.muted,
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
                     color: selected
                         ? Colors.white.withValues(alpha: 0.22)
@@ -739,7 +735,7 @@ class _SegTab extends StatelessWidget {
                   child: Text(
                     '$count',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 12,
                       fontWeight: FontWeight.w800,
                       color: selected ? Colors.white : AppTheme.muted,
                     ),
@@ -775,11 +771,8 @@ class _CoursesTab extends StatelessWidget {
     return CustomScrollView(
       key: const PageStorageKey<String>('teacher_profile_courses'),
       slivers: [
-        SliverOverlapInjector(
-          handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
-        ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
           sliver: courses.isEmpty
               ? SliverToBoxAdapter(
                   child: _EmptyPanel(
@@ -792,13 +785,13 @@ class _CoursesTab extends StatelessWidget {
                     (context, index) {
                       if (index == 0) {
                         return Padding(
-                          padding: const EdgeInsets.only(bottom: 14),
+                          padding: const EdgeInsets.only(bottom: 10),
                           child: Text(
                             l10n.storeSubscribeUnlock,
                             style: TextStyle(
                               color: AppTheme.muted.withValues(alpha: 0.9),
                               fontSize: 13,
-                              height: 1.4,
+                              height: 1.35,
                             ),
                           ),
                         );
@@ -1007,7 +1000,7 @@ class _CourseCard extends StatelessWidget {
                         course['description'].toString(),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppTheme.muted,
                           fontSize: 13,
                           height: 1.4,
@@ -1104,7 +1097,7 @@ class _MetaChip extends StatelessWidget {
           const SizedBox(width: 4),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppTheme.muted,
               fontSize: 11.5,
               fontWeight: FontWeight.w500,
@@ -1159,11 +1152,8 @@ class _ShortVideosTab extends StatelessWidget {
     return CustomScrollView(
       key: const PageStorageKey<String>('teacher_profile_shorts'),
       slivers: [
-        SliverOverlapInjector(
-          handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
-        ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
           sliver: videos.isEmpty
               ? SliverToBoxAdapter(
                   child: _EmptyPanel(
@@ -1350,7 +1340,7 @@ class _EmptyPanel extends StatelessWidget {
           Text(
             message,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: AppTheme.muted, height: 1.45),
+            style: TextStyle(color: AppTheme.muted, height: 1.45),
           ),
         ],
       ),
@@ -1380,12 +1370,12 @@ class _EmptyState extends StatelessWidget {
                 color: AppTheme.card,
                 border: Border.all(color: AppTheme.cardBorder),
               ),
-              child: const Icon(Icons.person_off_outlined, size: 32, color: AppTheme.muted),
+              child: Icon(Icons.person_off_outlined, size: 32, color: AppTheme.muted),
             ),
             const SizedBox(height: 16),
             Text(
               l10n.reelsTeacherNotFound,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppTheme.muted,
                 fontSize: 15,
                 fontWeight: FontWeight.w600,

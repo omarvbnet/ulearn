@@ -106,7 +106,7 @@ class _TeacherCreateCourseScreenState extends State<TeacherCreateCourseScreen> {
                     child: Text(
                       l10n.t('mobile.teacher.specialtiesRequired'),
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: AppTheme.muted, height: 1.5),
+                      style: TextStyle(color: AppTheme.muted, height: 1.5),
                     ),
                   ),
                 )
@@ -115,7 +115,7 @@ class _TeacherCreateCourseScreenState extends State<TeacherCreateCourseScreen> {
                   children: [
                     Text(
                       l10n.t('mobile.teacher.newCourseHint'),
-                      style: const TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.4),
+                      style: TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.4),
                     ),
                     const SizedBox(height: 18),
                     TextField(

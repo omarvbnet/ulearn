@@ -249,20 +249,20 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                               ].join(' · '),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                   color: AppTheme.muted, fontSize: 12),
                             ),
                             const SizedBox(height: 5),
                             Row(
                               children: [
                                 if (lesson['durationSec'] != null) ...[
-                                  const Icon(Icons.schedule,
+                                  Icon(Icons.schedule,
                                       size: 12, color: AppTheme.muted),
                                   const SizedBox(width: 3),
                                   Text(
                                     formatDuration(
                                         (lesson['durationSec'] as num).toInt()),
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                         color: AppTheme.muted, fontSize: 11.5),
                                   ),
                                   const SizedBox(width: 12),
@@ -346,7 +346,7 @@ class _EmptyFavorites extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: AppTheme.muted, height: 1.5),
+              style: TextStyle(color: AppTheme.muted, height: 1.5),
             ),
           ],
         ),

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:video_player/video_player.dart';
 
@@ -13,11 +14,12 @@ class VideoCoverHelper {
     final pick = await FilePicker.pickFiles(type: FileType.image);
     if (pick == null || pick.files.isEmpty) return null;
     final file = pick.files.first;
-    if (file.path != null) return File(file.path!);
+    if (file.path != null) {
+      // Copy out of picker/temp so later cache cleanup cannot delete it.
+      return _persistCover(File(file.path!));
+    }
     if (file.bytes != null) {
-      final temp = File(
-        '${Directory.systemTemp.path}/ulearn_cover_${DateTime.now().millisecondsSinceEpoch}.jpg',
-      );
+      final temp = await _coverDestPath('jpg');
       await temp.writeAsBytes(file.bytes!);
       return temp;
     }
@@ -25,7 +27,10 @@ class VideoCoverHelper {
   }
 
   /// Capture a frame ~1s into the video for use as cover art.
-  /// Times out so large iPhone MOV files cannot hang the upload UI forever.
+  ///
+  /// Copies the frame out of `video_compress` cache into a stable
+  /// `ulearn_cover_*.jpg` path — otherwise [VideoCompress.deleteAllCache]
+  /// (or mid-upload temp cleanup) deletes the cover before it is uploaded.
   static Future<File?> thumbnailFromVideo(String videoPath) async {
     try {
       final thumb = await VideoCompress.getFileThumbnail(
@@ -33,7 +38,7 @@ class VideoCoverHelper {
         quality: 70,
         position: 1000,
       ).timeout(const Duration(seconds: 12));
-      return thumb;
+      return _persistCover(thumb);
     } catch (_) {
       return null;
     }
@@ -72,6 +77,44 @@ class VideoCoverHelper {
       return null;
     } finally {
       await controller?.dispose();
+    }
+  }
+
+  /// Ensure [cover] is not inside the volatile `video_compress` cache.
+  /// Safe to call right before uploading an existing cover file.
+  static Future<File> ensurePersistedCover(File cover) async {
+    final path = cover.path;
+    if (path.contains('ulearn_cover_')) return cover;
+    if (path.contains('video_compress') || path.contains('VideoCompress')) {
+      return _persistCover(cover);
+    }
+    return cover;
+  }
+
+  static Future<File> _coverDestPath(String ext) async {
+    final dir = await getTemporaryDirectory();
+    return File(
+      '${dir.path}/ulearn_cover_${DateTime.now().microsecondsSinceEpoch}.$ext',
+    );
+  }
+
+  static Future<File> _persistCover(File source) async {
+    final lower = source.path.toLowerCase();
+    final ext = lower.endsWith('.png')
+        ? 'png'
+        : lower.endsWith('.webp')
+            ? 'webp'
+            : 'jpg';
+    final dest = await _coverDestPath(ext);
+    // Already our stable path — reuse.
+    if (source.path.contains('ulearn_cover_')) return source;
+    try {
+      return await source.copy(dest.path);
+    } catch (_) {
+      // Fallback: read bytes if copy fails across volumes.
+      final bytes = await source.readAsBytes();
+      await dest.writeAsBytes(bytes, flush: true);
+      return dest;
     }
   }
 }

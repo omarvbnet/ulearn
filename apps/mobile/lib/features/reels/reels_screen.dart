@@ -445,7 +445,7 @@ class ReelsScreenState extends State<ReelsScreen> {
                   const SizedBox(height: 16),
                   Text(
                     l10n.reelsNoReels,
-                    style: const TextStyle(color: AppTheme.foreground, fontSize: 18, fontWeight: FontWeight.w600),
+                    style: TextStyle(color: AppTheme.foreground, fontSize: 18, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -504,6 +504,12 @@ class ReelsScreenState extends State<ReelsScreen> {
                 bottomInset: _bottomInset,
                 onLike: () => _toggleLike(index),
                 onComment: () => _openComments(index),
+                onSave: () {
+                  final i = _videos.indexWhere(
+                    (v) => v['id']?.toString() == video['id']?.toString(),
+                  );
+                  if (i >= 0) _toggleSave(i);
+                },
                 onTeacherTap: () => _openTeacherProfile(video),
                 onMore: () => _openMoreMenu(video),
               );

@@ -187,6 +187,15 @@ class AppLocalizations {
   String get profileLogoutConfirm => t('mobile.profile.logoutConfirm');
   String get profileLanguageTitle => t('mobile.profile.languageTitle');
   String get profileLanguageSaved => t('mobile.profile.languageSaved');
+  String get profileAppearance => t('mobile.profile.appearance');
+  String get profileAppearanceTitle => t('mobile.profile.appearanceTitle');
+  String get profileAppearanceHint => t('mobile.profile.appearanceHint');
+  String get profileThemeSystem => t('mobile.profile.themeSystem');
+  String get profileThemeSystemHint => t('mobile.profile.themeSystemHint');
+  String get profileThemeLight => t('mobile.profile.themeLight');
+  String get profileThemeLightHint => t('mobile.profile.themeLightHint');
+  String get profileThemeDark => t('mobile.profile.themeDark');
+  String get profileThemeDarkHint => t('mobile.profile.themeDarkHint');
   String get profileStorageCache => t('mobile.profile.storageCache');
   String profileStorageCacheHint(String size) =>
       t('mobile.profile.storageCacheHint', {'size': size});

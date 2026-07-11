@@ -112,7 +112,7 @@ class _CompletedCoursesScreenState extends State<CompletedCoursesScreen> {
                         Text(
                           l10n.profileNoCompletedCourses,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: AppTheme.muted, height: 1.5),
+                          style: TextStyle(color: AppTheme.muted, height: 1.5),
                         ),
                       ],
                     )
@@ -298,7 +298,7 @@ class _CompletedCoursesScreenState extends State<CompletedCoursesScreen> {
                                             formatDuration(totalSec),
                                             l10n.profileCompletedOn(_formatDate(completedAt)),
                                           ].join(' · '),
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 12,
                                             color: AppTheme.muted,
                                             height: 1.35,
@@ -308,7 +308,7 @@ class _CompletedCoursesScreenState extends State<CompletedCoursesScreen> {
                                           const SizedBox(height: 12),
                                           Text(
                                             l10n.t('student.quizzes'),
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               fontSize: 12,
                                               fontWeight: FontWeight.w700,
                                               color: AppTheme.foreground,
@@ -331,7 +331,7 @@ class _CompletedCoursesScreenState extends State<CompletedCoursesScreen> {
                                                 padding: const EdgeInsets.only(bottom: 6),
                                                 child: Row(
                                                   children: [
-                                                    const Icon(
+                                                    Icon(
                                                       Icons.quiz_outlined,
                                                       size: 16,
                                                       color: AppTheme.muted,
@@ -340,7 +340,7 @@ class _CompletedCoursesScreenState extends State<CompletedCoursesScreen> {
                                                     Expanded(
                                                       child: Text(
                                                         '$qTitle · ${l10n.profileQuizNotTaken}',
-                                                        style: const TextStyle(
+                                                        style: TextStyle(
                                                           fontSize: 12,
                                                           color: AppTheme.muted,
                                                         ),

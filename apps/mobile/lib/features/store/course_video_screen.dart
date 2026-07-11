@@ -83,7 +83,7 @@ class _CourseVideoScreenState extends State<CourseVideoScreen> {
           ? const SkeletonVideoPlayer()
           : _error != null
               ? Center(
-                  child: Text(_error!, style: const TextStyle(color: AppTheme.muted)),
+                  child: Text(_error!, style: TextStyle(color: AppTheme.muted)),
                 )
               : Stack(
                   children: [

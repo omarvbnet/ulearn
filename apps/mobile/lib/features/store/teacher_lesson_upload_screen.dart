@@ -148,13 +148,13 @@ class _TeacherLessonUploadScreenState extends State<TeacherLessonUploadScreen> {
       final api = context.read<ApiClient>();
       final upload = VideoUploadService(api);
       File videoFile = _video!;
+      final sourceSize = await _video!.length();
+      final shouldCompress =
+          _compress || sourceSize >= VideoProcessService.forceCompressBytes;
 
-      if (_compress) {
-        final wm = await upload.fetchWatermarkConfig(courseName: widget.courseTitle);
-        final sourceSize = await _video!.length();
+      if (shouldCompress) {
         final processed = await VideoProcessService.processForUpload(
           source: _video!,
-          watermark: wm,
           onProgress: (p) {
             _setProgress(
               p * 0.45,
@@ -176,7 +176,7 @@ class _TeacherLessonUploadScreenState extends State<TeacherLessonUploadScreen> {
         courseId: widget.courseId,
         scope: 'STORE_COURSE',
         durationSec: duration,
-        watermarkApplied: _compress,
+        watermarkApplied: false,
         onProgress: (sent, total) {
           if (total <= 0) return;
           final pct = sent / total;
@@ -192,8 +192,12 @@ class _TeacherLessonUploadScreenState extends State<TeacherLessonUploadScreen> {
       );
 
       _setProgress(0.88, l10n.t('mobile.studio.uploadingCoverBusy'), force: true);
-      final coverSize = await _cover!.length();
-      final ext = _cover!.path.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+      final coverFile = await VideoCoverHelper.ensurePersistedCover(_cover!);
+      if (!await coverFile.exists()) {
+        throw Exception(l10n.t('mobile.teacher.coverUploadFailed'));
+      }
+      final coverSize = await coverFile.length();
+      final ext = coverFile.path.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
       final coverPresign = await api.post('/api/admin/uploads', {
         'filename': 'cover_${DateTime.now().millisecondsSinceEpoch}.$ext',
         'contentType': ext == 'png' ? 'image/png' : 'image/jpeg',
@@ -209,7 +213,7 @@ class _TeacherLessonUploadScreenState extends State<TeacherLessonUploadScreen> {
       }
       await api.putFile(
         coverUploadUrl,
-        _cover!,
+        coverFile,
         ext == 'png' ? 'image/png' : 'image/jpeg',
       );
 
@@ -251,6 +255,7 @@ class _TeacherLessonUploadScreenState extends State<TeacherLessonUploadScreen> {
       _setProgress(0.97, l10n.t('mobile.studio.uploadSaving'), force: true);
       await api.post('/api/teacher/courses/${widget.courseId}/lessons', payload);
       if (!mounted) return;
+      unawaited(VideoProcessService.clearTemp());
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(l10n.t('mobile.studio.videoUploaded'))),
       );
@@ -295,7 +300,7 @@ class _TeacherLessonUploadScreenState extends State<TeacherLessonUploadScreen> {
                   widget.courseTitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+                  style: TextStyle(color: AppTheme.muted, fontSize: 13),
                 ),
               ),
             ),
@@ -371,7 +376,7 @@ class _TeacherLessonUploadScreenState extends State<TeacherLessonUploadScreen> {
                 const SizedBox(height: 8),
                 Text(
                   l10n.t('mobile.studio.accessHint'),
-                  style: const TextStyle(color: AppTheme.muted, fontSize: 12.5, height: 1.4),
+                  style: TextStyle(color: AppTheme.muted, fontSize: 12.5, height: 1.4),
                 ),
                 const SizedBox(height: 10),
                 for (final opt in [
@@ -547,7 +552,7 @@ class _PickerCard extends StatelessWidget {
                   children: [
                     Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
                     if (subtitle != null)
-                      Text(subtitle!, style: const TextStyle(color: AppTheme.muted, fontSize: 12)),
+                      Text(subtitle!, style: TextStyle(color: AppTheme.muted, fontSize: 12)),
                   ],
                 ),
               ),

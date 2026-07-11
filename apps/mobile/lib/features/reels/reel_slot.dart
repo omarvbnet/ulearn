@@ -12,6 +12,7 @@ class ReelSlot extends StatelessWidget {
     required this.bottomInset,
     required this.onLike,
     required this.onComment,
+    this.onSave,
     this.onTeacherTap,
     this.onMore,
   });
@@ -23,6 +24,7 @@ class ReelSlot extends StatelessWidget {
   final double bottomInset;
   final VoidCallback onLike;
   final VoidCallback onComment;
+  final VoidCallback? onSave;
   final VoidCallback? onTeacherTap;
   final VoidCallback? onMore;
 
@@ -41,6 +43,7 @@ class ReelSlot extends StatelessWidget {
                 bottomInset: bottomInset,
                 onLike: onLike,
                 onComment: onComment,
+                onSave: onSave,
                 onTeacherTap: onTeacherTap,
                 onMore: onMore,
               );

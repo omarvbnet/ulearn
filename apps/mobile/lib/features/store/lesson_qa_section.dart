@@ -228,7 +228,7 @@ class _LessonQASectionState extends State<LessonQASection> {
         if (_questions.isEmpty)
           Text(
             l10n.t('student.noQuestions'),
-            style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+            style: TextStyle(color: AppTheme.muted, fontSize: 13),
           )
         else
           ..._questions.asMap().entries.map((e) {
@@ -276,7 +276,7 @@ class _LessonQASectionState extends State<LessonQASection> {
                                 role == 'TEACHER'
                                     ? l10n.t('student.teacher')
                                     : l10n.t('mobile.roles.student'),
-                                style: const TextStyle(fontSize: 11, color: AppTheme.muted),
+                                style: TextStyle(fontSize: 11, color: AppTheme.muted),
                               ),
                             ],
                           ),

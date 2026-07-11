@@ -105,7 +105,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
                   const SizedBox(height: 8),
                   Text(
                     '${pkg['price']} · ${pkg['deviceLimit']} ${l10n.t('student.devices')}',
-                    style: const TextStyle(color: AppTheme.muted),
+                    style: TextStyle(color: AppTheme.muted),
                   ),
                   const SizedBox(height: 12),
                   SizedBox(

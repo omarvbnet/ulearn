@@ -249,6 +249,12 @@ class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
                 bottomInset: bottomInset,
                 onLike: () => _toggleLike(index),
                 onComment: () => _openComments(index),
+                onSave: () {
+                  final i = _videos.indexWhere(
+                    (v) => v['id']?.toString() == video['id']?.toString(),
+                  );
+                  if (i >= 0) _toggleSave(i);
+                },
                 onTeacherTap: widget.teacherId != null ? () => _openTeacherProfile(video) : null,
                 onMore: () => _openMoreMenu(video),
               );

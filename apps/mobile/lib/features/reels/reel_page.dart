@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -19,6 +21,7 @@ class ReelPage extends StatefulWidget {
     required this.active,
     required this.onLike,
     required this.onComment,
+    this.onSave,
     this.onTeacherTap,
     this.onMore,
     this.bottomInset = 116,
@@ -28,6 +31,7 @@ class ReelPage extends StatefulWidget {
   final bool active;
   final VoidCallback onLike;
   final VoidCallback onComment;
+  final VoidCallback? onSave;
   final VoidCallback? onTeacherTap;
   final VoidCallback? onMore;
   final double bottomInset;
@@ -46,7 +50,8 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
   late final AnimationController _heartBurst;
   bool _showHeartBurst = false;
   bool _viewRecorded = false;
-  bool _scrubMode = false;
+  bool _holdPaused = false;
+  bool _scrubbing = false;
   int _initGeneration = 0;
   bool _disposed = false;
 
@@ -105,7 +110,7 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     if (c == null || !c.value.isInitialized) return;
     try {
       c.setVolume(_muted ? 0 : 1);
-      if (!_scrubMode) c.play();
+      if (!_scrubbing && !_holdPaused) c.play();
     } catch (_) {
       _releaseVideo(stash: false);
       if (mounted) {
@@ -153,14 +158,16 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
       }
     } else if (!widget.active && oldWidget.active) {
       _unpinUrl(widget.video['fileUrl']?.toString());
-      _scrubMode = false;
+      _scrubbing = false;
+      _holdPaused = false;
       _releaseVideo(stash: true);
       if (mounted) setState(() {});
     }
     if (oldWidget.video['id'] != widget.video['id']) {
       _unpinUrl(oldWidget.video['fileUrl']?.toString());
       _viewRecorded = false;
-      _scrubMode = false;
+      _scrubbing = false;
+      _holdPaused = false;
       _releaseVideo(stash: false);
       _initializing = widget.active;
       _showLoadSkeleton = false;
@@ -272,10 +279,7 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
   }
 
   void _toggleMute() {
-    if (_scrubMode) {
-      _exitScrubMode(resume: true);
-      return;
-    }
+    if (_holdPaused || _scrubbing) return;
     setState(() {
       _muted = !_muted;
       _showMuteHint = true;
@@ -296,30 +300,18 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     widget.onLike();
   }
 
-  void _enterScrubMode() {
+  void _onHoldStart(LongPressStartDetails _) {
     final c = _controller;
-    if (c == null || !c.value.isInitialized || _scrubMode) return;
-    HapticFeedback.mediumImpact();
+    if (c == null || !c.value.isInitialized || _holdPaused) return;
+    HapticFeedback.lightImpact();
     c.pause();
-    setState(() => _scrubMode = true);
+    setState(() => _holdPaused = true);
   }
 
-  void _exitScrubMode({bool resume = true}) {
-    if (!_scrubMode) return;
-    setState(() => _scrubMode = false);
-    if (resume && widget.active) {
-      _controller?.play();
-    }
-  }
-
-  void _seekRelative(int seconds) {
-    final c = _controller;
-    if (c == null || !c.value.isInitialized) return;
-    final max = c.value.duration;
-    var target = c.value.position + Duration(seconds: seconds);
-    if (target < Duration.zero) target = Duration.zero;
-    if (target > max) target = max;
-    c.seekTo(target);
+  void _onHoldEnd(LongPressEndDetails _) {
+    if (!_holdPaused) return;
+    setState(() => _holdPaused = false);
+    if (widget.active) _controller?.play();
   }
 
   void _seekToFraction(double fraction) {
@@ -398,7 +390,7 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     final teacher = widget.video['teacher'] as Map<String, dynamic>? ?? {};
     final name = _teacherName(teacher, context);
     final level = teacher['level']?.toString() ?? '';
-    final teacherPhoto = teacher['profilePhotoUrl']?.toString();
+    final teacherPhoto = resolveProfilePhotoUrl(teacher);
     final title = widget.video['title']?.toString().trim() ?? '';
     final description = widget.video['description']?.toString().trim() ?? '';
     final caption = description.isNotEmpty ? description : title;
@@ -407,12 +399,20 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     final saves = (widget.video['saves'] as num?)?.toInt() ?? 0;
     final views = (widget.video['viewCount'] as num?)?.toInt() ?? 0;
     final liked = widget.video['likedByMe'] == true;
+    final saved = widget.video['savedByMe'] == true;
     final bottom = widget.bottomInset;
 
     return GestureDetector(
       onTap: _toggleMute,
       onDoubleTap: () => _handleLike(burst: true),
-      onLongPressStart: (_) => _enterScrubMode(),
+      onLongPressStart: _onHoldStart,
+      onLongPressEnd: _onHoldEnd,
+      onLongPressCancel: () {
+        if (_holdPaused) {
+          setState(() => _holdPaused = false);
+          if (widget.active) _controller?.play();
+        }
+      },
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -477,27 +477,8 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
             ),
           ),
 
-          // Hold-to-pause scrub controls
-          if (_scrubMode && _controller != null && _controller!.value.isInitialized)
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: bottom + 8,
-              child: AnimatedBuilder(
-                animation: _controller!,
-                builder: (context, _) => _ReelScrubBar(
-                  controller: _controller!,
-                  onSeek: _seekToFraction,
-                  onBack: () => _seekRelative(-10),
-                  onForward: () => _seekRelative(10),
-                  onPlay: () => _exitScrubMode(resume: true),
-                  formatTime: _formatTime,
-                ),
-              ),
-            ),
-
-          // Paused indicator (center)
-          if (_scrubMode)
+          // Hold-to-pause indicator
+          if (_holdPaused)
             Center(
               child: Container(
                 padding: const EdgeInsets.all(16),
@@ -510,10 +491,36 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
               ),
             ),
 
+          // Slim glass progress + timer above bottom nav
+          if (_controller != null && _controller!.value.isInitialized)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: bottom - 36,
+              child: AnimatedBuilder(
+                animation: _controller!,
+                builder: (context, _) => _GlassProgressBar(
+                  controller: _controller!,
+                  formatTime: _formatTime,
+                  onSeekStart: () {
+                    setState(() => _scrubbing = true);
+                    _controller?.pause();
+                  },
+                  onSeek: _seekToFraction,
+                  onSeekEnd: () {
+                    setState(() => _scrubbing = false);
+                    if (widget.active && !_holdPaused) {
+                      _controller?.play();
+                    }
+                  },
+                ),
+              ),
+            ),
+
           // Right action rail
           Positioned(
             right: 10,
-            bottom: bottom + 24,
+            bottom: bottom + 12,
             child: Column(
               children: [
                 GestureDetector(
@@ -523,7 +530,11 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
                       shape: BoxShape.circle,
                       border: Border.all(color: Colors.white, width: 2),
                     ),
-                    child: ProfileAvatar(name: name, photoUrl: teacherPhoto, size: 46),
+                    child: ProfileAvatar(
+                      name: name,
+                      photoUrl: teacherPhoto,
+                      size: 46,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -544,9 +555,13 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
                 ),
                 const SizedBox(height: 16),
                 _ActionButton(
-                  icon: Icons.bookmark_border_rounded,
+                  icon: saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
                   label: _formatCount(saves),
-                  onTap: () {},
+                  color: saved ? AppTheme.accent : Colors.white,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    widget.onSave?.call();
+                  },
                 ),
                 const SizedBox(height: 16),
                 _ActionButton(
@@ -566,11 +581,11 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
             ),
           ),
 
-          // Bottom caption block — above tab bar
+          // Bottom caption block — above progress + tab bar
           Positioned(
             left: 14,
             right: 76,
-            bottom: bottom,
+            bottom: bottom + 8,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -682,22 +697,20 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
   }
 }
 
-class _ReelScrubBar extends StatelessWidget {
-  const _ReelScrubBar({
+class _GlassProgressBar extends StatelessWidget {
+  const _GlassProgressBar({
     required this.controller,
-    required this.onSeek,
-    required this.onBack,
-    required this.onForward,
-    required this.onPlay,
     required this.formatTime,
+    required this.onSeek,
+    required this.onSeekStart,
+    required this.onSeekEnd,
   });
 
   final VideoPlayerController controller;
-  final ValueChanged<double> onSeek;
-  final VoidCallback onBack;
-  final VoidCallback onForward;
-  final VoidCallback onPlay;
   final String Function(Duration) formatTime;
+  final ValueChanged<double> onSeek;
+  final VoidCallback onSeekStart;
+  final VoidCallback onSeekEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -708,134 +721,71 @@ class _ReelScrubBar extends StatelessWidget {
         ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
         : 0.0;
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.78),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white24),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Row(
             children: [
               Text(
                 formatTime(position),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.92),
+                  fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  fontFeatures: [FontFeature.tabularFigures()],
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                  shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
                 ),
               ),
               Text(
                 ' / ${formatTime(duration)}',
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.65),
-                  fontSize: 12,
+                  color: Colors.white.withValues(alpha: 0.55),
+                  fontSize: 11,
                   fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-              const Spacer(),
-              Text(
-                context.l10n.t('mobile.reels.holdToPause'),
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.5),
-                  fontSize: 10,
+                  shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 3,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-              activeTrackColor: AppTheme.accent,
-              inactiveTrackColor: Colors.white24,
-              thumbColor: AppTheme.accent,
-              overlayColor: AppTheme.accent.withValues(alpha: 0.2),
-            ),
-            child: Slider(
-              value: progress,
-              onChanged: onSeek,
-            ),
-          ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _ScrubIconButton(
-                icon: Icons.replay_10_rounded,
-                label: '-10s',
-                onTap: onBack,
+        ),
+        const SizedBox(height: 3),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+            child: Container(
+              height: 14,
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
               ),
-              const SizedBox(width: 20),
-              Material(
-                color: AppTheme.accent,
-                shape: const CircleBorder(),
-                child: InkWell(
-                  customBorder: const CircleBorder(),
-                  onTap: onPlay,
-                  child: const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Icon(Icons.play_arrow_rounded, color: Colors.black, size: 28),
-                  ),
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 2,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4),
+                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+                  activeTrackColor: Colors.white.withValues(alpha: 0.95),
+                  inactiveTrackColor: Colors.white.withValues(alpha: 0.22),
+                  thumbColor: Colors.white,
+                  overlayColor: AppTheme.accent.withValues(alpha: 0.18),
+                ),
+                child: Slider(
+                  value: progress,
+                  onChangeStart: (_) => onSeekStart(),
+                  onChanged: onSeek,
+                  onChangeEnd: (_) => onSeekEnd(),
                 ),
               ),
-              const SizedBox(width: 20),
-              _ScrubIconButton(
-                icon: Icons.forward_10_rounded,
-                label: '+10s',
-                onTap: onForward,
-              ),
-            ],
+            ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ScrubIconButton extends StatelessWidget {
-  const _ScrubIconButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-        children: [
-          Icon(icon, color: Colors.white, size: 28),
-          const SizedBox(height: 2),
-          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 10)),
-        ],
-      ),
-    );
-  }
-}
-
-class SkeletonReelPage extends StatelessWidget {
-  const SkeletonReelPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Skeleton(
-      child: Container(
-        color: AppTheme.card,
-        alignment: Alignment.center,
-        child: const SkeletonCircle(size: 56),
-      ),
+        ),
+      ],
     );
   }
 }
@@ -880,6 +830,21 @@ class _ActionButton extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class SkeletonReelPage extends StatelessWidget {
+  const SkeletonReelPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Skeleton(
+      child: Container(
+        color: AppTheme.card,
+        alignment: Alignment.center,
+        child: const SkeletonCircle(size: 56),
       ),
     );
   }

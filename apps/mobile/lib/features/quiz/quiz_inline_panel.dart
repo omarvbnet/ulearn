@@ -176,7 +176,7 @@ class _QuizInlinePanelState extends State<QuizInlinePanel> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.muted)),
+                  Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: AppTheme.muted)),
                   const SizedBox(height: 12),
                   OutlinedButton(onPressed: widget.onFinished, child: Text(l10n.t('common.next'))),
                 ],
@@ -231,7 +231,7 @@ class _QuizInlinePanelState extends State<QuizInlinePanel> {
               const Spacer(),
               Text(
                 '${_current + 1}/${questions.length}',
-                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
               ),
               if (_timeLeft != null) ...[
                 const SizedBox(width: 10),
@@ -369,7 +369,7 @@ class _InlineIntro extends StatelessWidget {
           const SizedBox(height: 14),
           Text(
             l10n.t('mobile.store.quizAfterLesson'),
-            style: const TextStyle(color: AppTheme.muted, fontSize: 12, fontWeight: FontWeight.w600),
+            style: TextStyle(color: AppTheme.muted, fontSize: 12, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 6),
           Text(
@@ -380,7 +380,7 @@ class _InlineIntro extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             '${l10n.t('quiz.questions')}: $questions · ${l10n.t('quiz.passMark')} $passPct%',
-            style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+            style: TextStyle(color: AppTheme.muted, fontSize: 13),
           ),
           const SizedBox(height: 18),
           FilledButton.icon(

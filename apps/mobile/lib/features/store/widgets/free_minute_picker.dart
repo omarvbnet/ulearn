@@ -39,7 +39,7 @@ class FreeMinutePicker extends StatelessWidget {
       children: [
         Text(
           l10n.t('mobile.studio.freeUntilMoment'),
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 13,
             color: AppTheme.muted,
             height: 1.4,
@@ -86,7 +86,7 @@ class FreeMinutePicker extends StatelessWidget {
                 l10n.t('mobile.studio.ofVideoDuration', {
                   'duration': _fmt(_max),
                 }),
-                style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                style: TextStyle(fontSize: 12, color: AppTheme.muted),
               ),
               const SizedBox(height: 18),
               LayoutBuilder(

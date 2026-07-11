@@ -108,7 +108,7 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                 onChanged: _onSearch,
                 decoration: InputDecoration(
                   hintText: '${l10n.t('common.search')}…',
-                  prefixIcon: const Icon(Icons.search, color: AppTheme.muted),
+                  prefixIcon: Icon(Icons.search, color: AppTheme.muted),
                   suffixIcon: isTeacher
                       ? IconButton(
                           tooltip: l10n.profileTeacherStudio,
@@ -201,7 +201,7 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                                 ? '${l10n.t('student.noCertificates')}\n${l10n.t('student.noCertificatesHint')}'
                                 : '${l10n.t('student.noCourses')}\n${l10n.homeBrowseStore}',
                             textAlign: TextAlign.center,
-                            style: const TextStyle(color: AppTheme.muted),
+                            style: TextStyle(color: AppTheme.muted),
                           ),
                         ],
                       ),
@@ -303,7 +303,7 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                                               '$lessonCount',
                                               '$progress%',
                                             ].join(' · '),
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               fontSize: 12.5,
                                               color: AppTheme.muted,
                                             ),

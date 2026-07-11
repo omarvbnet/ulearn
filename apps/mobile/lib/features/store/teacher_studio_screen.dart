@@ -57,10 +57,9 @@ class _UploadPlan {
     preparing = _UploadSegment(cursor, cursor + 2);
     cursor = preparing.end;
 
-    // Compress/watermark is usually the longest phase — give it real bar weight
-    // so overall % doesn't look stuck while FFmpeg runs.
+    // Compress is native/HW and short — keep bar weight modest.
     if (compress) {
-      compressing = _UploadSegment(cursor, cursor + 40);
+      compressing = _UploadSegment(cursor, cursor + 18);
       cursor = compressing.end;
     } else {
       compressing = _UploadSegment(cursor, cursor);
@@ -69,7 +68,7 @@ class _UploadPlan {
     videoPresign = _UploadSegment(cursor, cursor + 2);
     cursor = videoPresign.end;
 
-    final videoWeight = includePdf ? 38 : 44;
+    final videoWeight = includePdf ? 52 : 60;
     videoUpload = _UploadSegment(cursor, cursor + videoWeight);
     cursor = videoUpload.end;
 
@@ -277,12 +276,14 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     return null;
   }
 
-  Future<File?> _processVideoForUpload(_UploadPlan plan, {String? courseName}) async {
+  Future<File?> _processVideoForUpload(
+    _UploadPlan plan, {
+    String? courseName,
+    int? maxOutputBytes,
+  }) async {
     final video = _pendingVideo;
     if (video == null) return null;
 
-    final uploadService = VideoUploadService(context.read<ApiClient>());
-    final wm = await uploadService.fetchWatermarkConfig(courseName: courseName);
     final sourceBytes = await video.length();
 
     _setOverall(
@@ -295,7 +296,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     );
     final result = await VideoProcessService.processForUpload(
       source: video,
-      watermark: wm,
+      maxOutputBytes: maxOutputBytes,
       onProgress: (p) {
         if (!mounted) return;
         _setOverall(
@@ -318,6 +319,28 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       );
     }
     return result.file;
+  }
+
+  Future<File?> _prepareVideoForUpload(
+    _UploadPlan plan, {
+    int? maxOutputBytes,
+  }) async {
+    var video = _pendingVideo;
+    if (video == null) {
+      await _selectVideo();
+      video = _pendingVideo;
+    }
+    if (video == null) return null;
+    final bytes = await video.length();
+    final mustCompress = _compressBeforeUpload ||
+        maxOutputBytes != null ||
+        bytes >= VideoProcessService.forceCompressBytes;
+    if (!mustCompress) return video;
+    return _processVideoForUpload(
+      plan,
+      courseName: _selectedCourseTitle(),
+      maxOutputBytes: maxOutputBytes,
+    );
   }
 
   Future<Map<String, String>?> _uploadFile(
@@ -378,7 +401,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       courseId: courseId,
       scope: scope,
       durationSec: _pendingDurationSec,
-      watermarkApplied: _compressBeforeUpload,
+      watermarkApplied: false,
       onPhase: (phase) {
         if (!mounted) return;
         if (phase == 'presign') {
@@ -405,10 +428,12 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     File file,
     String folder,
     _UploadPlan plan,
-  ) {
-    final ext = file.path.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+  ) async {
+    final cover = await VideoCoverHelper.ensurePersistedCover(file);
+    if (!await cover.exists()) return null;
+    final ext = cover.path.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
     return _uploadFile(
-      file,
+      cover,
       'cover_${DateTime.now().millisecondsSinceEpoch}.$ext',
       ext == 'png' ? 'image/png' : 'image/jpeg',
       category: 'image',
@@ -499,18 +524,6 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     setState(() => _pendingCover = cover);
   }
 
-  Future<File?> _prepareVideoForUpload(_UploadPlan plan) async {
-    var video = _pendingVideo;
-    if (video == null) {
-      await _selectVideo();
-      video = _pendingVideo;
-    }
-    if (video == null) return null;
-    // Compress / watermark only when the teacher turns the toggle on.
-    if (!_compressBeforeUpload) return video;
-    return _processVideoForUpload(plan, courseName: _selectedCourseTitle());
-  }
-
   Future<void> _uploadShort() async {
     FocusManager.instance.primaryFocus?.unfocus();
     if (_titleCtrl.text.trim().isEmpty) return;
@@ -528,7 +541,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
     }
 
     final plan = _UploadPlan(
-      compress: _compressBeforeUpload,
+      compress: true,
       includePdf: false,
     );
 
@@ -546,8 +559,23 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
         byteDetail: null,
         force: true,
       );
-      final videoFile = await _prepareVideoForUpload(plan);
+      final videoFile = await _prepareVideoForUpload(
+        plan,
+        maxOutputBytes: VideoProcessService.shortsMaxBytes,
+      );
       if (videoFile == null) return;
+
+      final outSize = await videoFile.length();
+      if (outSize > VideoProcessService.shortsMaxBytes) {
+        throw Exception(
+          context.l10n.t('mobile.studio.shortTooLarge', {
+            'max': VideoProcessService.formatBytes(
+              VideoProcessService.shortsMaxBytes,
+            ),
+            'size': VideoProcessService.formatBytes(outSize),
+          }),
+        );
+      }
 
       final uploaded = await _uploadVideoToR2(
         file: videoFile,
@@ -585,6 +613,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       });
       _setOverall(100, StudioUploadPhase.saving, byteDetail: null, force: true);
       if (!mounted) return;
+      unawaited(VideoProcessService.clearTemp());
       _titleCtrl.clear();
       _descCtrl.clear();
       _clearPendingMedia();
@@ -594,9 +623,20 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       _load();
     } catch (e) {
       if (!mounted) return;
+      final msg = e.toString();
+      final friendly = msg.contains('VIDEO_TOO_LARGE')
+          ? context.l10n.t('mobile.studio.shortTooLarge', {
+              'max': VideoProcessService.formatBytes(
+                VideoProcessService.shortsMaxBytes,
+              ),
+              'size': VideoProcessService.formatBytes(
+                await (_pendingVideo?.length() ?? Future.value(0)),
+              ),
+            })
+          : msg;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(e.toString())));
+      ).showSnackBar(SnackBar(content: Text(friendly)));
     } finally {
       if (mounted) {
         setState(() {
@@ -616,27 +656,47 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
       behavior: HitTestBehavior.translucent,
       child: DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        body: NestedScrollView(
-          headerSliverBuilder: (context, innerBoxIsScrolled) => [
-            SliverAppBar(
-              expandedHeight: 132,
-              pinned: true,
-              stretch: true,
-              title: Text(l10n.profileTeacherStudio),
-              actions: [
-                IconButton(
-                  tooltip: l10n.t('common.refresh'),
-                  icon: const Icon(Icons.refresh_rounded),
-                  onPressed: _loading ? null : () async {
-                    setState(() => _loading = true);
-                    await _load();
-                  },
+        length: 3,
+        child: Scaffold(
+          appBar: AppBar(
+            titleSpacing: 16,
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l10n.profileTeacherStudio,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                    letterSpacing: -0.2,
+                  ),
                 ),
-                IconButton(
-                  tooltip: l10n.t('mobile.teacher.newCourse'),
-                  icon: const Icon(Icons.add_circle_outline),
+                Text(
+                  l10n.t('mobile.studio.studioHeroHint'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w400,
+                    color: AppTheme.muted.withValues(alpha: 0.95),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              IconButton(
+                tooltip: l10n.t('common.refresh'),
+                icon: const Icon(Icons.refresh_rounded),
+                onPressed: _loading
+                    ? null
+                    : () async {
+                        setState(() => _loading = true);
+                        await _load();
+                      },
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: FilledButton.icon(
                   onPressed: () async {
                     await Navigator.of(context).push<bool>(
                       MaterialPageRoute(
@@ -645,59 +705,45 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                     );
                     if (mounted) _load();
                   },
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: Text(l10n.t('mobile.teacher.newCourse')),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.accent,
+                    foregroundColor: Colors.black,
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    textStyle: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12.5,
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 4),
+              ),
+            ],
+            bottom: TabBar(
+              indicatorColor: AppTheme.accent,
+              indicatorWeight: 3,
+              indicatorSize: TabBarIndicatorSize.label,
+              labelColor: AppTheme.accent,
+              unselectedLabelColor: AppTheme.muted,
+              labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+              unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12),
+              tabs: [
+                Tab(
+                  icon: const Icon(Icons.menu_book_rounded, size: 20),
+                  text: l10n.t('mobile.studio.coursesTab'),
+                ),
+                Tab(
+                  icon: const Icon(Icons.quiz_outlined, size: 20),
+                  text: l10n.t('student.quizzes'),
+                ),
+                Tab(
+                  icon: const Icon(Icons.movie_filter_outlined, size: 20),
+                  text: l10n.reelsTitle,
+                ),
               ],
-              flexibleSpace: FlexibleSpaceBar(
-                background: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Color(0xFF2A1050),
-                        Color(0xFF0C1628),
-                        Color(0xFF07070F),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                  ),
-                  child: Align(
-                    alignment: Alignment.bottomLeft,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 56),
-                      child: Text(
-                        l10n.t('mobile.studio.studioHeroHint'),
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.72),
-                          fontSize: 13,
-                          height: 1.35,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              bottom: TabBar(
-                indicatorColor: AppTheme.accent,
-                labelColor: AppTheme.accent,
-                unselectedLabelColor: AppTheme.muted,
-                tabs: [
-                  Tab(
-                    icon: const Icon(Icons.menu_book_rounded, size: 20),
-                    text: l10n.t('mobile.studio.coursesTab'),
-                  ),
-                  Tab(
-                    icon: const Icon(Icons.quiz_outlined, size: 20),
-                    text: l10n.t('student.quizzes'),
-                  ),
-                  Tab(
-                    icon: const Icon(Icons.movie_filter_outlined, size: 20),
-                    text: l10n.reelsTitle,
-                  ),
-                ],
-              ),
             ),
-          ],
+          ),
           body: _loading
               ? const Center(
                   child: CircularProgressIndicator(color: AppTheme.accent),
@@ -741,7 +787,6 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                   ],
                 ),
         ),
-      ),
       ),
     );
   }
@@ -901,7 +946,7 @@ class _UploadTab extends StatelessWidget {
                 if (courses.isEmpty)
                   Text(
                     l10n.t('student.noCertificatesHint'),
-                    style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+                    style: TextStyle(color: AppTheme.muted, fontSize: 13),
                   )
                 else
                   DropdownButtonFormField<String>(
@@ -978,7 +1023,7 @@ class _UploadTab extends StatelessWidget {
             children: [
               Text(
                 l10n.t('mobile.studio.coverRequiredHint'),
-                style: const TextStyle(color: AppTheme.muted, fontSize: 12.5, height: 1.4),
+                style: TextStyle(color: AppTheme.muted, fontSize: 12.5, height: 1.4),
               ),
               const SizedBox(height: 10),
               Row(
@@ -1063,7 +1108,7 @@ class _UploadTab extends StatelessWidget {
               children: [
                 Text(
                   l10n.t('mobile.studio.accessHint'),
-                  style: const TextStyle(color: AppTheme.muted, fontSize: 12.5, height: 1.4),
+                  style: TextStyle(color: AppTheme.muted, fontSize: 12.5, height: 1.4),
                 ),
                 const SizedBox(height: 12),
                 _AccessModeCard(
@@ -1084,7 +1129,7 @@ class _UploadTab extends StatelessWidget {
                   const SizedBox(height: 10),
                   Text(
                     l10n.t('mobile.studio.fullFreeHint'),
-                    style: const TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.4),
+                    style: TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.4),
                   ),
                 ],
               ],
@@ -1305,7 +1350,7 @@ class _UploadProgressCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       completeLabel,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppTheme.muted,
                         fontSize: 12.5,
                       ),
@@ -1396,7 +1441,7 @@ class _StudioFlowSteps extends StatelessWidget {
                       ? const Icon(Icons.check_rounded, size: 16, color: Colors.black)
                       : Text(
                           '${i + 1}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
                             color: AppTheme.muted,
@@ -1486,7 +1531,7 @@ class _AccessModeCard extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(
                             o.$4,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               color: AppTheme.muted,
                               height: 1.3,
@@ -1664,7 +1709,7 @@ class _MediaPickerTile extends StatelessWidget {
                       const SizedBox(height: 3),
                       Text(
                         subtitle!,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppTheme.muted,
                           fontSize: 11.5,
                         ),
@@ -1818,69 +1863,95 @@ class _ShortVideoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = context.l10n;
     final status = short['status']?.toString() ?? '';
     final thumb = short['thumbnailUrl']?.toString();
+    final views = (short['viewCount'] as num?)?.toInt() ?? 0;
+    final likes = (short['likes'] as num?)?.toInt() ?? 0;
+    final saves = (short['saves'] as num?)?.toInt() ?? 0;
+    final color = _statusColor(status);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: AppTheme.card,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: AppTheme.cardBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.fromLTRB(12, 8, 14, 8),
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: thumb != null && thumb.isNotEmpty
-              ? Image.network(
-                  thumb,
-                  width: 56,
-                  height: 56,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => _thumbPlaceholder(),
-                )
-              : _thumbPlaceholder(),
-        ),
-        title: Text(
-          short['title']?.toString() ?? '',
-          style: const TextStyle(fontWeight: FontWeight.w700),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        subtitle: Text(
-          [
-            if (short['description'] != null &&
-                short['description'].toString().trim().isNotEmpty)
-              short['description'].toString(),
-            '${l10n.homeViews((short['viewCount'] as num?)?.toInt() ?? 0)} · ${l10n.homeLikes((short['likes'] as num?)?.toInt() ?? 0)}',
-          ].where((t) => t.isNotEmpty).join('\n'),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 12,
-            color: AppTheme.muted,
-            height: 1.35,
-          ),
-        ),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: _statusColor(status).withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: _statusColor(status).withValues(alpha: 0.35),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: thumb != null && thumb.isNotEmpty
+                  ? Image.network(
+                      thumb,
+                      width: 64,
+                      height: 64,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _thumbPlaceholder(),
+                    )
+                  : _thumbPlaceholder(),
             ),
-          ),
-          child: Text(
-            status.replaceAll('_', ' '),
-            style: TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w700,
-              color: _statusColor(status),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    short['title']?.toString() ?? '',
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (short['description'] != null &&
+                      short['description'].toString().trim().isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      short['description'].toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: AppTheme.muted),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _MiniStat(icon: Icons.visibility_outlined, value: '$views'),
+                      const SizedBox(width: 10),
+                      _MiniStat(icon: Icons.favorite_border_rounded, value: '$likes'),
+                      const SizedBox(width: 10),
+                      _MiniStat(icon: Icons.bookmark_border_rounded, value: '$saves'),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: color.withValues(alpha: 0.35)),
+              ),
+              child: Text(
+                status.replaceAll('_', ' '),
+                style: TextStyle(
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1888,10 +1959,36 @@ class _ShortVideoCard extends StatelessWidget {
 
   Widget _thumbPlaceholder() {
     return Container(
-      width: 56,
-      height: 56,
+      width: 64,
+      height: 64,
       color: AppTheme.primary.withValues(alpha: 0.15),
       child: const Icon(Icons.movie_outlined, color: AppTheme.accent),
+    );
+  }
+}
+
+class _MiniStat extends StatelessWidget {
+  const _MiniStat({required this.icon, required this.value});
+
+  final IconData icon;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: AppTheme.muted),
+        const SizedBox(width: 3),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.muted,
+          ),
+        ),
+      ],
     );
   }
 }

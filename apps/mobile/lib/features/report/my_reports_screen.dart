@@ -131,13 +131,13 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
                                 r['details']?.toString() ?? '',
                                 maxLines: 3,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: AppTheme.muted, height: 1.35),
+                                style: TextStyle(color: AppTheme.muted, height: 1.35),
                               ),
                               if (created != null) ...[
                                 const SizedBox(height: 8),
                                 Text(
                                   _formatDate(created),
-                                  style: const TextStyle(color: AppTheme.muted, fontSize: 11),
+                                  style: TextStyle(color: AppTheme.muted, fontSize: 11),
                                 ),
                               ],
                             ],

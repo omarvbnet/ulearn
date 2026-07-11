@@ -178,6 +178,15 @@ class _ReportContentSheetState extends State<ReportContentSheet> {
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ),
+                IconButton(
+                  tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  icon: const Icon(Icons.close_rounded),
+                  style: IconButton.styleFrom(
+                    foregroundColor: AppTheme.muted,
+                    backgroundColor: AppTheme.card,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 6),
@@ -185,12 +194,12 @@ class _ReportContentSheetState extends State<ReportContentSheet> {
               widget.contentTitle,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+              style: TextStyle(color: AppTheme.muted, fontSize: 13),
             ),
             const SizedBox(height: 8),
             Text(
               l10n.t('mobile.report.confidentiality'),
-              style: const TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.4),
+              style: TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.4),
             ),
             const SizedBox(height: 16),
             ...ReportReason.all.map((r) {
@@ -230,7 +239,7 @@ class _ReportContentSheetState extends State<ReportContentSheet> {
                                 const SizedBox(height: 2),
                                 Text(
                                   description,
-                                  style: const TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.35),
+                                  style: TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.35),
                                 ),
                               ],
                             ),

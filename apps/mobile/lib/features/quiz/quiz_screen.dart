@@ -177,7 +177,7 @@ class _QuizScreenState extends State<QuizScreen> {
                     Text(
                       _error!,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: AppTheme.muted, height: 1.4),
+                      style: TextStyle(color: AppTheme.muted, height: 1.4),
                     ),
                     const SizedBox(height: 16),
                     OutlinedButton(onPressed: _load, child: Text(l10n.retry)),
@@ -267,7 +267,7 @@ class _QuizScreenState extends State<QuizScreen> {
           const SizedBox(height: 20),
           Text(
             '${l10n.t('quiz.question')} ${_current + 1} ${l10n.t('quiz.of')} ${questions.length}',
-            style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+            style: TextStyle(color: AppTheme.muted, fontSize: 13),
           ),
           const SizedBox(height: 8),
           Text(
@@ -443,7 +443,7 @@ class _Stat extends StatelessWidget {
       child: Column(
         children: [
           Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          Text(label, style: const TextStyle(color: AppTheme.muted, fontSize: 12)),
+          Text(label, style: TextStyle(color: AppTheme.muted, fontSize: 12)),
         ],
       ),
     );
@@ -498,7 +498,7 @@ class _ResultView extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               '${result['score']} / ${result['maxScore']} ${l10n.t('quiz.points')}',
-              style: const TextStyle(color: AppTheme.muted),
+              style: TextStyle(color: AppTheme.muted),
             ),
             const SizedBox(height: 28),
             ElevatedButton(

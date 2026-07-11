@@ -151,7 +151,7 @@ class _LoginScreenState extends State<LoginScreen>
                     const SizedBox(height: 6),
                     Text(
                       context.l10n.learnWithoutLimits,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppTheme.muted,
                         fontSize: 13,
                         letterSpacing: 2,
@@ -257,7 +257,7 @@ class _LoginScreenState extends State<LoginScreen>
         const SizedBox(height: 6),
         Text(
           l10n.loginSignInHint,
-          style: const TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.5),
+          style: TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.5),
         ),
         const SizedBox(height: 20),
         TextField(
@@ -269,7 +269,7 @@ class _LoginScreenState extends State<LoginScreen>
           decoration: InputDecoration(
             labelText: l10n.authPhone,
             hintText: l10n.authPhonePlaceholder,
-            prefixIcon: const Icon(Icons.phone_iphone, color: AppTheme.muted),
+            prefixIcon: Icon(Icons.phone_iphone, color: AppTheme.muted),
           ),
         ),
         const SizedBox(height: 18),
@@ -319,13 +319,13 @@ class _LoginScreenState extends State<LoginScreen>
         const SizedBox(height: 6),
         Text.rich(
           TextSpan(
-            style: const TextStyle(
+            style: TextStyle(
                 color: AppTheme.muted, fontSize: 13, height: 1.5),
             children: [
               TextSpan(text: l10n.loginCodeSentPrefix),
               TextSpan(
                 text: _phoneCtrl.text.trim(),
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppTheme.foreground,
                   fontWeight: FontWeight.w600,
                 ),
@@ -393,7 +393,7 @@ class _LoginScreenState extends State<LoginScreen>
                           child: Text(
                             filled ? code[i] : '',
                             key: ValueKey(filled ? code[i] : 'empty$i'),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.bold,
                               color: AppTheme.foreground,
@@ -437,7 +437,7 @@ class _LoginScreenState extends State<LoginScreen>
               }),
               child: Text(
                 l10n.authChangeNumber,
-                style: const TextStyle(color: AppTheme.muted),
+                style: TextStyle(color: AppTheme.muted),
               ),
             ),
             TextButton(

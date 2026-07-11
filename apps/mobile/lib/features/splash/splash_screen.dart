@@ -93,7 +93,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                       const SizedBox(height: 8),
                       Text(
                         tagline,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppTheme.muted,
                           fontSize: 14,
                           letterSpacing: 2.5,

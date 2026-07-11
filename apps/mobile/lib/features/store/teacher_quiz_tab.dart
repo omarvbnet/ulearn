@@ -159,7 +159,7 @@ class _TeacherQuizTabState extends State<TeacherQuizTab> {
           child: Text(
             l10n.t('student.noCertificatesHint'),
             textAlign: TextAlign.center,
-            style: const TextStyle(color: AppTheme.muted),
+            style: TextStyle(color: AppTheme.muted),
           ),
         ),
       );
@@ -177,7 +177,7 @@ class _TeacherQuizTabState extends State<TeacherQuizTab> {
         const SizedBox(height: 6),
         Text(
           l10n.t('mobile.studio.quizBuilderHint'),
-          style: const TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.4),
+          style: TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.4),
         ),
         const SizedBox(height: 16),
         DropdownButtonFormField<String>(
@@ -301,7 +301,7 @@ class _QuestionEditorCard extends StatelessWidget {
       color: AppTheme.card,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: AppTheme.cardBorder),
+        side: BorderSide(color: AppTheme.cardBorder),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -381,7 +381,7 @@ class _QuestionEditorCard extends StatelessWidget {
               title: Text(l10n.t('mobile.studio.enableQuestionTimer')),
               subtitle: Text(
                 l10n.t('mobile.studio.enableQuestionTimerHint'),
-                style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                style: TextStyle(fontSize: 12, color: AppTheme.muted),
               ),
               value: draft.timerEnabled,
               activeThumbColor: AppTheme.accent,

@@ -194,7 +194,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     padding: const EdgeInsets.all(24),
                     child: Text(
                       _error!,
-                      style: const TextStyle(color: AppTheme.muted),
+                      style: TextStyle(color: AppTheme.muted),
                       textAlign: TextAlign.center,
                     ),
                   ),

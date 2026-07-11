@@ -124,12 +124,12 @@ class _CourseMaterialPdfScreenState extends State<CourseMaterialPdfScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.error_outline, color: AppTheme.muted, size: 48),
+                        Icon(Icons.error_outline, color: AppTheme.muted, size: 48),
                         const SizedBox(height: 12),
                         Text(
                           _error!,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: AppTheme.muted),
+                          style: TextStyle(color: AppTheme.muted),
                         ),
                         const SizedBox(height: 16),
                         FilledButton(
@@ -165,7 +165,7 @@ class _CourseMaterialPdfScreenState extends State<CourseMaterialPdfScreen> {
                           errorBuilder: (_, error) => Center(
                             child: Text(
                               error.toString(),
-                              style: const TextStyle(color: AppTheme.muted),
+                              style: TextStyle(color: AppTheme.muted),
                             ),
                           ),
                         ),
@@ -178,7 +178,7 @@ class _CourseMaterialPdfScreenState extends State<CourseMaterialPdfScreen> {
                         16,
                         10 + MediaQuery.paddingOf(context).bottom,
                       ),
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                         color: Color(0xFF08081A),
                         border: Border(top: BorderSide(color: AppTheme.cardBorder)),
                       ),

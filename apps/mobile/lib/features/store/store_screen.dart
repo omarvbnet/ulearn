@@ -131,7 +131,7 @@ class _StoreScreenState extends State<StoreScreen> {
             controller: _searchCtrl,
             decoration: InputDecoration(
               hintText: l10n.t('mobile.products.searchHint'),
-              prefixIcon: const Icon(Icons.search, color: AppTheme.muted),
+              prefixIcon: Icon(Icons.search, color: AppTheme.muted),
               suffixIcon: _query.isNotEmpty
                   ? IconButton(
                       icon: const Icon(Icons.close, size: 20),
@@ -238,7 +238,7 @@ class _StoreScreenState extends State<StoreScreen> {
                     padding: const EdgeInsets.all(24),
                     child: Text(
                       l10n.t('mobile.products.empty'),
-                      style: const TextStyle(color: AppTheme.muted),
+                      style: TextStyle(color: AppTheme.muted),
                       textAlign: TextAlign.center,
                     ),
                   ),
@@ -281,7 +281,7 @@ class _StoreScreenState extends State<StoreScreen> {
                                     ? CachedImage(url: image, fit: BoxFit.cover)
                                     : Container(
                                         color: AppTheme.primary.withValues(alpha: 0.1),
-                                        child: const Icon(Icons.shopping_bag_outlined, size: 40, color: AppTheme.muted),
+                                        child: Icon(Icons.shopping_bag_outlined, size: 40, color: AppTheme.muted),
                                       ),
                               ),
                               Padding(

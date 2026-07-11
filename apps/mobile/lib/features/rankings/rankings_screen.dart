@@ -114,7 +114,7 @@ class _RankList extends StatelessWidget {
   Widget build(BuildContext context) {
     if (entries.isEmpty) {
       return Center(
-        child: Text(context.l10n.rankNoRankings, style: const TextStyle(color: AppTheme.muted)),
+        child: Text(context.l10n.rankNoRankings, style: TextStyle(color: AppTheme.muted)),
       );
     }
 
@@ -154,7 +154,7 @@ class _RankList extends StatelessWidget {
                       backgroundColor: AppTheme.cardBorder,
                       child: Text(
                         '$rank',
-                        style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+                        style: TextStyle(color: AppTheme.muted, fontSize: 13),
                       ),
                     ),
               title: Text(e['name']?.toString() ?? 'User'),

@@ -40,7 +40,7 @@ class AppleTabBar extends StatelessWidget {
           borderRadius: BorderRadius.circular(26),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.45),
+              color: Colors.black.withValues(alpha: AppTheme.isDark ? 0.45 : 0.12),
               blurRadius: 24,
               offset: const Offset(0, 8),
             ),
@@ -53,9 +53,13 @@ class AppleTabBar extends StatelessWidget {
             child: Container(
               height: 62,
               decoration: BoxDecoration(
-                color: AppTheme.card.withValues(alpha: 0.82),
+                color: AppTheme.card.withValues(alpha: AppTheme.isDark ? 0.82 : 0.92),
                 borderRadius: BorderRadius.circular(26),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                border: Border.all(
+                  color: AppTheme.isDark
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : AppTheme.cardBorder.withValues(alpha: 0.9),
+                ),
               ),
               child: Row(
                 children: List.generate(items.length, (i) {

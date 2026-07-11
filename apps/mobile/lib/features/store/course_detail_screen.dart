@@ -630,57 +630,38 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           if (_isOwnCourse) ...[
             StaggeredItem(
               index: 0,
-              child: Container(
-                margin: const EdgeInsets.only(top: 8, bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.primary.withValues(alpha: 0.22),
-                      AppTheme.card,
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppTheme.accent.withValues(alpha: 0.35)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 6, bottom: 10),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.school_outlined, color: AppTheme.accent),
-                        const SizedBox(width: 8),
-                        Text(
-                          l10n.storeYourCourse,
-                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
-                        ),
-                      ],
+                    _MetaTag(
+                      icon: Icons.verified_outlined,
+                      label: l10n.storeYourCourse,
+                      accent: true,
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      [
-                        '${l10n.t('common.status')}: ${(course['status']?.toString() ?? 'APPROVED').replaceAll('_', ' ')}',
-                        l10n.t('student.videos'),
-                        l10n.homeViews(views),
-                        if (subscribers > 0) l10n.homeSubscribers(subscribers),
-                      ].join(' · '),
-                      style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+                    _MetaTag(
+                      label: (course['status']?.toString() ?? 'APPROVED')
+                          .replaceAll('_', ' '),
                     ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () => Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const TeacherStudioScreen()),
-                            ),
-                            icon: const Icon(Icons.video_call_outlined, size: 18),
-                            label: Text(l10n.storeManageInStudio),
-                          ),
+                    _MetaTag(label: l10n.homeViews(views)),
+                    if (subscribers > 0)
+                      _MetaTag(label: l10n.homeSubscribers(subscribers)),
+                    ActionChip(
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      avatar: const Icon(Icons.video_call_outlined, size: 16),
+                      label: Text(
+                        l10n.storeManageInStudio,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const TeacherStudioScreen(),
                         ),
-                      ],
+                      ),
                     ),
                   ],
                 ),
@@ -928,7 +909,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       return Scaffold(
         appBar: AppBar(),
         body: _error != null
-            ? Center(child: Text(_error!, style: const TextStyle(color: AppTheme.muted)))
+            ? Center(child: Text(_error!, style: TextStyle(color: AppTheme.muted)))
             : Skeleton(
                 child: ListView(
                   physics: const NeverScrollableScrollPhysics(),
@@ -1054,7 +1035,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           : Container(
               padding: EdgeInsets.fromLTRB(
                   18, 12, 18, 12 + MediaQuery.of(context).padding.bottom),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 color: AppTheme.card,
                 border: Border(top: BorderSide(color: AppTheme.cardBorder)),
               ),
@@ -1066,7 +1047,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                     children: [
                       Text(
                         l10n.t('student.enrolled'),
-                        style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                        style: TextStyle(fontSize: 12, color: AppTheme.muted),
                       ),
                       Text(
                         '${price.toStringAsFixed(0)} $currency',
@@ -1246,7 +1227,7 @@ class _CourseProgressHeader extends StatelessWidget {
                 const SizedBox(width: 6),
                 Text(
                   l10n.t('mobile.store.yourRating', {'rating': '$myRating'}),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
                     color: AppTheme.muted,
@@ -1437,7 +1418,7 @@ class _CourseDetailsTab extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         '${activeProgress.toStringAsFixed(0)}%',
-                        style: const TextStyle(fontSize: 11.5, color: AppTheme.muted),
+                        style: TextStyle(fontSize: 11.5, color: AppTheme.muted),
                       ),
                     ],
                     if (activeCompleted) ...[
@@ -1455,7 +1436,7 @@ class _CourseDetailsTab extends StatelessWidget {
                 )
               : Text(
                   l10n.t('mobile.store.selectLessonHint'),
-                  style: const TextStyle(color: AppTheme.muted, height: 1.4, fontSize: 13),
+                  style: TextStyle(color: AppTheme.muted, height: 1.4, fontSize: 13),
                 ),
         ),
         const SizedBox(height: 16),
@@ -1512,7 +1493,7 @@ class _CourseDetailsTab extends StatelessWidget {
                               rating > 0
                                   ? rating.toStringAsFixed(1)
                                   : l10n.t('rank.noRankings'),
-                              style: const TextStyle(fontSize: 13, color: AppTheme.muted),
+                              style: TextStyle(fontSize: 13, color: AppTheme.muted),
                             ),
                           ],
                         ),
@@ -1600,7 +1581,7 @@ class _CourseDetailsTab extends StatelessWidget {
           description != null && description!.isNotEmpty
               ? description!
               : l10n.t('mobile.store.noDescription'),
-          style: const TextStyle(color: AppTheme.muted, height: 1.5, fontSize: 13.5),
+          style: TextStyle(color: AppTheme.muted, height: 1.5, fontSize: 13.5),
         ),
         if (unlocked) ...[
           const SizedBox(height: 20),
@@ -1828,6 +1809,54 @@ class _CourseDetailTabs extends StatelessWidget {
   }
 }
 
+class _MetaTag extends StatelessWidget {
+  const _MetaTag({
+    required this.label,
+    this.icon,
+    this.accent = false,
+  });
+
+  final String label;
+  final IconData? icon;
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = accent ? AppTheme.accent : AppTheme.muted;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: accent
+            ? AppTheme.accent.withValues(alpha: 0.12)
+            : AppTheme.card,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: accent
+              ? AppTheme.accent.withValues(alpha: 0.35)
+              : AppTheme.cardBorder,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 14, color: fg),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              color: accent ? AppTheme.accent : AppTheme.foreground,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _QuizTimelineCard extends StatelessWidget {
   const _QuizTimelineCard({
     required this.title,
@@ -1891,12 +1920,12 @@ class _QuizTimelineCard extends StatelessWidget {
                           ].join(' · '),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 10.5, color: AppTheme.muted),
+                          style: TextStyle(fontSize: 10.5, color: AppTheme.muted),
                         ),
                       ],
                     ),
                   ),
-                  const Icon(Icons.arrow_forward_ios_rounded, size: 12, color: AppTheme.muted),
+                  Icon(Icons.arrow_forward_ios_rounded, size: 12, color: AppTheme.muted),
                 ],
               ),
             ),
@@ -1968,7 +1997,7 @@ class _CourseQATabState extends State<_CourseQATab> {
       children: [
         Text(
           l10n.t('mobile.store.selectLessonForQa'),
-          style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+          style: TextStyle(fontSize: 12, color: AppTheme.muted),
         ),
         const SizedBox(height: 10),
         SizedBox(
@@ -2166,7 +2195,7 @@ class _CourseMaterialsTab extends StatelessWidget {
                             ].join(' · '),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                            style: TextStyle(fontSize: 12, color: AppTheme.muted),
                           ),
                         ],
                       ),
@@ -2212,7 +2241,7 @@ class _LockedTabPlaceholder extends StatelessWidget {
           Text(
             message,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: AppTheme.muted, height: 1.4),
+            style: TextStyle(color: AppTheme.muted, height: 1.4),
           ),
         ],
       ),
@@ -2262,7 +2291,7 @@ class _EmptyTabPlaceholder extends StatelessWidget {
             Text(
               subtitle!,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.4),
+              style: TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.4),
             ),
           ],
         ],
@@ -2323,7 +2352,7 @@ class _LessonDocumentsPanel extends StatelessWidget {
               const Spacer(),
               Text(
                 l10n.t('mobile.store.lessonMaterials'),
-                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
               ),
             ],
           ),
@@ -2369,7 +2398,7 @@ class _LessonDocumentsPanel extends StatelessWidget {
                                 style: const TextStyle(fontWeight: FontWeight.w600),
                               ),
                               if (size.isNotEmpty)
-                                Text(size, style: const TextStyle(color: AppTheme.muted, fontSize: 12)),
+                                Text(size, style: TextStyle(color: AppTheme.muted, fontSize: 12)),
                             ],
                           ),
                         ),
@@ -2496,7 +2525,7 @@ class _LessonVideoCard extends StatelessWidget {
                           metaParts.join(' · '),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 10.5,
                             color: AppTheme.muted,
                           ),

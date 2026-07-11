@@ -1026,6 +1026,38 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.1.4"
+  video_compress_kit:
+    dependency: "direct main"
+    description:
+      name: video_compress_kit
+      sha256: ecdd00f3f1d5840f21e3d2515755c5e0cf0c9e78e73d1645056507e853640b75
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.3"
+  video_compress_kit_android:
+    dependency: transitive
+    description:
+      name: video_compress_kit_android
+      sha256: "697dccbc359cee2419e64218d1f0d10c6de545d3a4edc6963335897ea9435711"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.3"
+  video_compress_kit_ios:
+    dependency: transitive
+    description:
+      name: video_compress_kit_ios
+      sha256: d88936d9a2a797e2d9ec7f8cfe2433e355f3856d060aee15de4fa8dde40eceb4
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.3"
+  video_compress_kit_platform_interface:
+    dependency: transitive
+    description:
+      name: video_compress_kit_platform_interface
+      sha256: "99afa1586c1e65de9b174b3f5e9ac672da2859929293e04f453282f1bd4c652f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.4"
   video_player:
     dependency: "direct main"
     description:

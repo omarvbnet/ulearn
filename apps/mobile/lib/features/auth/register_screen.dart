@@ -229,7 +229,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         children: [
           Text(
             l10n.registerPhoneLabel(widget.phone),
-            style: const TextStyle(color: AppTheme.muted),
+            style: TextStyle(color: AppTheme.muted),
             textDirection: TextDirection.ltr,
           ),
           const SizedBox(height: 16),

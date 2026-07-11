@@ -133,7 +133,7 @@ class _TeacherCoursesTabState extends State<TeacherCoursesTab> {
                   const SizedBox(height: 6),
                   Text(
                     l10n.t('mobile.studio.coursesHubHint'),
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppTheme.muted,
                       fontSize: 13.5,
                       height: 1.4,
@@ -163,7 +163,7 @@ class _TeacherCoursesTabState extends State<TeacherCoursesTab> {
               child: Center(
                 child: Text(
                   l10n.t('mobile.studio.noCoursesInFilter'),
-                  style: const TextStyle(color: AppTheme.muted),
+                  style: TextStyle(color: AppTheme.muted),
                 ),
               ),
             )
@@ -366,7 +366,7 @@ class _EmptyCourses extends StatelessWidget {
           Text(
             l10n.t('mobile.studio.emptyCoursesHint'),
             textAlign: TextAlign.center,
-            style: const TextStyle(color: AppTheme.muted, height: 1.45),
+            style: TextStyle(color: AppTheme.muted, height: 1.45),
           ),
           const SizedBox(height: 22),
           FilledButton.icon(
@@ -563,7 +563,7 @@ class _CourseManageCard extends StatelessWidget {
                       const SizedBox(height: 6),
                       Text(
                         meta,
-                        style: const TextStyle(color: AppTheme.muted, fontSize: 12.5),
+                        style: TextStyle(color: AppTheme.muted, fontSize: 12.5),
                       ),
                     ],
                     if (status == 'REJECTED' && notes != null && notes.isNotEmpty) ...[

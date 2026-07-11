@@ -513,13 +513,9 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
     try {
       final api = context.read<ApiClient>();
       final upload = VideoUploadService(api);
-      final wm = await upload.fetchWatermarkConfig(
-        courseName: _titleCtrl.text.trim(),
-      );
       final sourceSize = await source.length();
       final processed = await VideoProcessService.processForUpload(
         source: source,
-        watermark: wm,
         onProgress: (p) {
           _setBusyUi(
             l10n.t('mobile.teacher.convertingVideo', {
@@ -546,6 +542,7 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
         courseId: widget.courseId,
         scope: 'STORE_COURSE',
         durationSec: duration,
+        watermarkApplied: false,
         onProgress: (sent, total) {
           if (total <= 0) return;
           final pct = (sent * 100 / total).round();
@@ -806,12 +803,12 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
                                     Column(
                                       mainAxisAlignment: MainAxisAlignment.center,
                                       children: [
-                                        const Icon(Icons.add_photo_alternate_outlined,
+                                        Icon(Icons.add_photo_alternate_outlined,
                                             size: 36, color: AppTheme.muted),
                                         const SizedBox(height: 8),
                                         Text(
                                           l10n.t('mobile.teacher.tapToChangeCover'),
-                                          style: const TextStyle(color: AppTheme.muted),
+                                          style: TextStyle(color: AppTheme.muted),
                                         ),
                                       ],
                                     ),
@@ -858,7 +855,7 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
                         const SizedBox(height: 6),
                         Text(
                           l10n.t('mobile.teacher.reorderHint'),
-                          style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                          style: TextStyle(color: AppTheme.muted, fontSize: 12),
                         ),
                         const SizedBox(height: 10),
                         FilledButton.tonalIcon(
@@ -884,7 +881,7 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
                           l10n.t('mobile.teacher.freePaidHint', {
                             'count': '$_freeCount',
                           }),
-                          style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                          style: TextStyle(color: AppTheme.muted, fontSize: 12),
                         ),
                         const SizedBox(height: 10),
                         ReorderableListView.builder(
@@ -1074,7 +1071,7 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
                         if (_documents.isEmpty)
                           Text(
                             l10n.t('mobile.teacher.noDocuments'),
-                            style: const TextStyle(color: AppTheme.muted),
+                            style: TextStyle(color: AppTheme.muted),
                           ),
                       ],
                     ),

@@ -60,7 +60,7 @@ class _SavedReelsScreenState extends State<SavedReelsScreen> {
                   child: Text(
                     l10n.profileSavedReelsHint,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: AppTheme.muted, height: 1.4),
+                    style: TextStyle(color: AppTheme.muted, height: 1.4),
                   ),
                 )
               : RefreshIndicator(

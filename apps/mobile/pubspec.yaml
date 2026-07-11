@@ -34,6 +34,7 @@ dependencies:
   printing: ^5.14.3
   ffmpeg_kit_flutter_new: ^4.3.2
   fvp: ^0.37.3
+  video_compress_kit: ^0.0.3
 
 dev_dependencies:
   flutter_test:

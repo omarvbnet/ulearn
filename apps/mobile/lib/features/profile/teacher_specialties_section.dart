@@ -77,7 +77,7 @@ class _TeacherSpecialtiesSectionState extends State<TeacherSpecialtiesSection> {
                     const SizedBox(height: 6),
                     Text(
                       l10n.t('mobile.teacher.specialtiesHint', {'max': '$_max'}),
-                      style: const TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.4),
+                      style: TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.4),
                     ),
                     const SizedBox(height: 16),
                     Flexible(
@@ -114,7 +114,7 @@ class _TeacherSpecialtiesSectionState extends State<TeacherSpecialtiesSection> {
                         'count': '${draft.length}',
                         'max': '$_max',
                       }),
-                      style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                      style: TextStyle(color: AppTheme.muted, fontSize: 12),
                     ),
                     const SizedBox(height: 12),
                     FilledButton(
@@ -196,7 +196,7 @@ class _TeacherSpecialtiesSectionState extends State<TeacherSpecialtiesSection> {
             const SizedBox(height: 6),
             Text(
               l10n.t('mobile.teacher.specialtiesHint', {'max': '$_max'}),
-              style: const TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.35),
+              style: TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.35),
             ),
             const SizedBox(height: 12),
             if (_loading)

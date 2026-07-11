@@ -12,8 +12,9 @@ async function ownCourse(userId: string, courseId: string) {
 
 const docSchema = z.object({
   title: z.string().min(1).max(200),
-  fileKey: z.string().optional(),
-  fileUrl: z.string().url().optional(),
+  // Relative `/api/media/...` gateway URLs are valid for our app (not only absolute http URLs).
+  fileKey: z.string().min(1).optional(),
+  fileUrl: z.string().min(1).optional(),
   mimeType: z.string().optional(),
   fileSize: z.number().int().positive().optional(),
   type: z.nativeEnum(ContentType).optional(),

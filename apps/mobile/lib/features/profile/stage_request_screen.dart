@@ -205,7 +205,7 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
                       leading: const Icon(Icons.school_outlined, color: AppTheme.accent),
                       title: Text(
                         l10n.stageRequestCurrentStage,
-                        style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+                        style: TextStyle(color: AppTheme.muted, fontSize: 13),
                       ),
                       trailing: Text(
                         currentStage?.nameFor(locale) ?? l10n.profileNotSet,
@@ -353,7 +353,7 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
                           subtitle: r['reviewNotes'] != null
                               ? Text(
                                   r['reviewNotes'].toString(),
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 12, color: AppTheme.muted),
                                 )
                               : null,

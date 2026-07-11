@@ -9,7 +9,9 @@ import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/features/profile/completed_courses_screen.dart';
 import 'package:ulearn/features/profile/favorites_screen.dart';
+import 'package:ulearn/features/profile/appearance_screen.dart';
 import 'package:ulearn/features/profile/language_screen.dart';
+import 'package:ulearn/core/theme/theme_mode_provider.dart';
 import 'package:ulearn/features/profile/saved_reels_screen.dart';
 import 'package:ulearn/features/profile/profile_avatar.dart';
 import 'package:ulearn/features/profile/profile_photo_service.dart';
@@ -230,7 +232,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 4),
-              Text(user.phone, style: const TextStyle(color: AppTheme.muted)),
+              Text(user.phone, style: TextStyle(color: AppTheme.muted)),
             ],
           ),
         ),
@@ -259,7 +261,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 title: Text(l10n.profileCoverTitle),
                 subtitle: Text(
                   l10n.profileChangeCover,
-                  style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                  style: TextStyle(color: AppTheme.muted, fontSize: 12),
                 ),
                 trailing: _savingCover
                     ? const SizedBox(
@@ -267,7 +269,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accent),
                       )
-                    : const Icon(Icons.chevron_right, color: AppTheme.muted),
+                    : Icon(Icons.chevron_right, color: AppTheme.muted),
                 onTap: _savingCover
                     ? null
                     : () => showTeacherCoverPickerSheet(
@@ -302,6 +304,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   MaterialPageRoute(builder: (_) => const LanguageScreen()),
                 ),
               ),
+              Builder(
+                builder: (context) {
+                  final mode = context.watch<ThemeModeProvider>().mode;
+                  final value = switch (mode) {
+                    ThemeMode.light => l10n.profileThemeLight,
+                    ThemeMode.dark => l10n.profileThemeDark,
+                    ThemeMode.system => l10n.profileThemeSystem,
+                  };
+                  return _InfoRow(
+                    icon: Icons.brightness_6_outlined,
+                    label: l10n.profileAppearance,
+                    value: value,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const AppearanceScreen()),
+                    ),
+                  );
+                },
+              ),
               if (user.role == 'STUDENT')
                 _InfoRow(
                   icon: Icons.school_outlined,
@@ -320,9 +340,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: Text(l10n.profileMyReports),
               subtitle: Text(
                 l10n.profileMyReportsHint,
-                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
               ),
-              trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+              trailing: Icon(Icons.chevron_right, color: AppTheme.muted),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const MyReportsScreen()),
               ),
@@ -337,9 +357,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: Text(l10n.rankTitle),
               subtitle: Text(
                 l10n.profileRankingsHint,
-                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
               ),
-              trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+              trailing: Icon(Icons.chevron_right, color: AppTheme.muted),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => Scaffold(
@@ -359,9 +379,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: Text(l10n.profileCompletedCourses),
               subtitle: Text(
                 l10n.profileCompletedCoursesHint,
-                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
               ),
-              trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+              trailing: Icon(Icons.chevron_right, color: AppTheme.muted),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const CompletedCoursesScreen()),
               ),
@@ -376,9 +396,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: Text(l10n.profileFavorites),
               subtitle: Text(
                 l10n.profileFavoritesHint,
-                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
               ),
-              trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+              trailing: Icon(Icons.chevron_right, color: AppTheme.muted),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const FavoritesScreen()),
               ),
@@ -393,9 +413,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: Text(l10n.profileSavedReels),
               subtitle: Text(
                 l10n.profileSavedReelsHint,
-                style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
               ),
-              trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+              trailing: Icon(Icons.chevron_right, color: AppTheme.muted),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const SavedReelsScreen()),
               ),
@@ -412,9 +432,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 title: Text(l10n.navSubscriptions),
                 subtitle: Text(
                   l10n.profileSubscriptionsHint,
-                  style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                  style: TextStyle(color: AppTheme.muted, fontSize: 12),
                 ),
-                trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+                trailing: Icon(Icons.chevron_right, color: AppTheme.muted),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const SubscriptionsScreen()),
                 ),
@@ -432,9 +452,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 title: Text(l10n.profileChangeStage),
                 subtitle: Text(
                   l10n.profileChangeStageHint,
-                  style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                  style: TextStyle(color: AppTheme.muted, fontSize: 12),
                 ),
-                trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+                trailing: Icon(Icons.chevron_right, color: AppTheme.muted),
                 onTap: () async {
                   await Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const StageRequestScreen()),
@@ -457,9 +477,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 title: Text(l10n.profileTeacherStudio),
                 subtitle: Text(
                   l10n.profileTeacherStudioHint,
-                  style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                  style: TextStyle(color: AppTheme.muted, fontSize: 12),
                 ),
-                trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
+                trailing: Icon(Icons.chevron_right, color: AppTheme.muted),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const TeacherStudioScreen()),
                 ),
@@ -476,11 +496,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               builder: (context, snap) {
                 final size = snap.data ?? '…';
                 return ListTile(
-                  leading: const Icon(Icons.storage_outlined, color: AppTheme.muted),
+                  leading: Icon(Icons.storage_outlined, color: AppTheme.muted),
                   title: Text(l10n.profileStorageCache),
                   subtitle: Text(
                     l10n.profileStorageCacheHint(size),
-                    style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                    style: TextStyle(color: AppTheme.muted, fontSize: 12),
                   ),
                   trailing: TextButton(
                     onPressed: _clearMediaCache,
@@ -564,14 +584,14 @@ class _InfoRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       leading: Icon(icon, color: AppTheme.accent),
-      title: Text(label, style: const TextStyle(color: AppTheme.muted, fontSize: 13)),
+      title: Text(label, style: TextStyle(color: AppTheme.muted, fontSize: 13)),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
           if (onTap != null) ...[
             const SizedBox(width: 4),
-            const Icon(Icons.chevron_right, color: AppTheme.muted, size: 20),
+            Icon(Icons.chevron_right, color: AppTheme.muted, size: 20),
           ],
         ],
       ),

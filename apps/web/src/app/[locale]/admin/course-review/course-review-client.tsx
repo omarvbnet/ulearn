@@ -363,38 +363,79 @@ export function CourseReviewClient() {
         ) : courses.length === 0 ? (
           <EmptyState title="No courses in this tab" />
         ) : (
-          <div className="stagger space-y-3">
+          <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {courses.map((c) => (
               <Card
                 key={c.id}
-                className="card-hover cursor-pointer"
+                className="card-hover cursor-pointer overflow-hidden p-0"
                 onClick={() => {
                   setSelected(c);
                   setNotes(c.reviewNotes ?? "");
                 }}
               >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="font-semibold">{c.titleEn}</p>
-                    <p className="mt-1 text-sm text-muted">
-                      {c.subject.nameEn} · {c.stage.nameEn} · {c.lessons.length} lessons ·{" "}
-                      {c._count.quizzes ?? 0} quizzes · {c._count.purchases} sales
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-accent">
+                <div className="relative aspect-[16/9] bg-card-border/40">
+                  {c.thumbnail ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={c.thumbnail}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-sm text-muted">
+                      No cover
+                    </div>
+                  )}
+                  <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/80 to-transparent p-3">
+                    <span className="rounded-full bg-black/50 px-2 py-0.5 text-xs font-semibold text-white">
                       {c.price} {c.currency}
                     </span>
                     <Badge status={LEVEL_BADGE[c.teacher.level]}>
                       {c.teacher.level.replace(/_/g, " ")}
                     </Badge>
-                    {!c.teacher.isActive && <Badge status="SUSPENDED">Teacher blocked</Badge>}
                   </div>
                 </div>
-                <p className="mt-2 text-xs text-muted">
-                  {c.teacher.user.fullLegalName} · <span dir="ltr">{c.teacher.user.phone}</span> ·{" "}
-                  {new Date(c.createdAt).toLocaleString()}
-                </p>
+                <div className="space-y-2 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="line-clamp-2 font-semibold leading-snug">{c.titleEn}</p>
+                    <Badge status={c.status === "APPROVED" ? "APPROVED" : c.status === "REJECTED" ? "REJECTED" : "PENDING"}>
+                      {c.status.replace(/_/g, " ")}
+                    </Badge>
+                  </div>
+                  <p className="line-clamp-2 text-sm text-muted">
+                    {c.description?.trim() || "No description"}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 text-[11px]">
+                    <span className="rounded-full border border-card-border px-2 py-0.5 text-muted">
+                      {c.subject.nameEn}
+                    </span>
+                    <span className="rounded-full border border-card-border px-2 py-0.5 text-muted">
+                      {c.stage.nameEn}
+                    </span>
+                    <span className="rounded-full border border-card-border px-2 py-0.5 text-muted">
+                      {c.lessons.length} lessons
+                    </span>
+                    <span className="rounded-full border border-card-border px-2 py-0.5 text-muted">
+                      {c._count.quizzes ?? 0} quizzes
+                    </span>
+                    <span className="rounded-full border border-card-border px-2 py-0.5 text-muted">
+                      {c._count.purchases} sales
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted">
+                    {c.teacher.user.fullLegalName} ·{" "}
+                    <span dir="ltr">{c.teacher.user.phone}</span>
+                    {!c.teacher.isActive && (
+                      <>
+                        {" · "}
+                        <Badge status="SUSPENDED">Teacher blocked</Badge>
+                      </>
+                    )}
+                  </p>
+                  <p className="text-[11px] text-muted">
+                    {new Date(c.createdAt).toLocaleString()} · Tap to open full content
+                  </p>
+                </div>
               </Card>
             ))}
           </div>

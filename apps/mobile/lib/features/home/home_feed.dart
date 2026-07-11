@@ -278,11 +278,11 @@ class HomeFeedState extends State<HomeFeed> {
                   : null,
               onTap: () => Navigator.pop(ctx, 'all'),
             ),
-            const Divider(color: AppTheme.cardBorder),
+            Divider(color: AppTheme.cardBorder),
             ..._stages.map((s) {
               final id = s['id'].toString();
               return ListTile(
-                leading: const Icon(Icons.layers_outlined, color: AppTheme.muted),
+                leading: Icon(Icons.layers_outlined, color: AppTheme.muted),
                 title: Text(localizedText(s, locale, prefix: 'name')),
                 trailing: _stageFilter == id
                     ? const Icon(Icons.check, color: AppTheme.accent)
@@ -367,7 +367,7 @@ class HomeFeedState extends State<HomeFeed> {
               child: Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Text(_error!, style: const TextStyle(color: AppTheme.muted)),
+                  child: Text(_error!, style: TextStyle(color: AppTheme.muted)),
                 ),
               ),
             ),
@@ -450,7 +450,7 @@ class HomeFeedState extends State<HomeFeed> {
                 else
                   Text(
                     '${_courses.length}',
-                    style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+                    style: TextStyle(color: AppTheme.muted, fontSize: 13),
                   ),
               ],
             ),
@@ -475,7 +475,7 @@ class HomeFeedState extends State<HomeFeed> {
                         _hasActiveFilters
                             ? l10n.homeNoCoursesInStage
                             : '${l10n.homeNoCoursesInStage}\n${l10n.t('student.noCoursesHint')}',
-                        style: const TextStyle(color: AppTheme.muted),
+                        style: TextStyle(color: AppTheme.muted),
                         textAlign: TextAlign.center,
                       ),
                     ],
@@ -644,11 +644,11 @@ class _FiltersBar extends StatelessWidget {
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 hintText: '${l10n.t('common.search')}…',
-                hintStyle: const TextStyle(color: AppTheme.muted, fontSize: 14),
-                prefixIcon: const Icon(Icons.search, color: AppTheme.muted),
+                hintStyle: TextStyle(color: AppTheme.muted, fontSize: 14),
+                prefixIcon: Icon(Icons.search, color: AppTheme.muted),
                 suffixIcon: value.text.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.close, size: 18, color: AppTheme.muted),
+                        icon: Icon(Icons.close, size: 18, color: AppTheme.muted),
                         onPressed: onClearQuery,
                       )
                     : null,
@@ -775,7 +775,7 @@ class _AdsSection extends StatelessWidget {
               const SizedBox(width: 6),
               Text(
                 l10n.t('nav.ads'),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.muted,
@@ -1139,7 +1139,7 @@ class _ContinueWatchingRail extends StatelessWidget {
                       const SizedBox(height: 8),
                       Text(
                         l10n.t('mobile.home.resumeCourse'),
-                        style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                        style: TextStyle(fontSize: 12, color: AppTheme.muted),
                       ),
                     ],
                   ),
@@ -1435,7 +1435,7 @@ class CourseCard extends StatelessWidget {
                           '$teacherName$levelStars',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13, color: AppTheme.muted),
+                          style: TextStyle(fontSize: 13, color: AppTheme.muted),
                         ),
                       ),
                       const Icon(Icons.star_rounded, size: 17, color: Colors.amber),
@@ -1447,7 +1447,7 @@ class CourseCard extends StatelessWidget {
                       if (ratingCount > 0)
                         Text(
                           ' (${formatCount(ratingCount)})',
-                          style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                          style: TextStyle(fontSize: 12, color: AppTheme.muted),
                         ),
                     ],
                   ),
@@ -1461,12 +1461,12 @@ class CourseCard extends StatelessWidget {
                           l10n.t('mobile.store.courseRating', {
                             'rating': courseRating.toStringAsFixed(1),
                           }),
-                          style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                          style: TextStyle(fontSize: 12, color: AppTheme.muted),
                         ),
                         if (courseRatingCount > 0)
                           Text(
                             ' (${formatCount(courseRatingCount)})',
-                            style: const TextStyle(fontSize: 12, color: AppTheme.muted),
+                            style: TextStyle(fontSize: 12, color: AppTheme.muted),
                           ),
                       ],
                     ),
@@ -1475,18 +1475,18 @@ class CourseCard extends StatelessWidget {
                   // Stats row: views + like/dislike + previews.
                   Row(
                     children: [
-                      const Icon(Icons.visibility_outlined, size: 17, color: AppTheme.muted),
+                      Icon(Icons.visibility_outlined, size: 17, color: AppTheme.muted),
                       const SizedBox(width: 4),
                       Text(
                         formatCount(views),
-                        style: const TextStyle(fontSize: 12.5, color: AppTheme.muted),
+                        style: TextStyle(fontSize: 12.5, color: AppTheme.muted),
                       ),
                       const SizedBox(width: 14),
-                      const Icon(Icons.people_outline, size: 17, color: AppTheme.muted),
+                      Icon(Icons.people_outline, size: 17, color: AppTheme.muted),
                       const SizedBox(width: 4),
                       Text(
                         formatCount(subscribers),
-                        style: const TextStyle(fontSize: 12.5, color: AppTheme.muted),
+                        style: TextStyle(fontSize: 12.5, color: AppTheme.muted),
                       ),
                       const SizedBox(width: 14),
                       ReactionButton(

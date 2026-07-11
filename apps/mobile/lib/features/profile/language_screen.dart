@@ -30,7 +30,7 @@ class LanguageScreen extends StatelessWidget {
                 l10n.languageName(code),
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
-              subtitle: Text(code, style: const TextStyle(color: AppTheme.muted, fontSize: 12)),
+              subtitle: Text(code, style: TextStyle(color: AppTheme.muted, fontSize: 12)),
               onChanged: (value) async {
                 if (value == null || value == locale.code) return;
                 final api = context.read<ApiClient>();

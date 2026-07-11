@@ -124,13 +124,13 @@ class _CourseEvaluationSheetState extends State<CourseEvaluationSheet> {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: AppTheme.muted, height: 1.35),
+              style: TextStyle(color: AppTheme.muted, height: 1.35),
             ),
             const SizedBox(height: 6),
             Text(
               l10n.t('mobile.store.evaluateCourseHint'),
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12.5, color: AppTheme.muted),
+              style: TextStyle(fontSize: 12.5, color: AppTheme.muted),
             ),
             const SizedBox(height: 20),
             Row(

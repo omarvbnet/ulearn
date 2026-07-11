@@ -94,6 +94,9 @@ class VideoUploadService {
       if (courseLessonId != null) 'courseLessonId': courseLessonId,
     });
 
+    // Do NOT clear compressor cache here — auto-generated covers live under
+    // video_compress/ until the caller finishes uploading the thumbnail.
+
     return VideoUploadResult(
       videoId: videoId,
       objectKey: objectKey,

@@ -1,12 +1,9 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 
-import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new/ffprobe_kit.dart';
-import 'package:ffmpeg_kit_flutter_new/return_code.dart';
-import 'package:ffmpeg_kit_flutter_new/statistics.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:video_compress/video_compress.dart' as legacy;
+import 'package:video_compress_kit/video_compress_kit.dart';
 
 export 'video_upload_service.dart';
 
@@ -57,44 +54,31 @@ class VideoWatermarkSettings {
   }
 }
 
-class _MediaProbe {
-  const _MediaProbe({
-    required this.durationMs,
-    required this.width,
-    required this.height,
-    required this.fps,
-  });
-
-  final int? durationMs;
-  final int width;
-  final int height;
-  final double fps;
-}
-
-/// Medium-quality encode that **keeps source resolution** and prioritizes speed
-/// (hardware H.264 when available, otherwise libx264 ultrafast).
-class _EncodeProfile {
-  const _EncodeProfile({
-    required this.width,
-    required this.height,
-    required this.videoBitrate,
-    required this.audioBitrate,
-    required this.fps,
-    required this.crf,
-  });
-
-  final int width;
-  final int height;
-  final String videoBitrate;
-  final String audioBitrate;
-  final int fps;
-  /// Soft target for software encode (~23 = medium).
-  final int crf;
-}
-
-/// Client-side FFmpeg: fast medium-quality H.264 MP4 at original resolution.
+/// Fast upload prep via hardware encoders (VideoToolbox / MediaCodec).
+///
+/// Always targets **1080p** (never drops to 720/480). Speed comes from HW
+/// encode + efficient bitrate — not from lowering resolution.
+///
+/// Never burns watermarks at upload time (playback overlays handle that).
 class VideoProcessService {
-  /// Always re-encode these — raw upload is too large / wrong container for R2.
+  static const _kit = VideoCompressKit();
+
+  /// Files at/above this size are always compressed to 1080p before upload.
+  static const int forceCompressBytes = 800 * 1024 * 1024;
+
+  /// Shorts must stay under this size after compression.
+  static const int shortsMaxBytes = 350 * 1024 * 1024;
+
+  /// Efficient 1080p H.264 bitrate (~5.5 Mbps). Keeps Full HD look while
+  /// shrinking multi‑GB camera rolls and keeping HW encode fast.
+  static const int _bitrate1080p = 5_500_000;
+
+  /// Retry bitrate if the first 1080p pass fails / times out.
+  static const int _bitrate1080pFast = 3_800_000;
+
+  /// Leaner 1080p bitrate used when targeting a max output size (shorts).
+  static const int _bitrate1080pCompact = 2_800_000;
+
   static bool mustProcess(File source) {
     final name = source.path.toLowerCase();
     if (name.endsWith('.mov') ||
@@ -106,7 +90,9 @@ class VideoProcessService {
       return true;
     }
     try {
-      return source.lengthSync() >= 80 * 1024 * 1024;
+      final bytes = source.lengthSync();
+      if (bytes >= forceCompressBytes) return true;
+      return bytes >= 40 * 1024 * 1024;
     } catch (_) {
       return true;
     }
@@ -121,305 +107,272 @@ class VideoProcessService {
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
-  /// Medium quality bitrate for the **actual** frame size (no downscale).
-  static String _mediumBitrate({
-    required int width,
-    required int height,
-    required double fps,
-  }) {
-    final pixels = math.max(1, width * height);
-    final f = fps.clamp(24.0, 60.0);
-    // ~0.09 bits/pixel/frame ≈ medium visual quality without crushing detail.
-    final bps = (pixels * f * 0.09).round();
-    final kbps = (bps / 1000).clamp(1000, 12000).round();
-    // Round to nearest 100k for cleaner encoder targets.
-    final rounded = ((kbps + 50) ~/ 100) * 100;
-    return '${rounded}k';
+  static Duration _timeoutForSize(int sourceBytes) {
+    // Soft ceilings — HW 1080p should finish well under these; never 12+ min.
+    if (sourceBytes >= 800 * 1024 * 1024) return const Duration(minutes: 5);
+    if (sourceBytes >= 300 * 1024 * 1024) return const Duration(minutes: 4);
+    return const Duration(minutes: 3);
   }
 
-  static _EncodeProfile _profileFor(_MediaProbe probe) {
-    final w = probe.width > 0 ? probe.width : 1280;
-    final h = probe.height > 0 ? probe.height : 720;
-    // Cap only extreme high-fps camera rolls for speed/size — resolution stays.
-    final fps = probe.fps > 30.5 ? 30 : probe.fps.round().clamp(24, 60);
-    return _EncodeProfile(
-      width: w,
-      height: h,
-      videoBitrate: _mediumBitrate(width: w, height: h, fps: fps.toDouble()),
-      audioBitrate: '128k',
-      fps: fps,
-      crf: 23,
+  static CompressionConfig _config1080p({required int bitrate}) {
+    return CompressionConfig(
+      // high = max long edge 1920 (true 1080p for landscape & portrait).
+      quality: VideoQuality.high,
+      bitrate: bitrate,
+      includeAudio: true,
+      deleteOrigin: false,
+      // Do NOT set frameRate or fixed width — preserves aspect & avoids slow paths.
+      faststart: true,
+      h264Profile: H264Profile.high,
+      bitrateMode: BitrateMode.vbr,
     );
   }
 
-  static String _fontPath() {
-    if (Platform.isIOS) {
-      return '/System/Library/Fonts/Supplemental/Arial.ttf';
-    }
-    return '/system/fonts/Roboto-Regular.ttf';
-  }
-
-  static String _positionExpr(String position) {
-    switch (position) {
-      case 'bottom-left':
-        return 'x=24:y=h-th-24';
-      case 'top-right':
-        return 'x=w-tw-24:y=24';
-      case 'top-left':
-        return 'x=24:y=24';
-      case 'bottom-right':
-      default:
-        return 'x=w-tw-24:y=h-th-24';
-    }
-  }
-
-  /// Escape single quotes for FFmpeg filter / path args.
-  static String _q(String path) => path.replaceAll("'", r"'\''");
-
-  static List<_EncoderSpec> _encoderCandidates({
-    required String videoBitrate,
-    required int crf,
-  }) {
-    if (Platform.isIOS) {
-      return [
-        _EncoderSpec(
-          name: 'h264_videotoolbox',
-          // Hardware encode — fastest path on iPhone while keeping resolution.
-          args:
-              '-c:v h264_videotoolbox -b:v $videoBitrate -maxrate $videoBitrate '
-              '-bufsize $videoBitrate -realtime true -allow_sw 1 '
-              '-profile:v main -pix_fmt yuv420p -bf 0 -g 60',
-        ),
-        _EncoderSpec(
-          name: 'libx264-ultrafast',
-          args:
-              '-c:v libx264 -preset ultrafast -tune fastdecode -crf $crf '
-              '-threads 0 -bf 0 -g 60 -pix_fmt yuv420p',
-        ),
-      ];
-    }
-    return [
-      // Many Android ffmpeg-kit builds expose MediaCodec HW encode.
-      _EncoderSpec(
-        name: 'h264_mediacodec',
-        args:
-            '-c:v h264_mediacodec -b:v $videoBitrate -maxrate $videoBitrate '
-            '-bufsize $videoBitrate -pix_fmt yuv420p -bf 0 -g 60',
-      ),
-      _EncoderSpec(
-        name: 'libx264-ultrafast',
-        args:
-            '-c:v libx264 -preset ultrafast -tune fastdecode -crf $crf '
-            '-threads 0 -bf 0 -g 60 -pix_fmt yuv420p',
-      ),
-    ];
-  }
-
-  static Future<_MediaProbe> _probe(String path) async {
-    int? durationMs;
-    var width = 0;
-    var height = 0;
-    var fps = 30.0;
-
-    try {
-      final session = await FFprobeKit.getMediaInformation(path);
-      final info = session.getMediaInformation();
-      final rawDur = info?.getDuration();
-      if (rawDur != null && rawDur.isNotEmpty) {
-        final sec = double.tryParse(rawDur);
-        if (sec != null && sec > 0) {
-          durationMs = sec > 10000 ? sec.round() : (sec * 1000).round();
-        }
-      }
-
-      final streams = info?.getStreams();
-      if (streams != null) {
-        for (final stream in streams) {
-          final type = stream.getType()?.toLowerCase() ?? '';
-          if (!type.contains('video')) continue;
-          width = stream.getWidth() ?? width;
-          height = stream.getHeight() ?? height;
-          final avg = stream.getAverageFrameRate();
-          final r = stream.getRealFrameRate();
-          fps = _parseFps(avg) ?? _parseFps(r) ?? fps;
-          break;
-        }
-      }
-    } catch (_) {}
-
-    // Even dimensions required by yuv420p — ±1px only, not a resolution change.
-    if (width > 0 && width.isOdd) width -= 1;
-    if (height > 0 && height.isOdd) height -= 1;
-
-    return _MediaProbe(
-      durationMs: durationMs,
-      width: width,
-      height: height,
-      fps: fps,
-    );
-  }
-
-  static double? _parseFps(String? raw) {
-    if (raw == null || raw.isEmpty || raw == '0/0') return null;
-    if (raw.contains('/')) {
-      final parts = raw.split('/');
-      if (parts.length == 2) {
-        final a = double.tryParse(parts[0]);
-        final b = double.tryParse(parts[1]);
-        if (a != null && b != null && b != 0) return a / b;
-      }
-    }
-    return double.tryParse(raw);
-  }
-
+  /// Compress for upload. [watermark] is ignored (playback overlays protect).
+  ///
+  /// When [maxOutputBytes] is set (e.g. shorts 350 MB), retries with a leaner
+  /// 1080p bitrate if the first pass is still too large.
   static Future<({File file, int? width, int? height, int sourceBytes, int outputBytes})>
       processForUpload({
     required File source,
-    required VideoWatermarkSettings watermark,
+    VideoWatermarkSettings? watermark,
     void Function(double progress)? onProgress,
+    int? maxOutputBytes,
   }) async {
-    final dir = await getTemporaryDirectory();
-    final label = watermark.buildLabel();
-    final font = _fontPath();
-    final pos = _positionExpr(watermark.position);
-    final alpha = watermark.opacity.clamp(0.1, 1.0).toStringAsFixed(2);
     final sourceBytes = await source.length();
-    final probe = await _probe(source.path);
-    final profile = _profileFor(probe);
-
-    // Keep original resolution. Only:
-    //  - optional fps cap (60→30) for speed/size
-    //  - even-dimension snap for H.264
-    //  - lightweight watermark
-    final filters = <String>[];
-    if (probe.fps > 30.5) {
-      filters.add('fps=${profile.fps}');
-    }
-    // Preserve size; force even dims without letterboxing/downscale.
-    filters.add(
-      "scale='trunc(iw/2)*2':'trunc(ih/2)*2':flags=fast_bilinear",
-    );
-    filters.add(
-      "drawtext=fontfile='${_q(font)}':text='${_q(label)}':"
-      "fontsize=${watermark.fontSize.clamp(18, 28)}:"
-      "fontcolor=white@$alpha:$pos:box=1:boxcolor=black@0.25:boxborderw=6",
-    );
-    final vf = filters.join(',');
-
     onProgress?.call(0.02);
 
-    final hwaccel = Platform.isIOS ? '-hwaccel videotoolbox ' : '';
-    final input = _q(source.path);
+    final lower = source.path.toLowerCase();
+    final force = sourceBytes >= forceCompressBytes || maxOutputBytes != null;
+    if (!force && lower.endsWith('.mp4') && sourceBytes < 40 * 1024 * 1024) {
+      onProgress?.call(1.0);
+      return (
+        file: source,
+        width: null,
+        height: null,
+        sourceBytes: sourceBytes,
+        outputBytes: sourceBytes,
+      );
+    }
 
-    Object? lastError;
-    for (final encoder in _encoderCandidates(
-      videoBitrate: profile.videoBitrate,
-      crf: profile.crf,
-    )) {
-      final outPath =
-          '${dir.path}/ulearn_delivery_${DateTime.now().millisecondsSinceEpoch}_${encoder.name}.mp4';
-      final cmd =
-          '-y $hwaccel-i \'$input\' -vf "$vf" ${encoder.args} '
-          '-c:a aac -b:a ${profile.audioBitrate} -ac 2 -ar 44100 '
-          '-movflags +faststart \'$outPath\'';
+    final bitrates = maxOutputBytes != null
+        ? <int>[_bitrate1080pCompact, _bitrate1080pFast]
+        : <int>[_bitrate1080p, _bitrate1080pFast];
 
-      try {
-        final file = await _executeWithProgress(
-          cmd: cmd,
-          outPath: outPath,
-          durationMs: probe.durationMs,
-          onProgress: onProgress,
-        );
+    for (final bitrate in bitrates) {
+      final kitOut = await _compressWithKit(
+        source: source,
+        sourceBytes: sourceBytes,
+        config: _config1080p(bitrate: bitrate),
+        onProgress: onProgress,
+      );
+      if (kitOut == null) continue;
+      if (maxOutputBytes != null && kitOut.outputBytes > maxOutputBytes) {
+        continue;
+      }
+      onProgress?.call(1.0);
+      return kitOut;
+    }
+
+    // Legacy 1080p export once (no frameRate — avoids slow iOS path).
+    final legacyOut = await _compressLegacy(
+      source: source,
+      sourceBytes: sourceBytes,
+      quality: legacy.VideoQuality.Res1920x1080Quality,
+      onProgress: onProgress,
+    );
+    if (legacyOut != null) {
+      if (maxOutputBytes == null || legacyOut.outputBytes <= maxOutputBytes) {
         onProgress?.call(1.0);
-        final outBytes = await file.length();
-        return (
-          file: file,
-          width: profile.width,
-          height: profile.height,
-          sourceBytes: sourceBytes,
-          outputBytes: outBytes,
-        );
-      } catch (e) {
-        lastError = e;
-        try {
-          final failed = File(outPath);
-          if (await failed.exists()) await failed.delete();
-        } catch (_) {}
+        return legacyOut;
       }
     }
 
-    throw Exception('Video processing failed: $lastError');
+    // Last resort: original only if under the max (shorts) or no max set.
+    if (maxOutputBytes != null && sourceBytes > maxOutputBytes) {
+      throw StateError('VIDEO_TOO_LARGE');
+    }
+
+    onProgress?.call(1.0);
+    return (
+      file: source,
+      width: null,
+      height: null,
+      sourceBytes: sourceBytes,
+      outputBytes: sourceBytes,
+    );
   }
 
-  static Future<File> _executeWithProgress({
-    required String cmd,
-    required String outPath,
-    required int? durationMs,
+  static Future<({File file, int? width, int? height, int sourceBytes, int outputBytes})?>
+      _compressWithKit({
+    required File source,
+    required int sourceBytes,
+    required CompressionConfig config,
     void Function(double progress)? onProgress,
   }) async {
-    final completer = Completer<void>();
-    Object? error;
-    var lastProgress = 0.05;
-    var lastStatsAt = DateTime.now();
+    final sessionId =
+        'ulearn_${DateTime.now().microsecondsSinceEpoch}_${config.bitrate ?? 0}';
 
-    void emit(double value) {
-      if (onProgress == null) return;
-      final next = value.clamp(0.0, 0.97);
-      if (next + 0.002 < lastProgress) return;
-      lastProgress = next;
-      scheduleMicrotask(() => onProgress(next));
+    StreamSubscription<Map<String, dynamic>>? sub;
+    try {
+      sub = _kit.compressionProgress
+          .where((e) => e['sessionId'] == sessionId)
+          .listen((e) {
+        final p = (e['progress'] as num?)?.toDouble() ?? 0;
+        onProgress?.call(p.clamp(0.03, 0.97));
+      });
+
+      final result = await _kit
+          .compressVideo(
+            source.path,
+            sessionId: sessionId,
+            config: config,
+          )
+          .timeout(
+            _timeoutForSize(sourceBytes),
+            onTimeout: () {
+              unawaited(_kit.cancelCompression(sessionId: sessionId));
+              return const CompressionResult(
+                isSuccessful: false,
+                error: 'timeout',
+              );
+            },
+          );
+
+      if (!result.isSuccessful || result.isCancelled) return null;
+      final path = result.outputPath;
+      if (path == null || path.isEmpty) return null;
+      final out = File(path);
+      if (!await out.exists()) return null;
+      final outBytes = result.fileSize ?? await out.length();
+      if (outBytes <= 0) return null;
+
+      // Reject "compression" that barely shrunk a huge file (failed encode).
+      if (sourceBytes >= 200 * 1024 * 1024 && outBytes > sourceBytes * 0.95) {
+        try {
+          await out.delete();
+        } catch (_) {}
+        return null;
+      }
+
+      int? width;
+      int? height;
+      try {
+        final info = await _kit.getMediaInfo(path);
+        width = info.width;
+        height = info.height;
+      } catch (_) {}
+
+      return (
+        file: out,
+        width: width,
+        height: height,
+        sourceBytes: sourceBytes,
+        outputBytes: outBytes,
+      );
+    } catch (_) {
+      try {
+        await _kit.cancelCompression(sessionId: sessionId);
+      } catch (_) {}
+      return null;
+    } finally {
+      await sub?.cancel();
+    }
+  }
+
+  static Future<({File file, int? width, int? height, int sourceBytes, int outputBytes})?>
+      _compressLegacy({
+    required File source,
+    required int sourceBytes,
+    required legacy.VideoQuality quality,
+    void Function(double progress)? onProgress,
+  }) async {
+    if (legacy.VideoCompress.isCompressing) {
+      try {
+        await legacy.VideoCompress.cancelCompression();
+      } catch (_) {}
     }
 
-    final heartbeat = Timer.periodic(const Duration(milliseconds: 400), (_) {
-      if (completer.isCompleted) return;
-      final stalled = DateTime.now().difference(lastStatsAt);
-      if (stalled < const Duration(milliseconds: 800)) return;
-      if (lastProgress >= 0.94) return;
-      emit(lastProgress + 0.01);
+    final sub = legacy.VideoCompress.compressProgress$.subscribe((p) {
+      onProgress?.call((p / 100.0).clamp(0.03, 0.97));
     });
 
-    await FFmpegKit.executeAsync(
-      cmd,
-      (session) async {
-        final code = await session.getReturnCode();
-        if (!ReturnCode.isSuccess(code)) {
-          final logs = await session.getAllLogsAsString();
-          error = Exception(logs ?? 'FFmpeg failed');
-        }
-        if (!completer.isCompleted) completer.complete();
-      },
-      null,
-      (Statistics stats) {
-        lastStatsAt = DateTime.now();
-        if (durationMs == null || durationMs <= 0) {
-          final frames = stats.getVideoFrameNumber();
-          if (frames > 0) emit(0.05 + (frames % 900) / 1000 * 0.85);
-          return;
-        }
-        final t = stats.getTime();
-        if (t <= 0) return;
-        emit(0.05 + (t / durationMs).clamp(0.0, 1.0) * 0.9);
-      },
-    );
-
     try {
-      await completer.future;
+      final info = await legacy.VideoCompress.compressVideo(
+        source.path,
+        quality: quality,
+        deleteOrigin: false,
+        includeAudio: true,
+      ).timeout(
+        Duration(minutes: sourceBytes >= 500 * 1024 * 1024 ? 4 : 3),
+        onTimeout: () {
+          unawaited(legacy.VideoCompress.cancelCompression());
+          return null;
+        },
+      );
+
+      final path = info?.path;
+      if (path == null || path.isEmpty) return null;
+      final out = File(path);
+      if (!await out.exists()) return null;
+      final outBytes = await out.length();
+      if (outBytes <= 0) return null;
+
+      return (
+        file: out,
+        width: info?.width,
+        height: info?.height,
+        sourceBytes: sourceBytes,
+        outputBytes: outBytes,
+      );
+    } catch (_) {
+      try {
+        await legacy.VideoCompress.cancelCompression();
+      } catch (_) {}
+      return null;
     } finally {
-      heartbeat.cancel();
+      sub.unsubscribe();
     }
-
-    if (error != null) throw error!;
-
-    final out = File(outPath);
-    if (!await out.exists() || await out.length() <= 0) {
-      throw Exception('Processed video file missing');
-    }
-    return out;
   }
-}
 
-class _EncoderSpec {
-  const _EncoderSpec({required this.name, required this.args});
-  final String name;
-  final String args;
+  /// Clear compressor temp files after a successful upload.
+  ///
+  /// Never calls [VideoCompress.deleteAllCache] — that wipes auto-generated
+  /// cover JPEGs still needed for the cover upload step.
+  static Future<void> clearTemp() async {
+    try {
+      final dir = await getTemporaryDirectory();
+      await for (final entity in dir.list(recursive: true, followLinks: false)) {
+        if (entity is! File) continue;
+        final path = entity.path;
+        final name = entity.uri.pathSegments.isNotEmpty
+            ? entity.uri.pathSegments.last
+            : '';
+        final lower = name.toLowerCase();
+
+        // Keep cover images and unrelated temp files.
+        if (name.startsWith('ulearn_cover_')) continue;
+        if (lower.endsWith('.jpg') ||
+            lower.endsWith('.jpeg') ||
+            lower.endsWith('.png') ||
+            lower.endsWith('.webp')) {
+          continue;
+        }
+
+        final isVideoTemp = name.startsWith('vck_') ||
+            (name.startsWith('ulearn_') &&
+                (lower.endsWith('.mp4') ||
+                    lower.endsWith('.mov') ||
+                    lower.endsWith('.m4v'))) ||
+            (path.contains('video_compress') &&
+                (lower.endsWith('.mp4') ||
+                    lower.endsWith('.mov') ||
+                    lower.endsWith('.m4v')));
+        if (!isVideoTemp) continue;
+        try {
+          await entity.delete();
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
 }

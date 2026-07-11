@@ -110,7 +110,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     if (p.isEmpty) {
       return Scaffold(
         appBar: AppBar(title: Text(l10n.t('mobile.products.title'))),
-        body: Center(child: Text(l10n.t('mobile.error.generic'), style: const TextStyle(color: AppTheme.muted))),
+        body: Center(child: Text(l10n.t('mobile.error.generic'), style: TextStyle(color: AppTheme.muted))),
       );
     }
 
@@ -184,7 +184,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   const SizedBox(height: 4),
                   Text(
                     l10n.t('mobile.products.inStock', {'count': stock.toInt().toString()}),
-                    style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+                    style: TextStyle(color: AppTheme.muted, fontSize: 13),
                   ),
                 ],
                 if (status == 'PENDING') ...[
@@ -206,7 +206,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 const SizedBox(height: 16),
                 Text(
                   description.isNotEmpty ? description : l10n.t('mobile.store.noDescription'),
-                  style: const TextStyle(height: 1.5, color: AppTheme.foreground),
+                  style: TextStyle(height: 1.5, color: AppTheme.foreground),
                 ),
                 const SizedBox(height: 24),
                 Text(l10n.t('mobile.products.quantity'), style: const TextStyle(fontWeight: FontWeight.w600)),

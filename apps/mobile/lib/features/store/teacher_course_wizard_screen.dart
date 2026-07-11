@@ -346,11 +346,9 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
     try {
       final api = context.read<ApiClient>();
       final upload = VideoUploadService(api);
-      final wm = await upload.fetchWatermarkConfig(courseName: _titleCtrl.text.trim());
       final sourceSize = await source.length();
       final processed = await VideoProcessService.processForUpload(
         source: source,
-        watermark: wm,
         onProgress: (p) {
           _setBusyUi(
             l10n.t('mobile.teacher.convertingVideo', {
@@ -378,6 +376,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         courseId: _courseId!,
         scope: 'STORE_COURSE',
         durationSec: duration,
+        watermarkApplied: false,
         onProgress: (sent, total) {
           if (total <= 0) return;
           final pct = (sent * 100 / total).round();
@@ -486,13 +485,14 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
       });
       final uploadUrl = presign['uploadUrl']?.toString();
       final key = presign['key']?.toString();
-      final publicUrl = presign['publicUrl']?.toString();
       if (uploadUrl == null || key == null) throw Exception(l10n.t('mobile.teacher.uploadFailed'));
       await api.putFile(uploadUrl, file, 'application/pdf');
+      final docTitle = name
+          .replaceAll(RegExp(r'\.pdf$', caseSensitive: false), '')
+          .trim();
       await api.post('/api/teacher/courses/$_courseId/documents', {
-        'title': name.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), ''),
+        'title': docTitle.isEmpty ? 'Course PDF' : docTitle,
         'fileKey': key,
-        if (publicUrl != null) 'fileUrl': publicUrl,
         'mimeType': 'application/pdf',
         'fileSize': size,
         'type': 'PDF',
@@ -616,7 +616,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
                     child: Text(
                       l10n.t('mobile.teacher.specialtiesRequired'),
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: AppTheme.muted, height: 1.5),
+                      style: TextStyle(color: AppTheme.muted, height: 1.5),
                     ),
                   ),
                 )
@@ -744,7 +744,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         const SizedBox(height: 6),
         Text(
           l10n.t('mobile.teacher.basicsHint'),
-          style: const TextStyle(color: AppTheme.muted, height: 1.4),
+          style: TextStyle(color: AppTheme.muted, height: 1.4),
         ),
         const SizedBox(height: 18),
         TextField(
@@ -816,9 +816,9 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
                   Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.add_photo_alternate_outlined, size: 40, color: AppTheme.muted),
+                      Icon(Icons.add_photo_alternate_outlined, size: 40, color: AppTheme.muted),
                       const SizedBox(height: 8),
-                      Text(l10n.t('mobile.teacher.tapToAddCover'), style: const TextStyle(color: AppTheme.muted)),
+                      Text(l10n.t('mobile.teacher.tapToAddCover'), style: TextStyle(color: AppTheme.muted)),
                     ],
                   ),
                 if (_coverFile != null || (_coverUrl != null && _coverUrl!.isNotEmpty))
@@ -853,7 +853,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         const SizedBox(height: 6),
         Text(
           l10n.t('mobile.teacher.videosHintOptional'),
-          style: const TextStyle(color: AppTheme.muted, height: 1.4),
+          style: TextStyle(color: AppTheme.muted, height: 1.4),
         ),
         const SizedBox(height: 16),
         _RequirementChip(
@@ -927,7 +927,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         const SizedBox(height: 6),
         Text(
           l10n.t('mobile.teacher.quizzesHint', {'count': '${_quizzes.length}'}),
-          style: const TextStyle(color: AppTheme.muted, height: 1.4),
+          style: TextStyle(color: AppTheme.muted, height: 1.4),
         ),
         const SizedBox(height: 12),
         ..._quizzes.map(
@@ -1059,7 +1059,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         const SizedBox(height: 6),
         Text(
           l10n.t('mobile.teacher.documentCountHint', {'count': '$docCount'}),
-          style: const TextStyle(color: AppTheme.muted, height: 1.4),
+          style: TextStyle(color: AppTheme.muted, height: 1.4),
         ),
         const SizedBox(height: 12),
         ...docs.map(
@@ -1130,7 +1130,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         const SizedBox(height: 6),
         Text(
           l10n.t('mobile.teacher.submitHint'),
-          style: const TextStyle(color: AppTheme.muted, height: 1.4),
+          style: TextStyle(color: AppTheme.muted, height: 1.4),
         ),
         const SizedBox(height: 16),
         _RequirementChip(label: l10n.t('mobile.teacher.checklistTitle'), done: r?['hasTitle'] == true),

@@ -4,6 +4,35 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/image_cache_manager.dart';
 
+/// Resolves a teacher/user profile photo from flat or nested API payloads.
+String? resolveProfilePhotoUrl(Map<String, dynamic>? source) {
+  if (source == null) return null;
+
+  String? pick(dynamic v) {
+    final s = v?.toString().trim();
+    return (s == null || s.isEmpty) ? null : s;
+  }
+
+  final direct = pick(source['profilePhotoUrl']);
+  if (direct != null) return direct;
+
+  final nested = source['user'];
+  if (nested is Map) {
+    final nestedUrl = pick(nested['profilePhotoUrl']);
+    if (nestedUrl != null) return nestedUrl;
+  }
+
+  final key = pick(source['profilePhotoKey']) ??
+      (nested is Map ? pick(nested['profilePhotoKey']) : null);
+  if (key == null) return null;
+  final encoded = key
+      .split('/')
+      .where((p) => p.isNotEmpty)
+      .map(Uri.encodeComponent)
+      .join('/');
+  return '/api/media/$encoded';
+}
+
 /// Circular avatar with optional photo, initials fallback, and edit affordance.
 class ProfileAvatar extends StatelessWidget {
   const ProfileAvatar({

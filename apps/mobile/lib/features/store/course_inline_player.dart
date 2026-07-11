@@ -296,7 +296,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
         child: Container(
           color: AppTheme.card,
           child: Center(
-            child: Text(_error!, style: const TextStyle(color: AppTheme.muted)),
+            child: Text(_error!, style: TextStyle(color: AppTheme.muted)),
           ),
         ),
       );

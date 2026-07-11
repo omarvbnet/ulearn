@@ -62,11 +62,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.notifications_none, size: 48, color: AppTheme.muted),
+            Icon(Icons.notifications_none, size: 48, color: AppTheme.muted),
             const SizedBox(height: 12),
             Text(
               context.l10n.studentNoNotifications,
-              style: const TextStyle(color: AppTheme.muted),
+              style: TextStyle(color: AppTheme.muted),
             ),
           ],
         ),
@@ -108,7 +108,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 ),
                 subtitle: Text(
                   n['body']?.toString() ?? '',
-                  style: const TextStyle(color: AppTheme.muted, fontSize: 13),
+                  style: TextStyle(color: AppTheme.muted, fontSize: 13),
                 ),
               ),
             ),
