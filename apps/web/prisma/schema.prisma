@@ -1693,7 +1693,7 @@ model KbChunk {
   /// JSON metadata copy for filters (stage, subject, lesson, …)
   metadata   Json
   version    Int      @default(1)
-  /// Portable embedding copy (Gemini text-embedding-004 = 768 dims)
+  /// Portable embedding copy (Gemini gemini-embedding-001 @ 768 dims)
   embedding  Float[]  @default([])
   contentHash String?
   createdAt  DateTime @default(now())

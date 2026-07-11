@@ -2,35 +2,46 @@ import { AuthService } from "@/services/auth.service";
 import { error, getClientIp, json } from "@/lib/api";
 import { z } from "zod";
 
+/** Accept missing / null / empty as undefined; validate real emails. */
+const optionalEmail = z.preprocess(
+  (v) => (v === null || v === "" ? undefined : v),
+  z.string().email().optional()
+);
+
+const optionalString = z.preprocess(
+  (v) => (v === null || v === "" ? undefined : v),
+  z.string().optional()
+);
+
 const baseSchema = z.object({
   phone: z.string().min(8),
   fullLegalName: z.string().min(2),
   gender: z.enum(["MALE", "FEMALE"]),
-  countryId: z.string(),
-  provinceId: z.string(),
-  email: z.string().email().optional(),
+  countryId: z.string().min(1),
+  provinceId: z.string().min(1),
+  email: optionalEmail,
   nationalId: z.string().min(3),
   nationalIdImage: z.string().min(1),
-  latitude: z.number().optional(),
-  longitude: z.number().optional(),
-  locationLabel: z.string().optional(),
+  latitude: z.number().optional().nullable(),
+  longitude: z.number().optional().nullable(),
+  locationLabel: optionalString,
   locale: z.enum(["AR", "KU", "TR", "EN"]).optional(),
 });
 
 const studentSchema = baseSchema.extend({
   type: z.literal("STUDENT"),
   parentPhone: z.string().min(8),
-  parentEmail: z.string().email().optional(),
+  parentEmail: optionalEmail,
   educationalStageId: z.string().min(1),
-  grade: z.string().optional(),
-  schoolUniversity: z.string().optional(),
+  grade: optionalString,
+  schoolUniversity: optionalString,
 });
 
 const certificateSchema = baseSchema.extend({
   type: z.literal("CERTIFICATE"),
-  educationalQualification: z.string().optional(),
-  specialization: z.string().optional(),
-  occupation: z.string().optional(),
+  educationalQualification: optionalString,
+  specialization: optionalString,
+  occupation: optionalString,
 });
 
 const schema = z.discriminatedUnion("type", [studentSchema, certificateSchema]);
@@ -40,7 +51,12 @@ export async function POST(request: Request) {
     const body = await request.json();
     const parsed = schema.safeParse(body);
     if (!parsed.success) {
-      return error("Validation failed", 400, "VALIDATION_ERROR");
+      const details = parsed.error.issues.map((i) => ({
+        path: i.path.join("."),
+        message: i.message,
+      }));
+      console.warn("[auth/register] validation failed", details);
+      return error("Validation failed", 400, "VALIDATION_ERROR", { details });
     }
 
     const ip = getClientIp(request);
@@ -48,8 +64,22 @@ export async function POST(request: Request) {
 
     const result =
       data.type === "STUDENT"
-        ? await AuthService.registerStudent(data, { ipAddress: ip })
-        : await AuthService.registerCertificateUser(data, { ipAddress: ip });
+        ? await AuthService.registerStudent(
+            {
+              ...data,
+              latitude: data.latitude ?? undefined,
+              longitude: data.longitude ?? undefined,
+            },
+            { ipAddress: ip }
+          )
+        : await AuthService.registerCertificateUser(
+            {
+              ...data,
+              latitude: data.latitude ?? undefined,
+              longitude: data.longitude ?? undefined,
+            },
+            { ipAddress: ip }
+          );
 
     if (!result.success) {
       return error(result.error, 400, result.error);

@@ -816,7 +816,9 @@
       "selectCountryProvince": "Please select country and province",
       "attachNationalId": "Please attach your national ID image",
       "selectStage": "Please select your educational stage",
-      "parentEmail": "Parent Email (for quiz results)"
+      "parentEmail": "Parent Email (for quiz results)",
+      "phoneExists": "Bu telefon numarası zaten kayıtlı. Lütfen giriş yapın.",
+      "validationFailed": "Lütfen bilgilerinizi kontrol edip tekrar deneyin."
     },
     "favorites": {
       "coursesTab": "Courses",

@@ -181,15 +181,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'provinceId': _provinceId,
         'nationalId': _nationalId.text.trim(),
         'nationalIdImage': _nationalIdImageUrl,
-        'email': _email.text.trim().isEmpty ? null : _email.text.trim(),
         'locale': context.localeCode,
       };
 
+      final email = _email.text.trim();
+      if (email.isNotEmpty) payload['email'] = email;
+
       if (_type == 'STUDENT') {
         payload['parentPhone'] = _parentPhone.text.trim();
-        if (_parentEmail.text.trim().isNotEmpty) {
-          payload['parentEmail'] = _parentEmail.text.trim();
-        }
+        final parentEmail = _parentEmail.text.trim();
+        if (parentEmail.isNotEmpty) payload['parentEmail'] = parentEmail;
         payload['educationalStageId'] = _stageId;
       }
 
@@ -202,10 +203,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (!mounted) return;
       Navigator.of(context).popUntil((r) => r.isFirst);
     } catch (e) {
-      setState(() => _error = e.toString());
+      final raw = e is ApiException ? e.message : e.toString();
+      setState(() => _error = _friendlyRegisterError(raw));
     } finally {
       setState(() => _loading = false);
     }
+  }
+
+  String _friendlyRegisterError(String raw) {
+    final l10n = context.l10n;
+    final code = raw.replaceFirst('ApiException: ', '').trim();
+    return switch (code) {
+      'PHONE_EXISTS' => l10n.t('mobile.register.phoneExists'),
+      'VALIDATION_ERROR' || 'Validation failed' =>
+        l10n.t('mobile.register.validationFailed'),
+      _ => code.isNotEmpty ? code : l10n.t('mobile.error.generic'),
+    };
   }
 
   @override
