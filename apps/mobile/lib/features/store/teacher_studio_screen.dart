@@ -16,6 +16,7 @@ import 'package:ulearn/features/store/teacher_quiz_tab.dart';
 import 'package:ulearn/features/store/widgets/free_minute_picker.dart';
 import 'package:ulearn/core/video/video_process_service.dart';
 import 'package:ulearn/core/video/video_upload_service.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 const _compressPrefKey = 'teacher_compress_before_upload';
 
@@ -658,7 +659,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       child: DefaultTabController(
         length: 3,
         child: Scaffold(
-          appBar: AppBar(
+          appBar: GlassAppBar(
             titleSpacing: 16,
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

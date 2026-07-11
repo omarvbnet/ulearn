@@ -93,10 +93,12 @@ export class ProductService {
       },
     });
 
-    const purchases = await prisma.productPurchase.findMany({
-      where: { userId, productId: { in: products.map((p) => p.id) } },
-      select: { productId: true, status: true, quantity: true },
-    });
+    const purchases = userId
+      ? await prisma.productPurchase.findMany({
+          where: { userId, productId: { in: products.map((p) => p.id) } },
+          select: { productId: true, status: true, quantity: true },
+        })
+      : [];
     const byProduct = new Map(purchases.map((p) => [p.productId, p]));
 
     return products.map((p) => {

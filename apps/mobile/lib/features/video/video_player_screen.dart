@@ -13,6 +13,7 @@ import 'package:ulearn/core/video/course_video_cache.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
 import 'package:video_player/video_player.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 class VideoPlayerScreen extends StatefulWidget {
   const VideoPlayerScreen({
@@ -167,9 +168,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     final l10n = context.l10n;
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
+      appBar: GlassAppBar(
         title: Text(widget.title),
-        backgroundColor: Colors.black,
         actions: [
           if (_quizzes.isNotEmpty)
             IconButton(

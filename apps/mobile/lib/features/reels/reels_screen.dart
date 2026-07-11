@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/auth/require_auth.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/reel_video_cache.dart';
@@ -12,6 +13,7 @@ import 'package:ulearn/features/reels/reel_comments_sheet.dart';
 import 'package:ulearn/features/notifications/notifications_screen.dart';
 import 'package:ulearn/features/reels/teacher_profile_screen.dart';
 import 'package:ulearn/features/report/report_content_sheet.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 /// Vertical short-video feed (reels) with likes and comments.
 class ReelsScreen extends StatefulWidget {
@@ -192,6 +194,7 @@ class ReelsScreenState extends State<ReelsScreen> {
   }
 
   Future<void> _toggleLike(int index) async {
+    if (!await requireAuth(context)) return;
     final video = _videos[index];
     final id = video['id']?.toString();
     if (id == null) return;
@@ -219,7 +222,9 @@ class ReelsScreenState extends State<ReelsScreen> {
     }
   }
 
-  void _openComments(int index) {
+  void _openComments(int index) async {
+    if (!await requireAuth(context)) return;
+    if (!mounted) return;
     final video = _videos[index];
     _pauseForNavigation(() => showModalBottomSheet<void>(
           context: context,
@@ -318,6 +323,8 @@ class ReelsScreenState extends State<ReelsScreen> {
   }
 
   Future<void> _reportVideo(Map<String, dynamic> video) async {
+    if (!await requireAuth(context)) return;
+    if (!mounted) return;
     final id = video['id']?.toString();
     if (id == null) return;
     await _pauseForNavigation(() => ReportContentSheet.show(
@@ -329,6 +336,8 @@ class ReelsScreenState extends State<ReelsScreen> {
   }
 
   Future<void> _toggleSave(int index) async {
+    if (!await requireAuth(context)) return;
+    if (!mounted) return;
     final video = _videos[index];
     final id = video['id']?.toString();
     if (id == null) return;
@@ -547,7 +556,7 @@ class ReelsScreenState extends State<ReelsScreen> {
                       onPressed: () => _pauseForNavigation(() => Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => Scaffold(
-                                appBar: AppBar(title: Text(context.l10n.navNotifications)),
+                                appBar: GlassAppBar(title: Text(context.l10n.navNotifications)),
                                 body: const NotificationsScreen(),
                               ),
                             ),

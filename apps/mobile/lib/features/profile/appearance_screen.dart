@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/theme/theme_mode_provider.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 class AppearanceScreen extends StatelessWidget {
   const AppearanceScreen({super.key});
@@ -34,7 +35,7 @@ class AppearanceScreen extends StatelessWidget {
     ];
 
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.profileAppearanceTitle)),
+      appBar: GlassAppBar(title: Text(l10n.profileAppearanceTitle)),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: [

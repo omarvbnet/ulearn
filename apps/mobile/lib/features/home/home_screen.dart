@@ -9,6 +9,7 @@ import 'package:ulearn/features/notifications/notifications_screen.dart';
 import 'package:ulearn/features/profile/profile_screen.dart';
 import 'package:ulearn/features/store/store_screen.dart';
 import 'package:ulearn/features/reels/reels_screen.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -76,7 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
       extendBodyBehindAppBar: isReels,
       appBar: isReels
           ? null
-          : AppBar(
+          : GlassAppBar(
               title: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -91,7 +92,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => Scaffold(
-                        appBar: AppBar(title: Text(context.l10n.navNotifications)),
+                        appBar: GlassAppBar(title: Text(context.l10n.navNotifications)),
                         body: const NotificationsScreen(),
                       ),
                     ),

@@ -1,18 +1,17 @@
-import { error, json, requireAuth } from "@/lib/api";
+import { error, json, optionalAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { PUBLIC_LESSON_WHERE } from "@/lib/video-visibility";
 import { CourseRatingService } from "@/services/course-rating.service";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 import { getDownloadUrl } from "@/lib/r2";
 
-/** Students: course detail; lesson media only after a confirmed purchase. */
+/** Course detail — public browse; purchase/progress fields when signed in. */
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth();
-  if (auth.error) return auth.error;
-  const userId = auth.session.userId;
+  const session = await optionalAuth();
+  const userId = session?.userId;
 
   const { id } = await params;
   const course = await prisma.course.findFirst({
@@ -47,29 +46,35 @@ export async function GET(
   const lessonIds = course.lessons.map((l) => l.id);
   const [purchased, myFavorite, favoriteCount, likeGroups, myLikes, favGroups, myLessonFavs] =
     await Promise.all([
-      TeacherCourseService.hasPurchased(id, userId),
-      prisma.courseFavorite.findUnique({
-        where: { courseId_userId: { courseId: id, userId } },
-      }),
+      userId ? TeacherCourseService.hasPurchased(id, userId) : Promise.resolve(false),
+      userId
+        ? prisma.courseFavorite.findUnique({
+            where: { courseId_userId: { courseId: id, userId } },
+          })
+        : Promise.resolve(null),
       prisma.courseFavorite.count({ where: { courseId: id } }),
       prisma.courseLessonLike.groupBy({
         by: ["lessonId"],
         where: { lessonId: { in: lessonIds } },
         _count: true,
       }),
-      prisma.courseLessonLike.findMany({
-        where: { userId, lessonId: { in: lessonIds } },
-        select: { lessonId: true },
-      }),
+      userId
+        ? prisma.courseLessonLike.findMany({
+            where: { userId, lessonId: { in: lessonIds } },
+            select: { lessonId: true },
+          })
+        : Promise.resolve([] as { lessonId: string }[]),
       prisma.courseLessonFavorite.groupBy({
         by: ["lessonId"],
         where: { lessonId: { in: lessonIds } },
         _count: true,
       }),
-      prisma.courseLessonFavorite.findMany({
-        where: { userId, lessonId: { in: lessonIds } },
-        select: { lessonId: true },
-      }),
+      userId
+        ? prisma.courseLessonFavorite.findMany({
+            where: { userId, lessonId: { in: lessonIds } },
+            select: { lessonId: true },
+          })
+        : Promise.resolve([] as { lessonId: string }[]),
     ]);
 
   const likeCounts = new Map(likeGroups.map((g) => [g.lessonId, g._count]));
@@ -77,23 +82,25 @@ export async function GET(
   const favCounts = new Map(favGroups.map((g) => [g.lessonId, g._count]));
   const favSet = new Set(myLessonFavs.map((f) => f.lessonId));
 
-  const isOwnCourse = course.teacher.userId === userId;
+  const isOwnCourse = Boolean(userId && course.teacher.userId === userId);
   const hasAccess = purchased || isOwnCourse || course.price <= 0;
 
-  const progressRows = await prisma.courseLessonProgress.findMany({
-    where: { userId, lessonId: { in: lessonIds } },
-    select: {
-      lessonId: true,
-      isCompleted: true,
-      completionPct: true,
-      positionSec: true,
-    },
-  });
+  const progressRows = userId
+    ? await prisma.courseLessonProgress.findMany({
+        where: { userId, lessonId: { in: lessonIds } },
+        select: {
+          lessonId: true,
+          isCompleted: true,
+          completionPct: true,
+          positionSec: true,
+        },
+      })
+    : [];
   const progressMap = new Map(progressRows.map((p) => [p.lessonId, p]));
 
   const quizIds = quizzes.map((q) => q.id);
   const passedAttempts =
-    quizIds.length > 0
+    userId && quizIds.length > 0
       ? await prisma.quizAttempt.findMany({
           where: {
             userId,
@@ -130,7 +137,6 @@ export async function GET(
       if (canWatch && l.fileKey && !fileUrl) {
         fileUrl = await getDownloadUrl(l.fileKey).catch(() => null);
       }
-      // Covers are shown for every lesson (locked ones included).
       let thumbnailUrl = l.thumbnailUrl;
       if (!thumbnailUrl && l.thumbnailKey) {
         thumbnailUrl = await getDownloadUrl(l.thumbnailKey).catch(() => null);
@@ -205,7 +211,9 @@ export async function GET(
     })
   );
 
-  const completion = await CourseRatingService.getCompletionStatus(id, userId);
+  const completion = userId
+    ? await CourseRatingService.getCompletionStatus(id, userId)
+    : null;
   const quizzesWithStatus = quizzes.map((q) => ({
     ...q,
     passedByMe: passedQuizIds.has(q.id),

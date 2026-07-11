@@ -12,6 +12,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/video_process_service.dart';
 import 'package:ulearn/core/video/video_upload_service.dart';
 import 'package:ulearn/features/store/widgets/free_minute_picker.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 const _compressPrefKey = 'teacher_compress_before_upload';
 
@@ -288,7 +289,7 @@ class _TeacherLessonUploadScreenState extends State<TeacherLessonUploadScreen> {
       onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
       behavior: HitTestBehavior.translucent,
       child: Scaffold(
-        appBar: AppBar(
+        appBar: GlassAppBar(
           title: Text(l10n.t('mobile.studio.addVideo')),
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(28),

@@ -240,6 +240,13 @@
       "verifyContinue": "Doğrula ve devam et",
       "resendIn": "{seconds}s içinde tekrar gönder"
     },
+    "auth": {
+      "loginRequiredTitle": "Devam etmek için giriş yapın",
+      "loginRequiredHint": "Beğenmek, kaydetmek, abone olmak ve öğrenmeyi açmak için giriş yapın veya hesap oluşturun.",
+      "registerWelcome": "Hesabınızı oluşturun 👋",
+      "registerHint": "Telefon numaranızı girin — WhatsApp ile doğrularız, sonra kaydı tamamlarız.",
+      "guestCoursesHint": "Abone olduğunuz ve satın aldığınız kursları görmek için giriş yapın."
+    },
     "home": {
       "myCourses": "Kurslarım",
       "reels": "Reels",

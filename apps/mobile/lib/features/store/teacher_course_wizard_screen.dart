@@ -12,6 +12,7 @@ import 'package:ulearn/core/video/video_process_service.dart';
 import 'package:ulearn/core/video/video_upload_service.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/features/home/home_feed.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 /// 5-step course creation wizard: basics → free videos → quizzes → document → submit.
 class TeacherCourseWizardScreen extends StatefulWidget {
@@ -600,7 +601,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
       onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
       behavior: HitTestBehavior.translucent,
       child: Scaffold(
-      appBar: AppBar(
+      appBar: GlassAppBar(
         title: Text(l10n.t('mobile.teacher.wizardTitle')),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(72),

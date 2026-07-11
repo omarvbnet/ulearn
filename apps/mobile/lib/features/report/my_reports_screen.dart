@@ -4,6 +4,7 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 class MyReportsScreen extends StatefulWidget {
   const MyReportsScreen({super.key});
@@ -16,7 +17,7 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
   List<Map<String, dynamic>> _reports = [];
   bool _loading = true;
 
-  static const _statusColors = {
+  static Map<String, Color> get _statusColors => {
     'PENDING': Colors.orangeAccent,
     'REVIEWED': AppTheme.accent,
     'DISMISSED': AppTheme.muted,
@@ -53,7 +54,7 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.profileMyReports)),
+      appBar: GlassAppBar(title: Text(l10n.profileMyReports)),
       body: _loading
           ? const Padding(
               padding: EdgeInsets.all(16),

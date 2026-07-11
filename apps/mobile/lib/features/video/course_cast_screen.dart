@@ -11,6 +11,7 @@ import 'package:ulearn/core/video/cast_watermarked_video.dart';
 import 'package:ulearn/core/video/course_cast_service.dart';
 import 'package:ulearn/features/video/native_airplay_player.dart';
 import 'package:ulearn/features/video/video_protection.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 /// Full-screen cast experience with a server-burned viewer watermark in the stream.
 class CourseCastScreen extends StatefulWidget {
@@ -188,9 +189,7 @@ class _CourseCastScreenState extends State<CourseCastScreen> {
 
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
+      appBar: GlassAppBar(
         title: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           if (Platform.isAndroid)

@@ -8,6 +8,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 class QuizScreen extends StatefulWidget {
   const QuizScreen({super.key, required this.quizId, required this.title});
@@ -164,7 +165,7 @@ class _QuizScreenState extends State<QuizScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
+      appBar: GlassAppBar(title: Text(widget.title)),
       body: _error != null
           ? Center(
               child: Padding(

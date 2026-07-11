@@ -9,6 +9,7 @@ import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 /// Request a move to a different educational stage. Requires a certificate
 /// attachment (image or PDF) which the admin reviews before approving.
@@ -176,7 +177,7 @@ class _StageRequestScreenState extends State<StageRequestScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.stageRequestTitle)),
+      appBar: GlassAppBar(title: Text(l10n.stageRequestTitle)),
       body: _loading
           ? Skeleton(
               child: ListView(

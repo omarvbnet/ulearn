@@ -240,6 +240,13 @@
       "verifyContinue": "تحقق ومتابعة",
       "resendIn": "إعادة الإرسال خلال {seconds} ث"
     },
+    "auth": {
+      "loginRequiredTitle": "سجّل الدخول للمتابعة",
+      "loginRequiredHint": "سجّل الدخول أو أنشئ حساباً للإعجاب والحفظ والاشتراك وفتح محتواك.",
+      "registerWelcome": "أنشئ حسابك 👋",
+      "registerHint": "أدخل رقم هاتفك — سنتحقق عبر واتساب ثم نكمل التسجيل.",
+      "guestCoursesHint": "سجّل الدخول لعرض دوراتك المشترك بها والمشتراة."
+    },
     "home": {
       "myCourses": "دوراتي",
       "reels": "ريلز",

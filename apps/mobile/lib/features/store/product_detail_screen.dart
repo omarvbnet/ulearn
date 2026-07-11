@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/auth/require_auth.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   const ProductDetailScreen({super.key, required this.productId});
@@ -45,6 +47,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   }
 
   Future<void> _requestOrder() async {
+    if (!await requireAuth(context)) return;
+    if (!mounted) return;
     final p = _product;
     if (p == null || p.isEmpty) return;
     final status = p['purchaseStatus']?.toString();
@@ -103,13 +107,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
     if (p == null) {
       return Scaffold(
-        appBar: AppBar(title: Text(l10n.t('mobile.products.title'))),
+        appBar: GlassAppBar(title: Text(l10n.t('mobile.products.title'))),
         body: SkeletonList(itemBuilder: (_) => const SkeletonTextCard()),
       );
     }
     if (p.isEmpty) {
       return Scaffold(
-        appBar: AppBar(title: Text(l10n.t('mobile.products.title'))),
+        appBar: GlassAppBar(title: Text(l10n.t('mobile.products.title'))),
         body: Center(child: Text(l10n.t('mobile.error.generic'), style: TextStyle(color: AppTheme.muted))),
       );
     }
@@ -126,7 +130,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     final canOrder = status != 'PENDING' && status != 'PAID' && (stock == null || stock >= _quantity);
 
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.t('mobile.products.title'))),
+      appBar: GlassAppBar(title: Text(l10n.t('mobile.products.title'))),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 100),
         children: [

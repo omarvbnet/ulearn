@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/auth/require_auth.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
@@ -42,6 +43,11 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
   }
 
   Future<void> _load() async {
+    final auth = context.read<AuthProvider>();
+    if (!auth.isAuthenticated) {
+      if (mounted) setState(() { _courses = []; _loading = false; });
+      return;
+    }
     setState(() => _loading = true);
     try {
       final q = _search.trim();
@@ -97,6 +103,37 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
     final isTeacher = auth.user?.role == 'TEACHER';
     final locale = context.localeCode;
     final l10n = context.l10n;
+
+    if (!auth.isAuthenticated) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.lock_outline_rounded, size: 48, color: AppTheme.muted.withValues(alpha: 0.5)),
+              const SizedBox(height: 14),
+              Text(
+                l10n.t('mobile.auth.guestCoursesHint'),
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.muted, height: 1.4),
+              ),
+              const SizedBox(height: 18),
+              FilledButton(
+                onPressed: () async {
+                  if (await requireAuth(context) && mounted) _load();
+                },
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.accent,
+                  foregroundColor: Colors.black,
+                ),
+                child: Text(l10n.navLogin),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Column(
       children: [

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/auth/require_auth.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/course_video_cache.dart';
@@ -17,6 +18,7 @@ import 'package:ulearn/features/store/course_inline_player.dart';
 import 'package:ulearn/features/store/course_material_pdf_screen.dart';
 import 'package:ulearn/features/store/lesson_qa_section.dart';
 import 'package:ulearn/features/store/teacher_studio_screen.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 enum _PlayerStage { playing, quiz, documents }
 
@@ -201,6 +203,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   Future<void> _toggleFavorite() async {
+    if (!await requireAuth(context)) return;
+    if (!mounted) return;
     final was = _favorited;
     setState(() => _favorited = !was);
     try {
@@ -220,6 +224,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   Future<void> _toggleLessonLike(Map<String, dynamic> lesson) async {
+    if (!await requireAuth(context)) return;
+    if (!mounted) return;
     final id = lesson['id'].toString();
     final wasLiked = lesson['likedByMe'] == true;
     setState(() {
@@ -244,6 +250,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   Future<void> _toggleLessonFavorite(Map<String, dynamic> lesson) async {
+    if (!await requireAuth(context)) return;
+    if (!mounted) return;
     final id = lesson['id'].toString();
     final was = lesson['favoritedByMe'] == true;
     setState(() => lesson['favoritedByMe'] = !was);
@@ -260,6 +268,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   Future<void> _buy() async {
+    if (!await requireAuth(context)) return;
+    if (!mounted) return;
     setState(() => _buying = true);
     try {
       await context
@@ -907,7 +917,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
 
     if (course == null) {
       return Scaffold(
-        appBar: AppBar(),
+        appBar: GlassAppBar(),
         body: _error != null
             ? Center(child: Text(_error!, style: TextStyle(color: AppTheme.muted)))
             : Skeleton(
@@ -966,7 +976,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
-      appBar: AppBar(
+      appBar: GlassAppBar(
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           if (!_isOwnCourse)

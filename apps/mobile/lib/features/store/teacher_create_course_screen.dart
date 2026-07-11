@@ -4,6 +4,7 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/features/home/home_feed.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 /// Teacher creates a store course — must pick one specialty + one stage.
 class TeacherCreateCourseScreen extends StatefulWidget {
@@ -96,7 +97,7 @@ class _TeacherCreateCourseScreenState extends State<TeacherCreateCourseScreen> {
     final locale = context.localeCode;
 
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.t('mobile.teacher.newCourse'))),
+      appBar: GlassAppBar(title: Text(l10n.t('mobile.teacher.newCourse'))),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
           : _specialties.isEmpty

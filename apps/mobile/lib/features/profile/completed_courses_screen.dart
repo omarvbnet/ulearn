@@ -9,6 +9,7 @@ import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
 import 'package:ulearn/features/video/video_player_screen.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 /// Profile screen listing fully completed courses with watch time and quiz scores.
 class CompletedCoursesScreen extends StatefulWidget {
@@ -82,7 +83,7 @@ class _CompletedCoursesScreenState extends State<CompletedCoursesScreen> {
     final summary = _summary;
 
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.profileCompletedCourses)),
+      appBar: GlassAppBar(title: Text(l10n.profileCompletedCourses)),
       body: courses == null
           ? Skeleton(
               child: ListView(

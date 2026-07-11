@@ -10,6 +10,7 @@ import 'package:ulearn/core/video/media_cache_budget.dart';
 import 'package:ulearn/core/video/reel_video_cache.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 import 'package:ulearn/features/profile/profile_avatar.dart';
 import 'package:video_player/video_player.dart';
 
@@ -491,17 +492,19 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
               ),
             ),
 
-          // Slim glass progress + timer above bottom nav
+          // Slim glass progress above bottom nav (timer only while scrubbing)
           if (_controller != null && _controller!.value.isInitialized)
             Positioned(
-              left: 12,
-              right: 12,
-              bottom: bottom - 36,
+              left: 14,
+              right: 14,
+              // Sit above the floating glass tab bar, nudged down 6px.
+              bottom: bottom - 36 + 35 - 6,
               child: AnimatedBuilder(
                 animation: _controller!,
                 builder: (context, _) => _GlassProgressBar(
                   controller: _controller!,
                   formatTime: _formatTime,
+                  showTimer: _scrubbing,
                   onSeekStart: () {
                     setState(() => _scrubbing = true);
                     _controller?.pause();
@@ -520,7 +523,7 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
           // Right action rail
           Positioned(
             right: 10,
-            bottom: bottom + 12,
+            bottom: bottom + 28,
             child: Column(
               children: [
                 GestureDetector(
@@ -585,7 +588,7 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
           Positioned(
             left: 14,
             right: 76,
-            bottom: bottom + 8,
+            bottom: bottom + 24,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -701,6 +704,7 @@ class _GlassProgressBar extends StatelessWidget {
   const _GlassProgressBar({
     required this.controller,
     required this.formatTime,
+    required this.showTimer,
     required this.onSeek,
     required this.onSeekStart,
     required this.onSeekEnd,
@@ -708,6 +712,7 @@ class _GlassProgressBar extends StatelessWidget {
 
   final VideoPlayerController controller;
   final String Function(Duration) formatTime;
+  final bool showTimer;
   final ValueChanged<double> onSeek;
   final VoidCallback onSeekStart;
   final VoidCallback onSeekEnd;
@@ -725,63 +730,59 @@ class _GlassProgressBar extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Row(
-            children: [
-              Text(
-                formatTime(position),
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.92),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                  shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
-                ),
+        AnimatedOpacity(
+          opacity: showTimer ? 1 : 0,
+          duration: const Duration(milliseconds: 160),
+          child: IgnorePointer(
+            ignoring: !showTimer,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Row(
+                children: [
+                  Text(
+                    formatTime(position),
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.9),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                      shadows: const [Shadow(color: Colors.black54, blurRadius: 5)],
+                    ),
+                  ),
+                  Text(
+                    ' / ${formatTime(duration)}',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.5),
+                      fontSize: 10,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                      shadows: const [Shadow(color: Colors.black54, blurRadius: 5)],
+                    ),
+                  ),
+                ],
               ),
-              Text(
-                ' / ${formatTime(duration)}',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.55),
-                  fontSize: 11,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                  shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
-                ),
-              ),
-            ],
+            ),
           ),
         ),
-        const SizedBox(height: 3),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: Container(
-              height: 14,
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-              ),
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 2,
-                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4),
-                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
-                  activeTrackColor: Colors.white.withValues(alpha: 0.95),
-                  inactiveTrackColor: Colors.white.withValues(alpha: 0.22),
-                  thumbColor: Colors.white,
-                  overlayColor: AppTheme.accent.withValues(alpha: 0.18),
-                ),
-                child: Slider(
-                  value: progress,
-                  onChangeStart: (_) => onSeekStart(),
-                  onChanged: onSeek,
-                  onChangeEnd: (_) => onSeekEnd(),
-                ),
-              ),
+        if (showTimer) const SizedBox(height: 2),
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 1.2,
+            thumbShape: RoundSliderThumbShape(
+              enabledThumbRadius: showTimer ? 4 : 2.5,
+            ),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+            activeTrackColor: Colors.white.withValues(alpha: 0.95),
+            inactiveTrackColor: Colors.white.withValues(alpha: 0.22),
+            thumbColor: Colors.white,
+            overlayColor: AppTheme.accent.withValues(alpha: 0.16),
+          ),
+          child: SizedBox(
+            height: 16,
+            child: Slider(
+              value: progress,
+              onChangeStart: (_) => onSeekStart(),
+              onChanged: onSeek,
+              onChangeEnd: (_) => onSeekEnd(),
             ),
           ),
         ),
@@ -810,13 +811,7 @@ class _ActionButton extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.38),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white10),
-            ),
+          GlassCircle(
             child: Icon(icon, color: color, size: 26),
           ),
           const SizedBox(height: 4),

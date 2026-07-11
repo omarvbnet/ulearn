@@ -5,6 +5,7 @@ import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/reels/teacher_reels_viewer.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 /// Saved short videos from the reels feed.
 class SavedReelsScreen extends StatefulWidget {
@@ -42,7 +43,7 @@ class _SavedReelsScreenState extends State<SavedReelsScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.profileSavedReels)),
+      appBar: GlassAppBar(title: Text(l10n.profileSavedReels)),
       body: _loading
           ? GridView.builder(
               padding: const EdgeInsets.all(12),

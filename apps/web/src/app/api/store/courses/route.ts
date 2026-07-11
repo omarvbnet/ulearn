@@ -1,11 +1,10 @@
-import { json, requireAuth } from "@/lib/api";
+import { json, optionalAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 
-/** Students: browse published teacher courses (with own purchase status). */
+/** Browse published teacher courses (public). Purchase status when signed in. */
 export async function GET(request: Request) {
-  const auth = await requireAuth();
-  if (auth.error) return auth.error;
+  const session = await optionalAuth();
 
   const { searchParams } = new URL(request.url);
   const courses = await TeacherCourseService.listPublishedCourses({
@@ -13,15 +12,17 @@ export async function GET(request: Request) {
     subjectId: searchParams.get("subjectId") ?? undefined,
   });
 
-  const purchases = await prisma.coursePurchase.findMany({
-    where: { userId: auth.session.userId },
-    select: { courseId: true, status: true },
-  });
+  const purchases = session
+    ? await prisma.coursePurchase.findMany({
+        where: { userId: session.userId },
+        select: { courseId: true, status: true },
+      })
+    : [];
   const byCourse = new Map(purchases.map((p) => [p.courseId, p.status]));
 
   const enriched = await TeacherCourseService.enrichCoursesForUser(
     courses,
-    auth.session.userId
+    session?.userId
   );
 
   return json({

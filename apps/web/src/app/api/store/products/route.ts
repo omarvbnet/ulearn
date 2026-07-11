@@ -1,4 +1,4 @@
-import { json, requireAuth } from "@/lib/api";
+import { json, optionalAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import type { ProductCategory } from "@prisma/client";
 import { ProductService } from "@/services/product.service";
@@ -12,16 +12,17 @@ const categories = new Set([
   "OTHER",
 ]);
 
-/** Students: browse physical products with filters. */
+/** Browse physical products (public). Order status when signed in. */
 export async function GET(request: Request) {
-  const auth = await requireAuth();
-  if (auth.error) return auth.error;
+  const session = await optionalAuth();
 
   const { searchParams } = new URL(request.url);
-  const user = await prisma.user.findUnique({
-    where: { id: auth.session.userId },
-    select: { locale: true, countryId: true },
-  });
+  const user = session
+    ? await prisma.user.findUnique({
+        where: { id: session.userId },
+        select: { locale: true, countryId: true },
+      })
+    : null;
   const locale = user?.locale?.toLowerCase() ?? "en";
 
   const rawCategory = searchParams.get("category");
@@ -41,7 +42,7 @@ export async function GET(request: Request) {
       sort: sort ?? undefined,
       countryId: user?.countryId ?? undefined,
     },
-    auth.session.userId,
+    session?.userId ?? "",
     locale
   );
 

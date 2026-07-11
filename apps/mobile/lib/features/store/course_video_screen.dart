@@ -8,6 +8,7 @@ import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
 import 'package:video_player/video_player.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 /// Plays a store-course lesson from a direct (presigned) URL,
 /// with the same screen protection and watermark as curriculum videos.
@@ -78,7 +79,7 @@ class _CourseVideoScreenState extends State<CourseVideoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(title: Text(widget.title), backgroundColor: Colors.black),
+      appBar: GlassAppBar(title: Text(widget.title)),
       body: _loading
           ? const SkeletonVideoPlayer()
           : _error != null

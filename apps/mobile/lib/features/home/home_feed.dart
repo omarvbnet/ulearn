@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/auth/require_auth.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
@@ -171,6 +172,8 @@ class HomeFeedState extends State<HomeFeed> {
   }
 
   Future<void> _reactToCourse(Map<String, dynamic> course, String type) async {
+    if (!await requireAuth(context)) return;
+    if (!mounted) return;
     final id = course['id'].toString();
     final previous = {
       'likes': course['likes'],
@@ -213,6 +216,8 @@ class HomeFeedState extends State<HomeFeed> {
   }
 
   Future<void> _toggleFavorite(Map<String, dynamic> course) async {
+    if (!await requireAuth(context)) return;
+    if (!mounted) return;
     final id = course['id'].toString();
     final previous = {
       'favorites': course['favorites'],
@@ -302,6 +307,8 @@ class HomeFeedState extends State<HomeFeed> {
   }
 
   Future<void> _likeAd(Map<String, dynamic> ad) async {
+    if (!await requireAuth(context)) return;
+    if (!mounted) return;
     final id = ad['id'].toString();
     final previous = {'likes': ad['likes'], 'likedByMe': ad['likedByMe']};
 

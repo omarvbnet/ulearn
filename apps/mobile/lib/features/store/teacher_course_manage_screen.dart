@@ -15,6 +15,7 @@ import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/features/store/teacher_course_wizard_screen.dart';
 import 'package:ulearn/features/store/teacher_lesson_upload_screen.dart';
 import 'package:ulearn/features/store/widgets/free_minute_picker.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 /// Teacher: edit course metadata, reorder/rename/replace lessons, quizzes, documents.
 class TeacherCourseManageScreen extends StatefulWidget {
@@ -713,7 +714,7 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
       onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
       behavior: HitTestBehavior.translucent,
       child: Scaffold(
-      appBar: AppBar(
+      appBar: GlassAppBar(
         title: Text(l10n.t('mobile.teacher.manageCourse')),
         actions: [
           if (_status == 'DRAFT')

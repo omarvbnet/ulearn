@@ -6,6 +6,7 @@ import 'package:ulearn/core/l10n/app_localizations.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/l10n/locale_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 class LanguageScreen extends StatelessWidget {
   const LanguageScreen({super.key});
@@ -18,7 +19,7 @@ class LanguageScreen extends StatelessWidget {
     final l10n = context.l10n;
 
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.profileLanguageTitle)),
+      appBar: GlassAppBar(title: Text(l10n.profileLanguageTitle)),
       body: ListView(
         children: [
           for (final code in _codes)

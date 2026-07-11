@@ -8,6 +8,7 @@ import 'package:ulearn/features/reels/reel_comments_sheet.dart';
 import 'package:ulearn/features/reels/reel_slot.dart';
 import 'package:ulearn/features/reels/teacher_profile_screen.dart';
 import 'package:ulearn/features/report/report_content_sheet.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 /// Full-screen viewer for a teacher's short videos (from profile grid).
 class TeacherReelsViewer extends StatefulWidget {
@@ -211,7 +212,7 @@ class _TeacherReelsViewerState extends State<TeacherReelsViewer> {
     if (_videos.isEmpty) {
       return Scaffold(
         backgroundColor: Colors.black,
-        appBar: AppBar(backgroundColor: Colors.transparent),
+        appBar: const GlassAppBar(),
         body: Center(
           child: Text(
             context.l10n.reelsNoReels,

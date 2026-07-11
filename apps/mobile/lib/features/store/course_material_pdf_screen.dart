@@ -7,6 +7,7 @@ import 'package:printing/printing.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 /// In-app PDF viewer for course documents with print support.
 class CourseMaterialPdfScreen extends StatefulWidget {
@@ -96,9 +97,7 @@ class _CourseMaterialPdfScreenState extends State<CourseMaterialPdfScreen> {
     final l10n = context.l10n;
     return Scaffold(
       backgroundColor: const Color(0xFF12121C),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF12121C),
-        foregroundColor: Colors.white,
+      appBar: GlassAppBar(
         title: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           if (_bytes != null) ...[

@@ -8,6 +8,7 @@ import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 /// The student's bookmarked courses and videos, in two tabs.
 class FavoritesScreen extends StatefulWidget {
@@ -103,7 +104,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     return DefaultTabController(
       length: 2,
       child: Scaffold(
-        appBar: AppBar(
+        appBar: GlassAppBar(
           title: Text(l10n.profileFavorites),
           bottom: TabBar(
             indicatorColor: AppTheme.accent,

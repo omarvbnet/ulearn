@@ -24,6 +24,11 @@ export async function requireAuth(roles?: UserRole[]): Promise<
   return { session };
 }
 
+/** Session if present; otherwise null (for public browse endpoints). */
+export async function optionalAuth(): Promise<SessionPayload | null> {
+  return getSession();
+}
+
 export function getClientIp(request: Request): string | undefined {
   return (
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||

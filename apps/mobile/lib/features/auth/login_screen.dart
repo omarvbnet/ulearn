@@ -10,7 +10,10 @@ import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/auth/register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.startAsRegister = false});
+
+  /// When opened from guest "Register", show a register-oriented welcome line.
+  final bool startAsRegister;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -105,11 +108,16 @@ class _LoginScreenState extends State<LoginScreen>
           );
       if (!mounted) return;
       if (result['isNewUser'] == true) {
-        Navigator.of(context).push(
+        await Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => RegisterScreen(phone: _phoneCtrl.text.trim()),
           ),
         );
+        if (!mounted) return;
+      }
+      // Guest flow: close login sheet/route after successful auth.
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
       }
     } catch (e) {
       _otpCtrl.clear();
@@ -251,12 +259,16 @@ class _LoginScreenState extends State<LoginScreen>
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          l10n.loginWelcome,
+          widget.startAsRegister
+              ? l10n.t('mobile.auth.registerWelcome')
+              : l10n.loginWelcome,
           style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 6),
         Text(
-          l10n.loginSignInHint,
+          widget.startAsRegister
+              ? l10n.t('mobile.auth.registerHint')
+              : l10n.loginSignInHint,
           style: TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.5),
         ),
         const SizedBox(height: 20),

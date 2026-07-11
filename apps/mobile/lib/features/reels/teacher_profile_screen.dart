@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/auth/require_auth.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
@@ -75,6 +76,8 @@ class _TeacherProfileScreenState extends State<TeacherProfileScreen>
   }
 
   Future<void> _purchase(String courseId) async {
+    if (!await requireAuth(context)) return;
+    if (!mounted) return;
     setState(() => _busyCourseId = courseId);
     try {
       await context.read<ApiClient>().post('/api/store/courses/$courseId/purchase', {});

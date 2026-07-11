@@ -1,4 +1,4 @@
-import { json, requireAuth } from "@/lib/api";
+import { json, optionalAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { resolvePublicMediaUrl } from "@/lib/r2";
 import { CourseRatingService } from "@/services/course-rating.service";
@@ -8,17 +8,11 @@ import type { TeacherLevel } from "@prisma/client";
 const LEVELS: TeacherLevel[] = ["GOOD", "EXCELLENT", "MASTER"];
 
 /**
- * Mobile home feed. Returns the student's stage, the list of stages (for the
- * stage switcher), active advertisements and the published store courses,
- * enriched with engagement data for the caller.
- *
- * Filters: `stageId` (defaults to the student's own stage), `q` free-text
- * search across courses/teachers/videos, `level` teacher experience filter.
+ * Mobile home feed. Public browse supported; engagement fields fill in when signed in.
  */
 export async function GET(request: Request) {
-  const auth = await requireAuth();
-  if (auth.error) return auth.error;
-  const userId = auth.session.userId;
+  const session = await optionalAuth();
+  const userId = session?.userId;
 
   const { searchParams } = new URL(request.url);
   const explicitStageId = searchParams.get("stageId") ?? undefined;
@@ -28,21 +22,22 @@ export async function GET(request: Request) {
     ? (levelParam.split(",").filter((l) => LEVELS.includes(l as TeacherLevel)) as TeacherLevel[])
     : undefined;
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: {
-      studentProfile: {
+  const user = userId
+    ? await prisma.user.findUnique({
+        where: { id: userId },
         include: {
-          educationalStage: {
-            select: { id: true, nameEn: true, nameAr: true, nameKu: true, nameTr: true },
+          studentProfile: {
+            include: {
+              educationalStage: {
+                select: { id: true, nameEn: true, nameAr: true, nameKu: true, nameTr: true },
+              },
+            },
           },
         },
-      },
-    },
-  });
+      })
+    : null;
 
   const stage = user?.studentProfile?.educationalStage ?? null;
-  // "all" lets students browse every stage; otherwise default to their own.
   const stageId =
     explicitStageId === "all" ? undefined : (explicitStageId ?? stage?.id);
 
@@ -58,7 +53,9 @@ export async function GET(request: Request) {
       orderBy: { sortOrder: "asc" },
       include: {
         _count: { select: { likes: true } },
-        likes: { where: { userId }, select: { id: true } },
+        ...(userId
+          ? { likes: { where: { userId }, select: { id: true } } }
+          : {}),
       },
     }),
     TeacherCourseService.listPublishedCourses({ stageId, q, levels }),
@@ -69,7 +66,6 @@ export async function GET(request: Request) {
     }),
   ]);
 
-  // Country-scoped ads: show global ads plus the user's country.
   const ads = adsRaw.filter((a) => !a.countryId || a.countryId === user?.countryId);
 
   const adsOut = await Promise.all(
@@ -86,7 +82,9 @@ export async function GET(request: Request) {
         updatedAt: a.updatedAt,
         linkUrl: a.linkUrl,
         likes: a._count.likes,
-        likedByMe: a.likes.length > 0,
+        likedByMe: userId
+          ? (("likes" in a ? (a.likes as { id: string }[]).length : 0) > 0)
+          : false,
       };
     })
   );

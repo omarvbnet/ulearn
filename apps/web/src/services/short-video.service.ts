@@ -83,7 +83,7 @@ export class ShortVideoService {
     };
   }
 
-  private static videoInclude(userId: string) {
+  private static videoInclude(userId?: string) {
     return {
       teacher: {
         select: {
@@ -106,8 +106,12 @@ export class ShortVideoService {
           comments: { where: { deletedAt: null } },
         },
       },
-      likes: { where: { userId }, select: { id: true }, take: 1 },
-      saves: { where: { userId }, select: { id: true }, take: 1 },
+      ...(userId
+        ? {
+            likes: { where: { userId }, select: { id: true }, take: 1 },
+            saves: { where: { userId }, select: { id: true }, take: 1 },
+          }
+        : {}),
     } as const;
   }
 
@@ -179,7 +183,7 @@ export class ShortVideoService {
   }
 
   static async listFeed(params: {
-    userId: string;
+    userId?: string;
     cursor?: string;
     limit?: number;
     refresh?: boolean;
@@ -258,7 +262,7 @@ export class ShortVideoService {
     };
   }
 
-  static async listForTeacher(teacherId: string, userId: string) {
+  static async listForTeacher(teacherId: string, userId?: string) {
     const videos = await prisma.teacherShortVideo.findMany({
       where: { teacherId, ...PUBLIC_SHORT_VIDEO_WHERE },
       orderBy: { createdAt: "desc" },

@@ -8,6 +8,7 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key, required this.phone});
@@ -223,7 +224,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final emailOptionalLabel = '${l10n.authEmail} (${l10n.t('student.optional')})';
 
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.authRegister)),
+      appBar: GlassAppBar(title: Text(l10n.authRegister)),
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [

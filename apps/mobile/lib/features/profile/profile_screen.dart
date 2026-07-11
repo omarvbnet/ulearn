@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/auth/require_auth.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/media_cache_budget.dart';
@@ -22,6 +23,7 @@ import 'package:ulearn/core/widgets/teacher_cover_presets.dart';
 import 'package:ulearn/features/profile/teacher_specialties_section.dart';
 import 'package:ulearn/features/store/teacher_studio_screen.dart';
 import 'package:ulearn/features/subscriptions/subscriptions_screen.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -202,7 +204,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final l10n = context.l10n;
     final auth = context.watch<AuthProvider>();
     final user = auth.user;
-    if (user == null) return const SizedBox.shrink();
+    if (user == null) {
+      return ListView(
+        padding: const EdgeInsets.all(24),
+        children: [
+          const SizedBox(height: 40),
+          Icon(Icons.person_outline_rounded, size: 64, color: AppTheme.muted.withValues(alpha: 0.5)),
+          const SizedBox(height: 16),
+          Text(
+            l10n.t('mobile.auth.loginRequiredTitle'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            l10n.t('mobile.auth.loginRequiredHint'),
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppTheme.muted, height: 1.4),
+          ),
+          const SizedBox(height: 24),
+          FilledButton(
+            onPressed: () => requireAuth(context),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.accent,
+              foregroundColor: Colors.black,
+              minimumSize: const Size.fromHeight(48),
+            ),
+            child: Text(l10n.navLogin),
+          ),
+        ],
+      );
+    }
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -363,7 +395,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => Scaffold(
-                    appBar: AppBar(title: Text(l10n.rankTitle)),
+                    appBar: GlassAppBar(title: Text(l10n.rankTitle)),
                     body: const RankingsScreen(),
                   ),
                 ),

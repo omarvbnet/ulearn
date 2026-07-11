@@ -866,7 +866,7 @@ export class TeacherCourseService {
   }
 
   /** Public teacher profile with live store courses for students. */
-  static async getTeacherStoreProfile(teacherId: string, userId: string) {
+  static async getTeacherStoreProfile(teacherId: string, userId?: string) {
     const teacher = await prisma.teacherProfile.findFirst({
       where: {
         id: teacherId,
@@ -978,7 +978,7 @@ export class TeacherCourseService {
    */
   static async enrichCoursesForUser(
     courses: Awaited<ReturnType<typeof TeacherCourseService.listPublishedCourses>>,
-    userId: string
+    userId?: string | null
   ) {
     const courseIds = courses.map((c) => c.id);
     const teacherIds = [...new Set(courses.map((c) => c.teacher.id))];
@@ -999,19 +999,23 @@ export class TeacherCourseService {
           where: { courseId: { in: courseIds } },
           _count: true,
         }),
-        prisma.courseReaction.findMany({
-          where: { userId, courseId: { in: courseIds } },
-          select: { courseId: true, type: true },
-        }),
+        userId
+          ? prisma.courseReaction.findMany({
+              where: { userId, courseId: { in: courseIds } },
+              select: { courseId: true, type: true },
+            })
+          : Promise.resolve([] as { courseId: string; type: string }[]),
         prisma.courseFavorite.groupBy({
           by: ["courseId"],
           where: { courseId: { in: courseIds } },
           _count: true,
         }),
-        prisma.courseFavorite.findMany({
-          where: { userId, courseId: { in: courseIds } },
-          select: { courseId: true },
-        }),
+        userId
+          ? prisma.courseFavorite.findMany({
+              where: { userId, courseId: { in: courseIds } },
+              select: { courseId: true },
+            })
+          : Promise.resolve([] as { courseId: string }[]),
         prisma.teacherRating.groupBy({
           by: ["teacherId"],
           where: { teacherId: { in: teacherIds } },
@@ -1024,10 +1028,12 @@ export class TeacherCourseService {
           _avg: { rating: true },
           _count: true,
         }),
-        prisma.coursePurchase.findMany({
-          where: { userId, courseId: { in: courseIds } },
-          select: { courseId: true, status: true },
-        }),
+        userId
+          ? prisma.coursePurchase.findMany({
+              where: { userId, courseId: { in: courseIds } },
+              select: { courseId: true, status: true },
+            })
+          : Promise.resolve([] as { courseId: string; status: string }[]),
         allLessonIds.length
           ? prisma.courseLessonProgress.groupBy({
               by: ["lessonId"],

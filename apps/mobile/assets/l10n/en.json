@@ -241,6 +241,13 @@
       "verifyContinue": "Verify & Continue",
       "resendIn": "Resend in {seconds}s"
     },
+    "auth": {
+      "loginRequiredTitle": "Sign in to continue",
+      "loginRequiredHint": "Log in or create an account to like, save, subscribe, and unlock your learning.",
+      "registerWelcome": "Create your account 👋",
+      "registerHint": "Enter your phone number — we'll verify it on WhatsApp, then finish registration.",
+      "guestCoursesHint": "Sign in to see your subscribed and purchased courses."
+    },
     "home": {
       "myCourses": "My Courses",
       "reels": "Reels",

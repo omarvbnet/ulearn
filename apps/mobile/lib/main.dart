@@ -11,9 +11,8 @@ import 'package:ulearn/core/l10n/locale_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/theme/theme_mode_provider.dart';
 import 'package:ulearn/core/video/media_cache_budget.dart';
-import 'package:ulearn/features/auth/login_screen.dart';
-import 'package:ulearn/features/home/home_screen.dart';
 import 'package:ulearn/features/auth/pending_screen.dart';
+import 'package:ulearn/features/home/home_screen.dart';
 import 'package:ulearn/features/splash/splash_screen.dart';
 
 void main() {
@@ -160,11 +159,15 @@ class _AuthGateState extends State<AuthGate> {
     final Widget child;
     if (auth.loading || !_splashDone) {
       child = const SplashScreen();
-    } else if (!auth.isAuthenticated) {
-      child = const LoginScreen();
-    } else if (auth.user?.status == 'PENDING') {
+    } else if (
+      auth.isAuthenticated &&
+      auth.user?.status == 'PENDING' &&
+      auth.user?.role == 'TEACHER'
+    ) {
+      // Waiting-for-approval is only for teacher registration.
       child = const PendingScreen();
     } else {
+      // Guests and approved users can browse the app.
       child = const HomeScreen();
     }
 

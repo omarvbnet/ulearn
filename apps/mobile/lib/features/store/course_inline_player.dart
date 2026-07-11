@@ -14,6 +14,7 @@ import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
 import 'package:video_player/video_player.dart';
+import 'package:ulearn/core/widgets/glass.dart';
 
 /// Inline / fullscreen course video player with brand logo, cast watermark,
 /// completion tracking, and standard transport controls.
@@ -618,8 +619,7 @@ class _FullscreenPlayerState extends State<_FullscreenPlayer> {
                   valueListenable: widget.controller,
                   builder: (context, value, _) => Column(
                     children: [
-                      AppBar(
-                        backgroundColor: Colors.black54,
+                      GlassAppBar(
                         leading: IconButton(
                           icon: const Icon(Icons.arrow_back, color: Colors.white),
                           onPressed: () => Navigator.of(context).pop(),
