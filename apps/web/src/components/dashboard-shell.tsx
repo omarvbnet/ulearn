@@ -31,14 +31,14 @@ export function DashboardShell({
   return (
     <div className="flex min-h-screen">
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-e border-card-border bg-card/80 p-4 backdrop-blur lg:flex">
-        <div className="mb-8 flex items-center gap-3 px-2">
+        <div className="mb-6 flex shrink-0 items-center gap-3 px-2">
           <ULearnLogo size={40} />
           <div>
             <p className="font-bold glow-text">U Learn</p>
             <p className="text-xs text-muted">{title}</p>
           </div>
         </div>
-        <nav className="flex flex-1 flex-col gap-1">
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pe-1">
           {nav.map((item) => {
             const active = pathname === item.href || pathname.startsWith(item.href + "/");
             return (
@@ -59,7 +59,7 @@ export function DashboardShell({
         </nav>
         <button
           onClick={logout}
-          className="sidebar-link mt-4 text-start text-danger hover:bg-danger/10"
+          className="sidebar-link mt-3 shrink-0 text-start text-danger hover:bg-danger/10"
         >
           Logout
         </button>

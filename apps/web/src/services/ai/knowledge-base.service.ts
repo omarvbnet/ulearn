@@ -25,7 +25,15 @@ export type KbMeta = {
 };
 
 export class KnowledgeBaseService {
-  static async list(params?: { status?: string; q?: string; take?: number }) {
+  static async list(params?: {
+    status?: string;
+    q?: string;
+    take?: number;
+    educationalStageId?: string | null;
+    /** When true with educationalStageId, only that stage (no unscoped docs). */
+    stageOnly?: boolean;
+  }) {
+    const stageId = params?.educationalStageId;
     return prisma.kbDocument.findMany({
       where: {
         deletedAt: null,
@@ -33,14 +41,33 @@ export class KnowledgeBaseService {
         ...(params?.q
           ? { fileName: { contains: params.q, mode: "insensitive" } }
           : {}),
+        ...(stageId
+          ? params?.stageOnly
+            ? { educationalStageId: stageId }
+            : {
+                OR: [{ educationalStageId: stageId }, { educationalStageId: null }],
+              }
+          : stageId === null
+            ? { educationalStageId: null }
+            : {}),
       },
       orderBy: { uploadedAt: "desc" },
-      take: params?.take ?? 100,
+      take: params?.take ?? 200,
       include: {
         versions: { orderBy: { version: "desc" }, take: 5 },
         _count: { select: { chunks: true } },
       },
     });
+  }
+
+  /** Counts of READY/FAILED/PENDING docs per stage (+ unscoped). */
+  static async countsByStage() {
+    const rows = await prisma.kbDocument.groupBy({
+      by: ["educationalStageId", "status"],
+      where: { deletedAt: null },
+      _count: true,
+    });
+    return rows;
   }
 
   static async get(id: string) {

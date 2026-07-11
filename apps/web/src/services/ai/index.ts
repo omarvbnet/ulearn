@@ -6,5 +6,7 @@ export { VectorSearchService } from "./vector-search.service";
 export { ChunkingService } from "./chunking.service";
 export { StudentMemoryService } from "./student-memory.service";
 export { AiAnalyticsService } from "./ai-analytics.service";
+export { AiDiagnosticsService } from "./ai-diagnostics.service";
 export { UNAVAILABLE_ANSWER, unavailableAnswer, languageInstruction } from "./types";
+
 

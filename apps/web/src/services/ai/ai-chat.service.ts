@@ -159,7 +159,7 @@ export class AiChatService {
       }
     }
 
-    // Prefer stage for ranking; do NOT hard-filter language (docs may be EN while UI is AR).
+    // Prefer this student's stage materials first (never other stages).
     const hits = await VectorSearchService.search(qEmbed, {
       educationalStageId: stageId,
       subjectId: input.subjectId,
@@ -167,17 +167,24 @@ export class AiChatService {
       lesson: input.lesson,
       topK: TOP_K,
       minSimilarity: MIN_SIMILARITY,
-      // language used only as a soft boost inside rankAndCut when passed:
-      language: undefined,
       preferLanguage: language,
+      stageStrict: true,
     });
 
     const best = hits[0]?.similarity ?? 0;
     if (!hits.length && !hasAttachments) {
-      const readyCount = await prisma.kbDocument.count({
-        where: { status: "READY", deletedAt: null },
-      });
-      const emptyKb = readyCount === 0;
+      const readyForStage = stageId
+        ? await prisma.kbDocument.count({
+            where: {
+              status: "READY",
+              deletedAt: null,
+              OR: [{ educationalStageId: stageId }, { educationalStageId: null }],
+            },
+          })
+        : await prisma.kbDocument.count({
+            where: { status: "READY", deletedAt: null },
+          });
+      const emptyKb = readyForStage === 0;
       return this.persistTurn({
         userId: input.userId,
         conversationId: input.conversationId,

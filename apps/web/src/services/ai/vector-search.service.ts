@@ -23,6 +23,11 @@ export type SearchFilters = {
   lesson?: string | null;
   topK?: number;
   minSimilarity?: number;
+  /**
+   * When true with educationalStageId: only that stage's docs (no other stages).
+   * Unscoped (null stage) docs are used only as fallback if stage-specific hits are empty.
+   */
+  stageStrict?: boolean;
 };
 
 export class VectorSearchService {
@@ -32,18 +37,51 @@ export class VectorSearchService {
   ): Promise<RetrievedChunk[]> {
     const topK = Math.min(filters.topK ?? 10, 12);
     const minSim = filters.minSimilarity ?? 0.42;
+    const stageId = filters.educationalStageId;
 
-    // Prefer pgvector when available; fall back to Prisma float[] cosine.
+    // Stage-strict: try this stage's materials first, then unscoped fallback.
+    if (stageId && filters.stageStrict !== false) {
+      const stageHits = await this.searchOnce(queryEmbedding, {
+        ...filters,
+        educationalStageId: stageId,
+        _stageMode: "exact",
+      }, topK, minSim);
+      if (stageHits.length) return stageHits;
+
+      const unscoped = await this.searchOnce(queryEmbedding, {
+        ...filters,
+        educationalStageId: null,
+        _stageMode: "nullOnly",
+      }, topK, minSim);
+      return unscoped;
+    }
+
+    return this.searchOnce(queryEmbedding, { ...filters, _stageMode: "legacy" }, topK, minSim);
+  }
+
+  private static async searchOnce(
+    queryEmbedding: number[],
+    filters: SearchFilters & { _stageMode?: "exact" | "nullOnly" | "legacy" },
+    topK: number,
+    minSim: number
+  ): Promise<RetrievedChunk[]> {
     try {
       const vec = `[${queryEmbedding.join(",")}]`;
       const params: unknown[] = [vec];
       const clauses: string[] = [];
-      if (filters.educationalStageId) {
+
+      if (filters._stageMode === "exact" && filters.educationalStageId) {
+        params.push(filters.educationalStageId);
+        clauses.push(`AND d."educationalStageId" = $${params.length}`);
+      } else if (filters._stageMode === "nullOnly") {
+        clauses.push(`AND d."educationalStageId" IS NULL`);
+      } else if (filters.educationalStageId) {
         params.push(filters.educationalStageId);
         clauses.push(
           `AND (d."educationalStageId" = $${params.length} OR d."educationalStageId" IS NULL)`
         );
       }
+
       if (filters.subjectId) {
         params.push(filters.subjectId);
         clauses.push(`AND (d."subjectId" = $${params.length} OR d."subjectId" IS NULL)`);
@@ -52,7 +90,6 @@ export class VectorSearchService {
         params.push(filters.courseId);
         clauses.push(`AND (d."courseId" = $${params.length} OR d."courseId" IS NULL)`);
       }
-      // Intentionally no hard language WHERE clause — multilingual corpus is common.
       params.push(topK * 3);
       const limitIdx = params.length;
 
@@ -109,22 +146,29 @@ export class VectorSearchService {
 
   private static async fallbackSearch(
     queryEmbedding: number[],
-    filters: SearchFilters,
+    filters: SearchFilters & { _stageMode?: "exact" | "nullOnly" | "legacy" },
     topK: number,
     minSim: number
   ): Promise<RetrievedChunk[]> {
+    const stageWhere =
+      filters._stageMode === "exact" && filters.educationalStageId
+        ? { educationalStageId: filters.educationalStageId }
+        : filters._stageMode === "nullOnly"
+          ? { educationalStageId: null }
+          : filters.educationalStageId
+            ? {
+                OR: [
+                  { educationalStageId: filters.educationalStageId },
+                  { educationalStageId: null },
+                ],
+              }
+            : {};
+
     const docs = await prisma.kbDocument.findMany({
       where: {
         status: "READY",
         deletedAt: null,
-        ...(filters.educationalStageId
-          ? {
-              OR: [
-                { educationalStageId: filters.educationalStageId },
-                { educationalStageId: null },
-              ],
-            }
-          : {}),
+        ...stageWhere,
         ...(filters.subjectId
           ? { OR: [{ subjectId: filters.subjectId }, { subjectId: null }] }
           : {}),
