@@ -120,11 +120,14 @@ export class AiDiagnosticsService {
       } catch (e) {
         embedError = e instanceof Error ? e.message : "Embed failed";
         embedMs = Date.now() - t0;
+        const emptyBody = /empty body|non-JSON|Unexpected end/i.test(embedError);
         issues.push({
           severity: "error",
           code: "EMBED_FAIL",
           message: `Embedding failed: ${embedError}`,
-          fix: "Assign EMBEDDING to Gemini with gemini-embedding-001 (DeepSeek cannot embed).",
+          fix: emptyBody
+            ? "EMBEDDING provider returned an empty response. Use a dedicated Gemini provider (model gemini-embedding-001, Base URL https://generativelanguage.googleapis.com) with a valid Gemini API key — not DeepSeek."
+            : "Assign EMBEDDING to Gemini with gemini-embedding-001 (DeepSeek cannot embed).",
         });
       }
     }
@@ -165,14 +168,17 @@ export class AiDiagnosticsService {
       } catch (e) {
         chatError = e instanceof Error ? e.message : "Chat failed";
         chatMs = Date.now() - t0;
+        const balance = /insufficient.?balance|quota|billing|payment|余额/i.test(chatError);
         const isDeepseek = chatProvider?.type === "DEEPSEEK";
         issues.push({
           severity: "error",
           code: "CHAT_FAIL",
           message: `Chat failed: ${chatError}`,
-          fix: isDeepseek
-            ? "Confirm DeepSeek API key, model deepseek-chat, and Base URL https://api.deepseek.com/v1 (not api.openai.com)."
-            : "Verify TEACHING_ASSISTANT provider, model name, API key, and Base URL.",
+          fix: balance
+            ? "Your chat provider account has no credit (DeepSeek: top up at platform.deepseek.com). Chat will stay down until the balance is positive."
+            : isDeepseek
+              ? "Confirm DeepSeek API key, model deepseek-chat, Base URL https://api.deepseek.com/v1, and account balance."
+              : "Verify TEACHING_ASSISTANT provider, model name, API key, and Base URL.",
         });
       }
     }

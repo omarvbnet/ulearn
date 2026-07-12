@@ -27,6 +27,26 @@ async function fetchJson(
   }
 }
 
+/** Parse JSON body; empty / HTML responses become clear errors (avoids "Unexpected end of JSON input"). */
+async function readApiJson(
+  res: Response,
+  label: string
+): Promise<Record<string, unknown>> {
+  const raw = await res.text();
+  if (!raw.trim()) {
+    throw new Error(
+      `${label} returned an empty body (HTTP ${res.status}). Check API key, model, and Base URL.`
+    );
+  }
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    throw new Error(
+      `${label} returned non-JSON (HTTP ${res.status}): ${raw.slice(0, 180)}`
+    );
+  }
+}
+
 export class GeminiAdapter implements AiProviderAdapter {
   readonly type = "GEMINI";
 
@@ -78,24 +98,36 @@ export class GeminiAdapter implements AiProviderAdapter {
       },
       config.timeoutMs
     );
-    const data = await res.json();
+    const data = await readApiJson(res, "Gemini chat");
     if (!res.ok) {
-      throw new Error(data?.error?.message || `Gemini chat failed (${res.status})`);
+      const err = data.error as { message?: string } | undefined;
+      throw new Error(err?.message || `Gemini chat failed (${res.status})`);
     }
+    const candidates = data.candidates as
+      | { content?: { parts?: { text?: string }[] } }[]
+      | undefined;
+    const usage = data.usageMetadata as
+      | { promptTokenCount?: number; candidatesTokenCount?: number }
+      | undefined;
     const text =
-      data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || "").join("") ||
-      "";
+      candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
     return {
       text,
-      tokensIn: data?.usageMetadata?.promptTokenCount ?? 0,
-      tokensOut: data?.usageMetadata?.candidatesTokenCount ?? 0,
+      tokensIn: usage?.promptTokenCount ?? 0,
+      tokensOut: usage?.candidatesTokenCount ?? 0,
     };
   }
 
   async embed(config: ProviderConfig, text: string): Promise<EmbeddingResult> {
-    // text-embedding-004 was shut down Jan 2026 — use gemini-embedding-001 @ 768 dims
+    // Always use the embedding model — chat models (flash/pro) cannot embed.
     const model = "gemini-embedding-001";
-    const url = `${this.base(config)}/v1beta/models/${model}:embedContent?key=${encodeURIComponent(config.apiKey)}`;
+    const base = this.base(config);
+    if (/deepseek|moonshot|openai|anthropic/i.test(base)) {
+      throw new Error(
+        `Gemini embedding Base URL looks wrong (${base}). Use https://generativelanguage.googleapis.com and a Gemini API key.`
+      );
+    }
+    const url = `${base}/v1beta/models/${model}:embedContent?key=${encodeURIComponent(config.apiKey)}`;
     const res = await fetchJson(
       url,
       {
@@ -109,11 +141,13 @@ export class GeminiAdapter implements AiProviderAdapter {
       },
       config.timeoutMs
     );
-    const data = await res.json();
+    const data = await readApiJson(res, "Gemini embed");
     if (!res.ok) {
-      throw new Error(data?.error?.message || `Gemini embed failed (${res.status})`);
+      const err = data.error as { message?: string } | undefined;
+      throw new Error(err?.message || `Gemini embed failed (${res.status})`);
     }
-    const values: number[] = data?.embedding?.values || [];
+    const embedding = data.embedding as { values?: number[] } | undefined;
+    const values: number[] = embedding?.values || [];
     return { embedding: truncateOrPad(values), tokensIn: Math.ceil(text.length / 4) };
   }
 
@@ -179,19 +213,20 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
       },
       config.timeoutMs
     );
-    const data = await res.json().catch(() => ({}));
+    const data = await readApiJson(res, `${this.type} chat`);
     if (!res.ok) {
-      const detail =
-        (data as { error?: { message?: string } })?.error?.message ||
-        (typeof data === "object" ? JSON.stringify(data).slice(0, 200) : "");
+      const err = data.error as { message?: string } | undefined;
+      const detail = err?.message || JSON.stringify(data).slice(0, 200);
       throw new Error(
         `${this.type} chat failed (${res.status}) at ${url}${detail ? `: ${detail}` : ""}`
       );
     }
+    const choices = data.choices as { message?: { content?: string } }[] | undefined;
+    const usage = data.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
     return {
-      text: data?.choices?.[0]?.message?.content || "",
-      tokensIn: data?.usage?.prompt_tokens ?? 0,
-      tokensOut: data?.usage?.completion_tokens ?? 0,
+      text: choices?.[0]?.message?.content || "",
+      tokensIn: usage?.prompt_tokens ?? 0,
+      tokensOut: usage?.completion_tokens ?? 0,
     };
   }
 
@@ -218,18 +253,20 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
       },
       config.timeoutMs
     );
-    const data = await res.json().catch(() => ({}));
+    const data = await readApiJson(res, `${this.type} embed`);
     if (!res.ok) {
-      const detail =
-        (data as { error?: { message?: string } })?.error?.message || "";
+      const err = data.error as { message?: string } | undefined;
+      const detail = err?.message || "";
       throw new Error(
         `${this.type} embed failed (${res.status}) at ${url}${detail ? `: ${detail}` : ""}`
       );
     }
-    const values: number[] = data?.data?.[0]?.embedding || [];
+    const list = data.data as { embedding?: number[] }[] | undefined;
+    const values: number[] = list?.[0]?.embedding || [];
+    const usage = data.usage as { total_tokens?: number } | undefined;
     return {
       embedding: truncateOrPad(values),
-      tokensIn: data?.usage?.total_tokens ?? Math.ceil(text.length / 4),
+      tokensIn: usage?.total_tokens ?? Math.ceil(text.length / 4),
     };
   }
 
@@ -283,16 +320,18 @@ export class AnthropicAdapter implements AiProviderAdapter {
       },
       config.timeoutMs
     );
-    const data = await res.json();
+    const data = await readApiJson(res, "Anthropic chat");
     if (!res.ok) {
-      throw new Error(data?.error?.message || `Anthropic chat failed (${res.status})`);
+      const err = data.error as { message?: string } | undefined;
+      throw new Error(err?.message || `Anthropic chat failed (${res.status})`);
     }
-    const text =
-      data?.content?.map((c: { text?: string }) => c.text || "").join("") || "";
+    const content = data.content as { text?: string }[] | undefined;
+    const usage = data.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+    const text = content?.map((c) => c.text || "").join("") || "";
     return {
       text,
-      tokensIn: data?.usage?.input_tokens ?? 0,
-      tokensOut: data?.usage?.output_tokens ?? 0,
+      tokensIn: usage?.input_tokens ?? 0,
+      tokensOut: usage?.output_tokens ?? 0,
     };
   }
 
