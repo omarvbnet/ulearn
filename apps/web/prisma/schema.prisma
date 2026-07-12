@@ -58,6 +58,7 @@ enum PackageType {
   SINGLE_SUBJECT
   FULL_STAGE
   CERTIFICATE_PROGRAM
+  AI_CREATIVE
 }
 
 enum QuizType {
@@ -234,6 +235,7 @@ model User {
   professorGenerations ProfessorGeneration[]
   professorArtifacts   ProfessorArtifact[]
   professorQuestions   ProfessorQuestionBankItem[]
+  aiCreativeJobs       AiCreativeJob[]
 
   @@index([role, status])
   @@index([countryId])
@@ -1576,6 +1578,7 @@ enum AiModuleKey {
   RECOMMENDATION
   PROFESSOR_CONTENT
   PROFESSOR_DOCUMENT
+  AI_CREATIVE
 }
 
 enum KbSourceType {
@@ -1986,4 +1989,45 @@ model ProfessorQuestionBankItem {
   @@index([instructorId, difficulty])
   @@index([instructorId, questionType])
   @@index([courseId])
+}
+
+// ─────────────────────────────────────────────
+// AI Creative Studio (students / certificate users)
+// ─────────────────────────────────────────────
+
+enum AiCreativeTool {
+  MERGE
+  DESIGN_PPT
+  DESIGN_PDF
+  IMAGE_EDIT
+  IMAGE_DESIGN
+}
+
+enum AiCreativeJobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+model AiCreativeJob {
+  id             String              @id @default(cuid())
+  userId         String
+  tool           AiCreativeTool
+  status         AiCreativeJobStatus @default(PENDING)
+  inputMeta      Json?
+  resultFileName String?
+  resultMime     String?
+  /// Base64 for binary artifacts (pdf/pptx/images); plain text for svg/html.
+  resultContent  String?             @db.Text
+  error          String?
+  countedAsUse   Boolean             @default(false)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@index([countedAsUse])
 }

@@ -303,6 +303,7 @@ function CreatePackageModal({ countries, onClose, onDone, toast }: {
   const [price, setPrice] = useState("");
   const [currency, setCurrency] = useState("IQD");
   const [deviceLimit, setDeviceLimit] = useState("1");
+  const [durationDays, setDurationDays] = useState("30");
   const [targets, setTargets] = useState<{ stages: { id: string; nameEn: string }[]; subjects: { id: string; nameEn: string }[] }>({ stages: [], subjects: [] });
   const [stageId, setStageId] = useState("");
   const [subjectId, setSubjectId] = useState("");
@@ -334,6 +335,10 @@ function CreatePackageModal({ countries, onClose, onDone, toast }: {
         price: Number(price),
         currency,
         deviceLimit: Number(deviceLimit),
+        durationDays:
+          type === "AI_CREATIVE" && durationDays
+            ? Number(durationDays)
+            : undefined,
         stageId: type === "FULL_STAGE" ? stageId : undefined,
         subjectId: type === "SINGLE_SUBJECT" ? subjectId : undefined,
       }),
@@ -359,18 +364,29 @@ function CreatePackageModal({ countries, onClose, onDone, toast }: {
           <Select label="Type" value={type} onChange={(e) => setType(e.target.value)}>
             <option value="SINGLE_SUBJECT">Single subject</option>
             <option value="FULL_STAGE">Full stage</option>
+            <option value="CERTIFICATE_PROGRAM">Certificate program</option>
+            <option value="AI_CREATIVE">AI Creative Studio</option>
           </Select>
-          {type === "SINGLE_SUBJECT" ? (
+          {type === "AI_CREATIVE" ? (
+            <Input
+              label="Duration (days)"
+              type="number"
+              min="1"
+              value={durationDays}
+              onChange={(e) => setDurationDays(e.target.value)}
+              required
+            />
+          ) : type === "SINGLE_SUBJECT" ? (
             <Select label="Subject" value={subjectId} onChange={(e) => setSubjectId(e.target.value)} required>
               <option value="">Select…</option>
               {targets.subjects.map((s) => <option key={s.id} value={s.id}>{s.nameEn}</option>)}
             </Select>
-          ) : (
+          ) : type === "FULL_STAGE" ? (
             <Select label="Stage" value={stageId} onChange={(e) => setStageId(e.target.value)} required>
               <option value="">Select…</option>
               {targets.stages.map((s) => <option key={s.id} value={s.id}>{s.nameEn}</option>)}
             </Select>
-          )}
+          ) : null}
           <Input label="Price" type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} required />
           <Select label="Currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
             <option value="IQD">IQD</option>

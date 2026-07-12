@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, PageHeader } from "@/components/ui";
 import { useT } from "@/i18n/client";
@@ -301,7 +302,18 @@ export default function StudentAiPage() {
 
       <div className="flex min-h-[60vh] flex-1 flex-col rounded-2xl border border-border bg-card">
         <div className="border-b border-border p-4">
-          <PageHeader title={t.student.aiPageTitle} description={t.student.aiPageHint} />
+          <PageHeader
+            title={t.student.aiPageTitle}
+            description={t.student.aiPageHint}
+            actions={
+              <Link
+                href={`/${locale}/student/ai/creative`}
+                className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-white/5"
+              >
+                Creative Studio
+              </Link>
+            }
+          />
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto p-4">

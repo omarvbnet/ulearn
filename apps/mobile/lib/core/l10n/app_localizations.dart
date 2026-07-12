@@ -79,6 +79,7 @@ class AppLocalizations {
   String get free => t('common.free');
   String get subscribe => t('common.subscribe');
   String get continueWatching => t('common.continue');
+  String get next => t('common.next');
 
   // Auth
   String get authPhone => t('auth.phone');

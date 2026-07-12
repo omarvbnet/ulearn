@@ -2449,7 +2449,7 @@ class _LessonDocumentsPanel extends StatelessWidget {
           FilledButton.icon(
             onPressed: onNext,
             icon: const Icon(Icons.arrow_forward_rounded),
-            label: Text(l10n.t('common.next')),
+            label: Text(l10n.next),
           ),
         ],
       ),

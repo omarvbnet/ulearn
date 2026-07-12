@@ -36,6 +36,7 @@ export default async function AdminLayout({
         { href: `${base}/ai-providers`, label: t.nav.aiProviders },
         { href: `${base}/ai-knowledge`, label: t.nav.aiKnowledge },
         { href: `${base}/ai-usage`, label: t.nav.aiUsage },
+        { href: `${base}/ai-subscribers`, label: "AI Subscribers" },
         { href: `${base}/logs`, label: t.nav.logs },
         { href: `${base}/settings`, label: t.nav.settings },
       ]}

@@ -178,7 +178,7 @@ class _QuizInlinePanelState extends State<QuizInlinePanel> {
                 children: [
                   Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: AppTheme.muted)),
                   const SizedBox(height: 12),
-                  OutlinedButton(onPressed: widget.onFinished, child: Text(l10n.t('common.next'))),
+                  OutlinedButton(onPressed: widget.onFinished, child: Text(l10n.next)),
                 ],
               ),
             )
@@ -424,7 +424,7 @@ class _InlineResult extends StatelessWidget {
           const SizedBox(height: 18),
           FilledButton(
             onPressed: onContinue,
-            child: Text(l10n.t('common.next')),
+            child: Text(l10n.next),
           ),
         ],
       ),

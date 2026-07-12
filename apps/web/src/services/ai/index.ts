@@ -12,5 +12,6 @@ export { AiExamService } from "./ai-exam.service";
 export { StudentLearningContextService } from "./student-learning-context.service";
 export { UNAVAILABLE_ANSWER, unavailableAnswer, languageInstruction } from "./types";
 export * from "./professor";
+export * from "./creative";
 
 

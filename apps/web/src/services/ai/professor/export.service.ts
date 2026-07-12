@@ -44,7 +44,7 @@ function splitSections(md: string): Array<{ heading: string; body: string }> {
   });
 }
 
-async function buildPdf(title: string, markdown: string): Promise<Uint8Array> {
+export async function buildPdf(title: string, markdown: string): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -144,7 +144,7 @@ async function buildDocx(title: string, markdown: string): Promise<Buffer> {
   return Packer.toBuffer(doc);
 }
 
-async function buildPptx(title: string, markdown: string): Promise<Buffer> {
+export async function buildPptx(title: string, markdown: string): Promise<Buffer> {
   const pptx = new PptxCtor();
   pptx.author = "AI Professor Studio";
   pptx.title = title;

@@ -12,6 +12,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/glass.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/ai/ai_exam_panel.dart';
+import 'package:ulearn/features/ai/creative/creative_studio_screen.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
 
 class _PendingAttachment {
@@ -577,6 +578,17 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           },
         ),
         actions: [
+          IconButton(
+            tooltip: l10n.t('mobile.ai.creative.title'),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const CreativeStudioScreen(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.auto_awesome_mosaic_outlined),
+          ),
           IconButton(
             tooltip: l10n.t('mobile.ai.newChat'),
             onPressed: _newChat,

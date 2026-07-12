@@ -164,10 +164,130 @@ export function SettingsClient() {
 
       <DeductionsCard />
 
+      <AiCreativeConfigCard />
+
       <VideoWatermarkCard />
 
       <IntroOutroCard />
     </div>
+  );
+}
+
+function AiCreativeConfigCard() {
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [freeUses, setFreeUses] = useState("5");
+  const [courseUnlockCount, setCourseUnlockCount] = useState("6");
+  const [monthlyPrice, setMonthlyPrice] = useState("15000");
+  const [currency, setCurrency] = useState("IQD");
+  const [offersJson, setOffersJson] = useState("[]");
+
+  useEffect(() => {
+    fetch("/api/admin/settings").then(async (r) => {
+      if (r.ok) {
+        const { settings } = await r.json();
+        const row = settings.find(
+          (s: { key: string }) => s.key === "ai_creative_config"
+        );
+        const v = (row?.value || {}) as Record<string, unknown>;
+        if (typeof v.freeUses === "number") setFreeUses(String(v.freeUses));
+        if (typeof v.courseUnlockCount === "number")
+          setCourseUnlockCount(String(v.courseUnlockCount));
+        if (typeof v.monthlyPrice === "number")
+          setMonthlyPrice(String(v.monthlyPrice));
+        if (typeof v.currency === "string") setCurrency(v.currency);
+        if (Array.isArray(v.offers)) setOffersJson(JSON.stringify(v.offers, null, 2));
+      }
+      setLoading(false);
+    });
+  }, []);
+
+  async function saveConfig() {
+    let offers: unknown[] = [];
+    try {
+      offers = JSON.parse(offersJson);
+      if (!Array.isArray(offers)) throw new Error("offers must be an array");
+    } catch {
+      toast("Offers JSON is invalid", "error");
+      return;
+    }
+    setSaving(true);
+    const res = await fetch("/api/admin/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key: "ai_creative_config",
+        value: {
+          freeUses: Number(freeUses),
+          courseUnlockCount: Number(courseUnlockCount),
+          monthlyPrice: Number(monthlyPrice),
+          currency,
+          offers,
+        },
+      }),
+    });
+    setSaving(false);
+    if (res.ok) toast("AI Creative config saved");
+    else toast("Failed to save AI Creative config", "error");
+  }
+
+  if (loading) return <SkeletonRows rows={2} />;
+
+  return (
+    <Card className="space-y-4 md:col-span-2">
+      <div>
+        <h3 className="font-semibold">AI Creative Studio</h3>
+        <p className="mt-1 text-sm text-muted">
+          Free uses, paid-course unlock threshold, monthly price, and time-boxed offers.
+          Create matching <code className="text-xs">AI_CREATIVE</code> packages under
+          Subscriptions for checkout.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Input
+          label="Free uses"
+          type="number"
+          min="0"
+          value={freeUses}
+          onChange={(e) => setFreeUses(e.target.value)}
+        />
+        <Input
+          label="Course unlock count"
+          type="number"
+          min="0"
+          value={courseUnlockCount}
+          onChange={(e) => setCourseUnlockCount(e.target.value)}
+        />
+        <Input
+          label="Monthly price"
+          type="number"
+          min="0"
+          value={monthlyPrice}
+          onChange={(e) => setMonthlyPrice(e.target.value)}
+        />
+        <Select label="Currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+          <option value="IQD">IQD</option>
+          <option value="USD">USD</option>
+          <option value="TRY">TRY</option>
+        </Select>
+      </div>
+      <div>
+        <label className="mb-1 block text-sm font-medium">
+          Offers JSON
+        </label>
+        <textarea
+          className="min-h-[120px] w-full rounded-lg border border-[var(--border)] bg-transparent p-3 font-mono text-xs"
+          value={offersJson}
+          onChange={(e) => setOffersJson(e.target.value)}
+          spellCheck={false}
+          placeholder='[{"id":"offer1","label":"Launch 30 days","price":10000,"durationDays":30,"active":true}]'
+        />
+      </div>
+      <Button disabled={saving} onClick={() => void saveConfig()}>
+        {saving ? "Saving…" : "Save AI Creative Config"}
+      </Button>
+    </Card>
   );
 }
 
