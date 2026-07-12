@@ -150,7 +150,10 @@ export class ProfessorDocumentAiService {
         if (input.action === "FLASHCARDS") kind = "FLASHCARDS";
         else if (input.action === "MIND_MAP") kind = "MIND_MAP";
         else kind = "JSON";
-        meta = { action: input.action, parsed };
+        meta = {
+          action: input.action,
+          parsed: parsed as Prisma.InputJsonValue,
+        };
       }
 
       const artifact = await prisma.professorArtifact.create({
