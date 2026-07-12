@@ -338,9 +338,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   Future<void> _startExamFlow() async {
     if (_sending) return;
     final api = context.read<ApiClient>();
-    final errGeneric = context.l10n.t('mobile.ai.errorGeneric');
-    final noMaterials = context.l10n.t('mobile.ai.noMaterials');
-    final materialsProcessing = context.l10n.t('mobile.ai.materialsProcessing');
+    final l10n = context.l10n;
+    final errGeneric = l10n.t('mobile.ai.errorGeneric');
     List<Map<String, dynamic>> docs = [];
     Map<String, dynamic>? meta;
     try {
@@ -356,7 +355,19 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     if (!mounted) return;
     if (docs.isEmpty) {
       final pending = (meta?['pendingForStage'] as num?)?.toInt() ?? 0;
-      _toast(pending > 0 ? materialsProcessing : noMaterials);
+      final insights = meta?['scope']?.toString() == 'insights';
+      final msg = pending > 0
+          ? l10n.t(
+              insights
+                  ? 'mobile.ai.materialsProcessingInsights'
+                  : 'mobile.ai.materialsProcessingStage',
+            )
+          : l10n.t(
+              insights
+                  ? 'mobile.ai.noMaterialsInsights'
+                  : 'mobile.ai.noMaterialsStage',
+            );
+      _toast(msg);
       return;
     }
 

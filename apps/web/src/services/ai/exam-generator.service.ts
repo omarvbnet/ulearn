@@ -233,7 +233,17 @@ export class ExamGeneratorService {
       const chunks = await prisma.kbChunk.findMany({
         where: {
           documentId: { in: input.documentIds },
-          document: { status: "READY", deletedAt: null },
+          document: {
+            status: "READY",
+            deletedAt: null,
+            instructorId: null,
+            ...(input.educationalStageId
+              ? { educationalStageId: input.educationalStageId }
+              : {}),
+            ...(input.subjectIds?.length
+              ? { subjectId: { in: input.subjectIds } }
+              : {}),
+          },
         },
         take: 80,
         orderBy: { chunkIndex: "asc" },

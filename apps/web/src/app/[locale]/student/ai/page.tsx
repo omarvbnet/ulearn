@@ -161,7 +161,17 @@ export default function StudentAiPage() {
     }
     const list = (data.documents || []) as KbDoc[];
     if (!list.length) {
-      alert(t.student.aiNoMaterials);
+      const pending = Number(data.meta?.pendingForStage || 0);
+      const insights = data.meta?.scope === "insights";
+      const emptyMsg =
+        pending > 0
+          ? insights
+            ? t.student.aiMaterialsProcessingInsights
+            : t.student.aiMaterialsProcessingStage
+          : insights
+            ? t.student.aiNoMaterialsInsights
+            : t.student.aiNoMaterialsStage;
+      alert(emptyMsg || t.student.aiNoMaterials);
       return;
     }
     setDocs(list);

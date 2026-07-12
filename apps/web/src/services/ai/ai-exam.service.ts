@@ -66,7 +66,12 @@ export class AiExamService {
     return { total, passed, failed, avgScore };
   }
 
-  /** READY KB docs scoped to the user's stage / certificate interests. */
+  /**
+   * READY admin KB docs for learner exams only:
+   * - STUDENT → educational stage materials (Basic Knowledge for that stage)
+   * - CERTIFICATE_USER → Professional Certificates materials matching their insights
+   * Never falls back to other stages, unscoped uploads, or teacher (instructor) docs.
+   */
   static async listKbDocumentsForUser(userId: string) {
     const profile = await prisma.user.findUnique({
       where: { id: userId },
@@ -97,78 +102,30 @@ export class AiExamService {
       ? certStageId
       : profile.studentProfile?.educationalStageId ?? null;
 
-    const baseWhere = {
-      status: "READY" as const,
-      deletedAt: null,
-    };
+    if (!stageId) return [];
+    if (isCert && !interestIds.length) return [];
 
-    // 1) Prefer READY docs for the student's stage.
-    let docs =
-      stageId
-        ? await prisma.kbDocument.findMany({
-            where: {
-              ...baseWhere,
-              educationalStageId: stageId,
-            },
-            orderBy: { updatedAt: "desc" },
-            take: 100,
-            select: {
-              id: true,
-              fileName: true,
-              subjectId: true,
-              educationalStageId: true,
-              pageCount: true,
-              updatedAt: true,
-            },
-          })
-        : [];
+    const select = {
+      id: true,
+      fileName: true,
+      subjectId: true,
+      educationalStageId: true,
+      pageCount: true,
+      updatedAt: true,
+    } as const;
 
-    // 2) Certificate track: prefer interest subjects, but keep stage docs with no subject.
-    if (isCert && interestIds.length && docs.length) {
-      const scoped = docs.filter(
-        (d) => !d.subjectId || interestIds.includes(d.subjectId)
-      );
-      if (scoped.length) docs = scoped;
-    }
-
-    // 3) If nothing for the stage, include unscoped READY uploads (admin left stage blank).
-    if (!docs.length) {
-      docs = await prisma.kbDocument.findMany({
-        where: {
-          ...baseWhere,
-          educationalStageId: null,
-        },
-        orderBy: { updatedAt: "desc" },
-        take: 100,
-        select: {
-          id: true,
-          fileName: true,
-          subjectId: true,
-          educationalStageId: true,
-          pageCount: true,
-          updatedAt: true,
-        },
-      });
-    }
-
-    // 4) Last resort: any READY docs (so exams work while stage mapping is fixed).
-    if (!docs.length) {
-      docs = await prisma.kbDocument.findMany({
-        where: baseWhere,
-        orderBy: { updatedAt: "desc" },
-        take: 100,
-        select: {
-          id: true,
-          fileName: true,
-          subjectId: true,
-          educationalStageId: true,
-          pageCount: true,
-          updatedAt: true,
-        },
-      });
-    }
-
-    return docs;
+    return prisma.kbDocument.findMany({
+      where: {
+        status: "READY",
+        deletedAt: null,
+        instructorId: null,
+        educationalStageId: stageId,
+        ...(isCert ? { subjectId: { in: interestIds } } : {}),
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 100,
+      select,
+    });
   }
 
   /** Extra context for empty-state messaging on clients. */
@@ -181,29 +138,41 @@ export class AiExamService {
         certificateProfile: {
           select: {
             interests: {
-              select: { subject: { select: { stageId: true } } },
+              select: {
+                subjectId: true,
+                subject: { select: { stageId: true } },
+              },
             },
           },
         },
       },
     });
     const isCert = profile?.role === "CERTIFICATE_USER";
+    const interestIds =
+      profile?.certificateProfile?.interests.map((i) => i.subjectId) ?? [];
     const stageId = isCert
       ? profile?.certificateProfile?.interests.find((i) => i.subject.stageId)
           ?.subject.stageId ?? null
       : profile?.studentProfile?.educationalStageId ?? null;
 
-    const pendingForStage = stageId
-      ? await prisma.kbDocument.count({
-          where: {
-            deletedAt: null,
-            educationalStageId: stageId,
-            status: { in: ["PENDING", "PROCESSING"] },
-          },
-        })
-      : 0;
+    const pendingForStage =
+      stageId && (!isCert || interestIds.length)
+        ? await prisma.kbDocument.count({
+            where: {
+              deletedAt: null,
+              instructorId: null,
+              educationalStageId: stageId,
+              status: { in: ["PENDING", "PROCESSING"] },
+              ...(isCert ? { subjectId: { in: interestIds } } : {}),
+            },
+          })
+        : 0;
 
-    return { stageId, pendingForStage };
+    return {
+      stageId,
+      pendingForStage,
+      scope: isCert ? ("insights" as const) : ("stage" as const),
+    };
   }
 
   static async assertDocumentsAllowed(userId: string, documentIds: string[]) {
