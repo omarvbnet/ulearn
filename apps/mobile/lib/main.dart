@@ -105,19 +105,16 @@ class _LocalizedAppState extends State<_LocalizedApp> {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: themeMode.mode,
-      locale: locale.flutterLocale,
+      // Must be a locale GlobalMaterialLocalizations supports (not bare `ku`).
+      locale: locale.materialLocale,
       supportedLocales: const [
         Locale('ar'),
-        Locale('ku'),
         Locale('tr'),
         Locale('en'),
       ],
       localeResolutionCallback: (deviceLocale, supported) {
-        if (deviceLocale == null) return locale.flutterLocale;
-        for (final s in supported) {
-          if (s.languageCode == deviceLocale.languageCode) return s;
-        }
-        return locale.flutterLocale;
+        // Always honor the in-app language choice for Material delegates.
+        return locale.materialLocale;
       },
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,

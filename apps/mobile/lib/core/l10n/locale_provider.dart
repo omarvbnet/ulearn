@@ -20,6 +20,17 @@ class LocaleProvider extends ChangeNotifier {
         _ => const Locale('en'),
       };
 
+  /// Locale for Flutter Material/Cupertino delegates.
+  /// Kurdish (`ku`) is not shipped by `GlobalMaterialLocalizations`, which
+  /// otherwise throws and whites out screens — use Arabic (RTL) for Material
+  /// chrome while our own `ku.json` strings stay Kurdish.
+  Locale get materialLocale => switch (_code) {
+        'AR' => const Locale('ar'),
+        'KU' => const Locale('ar'),
+        'TR' => const Locale('tr'),
+        _ => const Locale('en'),
+      };
+
   TextDirection get textDirection =>
       _code == 'AR' || _code == 'KU' ? TextDirection.rtl : TextDirection.ltr;
 
