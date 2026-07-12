@@ -134,13 +134,7 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
   }
 
   private base(config: ProviderConfig) {
-    const fallback =
-      this.type === "KIMI"
-        ? "https://api.moonshot.cn/v1"
-        : this.type === "DEEPSEEK"
-          ? "https://api.deepseek.com/v1"
-          : "https://api.openai.com/v1";
-    return (config.baseUrl || fallback).replace(/\/$/, "");
+    return normalizeOpenAiCompatibleBase(this.type, config.baseUrl);
   }
 
   async chat(config: ProviderConfig, messages: ChatMessage[]): Promise<ChatResult> {
@@ -165,6 +159,14 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
         ],
       };
     });
+    const body: Record<string, unknown> = {
+      model: config.model || defaultChatModel(this.type),
+      messages: mapped,
+      temperature: config.temperature,
+      max_tokens: config.maxTokens,
+    };
+    if (config.topP != null) body.top_p = config.topP;
+
     const res = await fetchJson(
       url,
       {
@@ -173,19 +175,18 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
           "Content-Type": "application/json",
           Authorization: `Bearer ${config.apiKey}`,
         },
-        body: JSON.stringify({
-          model: config.model || "gpt-4o-mini",
-          messages: mapped,
-          temperature: config.temperature,
-          max_tokens: config.maxTokens,
-          top_p: config.topP ?? undefined,
-        }),
+        body: JSON.stringify(body),
       },
       config.timeoutMs
     );
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data?.error?.message || `OpenAI chat failed (${res.status})`);
+      const detail =
+        (data as { error?: { message?: string } })?.error?.message ||
+        (typeof data === "object" ? JSON.stringify(data).slice(0, 200) : "");
+      throw new Error(
+        `${this.type} chat failed (${res.status}) at ${url}${detail ? `: ${detail}` : ""}`
+      );
     }
     return {
       text: data?.choices?.[0]?.message?.content || "",
@@ -195,6 +196,11 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
   }
 
   async embed(config: ProviderConfig, text: string): Promise<EmbeddingResult> {
+    if (!providerSupportsEmbeddings(this.type)) {
+      throw new Error(
+        `${this.type} does not support embeddings. Assign the EMBEDDING module to Gemini (gemini-embedding-001) or OpenAI.`
+      );
+    }
     const url = `${this.base(config)}/embeddings`;
     const res = await fetchJson(
       url,
@@ -212,9 +218,13 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
       },
       config.timeoutMs
     );
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data?.error?.message || `OpenAI embed failed (${res.status})`);
+      const detail =
+        (data as { error?: { message?: string } })?.error?.message || "";
+      throw new Error(
+        `${this.type} embed failed (${res.status}) at ${url}${detail ? `: ${detail}` : ""}`
+      );
     }
     const values: number[] = data?.data?.[0]?.embedding || [];
     return {
@@ -225,15 +235,18 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
 
   async testConnection(config: ProviderConfig) {
     try {
-      // Kimi / DeepSeek are chat-first; embeddings may be unsupported on the same key.
+      // Kimi / DeepSeek are chat-first; embeddings are unsupported.
       if (this.type === "KIMI" || this.type === "DEEPSEEK") {
         await this.chat(config, [{ role: "user", content: "Reply with OK" }]);
-        return { ok: true, message: `${this.type} connection OK` };
+        return { ok: true, message: `${this.type} chat connection OK` };
       }
       await this.embed(config, "ulearn ping");
       return { ok: true, message: `${this.type} connection OK` };
     } catch (e) {
-      return { ok: false, message: e instanceof Error ? e.message : "OpenAI test failed" };
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : `${this.type} test failed`,
+      };
     }
   }
 }
@@ -332,8 +345,60 @@ export function defaultBaseUrlForType(type: string): string | null {
     case "KIMI":
       return "https://api.moonshot.cn/v1";
     case "DEEPSEEK":
+      // Official: both / and /v1 work; /v1 matches OpenAI-compatible clients.
       return "https://api.deepseek.com/v1";
     default:
       return null;
   }
+}
+
+/** True when this provider can run the EMBEDDING module. */
+export function providerSupportsEmbeddings(type: string): boolean {
+  return type === "GEMINI" || type === "OPENAI" || type === "OPENAI_COMPATIBLE";
+}
+
+function defaultChatModel(type: string): string {
+  switch (type) {
+    case "KIMI":
+      return "moonshot-v1-8k";
+    case "DEEPSEEK":
+      return "deepseek-chat";
+    default:
+      return "gpt-4o-mini";
+  }
+}
+
+/** Normalize base URL for OpenAI-compatible providers (DeepSeek/Kimi/OpenAI). */
+export function normalizeOpenAiCompatibleBase(
+  type: string,
+  baseUrl?: string | null
+): string {
+  let base = (baseUrl || "").trim().replace(/\/$/, "");
+  // Strip accidental endpoint suffixes pasted into Base URL.
+  base = base
+    .replace(/\/chat\/completions$/i, "")
+    .replace(/\/embeddings$/i, "")
+    .replace(/\/$/, "");
+
+  const looksLikeOpenAi =
+    !base ||
+    /api\.openai\.com/i.test(base) ||
+    base === "https://api.openai.com";
+
+  if (type === "DEEPSEEK" && looksLikeOpenAi) {
+    base = "https://api.deepseek.com/v1";
+  } else if (type === "KIMI" && looksLikeOpenAi) {
+    base = "https://api.moonshot.cn/v1";
+  } else if (!base) {
+    base =
+      defaultBaseUrlForType(type) ||
+      "https://api.openai.com/v1";
+  }
+
+  // DeepSeek accepts both hosts; ensure /v1 for openai-compatible path joining.
+  if (type === "DEEPSEEK" && base === "https://api.deepseek.com") {
+    base = "https://api.deepseek.com/v1";
+  }
+
+  return base.replace(/\/$/, "");
 }

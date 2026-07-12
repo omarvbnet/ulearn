@@ -1,13 +1,20 @@
 import { prisma } from "@/lib/prisma";
 import type { AiModuleKey, AiProvider, AiProviderType } from "@prisma/client";
 import { decryptSecret, encryptSecret } from "./crypto";
-import { defaultBaseUrlForType, getAdapter } from "./adapters";
+import { defaultBaseUrlForType, getAdapter, normalizeOpenAiCompatibleBase, providerSupportsEmbeddings } from "./adapters";
 import type { ChatMessage, ProviderConfig } from "./types";
 
 function toConfig(p: AiProvider, apiKey: string): ProviderConfig {
+  const openAiCompat =
+    p.type === "OPENAI" ||
+    p.type === "OPENAI_COMPATIBLE" ||
+    p.type === "KIMI" ||
+    p.type === "DEEPSEEK";
   return {
     apiKey,
-    baseUrl: p.baseUrl,
+    baseUrl: openAiCompat
+      ? normalizeOpenAiCompatibleBase(p.type, p.baseUrl)
+      : p.baseUrl || defaultBaseUrlForType(p.type),
     model: p.model,
     apiVersion: p.apiVersion,
     timeoutMs: p.timeoutMs,
@@ -51,7 +58,12 @@ export class AiProviderService {
         name: input.name,
         type: input.type,
         apiKeyEncrypted: input.apiKey ? encryptSecret(input.apiKey) : null,
-        baseUrl: input.baseUrl || defaultBaseUrlForType(input.type) || null,
+        baseUrl:
+          input.baseUrl ||
+          (["OPENAI", "OPENAI_COMPATIBLE", "KIMI", "DEEPSEEK"].includes(input.type)
+            ? normalizeOpenAiCompatibleBase(input.type, input.baseUrl)
+            : defaultBaseUrlForType(input.type)) ||
+          null,
         model: input.model,
         apiVersion: input.apiVersion,
         timeoutMs: input.timeoutMs ?? 60000,
@@ -137,6 +149,12 @@ export class AiProviderService {
     let lastError: unknown;
     for (const provider of chain) {
       if (!provider.apiKeyEncrypted) continue;
+      if (moduleKey === "EMBEDDING" && !providerSupportsEmbeddings(provider.type)) {
+        lastError = new Error(
+          `${provider.type} (${provider.name}) cannot run embeddings. Assign EMBEDDING to Gemini or OpenAI.`
+        );
+        continue;
+      }
       try {
         const apiKey = decryptSecret(provider.apiKeyEncrypted);
         const result = await run(provider, toConfig(provider, apiKey));

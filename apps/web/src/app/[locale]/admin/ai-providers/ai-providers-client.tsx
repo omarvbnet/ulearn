@@ -538,10 +538,19 @@ export function AiProvidersClient() {
         ))}
       </div>
 
-      <PageHeader title="Module assignments" description="Route each AI module to a provider" />
+      <PageHeader
+        title="Module assignments"
+        description="Route each AI module to a provider. EMBEDDING must be Gemini or OpenAI — DeepSeek/Claude/Kimi are chat-only."
+      />
       <div className="card space-y-3 p-4">
         {MODULES.map((moduleKey) => {
           const current = assignments.find((a) => a.moduleKey === moduleKey)?.providerId || "";
+          const options =
+            moduleKey === "EMBEDDING"
+              ? providers.filter((p) =>
+                  ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE"].includes(p.type)
+                )
+              : providers;
           return (
             <label key={moduleKey} className="flex flex-wrap items-center gap-3 text-sm">
               <span className="w-48 font-medium">{moduleKey}</span>
@@ -557,12 +566,17 @@ export function AiProvidersClient() {
                 }}
               >
                 <option value="">—</option>
-                {providers.map((p) => (
+                {options.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} ({p.type} · {p.model})
                   </option>
                 ))}
               </select>
+              {moduleKey === "EMBEDDING" && options.length === 0 ? (
+                <span className="text-xs text-amber-700">
+                  Add Gemini first — DeepSeek cannot embed.
+                </span>
+              ) : null}
             </label>
           );
         })}

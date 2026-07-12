@@ -59,11 +59,44 @@ export class AiDiagnosticsService {
       }
     }
 
+    const embedAssignment = assignments.find((x) => x.moduleKey === "EMBEDDING");
+    const embedProvider =
+      embedAssignment?.provider ||
+      enabled.find((p) => p.isDefault) ||
+      null;
+    const chatAssignment = assignments.find((x) => x.moduleKey === "TEACHING_ASSISTANT");
+    const chatProvider =
+      chatAssignment?.provider ||
+      enabled.find((p) => p.isDefault) ||
+      null;
+
+    const chatOnlyTypes = new Set(["DEEPSEEK", "KIMI", "ANTHROPIC"]);
+    if (embedProvider && chatOnlyTypes.has(embedProvider.type)) {
+      issues.push({
+        severity: "error",
+        code: "EMBED_CHAT_ONLY_PROVIDER",
+        message: `EMBEDDING is assigned to ${embedProvider.type} (${embedProvider.name}), which does not support embeddings (causes 405).`,
+        fix: "Add a Gemini provider with model gemini-embedding-001, set its API key, then assign EMBEDDING to Gemini (keep DeepSeek/Claude/Kimi for TEACHING_ASSISTANT only).",
+      });
+    }
+
     let embedOk = false;
     let embedMs = 0;
     let embedError: string | null = null;
     let embedDims = 0;
-    if (withKey.length) {
+    const canTryEmbed =
+      withKey.length > 0 &&
+      (!embedProvider || !chatOnlyTypes.has(embedProvider.type));
+    if (withKey.length && !canTryEmbed) {
+      embedError =
+        "No embedding-capable provider available (DeepSeek/Kimi/Claude cannot embed).";
+      issues.push({
+        severity: "error",
+        code: "EMBED_FAIL",
+        message: `Embedding failed: ${embedError}`,
+        fix: "Add Gemini (or OpenAI) and assign it to the EMBEDDING module.",
+      });
+    } else if (canTryEmbed) {
       const t0 = Date.now();
       try {
         const vec = await AiProviderService.embed("U Learn diagnostics ping");
@@ -91,7 +124,7 @@ export class AiDiagnosticsService {
           severity: "error",
           code: "EMBED_FAIL",
           message: `Embedding failed: ${embedError}`,
-          fix: "Verify API key and that the embedding model is gemini-embedding-001 (text-embedding-004 is retired).",
+          fix: "Assign EMBEDDING to Gemini with gemini-embedding-001 (DeepSeek cannot embed).",
         });
       }
     }
@@ -120,7 +153,7 @@ export class AiDiagnosticsService {
           issues.push({
             severity: "ok",
             code: "CHAT_OK",
-            message: `Chat OK (${chatMs}ms).`,
+            message: `Chat OK via ${chatProvider?.type || "provider"} (${chatMs}ms).`,
           });
         } else {
           issues.push({
@@ -132,11 +165,14 @@ export class AiDiagnosticsService {
       } catch (e) {
         chatError = e instanceof Error ? e.message : "Chat failed";
         chatMs = Date.now() - t0;
+        const isDeepseek = chatProvider?.type === "DEEPSEEK";
         issues.push({
           severity: "error",
           code: "CHAT_FAIL",
           message: `Chat failed: ${chatError}`,
-          fix: "Verify TEACHING_ASSISTANT provider, model name, and API key quotas.",
+          fix: isDeepseek
+            ? "Confirm DeepSeek API key, model deepseek-chat, and Base URL https://api.deepseek.com/v1 (not api.openai.com)."
+            : "Verify TEACHING_ASSISTANT provider, model name, API key, and Base URL.",
         });
       }
     }
