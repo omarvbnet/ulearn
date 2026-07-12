@@ -185,7 +185,7 @@ export class ExamGeneratorService {
       "AI Generated Quiz";
 
     if (!input.publish) {
-      return { preview: { title, questions, citations: practice.citations }, quiz: null };
+      return { preview: { title, questions, citations: practice.citations }, quiz: null, questions };
     }
 
     const quiz = await QuizService.createQuiz({
@@ -209,7 +209,7 @@ export class ExamGeneratorService {
       })),
     });
 
-    return { preview: null, quiz, citations: practice.citations };
+    return { preview: null, quiz, citations: practice.citations, questions };
   }
 
   private static async loadMaterialText(input: {

@@ -88,10 +88,11 @@ export class KnowledgeBaseService {
     fileUrl?: string;
     mimeType?: string;
     meta?: KbMeta;
+    sourceType?: "KB_UPLOAD" | "TEACHER_UPLOAD";
   }) {
     const doc = await prisma.kbDocument.create({
       data: {
-        sourceType: "KB_UPLOAD",
+        sourceType: input.sourceType ?? "KB_UPLOAD",
         fileName: input.fileName,
         fileKey: input.fileKey,
         fileUrl: input.fileUrl,
@@ -111,6 +112,28 @@ export class KnowledgeBaseService {
     });
     void this.processDocument(doc.id);
     return doc;
+  }
+
+  static async listForInstructor(
+    instructorId: string,
+    params?: { status?: string; q?: string; take?: number }
+  ) {
+    return prisma.kbDocument.findMany({
+      where: {
+        deletedAt: null,
+        instructorId,
+        sourceType: "TEACHER_UPLOAD",
+        ...(params?.status ? { status: params.status as never } : {}),
+        ...(params?.q
+          ? { fileName: { contains: params.q, mode: "insensitive" } }
+          : {}),
+      },
+      orderBy: { uploadedAt: "desc" },
+      take: params?.take ?? 200,
+      include: {
+        _count: { select: { chunks: true } },
+      },
+    });
   }
 
   static async softDelete(id: string) {

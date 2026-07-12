@@ -14,6 +14,7 @@ import 'package:ulearn/features/store/teacher_course_wizard_screen.dart';
 import 'package:ulearn/features/store/teacher_courses_tab.dart';
 import 'package:ulearn/features/store/teacher_quiz_tab.dart';
 import 'package:ulearn/features/store/widgets/free_minute_picker.dart';
+import 'package:ulearn/features/ai/professor/teacher_ai_professor_screen.dart';
 import 'package:ulearn/core/video/video_process_service.dart';
 import 'package:ulearn/core/video/video_upload_service.dart';
 import 'package:ulearn/core/widgets/glass.dart';
@@ -657,7 +658,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
       behavior: HitTestBehavior.translucent,
       child: DefaultTabController(
-        length: 3,
+        length: 4,
         child: Scaffold(
           appBar: GlassAppBar(
             titleSpacing: 16,
@@ -742,6 +743,10 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                   icon: const Icon(Icons.movie_filter_outlined, size: 20),
                   text: l10n.reelsTitle,
                 ),
+                Tab(
+                  icon: const Icon(Icons.auto_awesome_rounded, size: 20),
+                  text: l10n.t('mobile.professor.tabShort'),
+                ),
               ],
             ),
           ),
@@ -750,6 +755,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                   child: CircularProgressIndicator(color: AppTheme.accent),
                 )
               : TabBarView(
+                  physics: const NeverScrollableScrollPhysics(),
                   children: [
                     TeacherCoursesTab(
                       courses: _courses,
@@ -785,6 +791,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                       compressBeforeUpload: _compressBeforeUpload,
                       onCompressChanged: _setCompressBeforeUpload,
                     ),
+                    const TeacherAiProfessorScreen(),
                   ],
                 ),
         ),

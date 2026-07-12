@@ -32,6 +32,10 @@ export type SearchFilters = {
    * Unscoped (null stage) docs are used only as fallback if stage-specific hits are empty.
    */
   stageStrict?: boolean;
+  /** Teacher Professor Studio: only this instructor's documents. */
+  instructorId?: string | null;
+  /** Restrict retrieval to these KbDocument ids. */
+  documentIds?: string[];
 };
 
 export class VectorSearchService {
@@ -102,6 +106,14 @@ export class VectorSearchService {
       if (filters.courseId) {
         params.push(filters.courseId);
         clauses.push(`AND (d."courseId" = $${params.length} OR d."courseId" IS NULL)`);
+      }
+      if (filters.instructorId) {
+        params.push(filters.instructorId);
+        clauses.push(`AND d."instructorId" = $${params.length}`);
+      }
+      if (filters.documentIds?.length) {
+        params.push(filters.documentIds);
+        clauses.push(`AND d.id = ANY($${params.length}::text[])`);
       }
       params.push(topK * 3);
       const limitIdx = params.length;
@@ -197,6 +209,8 @@ export class VectorSearchService {
         ...(filters.courseId
           ? { OR: [{ courseId: filters.courseId }, { courseId: null }] }
           : {}),
+        ...(filters.instructorId ? { instructorId: filters.instructorId } : {}),
+        ...(filters.documentIds?.length ? { id: { in: filters.documentIds } } : {}),
       },
       select: { id: true, fileName: true },
       take: 200,

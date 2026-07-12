@@ -1,0 +1,9 @@
+export { ProfessorJobService } from "./job.service";
+export { ProfessorDocumentService } from "./document.service";
+export { ProfessorChatService } from "./chat.service";
+export { ProfessorExamService } from "./exam.service";
+export { ProfessorGenerationService } from "./generation.service";
+export { ProfessorExportService } from "./export.service";
+export { ProfessorDocumentAiService } from "./document-ai.service";
+export { ProfessorPdfToolsService } from "./pdf-tools.service";
+export { ProfessorQuestionBankService } from "./question-bank.service";

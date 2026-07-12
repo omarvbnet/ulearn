@@ -230,6 +230,10 @@ model User {
   studentAiMemory      StudentAiMemory?
   aiMessages           AiMessage[]
   aiExamAttempts       AiExamAttempt[]
+  professorJobs        ProfessorJob[]
+  professorGenerations ProfessorGeneration[]
+  professorArtifacts   ProfessorArtifact[]
+  professorQuestions   ProfessorQuestionBankItem[]
 
   @@index([role, status])
   @@index([countryId])
@@ -1570,12 +1574,15 @@ enum AiModuleKey {
   OCR_ANALYSIS
   EMBEDDING
   RECOMMENDATION
+  PROFESSOR_CONTENT
+  PROFESSOR_DOCUMENT
 }
 
 enum KbSourceType {
   COURSE_MATERIAL
   LESSON_CONTENT
   KB_UPLOAD
+  TEACHER_UPLOAD
 }
 
 enum KbDocumentStatus {
@@ -1695,6 +1702,8 @@ model KbDocument {
   @@index([educationalStageId, subjectId])
   @@index([courseId])
   @@index([language])
+  @@index([instructorId, status])
+  @@index([instructorId, uploadedAt])
 }
 
 model KbDocumentVersion {
@@ -1823,4 +1832,158 @@ model AiResponseCache {
 
   @@index([stageId, subjectId])
   @@index([expiresAt])
+}
+
+// ─────────────────────────────────────────────
+// AI Professor Studio (teacher-owned)
+// ─────────────────────────────────────────────
+
+enum ProfessorJobType {
+  INGEST
+  GENERATE_CONTENT
+  DOCUMENT_ACTION
+  PDF_TOOL
+  EXPORT
+  GENERATE_EXAM
+  GRADE_ASSIST
+}
+
+enum ProfessorJobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum ProfessorGenerationType {
+  LECTURE
+  NOTES
+  STUDY_GUIDE
+  TEACHING_MANUAL
+  SYLLABUS
+  LESSON_PLAN
+  WEEKLY_PLAN
+  SEMESTER_PLAN
+  LEARNING_OUTCOMES
+  PRESENTATION_OUTLINE
+  CUSTOM
+}
+
+enum ProfessorArtifactKind {
+  MARKDOWN
+  HTML
+  PDF
+  DOCX
+  PPTX
+  JSON
+  FLASHCARDS
+  MIND_MAP
+}
+
+model ProfessorJob {
+  id             String              @id @default(cuid())
+  instructorId   String
+  type           ProfessorJobType
+  status         ProfessorJobStatus  @default(QUEUED)
+  progress       Int                 @default(0)
+  errorMessage   String?
+  inputJson      Json?
+  resultJson     Json?
+  documentId     String?
+  generationId   String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  completedAt    DateTime?
+
+  instructor User                 @relation(fields: [instructorId], references: [id], onDelete: Cascade)
+  generation ProfessorGeneration? @relation(fields: [generationId], references: [id], onDelete: SetNull)
+
+  @@index([instructorId, createdAt])
+  @@index([instructorId, status])
+  @@index([generationId])
+}
+
+model ProfessorGeneration {
+  id           String                   @id @default(cuid())
+  instructorId String
+  type         ProfessorGenerationType
+  title        String
+  language     String                   @default("en")
+  params       Json?
+  markdown     String?
+  status       ProfessorJobStatus       @default(QUEUED)
+  version      Int                      @default(1)
+  parentId     String?
+  courseId     String?
+  documentIds  String[]                 @default([])
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+
+  instructor User                        @relation(fields: [instructorId], references: [id], onDelete: Cascade)
+  parent     ProfessorGeneration?        @relation("GenerationVersions", fields: [parentId], references: [id], onDelete: SetNull)
+  versions   ProfessorGeneration[]       @relation("GenerationVersions")
+  artifacts  ProfessorArtifact[]
+  jobs       ProfessorJob[]
+
+  @@index([instructorId, updatedAt])
+  @@index([instructorId, type])
+  @@index([parentId])
+}
+
+model ProfessorArtifact {
+  id           String                @id @default(cuid())
+  instructorId String
+  generationId String?
+  jobId        String?
+  documentId   String?
+  kind         ProfessorArtifactKind
+  fileName     String
+  fileKey      String?
+  fileUrl      String?
+  contentText  String?
+  version      Int                   @default(1)
+  meta         Json?
+  createdAt    DateTime              @default(now())
+
+  instructor User                 @relation(fields: [instructorId], references: [id], onDelete: Cascade)
+  generation ProfessorGeneration? @relation(fields: [generationId], references: [id], onDelete: SetNull)
+
+  @@index([instructorId, createdAt])
+  @@index([generationId])
+  @@index([documentId])
+  @@index([jobId])
+}
+
+model ProfessorQuestionBankItem {
+  id               String   @id @default(cuid())
+  instructorId     String
+  subject          String?
+  chapter          String?
+  lesson           String?
+  topic            String?
+  difficulty       String?
+  bloom            String?
+  questionType     String
+  language         String   @default("en")
+  text             String
+  options          Json?
+  correctKey       String?
+  answerKey        String?
+  marks            Float?   @default(1)
+  timeEstimateSec  Int?
+  courseId         String?
+  documentId       String?
+  generationId     String?
+  examVersion      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  instructor User @relation(fields: [instructorId], references: [id], onDelete: Cascade)
+
+  @@index([instructorId, createdAt])
+  @@index([instructorId, subject, chapter])
+  @@index([instructorId, difficulty])
+  @@index([instructorId, questionType])
+  @@index([courseId])
 }

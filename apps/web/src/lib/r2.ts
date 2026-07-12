@@ -31,6 +31,8 @@ export const R2_KEY_PREFIXES = [
   "teacher-covers/",
   "teacher-shorts-covers/",
   "teacher-shorts/",
+  "professor-docs/",
+  "professor-artifacts/",
   "videos/",
 ] as const;
 
