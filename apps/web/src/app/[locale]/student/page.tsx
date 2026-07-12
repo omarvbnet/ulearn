@@ -16,11 +16,19 @@ type Subject = {
   chapters: { lessons: { isFree: boolean }[] }[];
 };
 
+type AiExamStats = {
+  total: number;
+  passed: number;
+  failed: number;
+  avgScore: number;
+};
+
 export default function StudentHomePage() {
   const t = useT();
   const { locale } = useParams<{ locale: string }>();
   const [user, setUser] = useState<{ fullLegalName?: string; status?: string } | null>(null);
   const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [aiExamStats, setAiExamStats] = useState<AiExamStats | null>(null);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -31,6 +39,13 @@ export default function StudentHomePage() {
     fetch("/api/courses")
       .then((r) => (r.ok ? r.json() : { subjects: [] }))
       .then((d) => setSubjects(d.subjects || []))
+      .catch(() => {});
+
+    fetch("/api/ai/exams/stats")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.stats) setAiExamStats(d.stats);
+      })
       .catch(() => {});
   }, []);
 
@@ -45,6 +60,24 @@ export default function StudentHomePage() {
         <div className="mb-6 rounded-xl border border-warning/30 bg-warning/10 p-4 text-warning">
           {t.student.underReview}
         </div>
+      )}
+
+      {aiExamStats && (
+        <Link href={`/${locale}/student/ai`} className="mb-6 block">
+          <Card className="card-hover overflow-hidden border-accent/25 bg-gradient-to-br from-accent/10 to-transparent">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold">{t.student.aiExamsTitle}</h3>
+                <p className="mt-1 text-sm text-muted">{t.student.aiExamsCta}</p>
+              </div>
+              <div className="flex gap-6">
+                <Stat label={t.student.aiExamsTotal} value={aiExamStats.total} />
+                <Stat label={t.student.aiExamsPassed} value={aiExamStats.passed} tone="ok" />
+                <Stat label={t.student.aiExamsFailed} value={aiExamStats.failed} tone="bad" />
+              </div>
+            </div>
+          </Card>
+        </Link>
       )}
 
       <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -62,7 +95,9 @@ export default function StudentHomePage() {
                 </p>
                 {freeCount > 0 && (
                   <div className="mt-3">
-                    <Badge status="FREE">{freeCount} {t.student.freeLessons}</Badge>
+                    <Badge status="FREE">
+                      {freeCount} {t.student.freeLessons}
+                    </Badge>
                   </div>
                 )}
               </Card>
@@ -75,6 +110,33 @@ export default function StudentHomePage() {
           </Card>
         )}
       </div>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: "ok" | "bad";
+}) {
+  return (
+    <div className="text-center">
+      <div
+        className={
+          tone === "ok"
+            ? "text-2xl font-extrabold text-emerald-400"
+            : tone === "bad"
+              ? "text-2xl font-extrabold text-red-400"
+              : "text-2xl font-extrabold"
+        }
+      >
+        {value}
+      </div>
+      <div className="text-xs font-medium text-muted">{label}</div>
     </div>
   );
 }

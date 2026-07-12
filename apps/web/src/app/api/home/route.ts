@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { resolvePublicMediaUrl } from "@/lib/r2";
 import { CourseRatingService } from "@/services/course-rating.service";
 import { TeacherCourseService } from "@/services/teacher-course.service";
+import { AiExamService } from "@/services/ai";
 import type { TeacherLevel } from "@prisma/client";
 
 const LEVELS: TeacherLevel[] = ["GOOD", "EXCELLENT", "MASTER"];
@@ -167,11 +168,21 @@ export async function GET(request: Request) {
     await TeacherCourseService.enrichCoursesForUser(courses, userId)
   );
 
+  const aiExamStats = userId
+    ? await AiExamService.getStats(userId).catch(() => ({
+        total: 0,
+        passed: 0,
+        failed: 0,
+        avgScore: 0,
+      }))
+    : null;
+
   return json({
     stage,
     stages,
     interests: interestSubjects,
     courses: coursesOut,
     ads: adsOut,
+    aiExamStats,
   });
 }

@@ -1,8 +1,8 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
@@ -10,6 +10,7 @@ import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/l10n/locale_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/glass.dart';
+import 'package:ulearn/features/ai/ai_exam_panel.dart';
 
 class _PendingAttachment {
   _PendingAttachment({
@@ -35,19 +36,133 @@ class AiAssistantScreen extends StatefulWidget {
 class _AiAssistantScreenState extends State<AiAssistantScreen> {
   final _controller = TextEditingController();
   final _scroll = ScrollController();
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   String? _conversationId;
   bool _sending = false;
   final List<_ChatBubble> _messages = [];
   final List<_PendingAttachment> _pending = [];
+  List<Map<String, dynamic>> _conversations = [];
+  bool _loadingHistory = false;
 
   static const _maxBytes = 4 * 1024 * 1024;
   static const _maxFiles = 4;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadConversations());
+  }
 
   @override
   void dispose() {
     _controller.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  Map<String, dynamic> _stagePayload(AuthProvider auth) {
+    if (auth.user?.role == 'CERTIFICATE_USER') {
+      return {
+        if (auth.user?.certificateStage?.id != null)
+          'stageId': auth.user!.certificateStage!.id,
+        if (auth.user!.interestSubjects.isNotEmpty)
+          'subjectIds': auth.user!.interestSubjects.map((s) => s.id).toList(),
+      };
+    }
+    if (auth.user?.stage?.id != null) {
+      return {'stageId': auth.user!.stage!.id};
+    }
+    return {};
+  }
+
+  Future<void> _loadConversations() async {
+    setState(() => _loadingHistory = true);
+    try {
+      final api = context.read<ApiClient>();
+      final data = await api.get('/api/ai/conversations');
+      if (!mounted) return;
+      setState(() {
+        _conversations =
+            ((data['conversations'] as List?) ?? []).cast<Map<String, dynamic>>();
+      });
+    } catch (_) {
+      // History is optional if offline.
+    } finally {
+      if (mounted) setState(() => _loadingHistory = false);
+    }
+  }
+
+  Future<void> _openConversation(String id) async {
+    Navigator.of(context).maybePop();
+    setState(() {
+      _sending = true;
+      _messages.clear();
+      _conversationId = id;
+    });
+    try {
+      final api = context.read<ApiClient>();
+      final data = await api.get('/api/ai/conversations/$id');
+      if (!mounted) return;
+      final msgs = ((data['conversation']?['messages'] as List?) ??
+              (data['messages'] as List?) ??
+              [])
+          .cast<Map<String, dynamic>>();
+      final bubbles = <_ChatBubble>[];
+      for (final m in msgs) {
+        final role = (m['role']?.toString() ?? 'ASSISTANT').toLowerCase();
+        final citationsRaw = m['citations'];
+        Map<String, dynamic>? citationsMap;
+        if (citationsRaw is Map) {
+          citationsMap = Map<String, dynamic>.from(citationsRaw);
+        }
+        final practice = citationsMap?['practiceQuiz'] as Map?;
+        AiPracticeExamData? exam;
+        Map<String, dynamic>? examResult;
+        if (citationsMap?['examAttemptId'] != null &&
+            citationsMap?['review'] is List) {
+          examResult = {
+            'percentage': citationsMap!['percentage'],
+            'passed': citationsMap['passed'],
+            'score': citationsMap['score'],
+            'maxScore': citationsMap['maxScore'],
+            'analysis': citationsMap['analysis'] ?? m['content']?.toString(),
+            'review': citationsMap['review'],
+          };
+        } else if (practice is Map) {
+          exam = AiPracticeExamData.fromJson(Map<String, dynamic>.from(practice));
+        }
+        bubbles.add(
+          _ChatBubble(
+            role: role == 'user' ? 'user' : 'assistant',
+            text: m['content']?.toString() ?? '',
+            exam: exam != null && exam.examAttemptId.isNotEmpty ? exam : null,
+            examCompleted: exam != null,
+            examResult: examResult,
+          ),
+        );
+      }
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(bubbles);
+      });
+      _scrollToEnd();
+    } catch (e) {
+      if (!mounted) return;
+      _toast(e is ApiException ? e.message : context.l10n.t('mobile.ai.errorGeneric'));
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  void _newChat() {
+    setState(() {
+      _conversationId = null;
+      _messages.clear();
+      _pending.clear();
+      _controller.clear();
+    });
+    Navigator.of(context).maybePop();
   }
 
   String _mimeFor(String? ext, {required bool image}) {
@@ -91,11 +206,10 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         _toast(context.l10n.t('mobile.ai.attachTooLarge'));
         continue;
       }
-      final mime = _mimeFor(f.extension, image: imagesOnly);
       next.add(
         _PendingAttachment(
           fileName: f.name,
-          mimeType: mime,
+          mimeType: _mimeFor(f.extension, image: imagesOnly),
           bytes: bytes,
         ),
       );
@@ -117,9 +231,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     if ((q.isEmpty && _pending.isEmpty) || _sending) return;
 
     final attachments = List<_PendingAttachment>.from(_pending);
-    final displayText = q.isEmpty
-        ? context.l10n.t('mobile.ai.askAboutAttachments')
-        : q;
+    final displayText =
+        q.isEmpty ? context.l10n.t('mobile.ai.askAboutAttachments') : q;
 
     setState(() {
       _sending = true;
@@ -128,10 +241,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           role: 'user',
           text: displayText,
           attachmentNames: attachments.map((a) => a.fileName).toList(),
-          previewImages: attachments
-              .where((a) => a.isImage)
-              .map((a) => a.bytes)
-              .toList(),
+          previewImages:
+              attachments.where((a) => a.isImage).map((a) => a.bytes).toList(),
         ),
       );
       _controller.clear();
@@ -149,14 +260,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         'question': q,
         'language': locale,
         if (_conversationId != null) 'conversationId': _conversationId,
-        if (auth.user?.role == 'CERTIFICATE_USER') ...{
-          if (auth.user?.certificateStage?.id != null)
-            'stageId': auth.user!.certificateStage!.id,
-          if (auth.user!.interestSubjects.isNotEmpty)
-            'subjectIds':
-                auth.user!.interestSubjects.map((s) => s.id).toList(),
-        } else if (auth.user?.stage?.id != null)
-          'stageId': auth.user!.stage!.id,
+        ..._stagePayload(auth),
         if (attachments.isNotEmpty)
           'attachments': attachments
               .map(
@@ -174,11 +278,6 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       final answer = data['answer']?.toString() ?? unavailable;
       final citations = (data['citations'] as List?) ?? const [];
       final edited = data['editedFile'] as Map<String, dynamic>?;
-      String? editedLabel;
-      if (edited != null) {
-        editedLabel = edited['fileName']?.toString();
-        // Store base64 on the bubble for share/save via snackbar action.
-      }
       setState(() {
         _conversationId = data['conversationId']?.toString() ?? _conversationId;
         _messages.add(
@@ -195,30 +294,22 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                 })
                 .whereType<String>()
                 .toList(),
-            editedFileName: editedLabel,
+            editedFileName: edited?['fileName']?.toString(),
             editedContentBase64: edited?['contentBase64']?.toString(),
           ),
         );
       });
-      if (editedLabel != null && mounted) {
-        _toast('Edited file ready: $editedLabel (long-press message to copy)');
-      }
+      _loadConversations();
     } catch (e) {
       if (!mounted) return;
       final msg = e is ApiException ? e.message : e.toString();
-      // Prefer the real API error so balance/config issues are visible.
       final text = msg.trim().isNotEmpty &&
               msg != 'Request failed' &&
               !msg.contains('SocketException')
           ? msg
           : context.l10n.t('mobile.ai.errorGeneric');
       setState(() {
-        _messages.add(
-          _ChatBubble(
-            role: 'assistant',
-            text: text,
-          ),
-        );
+        _messages.add(_ChatBubble(role: 'assistant', text: text));
       });
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -226,15 +317,43 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     }
   }
 
-  Future<void> _sendPracticeQuiz() async {
+  Future<void> _startExamFlow() async {
     if (_sending) return;
-    final q = _controller.text.trim().isEmpty
-        ? 'Generate a practice quiz from my materials'
-        : _controller.text.trim();
+    final api = context.read<ApiClient>();
+    final errGeneric = context.l10n.t('mobile.ai.errorGeneric');
+    final noMaterials = context.l10n.t('mobile.ai.noMaterials');
+    List<Map<String, dynamic>> docs = [];
+    try {
+      final data = await api.get('/api/ai/kb-documents');
+      docs = ((data['documents'] as List?) ?? []).cast<Map<String, dynamic>>();
+    } catch (e) {
+      _toast(e is ApiException ? e.message : errGeneric);
+      return;
+    }
+    if (!mounted) return;
+    if (docs.isEmpty) {
+      _toast(noMaterials);
+      return;
+    }
+
+    final selected = await showModalBottomSheet<List<String>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => _MaterialPickerSheet(documents: docs),
+    );
+    if (selected == null || selected.isEmpty || !mounted) return;
+    await _generateExam(selected);
+  }
+
+  Future<void> _generateExam(List<String> documentIds) async {
+    final q = context.l10n.t('mobile.ai.generateExamPrompt');
     setState(() {
       _sending = true;
       _messages.add(_ChatBubble(role: 'user', text: q));
-      _controller.clear();
     });
     _scrollToEnd();
     try {
@@ -245,35 +364,43 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         'question': q,
         'language': locale,
         'mode': 'practice_quiz',
+        'documentIds': documentIds,
         if (_conversationId != null) 'conversationId': _conversationId,
-        if (auth.user?.role == 'CERTIFICATE_USER') ...{
-          if (auth.user?.certificateStage?.id != null)
-            'stageId': auth.user!.certificateStage!.id,
-          if (auth.user!.interestSubjects.isNotEmpty)
-            'subjectIds':
-                auth.user!.interestSubjects.map((s) => s.id).toList(),
-        } else if (auth.user?.stage?.id != null)
-          'stageId': auth.user!.stage!.id,
+        ..._stagePayload(auth),
       };
       final data = await api.post('/api/ai/chat', payload);
       if (!mounted) return;
+      final practice = data['practiceQuiz'] as Map<String, dynamic>?;
+      AiPracticeExamData? exam;
+      if (practice != null) {
+        exam = AiPracticeExamData.fromJson({
+          ...practice,
+          'examAttemptId':
+              practice['examAttemptId'] ?? data['examAttemptId'],
+          'timeLimitSec': practice['timeLimitSec'],
+        });
+      }
       setState(() {
         _conversationId = data['conversationId']?.toString() ?? _conversationId;
         _messages.add(
           _ChatBubble(
             role: 'assistant',
-            text: data['answer']?.toString() ??
-                context.l10n.t('mobile.ai.unavailable'),
+            text: data['answer']?.toString() ?? '',
+            exam: exam != null && exam.examAttemptId.isNotEmpty ? exam : null,
           ),
         );
       });
-    } catch (_) {
+      _loadConversations();
+    } catch (e) {
       if (!mounted) return;
+      final msg = e is ApiException ? e.message : e.toString();
       setState(() {
         _messages.add(
           _ChatBubble(
             role: 'assistant',
-            text: context.l10n.t('mobile.ai.errorGeneric'),
+            text: msg.trim().isNotEmpty
+                ? msg
+                : context.l10n.t('mobile.ai.errorGeneric'),
           ),
         );
       });
@@ -283,11 +410,67 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     }
   }
 
+  Future<void> _submitExam(
+    int bubbleIndex,
+    AiPracticeExamData exam,
+    Map<String, String> answers,
+    int elapsedSec,
+    bool expired,
+  ) async {
+    try {
+      final api = context.read<ApiClient>();
+      final locale = context.read<LocaleProvider>().code.toLowerCase();
+      final result = await api.post('/api/ai/exams/submit', {
+        'examAttemptId': exam.examAttemptId,
+        'answers': answers,
+        'elapsedSec': elapsedSec,
+        'expired': expired,
+        'language': locale,
+      });
+      if (!mounted) return;
+      setState(() {
+        if (bubbleIndex >= 0 && bubbleIndex < _messages.length) {
+          final old = _messages[bubbleIndex];
+          _messages[bubbleIndex] = _ChatBubble(
+            role: old.role,
+            text: old.text,
+            citations: old.citations,
+            exam: old.exam,
+            examCompleted: true,
+          );
+        }
+        _messages.add(
+          _ChatBubble(
+            role: 'assistant',
+            text: '',
+            examResult: Map<String, dynamic>.from(result),
+          ),
+        );
+      });
+      _scrollToEnd();
+    } catch (e) {
+      if (!mounted) return;
+      _toast(e is ApiException ? e.message : context.l10n.t('mobile.ai.errorGeneric'));
+      setState(() {
+        if (bubbleIndex >= 0 && bubbleIndex < _messages.length) {
+          final old = _messages[bubbleIndex];
+          _messages[bubbleIndex] = _ChatBubble(
+            role: old.role,
+            text: old.text,
+            citations: old.citations,
+            exam: old.exam,
+            examCompleted: false,
+          );
+        }
+      });
+    }
+  }
+
   void _scrollToEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
       _scroll.animateTo(
-        _scroll.position.maxScrollExtent + 120,
+        _scroll.position.maxScrollExtent + 160,
         duration: const Duration(milliseconds: 280),
         curve: Curves.easeOut,
       );
@@ -310,15 +493,53 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         : auth.user?.stage?.nameFor(locale);
 
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: AppTheme.background,
-      appBar: GlassAppBar(title: Text(l10n.t('mobile.ai.title'))),
+      drawer: _HistoryDrawer(
+        loading: _loadingHistory,
+        conversations: _conversations,
+        activeId: _conversationId,
+        onRefresh: _loadConversations,
+        onNew: _newChat,
+        onOpen: _openConversation,
+      ),
+      appBar: GlassAppBar(
+        title: Text(l10n.t('mobile.ai.title')),
+        leading: IconButton(
+          icon: const Icon(Icons.history_rounded),
+          tooltip: l10n.t('mobile.ai.history'),
+          onPressed: () {
+            _loadConversations();
+            _scaffoldKey.currentState?.openDrawer();
+          },
+        ),
+        actions: [
+          IconButton(
+            tooltip: l10n.t('mobile.ai.newChat'),
+            onPressed: _newChat,
+            icon: const Icon(Icons.edit_square),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           if (name != null || stageName != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Align(
-                alignment: Alignment.centerLeft,
+              child: Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primary.withValues(alpha: 0.12),
+                      AppTheme.accent.withValues(alpha: 0.06),
+                    ],
+                  ),
+                  border: Border.all(color: AppTheme.cardBorder),
+                ),
                 child: Text(
                   [
                     if (name != null && name.isNotEmpty) name,
@@ -334,15 +555,12 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             ),
           Expanded(
             child: _messages.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(28),
-                      child: Text(
-                        l10n.t('mobile.ai.emptyHint'),
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: AppTheme.muted, height: 1.45),
-                      ),
-                    ),
+                ? _EmptyState(
+                    onAsk: (prompt) {
+                      _controller.text = prompt;
+                      _send();
+                    },
+                    onExam: _startExamFlow,
                   )
                 : ListView.builder(
                     controller: _scroll,
@@ -350,118 +568,199 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                     itemCount: _messages.length + (_sending ? 1 : 0),
                     itemBuilder: (context, i) {
                       if (_sending && i == _messages.length) {
-                        return Align(
-                          alignment: Alignment.centerLeft,
-                          child: Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Text(
-                              l10n.t('mobile.ai.thinking'),
-                              style: TextStyle(color: AppTheme.muted),
-                            ),
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppTheme.accent,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                l10n.t('mobile.ai.thinking'),
+                                style: TextStyle(color: AppTheme.muted),
+                              ),
+                            ],
                           ),
                         );
                       }
                       final m = _messages[i];
                       final isUser = m.role == 'user';
                       return Align(
-                        alignment:
-                            isUser ? Alignment.centerRight : Alignment.centerLeft,
+                        alignment: isUser
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
                         child: Container(
                           constraints: BoxConstraints(
-                            maxWidth: MediaQuery.sizeOf(context).width * 0.86,
+                            maxWidth: MediaQuery.sizeOf(context).width * 0.92,
                           ),
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isUser
-                                ? AppTheme.accent.withValues(alpha: 0.18)
-                                : AppTheme.card,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: AppTheme.cardBorder),
-                          ),
+                          margin: const EdgeInsets.only(bottom: 12),
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            crossAxisAlignment: isUser
+                                ? CrossAxisAlignment.end
+                                : CrossAxisAlignment.start,
                             children: [
-                              if (m.previewImages.isNotEmpty) ...[
-                                Wrap(
-                                  spacing: 6,
-                                  runSpacing: 6,
-                                  children: m.previewImages
-                                      .map(
-                                        (b) => ClipRRect(
-                                          borderRadius: BorderRadius.circular(10),
-                                          child: Image.memory(
-                                            b,
-                                            width: 72,
-                                            height: 72,
-                                            fit: BoxFit.cover,
-                                          ),
+                              if (m.text.isNotEmpty ||
+                                  m.previewImages.isNotEmpty ||
+                                  m.attachmentNames.isNotEmpty)
+                                GestureDetector(
+                                  onLongPress: m.text.isEmpty
+                                      ? null
+                                      : () async {
+                                          await Clipboard.setData(
+                                            ClipboardData(text: m.text),
+                                          );
+                                          if (mounted) {
+                                            _toast(l10n.t('mobile.ai.copied'));
+                                          }
+                                        },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 11,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isUser
+                                          ? AppTheme.accent
+                                              .withValues(alpha: 0.18)
+                                          : AppTheme.card,
+                                      borderRadius: BorderRadius.only(
+                                        topLeft: const Radius.circular(18),
+                                        topRight: const Radius.circular(18),
+                                        bottomLeft: Radius.circular(
+                                          isUser ? 18 : 6,
                                         ),
-                                      )
-                                      .toList(),
-                                ),
-                                const SizedBox(height: 8),
-                              ],
-                              if (m.attachmentNames.isNotEmpty) ...[
-                                Wrap(
-                                  spacing: 6,
-                                  runSpacing: 6,
-                                  children: m.attachmentNames
-                                      .map(
-                                        (n) => Chip(
-                                          visualDensity: VisualDensity.compact,
-                                          label: Text(
-                                            n,
-                                            style: const TextStyle(fontSize: 11),
-                                          ),
-                                          avatar: const Icon(Icons.attach_file, size: 14),
+                                        bottomRight: Radius.circular(
+                                          isUser ? 6 : 18,
                                         ),
-                                      )
-                                      .toList(),
-                                ),
-                                const SizedBox(height: 6),
-                              ],
-                              Text(
-                                m.text,
-                                style: TextStyle(
-                                  color: AppTheme.foreground,
-                                  height: 1.4,
-                                ),
-                              ),
-                              if (m.citations.isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 6,
-                                  runSpacing: 6,
-                                  children: m.citations
-                                      .map(
-                                        (c) => Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 4,
+                                      ),
+                                      border: Border.all(
+                                        color: AppTheme.cardBorder,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        if (m.previewImages.isNotEmpty) ...[
+                                          Wrap(
+                                            spacing: 6,
+                                            runSpacing: 6,
+                                            children: m.previewImages
+                                                .map(
+                                                  (b) => ClipRRect(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            10),
+                                                    child: Image.memory(
+                                                      b,
+                                                      width: 72,
+                                                      height: 72,
+                                                      fit: BoxFit.cover,
+                                                    ),
+                                                  ),
+                                                )
+                                                .toList(),
                                           ),
-                                          decoration: BoxDecoration(
-                                            color: AppTheme.background,
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                            border: Border.all(
-                                              color: AppTheme.cardBorder,
-                                            ),
+                                          const SizedBox(height: 8),
+                                        ],
+                                        if (m.attachmentNames.isNotEmpty) ...[
+                                          Wrap(
+                                            spacing: 6,
+                                            runSpacing: 6,
+                                            children: m.attachmentNames
+                                                .map(
+                                                  (n) => Chip(
+                                                    visualDensity:
+                                                        VisualDensity.compact,
+                                                    label: Text(
+                                                      n,
+                                                      style: const TextStyle(
+                                                          fontSize: 11),
+                                                    ),
+                                                    avatar: const Icon(
+                                                      Icons.attach_file,
+                                                      size: 14,
+                                                    ),
+                                                  ),
+                                                )
+                                                .toList(),
                                           ),
-                                          child: Text(
-                                            c,
+                                          const SizedBox(height: 6),
+                                        ],
+                                        if (m.text.isNotEmpty)
+                                          Text(
+                                            m.text,
                                             style: TextStyle(
-                                              fontSize: 11,
-                                              color: AppTheme.muted,
+                                              color: AppTheme.foreground,
+                                              height: 1.45,
                                             ),
                                           ),
-                                        ),
-                                      )
-                                      .toList(),
+                                        if (m.citations.isNotEmpty) ...[
+                                          const SizedBox(height: 8),
+                                          Wrap(
+                                            spacing: 6,
+                                            runSpacing: 6,
+                                            children: m.citations
+                                                .map(
+                                                  (c) => Container(
+                                                    padding:
+                                                        const EdgeInsets
+                                                            .symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 4,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color:
+                                                          AppTheme.background,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              999),
+                                                      border: Border.all(
+                                                        color: AppTheme
+                                                            .cardBorder,
+                                                      ),
+                                                    ),
+                                                    child: Text(
+                                                      c,
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        color: AppTheme.muted,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                )
+                                                .toList(),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
                                 ),
+                              if (m.exam != null) ...[
+                                const SizedBox(height: 8),
+                                AiExamPanel(
+                                  key: ValueKey(m.exam!.examAttemptId),
+                                  exam: m.exam!,
+                                  disabled: m.examCompleted,
+                                  onSubmit: (answers, elapsed, expired) =>
+                                      _submitExam(
+                                    i,
+                                    m.exam!,
+                                    answers,
+                                    elapsed,
+                                    expired,
+                                  ),
+                                ),
+                              ],
+                              if (m.examResult != null) ...[
+                                const SizedBox(height: 8),
+                                AiExamResultPanel(result: m.examResult!),
                               ],
                             ],
                           ),
@@ -497,7 +796,10 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    const Icon(Icons.insert_drive_file_outlined, size: 22),
+                                    const Icon(
+                                      Icons.insert_drive_file_outlined,
+                                      size: 22,
+                                    ),
                                     const SizedBox(height: 4),
                                     Text(
                                       a.fileName,
@@ -521,7 +823,11 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                               shape: BoxShape.circle,
                             ),
                             padding: const EdgeInsets.all(2),
-                            child: const Icon(Icons.close, size: 14, color: Colors.white),
+                            child: const Icon(
+                              Icons.close,
+                              size: 14,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),
@@ -532,8 +838,21 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             ),
           SafeArea(
             top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              padding: const EdgeInsets.fromLTRB(4, 6, 6, 6),
+              decoration: BoxDecoration(
+                color: AppTheme.card,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: AppTheme.cardBorder),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -544,20 +863,14 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                   ),
                   IconButton(
                     tooltip: l10n.t('mobile.ai.attachFile'),
-                    onPressed: _sending ? null : () => _pick(imagesOnly: false),
+                    onPressed:
+                        _sending ? null : () => _pick(imagesOnly: false),
                     icon: const Icon(Icons.attach_file_rounded),
                   ),
                   IconButton(
-                    tooltip: 'Practice quiz',
-                    onPressed: _sending
-                        ? null
-                        : () {
-                            _controller.text = _controller.text.trim().isEmpty
-                                ? 'Generate a practice quiz from my materials'
-                                : _controller.text;
-                            _sendPracticeQuiz();
-                          },
-                    icon: const Icon(Icons.quiz_outlined),
+                    tooltip: l10n.t('mobile.ai.generateExam'),
+                    onPressed: _sending ? null : _startExamFlow,
+                    icon: Icon(Icons.quiz_outlined, color: AppTheme.accent),
                   ),
                   Expanded(
                     child: TextField(
@@ -568,20 +881,17 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                       onSubmitted: (_) => _send(),
                       decoration: InputDecoration(
                         hintText: l10n.t('mobile.ai.placeholder'),
-                        filled: true,
-                        fillColor: AppTheme.card,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(18),
-                          borderSide: BorderSide(color: AppTheme.cardBorder),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(18),
-                          borderSide: BorderSide(color: AppTheme.cardBorder),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        filled: false,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 10,
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 6),
                   IconButton.filled(
                     onPressed: _sending ? null : _send,
                     style: IconButton.styleFrom(
@@ -600,6 +910,312 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   }
 }
 
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.onAsk, required this.onExam});
+
+  final void Function(String prompt) onAsk;
+  final VoidCallback onExam;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final prompts = [
+      l10n.t('mobile.ai.promptExplain'),
+      l10n.t('mobile.ai.promptPractice'),
+      l10n.t('mobile.ai.promptWeak'),
+    ];
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 40, 24, 24),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            gradient: LinearGradient(
+              colors: [
+                AppTheme.primary.withValues(alpha: 0.22),
+                AppTheme.accent.withValues(alpha: 0.12),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            border: Border.all(color: AppTheme.cardBorder),
+          ),
+          child: Column(
+            children: [
+              Icon(Icons.auto_awesome, size: 36, color: AppTheme.accent),
+              const SizedBox(height: 12),
+              Text(
+                l10n.t('mobile.ai.emptyTitle'),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppTheme.foreground,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                l10n.t('mobile.ai.emptyHint'),
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.muted, height: 1.45),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: onExam,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.accent,
+                  foregroundColor: Colors.black,
+                ),
+                icon: const Icon(Icons.quiz_outlined),
+                label: Text(l10n.t('mobile.ai.generateExam')),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        ...prompts.map(
+          (p) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: OutlinedButton(
+              onPressed: () => onAsk(p),
+              style: OutlinedButton.styleFrom(
+                alignment: Alignment.centerLeft,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                side: BorderSide(color: AppTheme.cardBorder),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: Text(
+                p,
+                style: TextStyle(color: AppTheme.foreground),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HistoryDrawer extends StatelessWidget {
+  const _HistoryDrawer({
+    required this.loading,
+    required this.conversations,
+    required this.activeId,
+    required this.onRefresh,
+    required this.onNew,
+    required this.onOpen,
+  });
+
+  final bool loading;
+  final List<Map<String, dynamic>> conversations;
+  final String? activeId;
+  final VoidCallback onRefresh;
+  final VoidCallback onNew;
+  final void Function(String id) onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Drawer(
+      backgroundColor: AppTheme.background,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      l10n.t('mobile.ai.history'),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                        color: AppTheme.foreground,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: onRefresh,
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: FilledButton.tonalIcon(
+                onPressed: onNew,
+                icon: const Icon(Icons.add_comment_outlined),
+                label: Text(l10n.t('mobile.ai.newChat')),
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (loading) const LinearProgressIndicator(minHeight: 2),
+            Expanded(
+              child: conversations.isEmpty && !loading
+                  ? Center(
+                      child: Text(
+                        l10n.t('mobile.ai.historyEmpty'),
+                        style: TextStyle(color: AppTheme.muted),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: conversations.length,
+                      itemBuilder: (context, i) {
+                        final c = conversations[i];
+                        final id = c['id']?.toString() ?? '';
+                        final title = (c['title']?.toString() ?? '').trim().isNotEmpty
+                            ? c['title'].toString()
+                            : l10n.t('mobile.ai.untitledChat');
+                        final active = id == activeId;
+                        return ListTile(
+                          selected: active,
+                          selectedTileColor:
+                              AppTheme.accent.withValues(alpha: 0.12),
+                          leading: Icon(
+                            Icons.chat_bubble_outline,
+                            color: active ? AppTheme.accent : AppTheme.muted,
+                          ),
+                          title: Text(
+                            title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppTheme.foreground,
+                              fontWeight: active
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                          ),
+                          onTap: id.isEmpty ? null : () => onOpen(id),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MaterialPickerSheet extends StatefulWidget {
+  const _MaterialPickerSheet({required this.documents});
+
+  final List<Map<String, dynamic>> documents;
+
+  @override
+  State<_MaterialPickerSheet> createState() => _MaterialPickerSheetState();
+}
+
+class _MaterialPickerSheetState extends State<_MaterialPickerSheet> {
+  final Set<String> _selected = {};
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.72,
+      minChildSize: 0.45,
+      maxChildSize: 0.92,
+      builder: (context, scroll) {
+        return Column(
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppTheme.muted.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(99),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.t('mobile.ai.pickMaterials'),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 17,
+                      color: AppTheme.foreground,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    l10n.t('mobile.ai.pickMaterialsHint'),
+                    style: TextStyle(color: AppTheme.muted, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                controller: scroll,
+                itemCount: widget.documents.length,
+                itemBuilder: (context, i) {
+                  final d = widget.documents[i];
+                  final id = d['id']?.toString() ?? '';
+                  final name = d['fileName']?.toString() ?? 'Document';
+                  final checked = _selected.contains(id);
+                  return CheckboxListTile(
+                    value: checked,
+                    onChanged: id.isEmpty
+                        ? null
+                        : (v) {
+                            setState(() {
+                              if (v == true) {
+                                _selected.add(id);
+                              } else {
+                                _selected.remove(id);
+                              }
+                            });
+                          },
+                    title: Text(
+                      name,
+                      style: TextStyle(color: AppTheme.foreground),
+                    ),
+                    activeColor: AppTheme.accent,
+                  );
+                },
+              ),
+            ),
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: FilledButton(
+                  onPressed: _selected.isEmpty
+                      ? null
+                      : () => Navigator.pop(context, _selected.toList()),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.accent,
+                    foregroundColor: Colors.black,
+                    minimumSize: const Size.fromHeight(48),
+                  ),
+                  child: Text(
+                    l10n.t('mobile.ai.generateExam'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _ChatBubble {
   _ChatBubble({
     required this.role,
@@ -609,6 +1225,9 @@ class _ChatBubble {
     this.previewImages = const [],
     this.editedFileName,
     this.editedContentBase64,
+    this.exam,
+    this.examCompleted = false,
+    this.examResult,
   });
 
   final String role;
@@ -618,4 +1237,7 @@ class _ChatBubble {
   final List<Uint8List> previewImages;
   final String? editedFileName;
   final String? editedContentBase64;
+  final AiPracticeExamData? exam;
+  final bool examCompleted;
+  final Map<String, dynamic>? examResult;
 }

@@ -1,6 +1,15 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 
+type ExamResultEntry = {
+  title: string;
+  percentage: number;
+  passed: boolean;
+  documentIds?: string[];
+  weakQuestionHints?: string[];
+  at: string;
+};
+
 export class StudentMemoryService {
   static async getOrCreate(userId: string) {
     const existing = await prisma.studentAiMemory.findUnique({ where: { userId } });
@@ -13,6 +22,7 @@ export class StudentMemoryService {
     strongSubjects: string[];
     preferredStyle: string | null;
     learningSpeed: string | null;
+    examResults?: unknown;
   }) {
     const bits: string[] = [];
     if (memory.weakSubjects.length) bits.push(`weaker topics: ${memory.weakSubjects.slice(0, 5).join(", ")}`);
@@ -20,6 +30,32 @@ export class StudentMemoryService {
       bits.push(`stronger topics: ${memory.strongSubjects.slice(0, 5).join(", ")}`);
     if (memory.preferredStyle) bits.push(`style: ${memory.preferredStyle}`);
     if (memory.learningSpeed) bits.push(`pace: ${memory.learningSpeed}`);
+
+    const exams = Array.isArray(memory.examResults)
+      ? (memory.examResults as ExamResultEntry[])
+      : [];
+    if (exams.length) {
+      const recent = exams.slice(0, 5);
+      const passed = recent.filter((e) => e.passed).length;
+      const failed = recent.length - passed;
+      const avg =
+        Math.round(
+          (recent.reduce((s, e) => s + (e.percentage || 0), 0) / recent.length) * 10
+        ) / 10;
+      bits.push(
+        `AI practice exams (recent ${recent.length}): ${passed} passed, ${failed} failed, avg ${avg}%`
+      );
+      const last = recent[0];
+      if (last) {
+        bits.push(
+          `latest AI exam "${last.title}": ${last.percentage}% (${last.passed ? "passed" : "failed"})`
+        );
+      }
+      const weakHints = recent
+        .flatMap((e) => e.weakQuestionHints || [])
+        .slice(0, 4);
+      if (weakHints.length) bits.push(`recent missed concepts: ${weakHints.join("; ")}`);
+    }
     return bits.join("; ");
   }
 
@@ -42,6 +78,49 @@ export class StudentMemoryService {
       where: { userId },
       data: {
         frequentQuestions: trimmed as Prisma.InputJsonValue,
+        weakSubjects: weak,
+      },
+    });
+  }
+
+  static async recordExamResult(
+    userId: string,
+    result: {
+      title: string;
+      percentage: number;
+      passed: boolean;
+      documentIds?: string[];
+      weakQuestionHints?: string[];
+    }
+  ) {
+    const mem = await this.getOrCreate(userId);
+    const prev = (Array.isArray(mem.examResults) ? mem.examResults : []) as ExamResultEntry[];
+    const entry: ExamResultEntry = {
+      title: result.title,
+      percentage: result.percentage,
+      passed: result.passed,
+      documentIds: result.documentIds,
+      weakQuestionHints: (result.weakQuestionHints || []).slice(0, 6),
+      at: new Date().toISOString(),
+    };
+    const next = [entry, ...prev].slice(0, 40);
+
+    const strong = [...mem.strongSubjects];
+    const weak = [...mem.weakSubjects];
+    const tag = result.title.slice(0, 60);
+    if (result.passed) {
+      if (!strong.includes(tag) && strong.length < 20) strong.push(tag);
+      const wi = weak.indexOf(tag);
+      if (wi >= 0) weak.splice(wi, 1);
+    } else {
+      if (!weak.includes(tag) && weak.length < 20) weak.push(tag);
+    }
+
+    await prisma.studentAiMemory.update({
+      where: { userId },
+      data: {
+        examResults: next as unknown as Prisma.InputJsonValue,
+        strongSubjects: strong,
         weakSubjects: weak,
       },
     });

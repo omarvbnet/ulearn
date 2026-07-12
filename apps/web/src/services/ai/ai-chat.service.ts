@@ -162,24 +162,65 @@ export class AiChatService {
 
     if (practiceQuiz) {
       const { ExamGeneratorService } = await import("./exam-generator.service");
+      const { AiExamService, stripCorrectKeys } = await import("./ai-exam.service");
+      const documentIds = await AiExamService.assertDocumentsAllowed(
+        input.userId,
+        input.documentIds || []
+      );
       const quiz = await ExamGeneratorService.generatePractice({
         userId: input.userId,
         question,
         language,
         educationalStageId: stageId,
         subjectIds: subjectId ? [subjectId] : subjectIds,
-        documentIds: input.documentIds,
-        attachmentText: processed.textExcerpt,
+        documentIds,
+        requireDocuments: true,
+        count: 5,
       });
+
+      // Ensure conversation exists before linking the attempt.
+      let conversationId = input.conversationId;
+      if (!conversationId) {
+        const conv = await prisma.aiConversation.create({
+          data: {
+            userId: input.userId,
+            title: (quiz.title || question).slice(0, 80),
+          },
+        });
+        conversationId = conv.id;
+      }
+
+      const attempt = await AiExamService.createAttempt({
+        userId: input.userId,
+        conversationId,
+        documentIds,
+        title: quiz.title,
+        questions: quiz.questions,
+      });
+
+      const publicQuiz = {
+        title: quiz.title,
+        questions: stripCorrectKeys(quiz.questions),
+        citations: quiz.citations,
+        examAttemptId: attempt.id,
+        timeLimitSec: attempt.timeLimitSec,
+      };
+
+      const intro =
+        language === "ar"
+          ? `امتحان جاهز: ${quiz.title}\nاختر الإجابات مباشرة. الوقت: ${attempt.timeLimitSec} ثانية.`
+          : `Exam ready: ${quiz.title}\nSelect your answers below. Time limit: ${attempt.timeLimitSec}s.`;
+
       return this.persistTurn({
         userId: input.userId,
-        conversationId: input.conversationId,
-        question,
-        answer: formatPracticeQuizAnswer(quiz, language),
+        conversationId,
+        question: question || `Generate exam from ${documentIds.length} material(s)`,
+        answer: intro,
         citations: quiz.citations,
         fromCache: false,
-        attachmentNames: attachments.map((a) => a.fileName),
-        practiceQuiz: quiz,
+        attachmentNames: [],
+        practiceQuiz: publicQuiz,
+        examAttemptId: attempt.id,
       });
     }
 
@@ -267,7 +308,11 @@ export class AiChatService {
         });
 
     const context = hits.length ? compressContext(hits) : "";
-    const memoryBlurb = StudentMemoryService.toPromptBlurb(memory);
+    const memoryBlurb = StudentMemoryService.toPromptBlurb({
+      ...memory,
+      examResults: memory.examResults,
+    });
+
     const studentBlurb = [
       studentName ? `Student name: ${studentName}` : null,
       stageName
@@ -452,6 +497,7 @@ export class AiChatService {
     attachmentNames: string[];
     editedFile?: { fileName: string; mimeType: string; contentBase64: string };
     practiceQuiz?: unknown;
+    examAttemptId?: string;
   }) {
     let conversationId = input.conversationId;
     if (!conversationId) {
@@ -488,7 +534,9 @@ export class AiChatService {
         userId: input.userId,
         role: "ASSISTANT",
         content: input.answer,
-        citations: input.citations as never,
+        citations: (input.practiceQuiz
+          ? { ...(input.citations as object), practiceQuiz: input.practiceQuiz }
+          : input.citations) as never,
       },
     });
 
@@ -500,6 +548,7 @@ export class AiChatService {
       fromCache: input.fromCache,
       editedFile: input.editedFile,
       practiceQuiz: input.practiceQuiz,
+      examAttemptId: input.examAttemptId,
     };
   }
 }
@@ -597,35 +646,4 @@ function extractFencedText(answer: string): string | null {
   const m = answer.match(/```(?:text|txt|markdown|md)?\s*([\s\S]*?)```/i);
   if (m?.[1]?.trim()) return m[1].trim();
   return null;
-}
-
-function formatPracticeQuizAnswer(
-  quiz: {
-    title: string;
-    questions: Array<{ text: string; options: Record<string, string>; correctKey: string }>;
-  },
-  language: string
-): string {
-  const header =
-    language === "ar"
-      ? "اختبار تدريبي"
-      : language === "ku"
-        ? "تاقیکردنەوەی ڕاهێنان"
-        : language === "tr"
-          ? "Alıştırma sınavı"
-          : "Practice quiz";
-  const lines = [`${header}: ${quiz.title}`, ""];
-  quiz.questions.forEach((q, i) => {
-    lines.push(`${i + 1}. ${q.text}`);
-    for (const [k, v] of Object.entries(q.options)) {
-      lines.push(`   ${k}) ${v}`);
-    }
-    lines.push("");
-  });
-  lines.push(
-    language === "ar"
-      ? "(الإجابات الصحيحة محفوظة للتقييم داخل التطبيق.)"
-      : "(Correct answers are kept for in-app scoring.)"
-  );
-  return lines.join("\n");
 }

@@ -61,9 +61,16 @@ export class ExamGeneratorService {
     documentIds?: string[];
     attachmentText?: string;
     count?: number;
+    /** When true (student exams), documentIds are required. */
+    requireDocuments?: boolean;
   }): Promise<PracticeQuizPayload> {
     const language = normalizeLang(input.language);
     const count = Math.min(Math.max(input.count ?? 5, 3), 10);
+
+    if (input.requireDocuments && !input.documentIds?.length) {
+      throw new Error("Select at least one knowledge document before generating an exam");
+    }
+
     const material = await this.loadMaterialText({
       userId: input.userId,
       question: input.question,
@@ -71,6 +78,7 @@ export class ExamGeneratorService {
       subjectIds: input.subjectIds,
       documentIds: input.documentIds,
       attachmentText: input.attachmentText,
+      allowRagFallback: !input.requireDocuments,
     });
 
     const prompt = [
@@ -157,6 +165,7 @@ export class ExamGeneratorService {
       subjectIds: input.subjectId ? [input.subjectId] : undefined,
       documentIds: input.documentIds,
       count: input.count ?? 8,
+      requireDocuments: true,
     });
 
     const questions: GeneratedQuestion[] = practice.questions.map((q) => ({
@@ -210,6 +219,7 @@ export class ExamGeneratorService {
     subjectIds?: string[];
     documentIds?: string[];
     attachmentText?: string;
+    allowRagFallback?: boolean;
   }) {
     const citations: Array<{ documentName: string; page: number | null }> = [];
     const parts: string[] = [];
@@ -233,7 +243,7 @@ export class ExamGeneratorService {
         parts.push(`[${c.document.fileName}]\n${c.text}`);
         citations.push({ documentName: c.document.fileName, page: c.pageNumber });
       }
-    } else {
+    } else if (input.allowRagFallback !== false) {
       const embed = await EmbeddingService.embedText(
         input.question || "quiz from materials",
         input.userId

@@ -851,11 +851,12 @@
     "pending": {
       "badge": "Pending Approval"
     },
-    "ai": {
+      "ai": {
       "entryLabel": "AI with U Learn",
       "title": "AI with U Learn",
       "placeholder": "Ask about your lessons…",
-      "emptyHint": "Ask a question grounded in U Learn educational materials. You can also attach photos or files.",
+      "emptyTitle": "Your personal tutor",
+      "emptyHint": "Ask grounded questions, attach homework photos, or generate a timed exam from your materials.",
       "thinking": "Thinking…",
       "unavailable": "The requested information is not available in the educational material uploaded to U Learn.",
       "attachPhoto": "Add photo",
@@ -863,7 +864,31 @@
       "attachLimit": "You can attach up to 4 files.",
       "attachTooLarge": "Each file must be under 4 MB.",
       "askAboutAttachments": "Please explain the attached file(s).",
-      "errorGeneric": "AI is temporarily unavailable. Please try again in a moment."
+      "errorGeneric": "AI is temporarily unavailable. Please try again in a moment.",
+      "history": "Chat history",
+      "historyEmpty": "No saved chats yet",
+      "newChat": "New chat",
+      "untitledChat": "Untitled chat",
+      "copied": "Copied",
+      "generateExam": "Generate exam",
+      "generateExamPrompt": "Generate a practice exam from my selected materials",
+      "pickMaterials": "Select materials",
+      "pickMaterialsHint": "Choose at least one uploaded knowledge document for your stage.",
+      "noMaterials": "No READY knowledge materials for your stage yet. Ask an admin to upload them.",
+      "examSelectAnswers": "Tap an answer for each question. Timer is running.",
+      "examSubmit": "Submit exam",
+      "examPassed": "Passed",
+      "examFailed": "Needs review",
+      "examScore": "Score {score}/{max}",
+      "examAnalysis": "AI knowledge analysis",
+      "examReview": "Question review",
+      "promptExplain": "Explain today's lesson step by step",
+      "promptPractice": "Help me practice a hard concept",
+      "promptWeak": "What should I revise based on my exams?",
+      "homeCardTitle": "AI exams",
+      "homeTotal": "Total",
+      "homePassed": "Passed",
+      "homeFailed": "Failed"
     },
     "error": {
       "generic": "Something went wrong",

@@ -229,6 +229,7 @@ model User {
   aiUsageLogs          AiUsageLog[]
   studentAiMemory      StudentAiMemory?
   aiMessages           AiMessage[]
+  aiExamAttempts       AiExamAttempt[]
 
   @@index([role, status])
   @@index([countryId])
@@ -1591,6 +1592,12 @@ enum AiMessageRole {
   SYSTEM
 }
 
+enum AiExamAttemptStatus {
+  PENDING
+  SUBMITTED
+  EXPIRED
+}
+
 model AiProvider {
   id               String           @id @default(cuid())
   name             String
@@ -1734,10 +1741,41 @@ model AiConversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages AiMessage[]
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages     AiMessage[]
+  examAttempts AiExamAttempt[]
 
   @@index([userId, updatedAt])
+}
+
+/// Student AI practice exams generated from KB materials (not course Quiz).
+model AiExamAttempt {
+  id             String              @id @default(cuid())
+  userId         String
+  conversationId String?
+  documentIds    String[]            @default([])
+  title          String
+  /// Full questions including correctKey (server-only until submit response).
+  questions      Json
+  answers        Json?
+  score          Int?
+  maxScore       Int?
+  percentage     Float?
+  passed         Boolean?
+  timeLimitSec   Int
+  elapsedSec     Int?
+  analysis       String?
+  status         AiExamAttemptStatus @default(PENDING)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  completedAt    DateTime?
+
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation AiConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([userId, passed])
+  @@index([conversationId])
 }
 
 model AiMessage {

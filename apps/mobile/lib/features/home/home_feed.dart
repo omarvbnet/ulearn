@@ -56,6 +56,7 @@ class HomeFeedState extends State<HomeFeed> {
   List<Map<String, dynamic>> _ads = [];
   List<Map<String, dynamic>> _courses = [];
   List<Map<String, dynamic>> _continueWatching = [];
+  Map<String, dynamic>? _aiExamStats;
   bool _loading = true;
   bool _searching = false;
   String? _error;
@@ -144,6 +145,8 @@ class HomeFeedState extends State<HomeFeed> {
         _ads = ((data['ads'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
         _courses = homeCourses;
         _continueWatching = continueItems;
+        final stats = data['aiExamStats'];
+        _aiExamStats = stats is Map ? Map<String, dynamic>.from(stats) : null;
         _loading = false;
         _searching = false;
         _error = null;
@@ -414,6 +417,11 @@ class HomeFeedState extends State<HomeFeed> {
                   : null,
             ),
           ),
+          if (user != null && _aiExamStats != null)
+            StaggeredItem(
+              index: 1,
+              child: _AiExamStatsCard(stats: _aiExamStats!),
+            ),
           if (_error != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -555,6 +563,129 @@ class HomeFeedState extends State<HomeFeed> {
 }
 
 // ── Welcome header ─────────────────────────────────────────────
+
+class _AiExamStatsCard extends StatelessWidget {
+  const _AiExamStatsCard({required this.stats});
+
+  final Map<String, dynamic> stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final total = (stats['total'] as num?)?.toInt() ?? 0;
+    final passed = (stats['passed'] as num?)?.toInt() ?? 0;
+    final failed = (stats['failed'] as num?)?.toInt() ?? 0;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: LinearGradient(
+            colors: [
+              AppTheme.primary.withValues(alpha: 0.22),
+              AppTheme.accent.withValues(alpha: 0.10),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          border: Border.all(color: AppTheme.cardBorder),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.auto_awesome, color: AppTheme.accent, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  l10n.t('mobile.ai.homeCardTitle'),
+                  style: TextStyle(
+                    color: AppTheme.foreground,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _StatPill(
+                    label: l10n.t('mobile.ai.homeTotal'),
+                    value: '$total',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _StatPill(
+                    label: l10n.t('mobile.ai.homePassed'),
+                    value: '$passed',
+                    accent: const Color(0xFF22C55E),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _StatPill(
+                    label: l10n.t('mobile.ai.homeFailed'),
+                    value: '$failed',
+                    accent: const Color(0xFFEF4444),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatPill extends StatelessWidget {
+  const _StatPill({
+    required this.label,
+    required this.value,
+    this.accent,
+  });
+
+  final String label;
+  final String value;
+  final Color? accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.card.withValues(alpha: 0.75),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.cardBorder),
+      ),
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: accent ?? AppTheme.foreground,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.muted,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _WelcomeHeader extends StatelessWidget {
   const _WelcomeHeader({this.name, this.stageName});

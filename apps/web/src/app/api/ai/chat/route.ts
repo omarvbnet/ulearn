@@ -30,14 +30,19 @@ export async function POST(request: Request) {
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
   const { question, attachments, ...rest } = parsed.data;
-  if (!question.trim() && !(attachments && attachments.length)) {
+  const isPractice = rest.mode === "practice_quiz";
+  if (
+    !question.trim() &&
+    !(attachments && attachments.length) &&
+    !(isPractice && rest.documentIds?.length)
+  ) {
     return error("question or attachments required", 422, "VALIDATION");
   }
 
   try {
     const result = await AiChatService.chat({
       userId: auth.session.userId,
-      question,
+      question: question || (isPractice ? "Generate a practice exam from my selected materials" : ""),
       attachments,
       ...rest,
     });
