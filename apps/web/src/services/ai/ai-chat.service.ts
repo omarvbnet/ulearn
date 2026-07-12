@@ -3,6 +3,7 @@ import { AiProviderService } from "./ai-provider.service";
 import { EmbeddingService } from "./embedding.service";
 import { VectorSearchService, type RetrievedChunk } from "./vector-search.service";
 import { StudentMemoryService } from "./student-memory.service";
+import { StudentLearningContextService } from "./student-learning-context.service";
 import { extractTextFromBuffer } from "./text-extract";
 import {
   languageInstruction,
@@ -246,6 +247,29 @@ export class AiChatService {
             where: { id: cached.id },
             data: { hitCount: { increment: 1 } },
           });
+          const isLearnerCache =
+            profile?.role === "STUDENT" ||
+            profile?.role === "CERTIFICATE_USER";
+          let cacheSuggestions: unknown;
+          if (
+            isLearnerCache &&
+            (StudentLearningContextService.wantsCourseSuggestions(question) ||
+              /study plan|weak|fail|progress|evaluate|تقييم|خطة|ضعف/i.test(
+                question
+              ))
+          ) {
+            const learningCtxCache =
+              await StudentLearningContextService.build({
+                userId: input.userId,
+                language,
+                stageId,
+                subjectIds: subjectId ? [subjectId] : subjectIds,
+                role: profile?.role,
+              });
+            if (learningCtxCache.courseSuggestions.length) {
+              cacheSuggestions = learningCtxCache.courseSuggestions.slice(0, 5);
+            }
+          }
           return this.persistTurn({
             userId: input.userId,
             conversationId: input.conversationId,
@@ -254,6 +278,7 @@ export class AiChatService {
             citations: cached.citations,
             fromCache: true,
             attachmentNames: [],
+            courseSuggestions: cacheSuggestions,
           });
         }
       }
@@ -313,6 +338,18 @@ export class AiChatService {
       examResults: memory.examResults,
     });
 
+    const isLearner =
+      profile?.role === "STUDENT" || profile?.role === "CERTIFICATE_USER";
+    const learningCtx = isLearner
+      ? await StudentLearningContextService.build({
+          userId: input.userId,
+          language,
+          stageId,
+          subjectIds: subjectId ? [subjectId] : subjectIds,
+          role: profile?.role,
+        })
+      : null;
+
     const studentBlurb = [
       studentName ? `Student name: ${studentName}` : null,
       stageName
@@ -354,6 +391,9 @@ export class AiChatService {
             ? `Know this student: ${studentBlurb}. Address them by name when natural.`
             : "",
           memoryBlurb ? `Learning memory: ${memoryBlurb}` : "",
+          learningCtx?.promptBlurb
+            ? `\nLearner progress & catalog (use for evaluation and recommendations):\n${learningCtx.promptBlurb}`
+            : "",
           hasAttachments
             ? [
                 "The student attached files/photos. Their content is provided below and/or as images.",
@@ -516,6 +556,11 @@ export class AiChatService {
 
     void StudentMemoryService.recordQuestion(input.userId, question, subjectId);
 
+    const includeSuggestions =
+      Boolean(learningCtx?.courseSuggestions.length) &&
+      (StudentLearningContextService.wantsCourseSuggestions(question) ||
+        /study plan|weak|fail|progress|evaluate|تقييم|خطة|ضعف/i.test(question));
+
     return this.persistTurn({
       userId: input.userId,
       conversationId: input.conversationId,
@@ -525,6 +570,9 @@ export class AiChatService {
       fromCache: false,
       attachmentNames: attachments.map((a) => a.fileName),
       editedFile,
+      courseSuggestions: includeSuggestions
+        ? learningCtx!.courseSuggestions.slice(0, 5)
+        : undefined,
     });
   }
 
@@ -539,6 +587,7 @@ export class AiChatService {
     editedFile?: { fileName: string; mimeType: string; contentBase64: string };
     practiceQuiz?: unknown;
     examAttemptId?: string;
+    courseSuggestions?: unknown;
   }) {
     let conversationId = input.conversationId;
     if (!conversationId) {
@@ -569,15 +618,23 @@ export class AiChatService {
       },
     });
 
+    const citationPayload = {
+      ...(Array.isArray(input.citations)
+        ? { items: input.citations }
+        : ((input.citations as object) || {})),
+      ...(input.practiceQuiz ? { practiceQuiz: input.practiceQuiz } : {}),
+      ...(input.courseSuggestions
+        ? { courseSuggestions: input.courseSuggestions }
+        : {}),
+    };
+
     const assistant = await prisma.aiMessage.create({
       data: {
         conversationId,
         userId: input.userId,
         role: "ASSISTANT",
         content: input.answer,
-        citations: (input.practiceQuiz
-          ? { ...(input.citations as object), practiceQuiz: input.practiceQuiz }
-          : input.citations) as never,
+        citations: citationPayload as never,
       },
     });
 
@@ -590,6 +647,7 @@ export class AiChatService {
       editedFile: input.editedFile,
       practiceQuiz: input.practiceQuiz,
       examAttemptId: input.examAttemptId,
+      courseSuggestions: input.courseSuggestions,
     };
   }
 }

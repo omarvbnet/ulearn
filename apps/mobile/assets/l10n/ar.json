@@ -909,7 +909,14 @@
       "homeCardTitle": "امتحانات الذكاء الاصطناعي",
       "homeTotal": "المجموع",
       "homePassed": "ناجح",
-      "homeFailed": "راسب"
+      "homeFailed": "راسب",
+      "entryLabelStudent": "تعلّم مع AI",
+      "entryLabelTeacher": "الأستاذ الذكي",
+      "entryLabelProfessional": "رؤى مهنية",
+      "hideSnack": "تم إخفاء زر الذكاء الاصطناعي. أعد إظهاره من الملف الشخصي.",
+      "showOnHome": "إظهار الذكاء الاصطناعي في الرئيسية",
+      "showOnHomeHint": "اختصار عائم فوق شريط التبويب",
+      "suggestedCourses": "مقترحة لمرحلتك"
     },
     "error": {
       "generic": "حدث خطأ",

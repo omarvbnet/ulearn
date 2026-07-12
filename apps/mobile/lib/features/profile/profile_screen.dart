@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/auth/require_auth.dart';
@@ -8,6 +9,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/media_cache_budget.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
+import 'package:ulearn/features/ai/ai_with_ulearn_entry.dart';
 import 'package:ulearn/features/profile/completed_courses_screen.dart';
 import 'package:ulearn/features/profile/favorites_screen.dart';
 import 'package:ulearn/features/profile/appearance_screen.dart';
@@ -494,6 +496,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   if (context.mounted) {
                     await context.read<AuthProvider>().refreshUser();
                   }
+                },
+              ),
+            ),
+          ),
+        ],
+        if (user.role == 'STUDENT' || user.role == 'CERTIFICATE_USER') ...[
+          const SizedBox(height: 16),
+          StaggeredItem(
+            index: 4,
+            child: Card(
+              child: FutureBuilder<void>(
+                future: HomeAiEntryVisibility.ensureLoaded(),
+                builder: (context, _) {
+                  return ValueListenableBuilder<bool>(
+                    valueListenable: HomeAiEntryVisibility.hidden,
+                    builder: (context, hidden, _) {
+                      return SwitchListTile(
+                        secondary: Icon(
+                          Icons.smart_toy_outlined,
+                          color: AppTheme.accent,
+                        ),
+                        title: Text(l10n.t('mobile.ai.showOnHome')),
+                        subtitle: Text(
+                          l10n.t('mobile.ai.showOnHomeHint'),
+                          style: TextStyle(color: AppTheme.muted, fontSize: 12),
+                        ),
+                        value: !hidden,
+                        activeThumbColor: AppTheme.accent,
+                        onChanged: (show) =>
+                            HomeAiEntryVisibility.setHidden(!show),
+                      );
+                    },
+                  );
                 },
               ),
             ),

@@ -10,7 +10,10 @@ import 'package:flutter/material.dart';
 
 /// Teacher AI Professor Studio — library, chat, exams, generate, tools.
 class TeacherAiProfessorScreen extends StatefulWidget {
-  const TeacherAiProfessorScreen({super.key});
+  const TeacherAiProfessorScreen({super.key, this.standalone = false});
+
+  /// When true, wraps content in a Scaffold (home navigation).
+  final bool standalone;
 
   @override
   State<TeacherAiProfessorScreen> createState() =>
@@ -321,9 +324,17 @@ class _TeacherAiProfessorScreenState extends State<TeacherAiProfessorScreen>
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     if (_loading) {
-      return const Center(child: CircularProgressIndicator(color: AppTheme.accent));
+      final loading = const Center(
+        child: CircularProgressIndicator(color: AppTheme.accent),
+      );
+      if (!widget.standalone) return loading;
+      return Scaffold(
+        appBar: AppBar(title: Text(l10n.t('mobile.professor.title'))),
+        body: loading,
+      );
     }
-    return Column(
+
+    final body = Column(
       children: [
         if (_message != null)
           Material(
@@ -373,6 +384,20 @@ class _TeacherAiProfessorScreenState extends State<TeacherAiProfessorScreen>
           ),
         ),
       ],
+    );
+
+    if (!widget.standalone) return body;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(l10n.t('mobile.professor.title')),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: _loading ? null : _refresh,
+          ),
+        ],
+      ),
+      body: body,
     );
   }
 

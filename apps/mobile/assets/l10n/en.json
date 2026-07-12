@@ -920,7 +920,14 @@
       "homeCardTitle": "AI exams",
       "homeTotal": "Total",
       "homePassed": "Passed",
-      "homeFailed": "Failed"
+      "homeFailed": "Failed",
+      "entryLabelStudent": "Study with AI",
+      "entryLabelTeacher": "AI Professor",
+      "entryLabelProfessional": "Pro insights",
+      "hideSnack": "AI button hidden. Turn it back on in Profile.",
+      "showOnHome": "Show AI on Home",
+      "showOnHomeHint": "Floating AI shortcut above the tab bar",
+      "suggestedCourses": "Suggested for your stage"
     },
     "error": {
       "generic": "Something went wrong",

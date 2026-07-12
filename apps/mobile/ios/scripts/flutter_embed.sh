@@ -6,6 +6,9 @@ ROOT="${SRCROOT}/.."
 BUILD_DIR="${ROOT}/build"
 NATIVE_FW="${BUILD_DIR}/native_assets/ios/objective_c.framework"
 
+export COPYFILE_DISABLE=1
+/bin/sh "${ROOT}/scripts/setup_ios_build.sh" 2>/dev/null || true
+
 # App.framework may reference native assets before they are compiled (flutter run race).
 manifest=""
 for candidate in \

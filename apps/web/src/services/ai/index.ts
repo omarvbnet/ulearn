@@ -9,6 +9,7 @@ export { AiAnalyticsService } from "./ai-analytics.service";
 export { AiDiagnosticsService } from "./ai-diagnostics.service";
 export { ExamGeneratorService } from "./exam-generator.service";
 export { AiExamService } from "./ai-exam.service";
+export { StudentLearningContextService } from "./student-learning-context.service";
 export { UNAVAILABLE_ANSWER, unavailableAnswer, languageInstruction } from "./types";
 export * from "./professor";
 

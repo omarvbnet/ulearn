@@ -12,6 +12,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/glass.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/ai/ai_exam_panel.dart';
+import 'package:ulearn/features/store/course_detail_screen.dart';
 
 class _PendingAttachment {
   _PendingAttachment({
@@ -132,6 +133,13 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         } else if (practice is Map) {
           exam = AiPracticeExamData.fromJson(Map<String, dynamic>.from(practice));
         }
+        final suggestionsRaw = citationsMap?['courseSuggestions'];
+        final suggestions = <Map<String, dynamic>>[];
+        if (suggestionsRaw is List) {
+          for (final s in suggestionsRaw) {
+            if (s is Map) suggestions.add(Map<String, dynamic>.from(s));
+          }
+        }
         bubbles.add(
           _ChatBubble(
             role: role == 'user' ? 'user' : 'assistant',
@@ -139,6 +147,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             exam: exam != null && exam.examAttemptId.isNotEmpty ? exam : null,
             examCompleted: exam != null,
             examResult: examResult,
+            courseSuggestions: suggestions,
           ),
         );
       }
@@ -279,6 +288,13 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       final answer = data['answer']?.toString() ?? unavailable;
       final citations = (data['citations'] as List?) ?? const [];
       final edited = data['editedFile'] as Map<String, dynamic>?;
+      final suggestionsRaw = data['courseSuggestions'];
+      final suggestions = <Map<String, dynamic>>[];
+      if (suggestionsRaw is List) {
+        for (final s in suggestionsRaw) {
+          if (s is Map) suggestions.add(Map<String, dynamic>.from(s));
+        }
+      }
       setState(() {
         _conversationId = data['conversationId']?.toString() ?? _conversationId;
         _messages.add(
@@ -297,6 +313,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                 .toList(),
             editedFileName: edited?['fileName']?.toString(),
             editedContentBase64: edited?['contentBase64']?.toString(),
+            courseSuggestions: suggestions,
           ),
         );
       });
@@ -779,6 +796,12 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                 const SizedBox(height: 8),
                                 AiExamResultPanel(result: m.examResult!),
                               ],
+                              if (m.courseSuggestions.isNotEmpty) ...[
+                                const SizedBox(height: 10),
+                                _CourseSuggestionsStrip(
+                                  courses: m.courseSuggestions,
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -1246,6 +1269,7 @@ class _ChatBubble {
     this.exam,
     this.examCompleted = false,
     this.examResult,
+    this.courseSuggestions = const [],
   });
 
   final String role;
@@ -1258,4 +1282,118 @@ class _ChatBubble {
   final AiPracticeExamData? exam;
   final bool examCompleted;
   final Map<String, dynamic>? examResult;
+  final List<Map<String, dynamic>> courseSuggestions;
+}
+
+class _CourseSuggestionsStrip extends StatelessWidget {
+  const _CourseSuggestionsStrip({required this.courses});
+
+  final List<Map<String, dynamic>> courses;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          l10n.t('mobile.ai.suggestedCourses'),
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 13,
+            color: AppTheme.foreground,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...courses.map((c) {
+          final id = c['id']?.toString() ?? '';
+          if (id.isEmpty) return const SizedBox.shrink();
+          final title = c['title']?.toString() ?? '';
+          final teacher = c['teacherName']?.toString();
+          final likes = (c['likes'] as num?)?.toInt() ?? 0;
+          final views = (c['viewCount'] as num?)?.toInt() ?? 0;
+          final rating = (c['courseRating'] as num?)?.toDouble() ?? 0;
+          final price = (c['price'] as num?)?.toDouble();
+          final currency = c['currency']?.toString() ?? '';
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Material(
+              color: AppTheme.card,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => CourseDetailScreen(
+                        courseId: id,
+                        summary: c,
+                      ),
+                    ),
+                  );
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          Icons.menu_book_rounded,
+                          color: AppTheme.accent,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
+                            ),
+                            if (teacher != null && teacher.isNotEmpty)
+                              Text(
+                                teacher,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: AppTheme.muted,
+                                ),
+                              ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '★ ${rating.toStringAsFixed(1)} · ♥ $likes · 👁 $views'
+                              '${price != null ? ' · ${price.toStringAsFixed(0)} $currency' : ''}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.muted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.chevron_right, color: AppTheme.muted),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
 }

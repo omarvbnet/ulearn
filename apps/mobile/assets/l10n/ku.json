@@ -910,7 +910,14 @@
       "homeCardTitle": "تاقیکردنەوەکانی AI",
       "homeTotal": "کۆ",
       "homePassed": "سەرکەوتوو",
-      "homeFailed": "شکست"
+      "homeFailed": "شکست",
+      "entryLabelStudent": "لەگەڵ AI بخوێنە",
+      "entryLabelTeacher": "پرۆفیسۆری زیریرەک",
+      "entryLabelProfessional": "تێڕوانینی پیشەیی",
+      "hideSnack": "دوگمەی AI شاردرایەوە. لە پڕۆفایل دەتوانیت بیگەڕێنیتەوە.",
+      "showOnHome": "AI لە سەرەکی پیشان بدە",
+      "showOnHomeHint": "قەڵەمی سەرووی تاب بار",
+      "suggestedCourses": "پێشنیارکراو بۆ قۆناغەکەت"
     },
     "error": {
       "generic": "هەڵەیەک ڕوویدا",

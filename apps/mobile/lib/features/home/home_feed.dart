@@ -417,7 +417,9 @@ class HomeFeedState extends State<HomeFeed> {
                   : null,
             ),
           ),
-          if (user != null && _aiExamStats != null)
+          if (user != null &&
+              user.role != 'TEACHER' &&
+              _aiExamStats != null)
             StaggeredItem(
               index: 1,
               child: _AiExamStatsCard(stats: _aiExamStats!),

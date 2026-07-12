@@ -909,7 +909,14 @@
       "homeCardTitle": "YZ sınavları",
       "homeTotal": "Toplam",
       "homePassed": "Geçti",
-      "homeFailed": "Kaldı"
+      "homeFailed": "Kaldı",
+      "entryLabelStudent": "YZ ile çalış",
+      "entryLabelTeacher": "YZ Profesör",
+      "entryLabelProfessional": "Pro içgörüler",
+      "hideSnack": "YZ düğmesi gizlendi. Profil’den yeniden açabilirsiniz.",
+      "showOnHome": "Ana ekranda YZ göster",
+      "showOnHomeHint": "Sekme çubuğunun üstündeki yüzen kısayol",
+      "suggestedCourses": "Aşaman için önerilenler"
     },
     "error": {
       "generic": "Bir şeyler ters gitti",
