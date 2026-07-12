@@ -37,22 +37,123 @@ function normalizeLang(raw?: string | null): string {
   return "en";
 }
 
-function parseJsonBlock(text: string): unknown {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const raw = (fenced?.[1] || text).trim();
-  try {
-    return JSON.parse(raw);
-  } catch {
-    const start = raw.indexOf("{");
-    const end = raw.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      return JSON.parse(raw.slice(start, end + 1));
+/** Recover complete question objects from truncated model JSON. */
+function extractQuestionsFromPartial(raw: string): {
+  title: string | null;
+  questions: Array<Record<string, unknown>>;
+} {
+  let title: string | null = null;
+  const titleMatch = raw.match(/"title"\s*:\s*"((?:\\.|[^"\\])*)"/);
+  if (titleMatch) {
+    try {
+      title = JSON.parse(`"${titleMatch[1]}"`) as string;
+    } catch {
+      title = titleMatch[1];
     }
-    throw new Error("Model did not return valid quiz JSON");
   }
+
+  const qIdx = raw.indexOf('"questions"');
+  if (qIdx < 0) return { title, questions: [] };
+  const arrStart = raw.indexOf("[", qIdx);
+  if (arrStart < 0) return { title, questions: [] };
+
+  const questions: Array<Record<string, unknown>> = [];
+  let i = arrStart + 1;
+  while (i < raw.length) {
+    while (i < raw.length && /[\s,]/.test(raw[i]!)) i++;
+    if (i >= raw.length || raw[i] === "]") break;
+    if (raw[i] !== "{") break;
+
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    const start = i;
+    let closed = false;
+    for (; i < raw.length; i++) {
+      const ch = raw[i]!;
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === "\\") esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') inStr = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          i++;
+          closed = true;
+          try {
+            questions.push(JSON.parse(raw.slice(start, i)) as Record<string, unknown>);
+          } catch {
+            // skip malformed object
+          }
+          break;
+        }
+      }
+    }
+    if (!closed) break; // truncated mid-object
+  }
+
+  return { title, questions };
 }
 
-/** Deterministic shuffle so each request can pick a different material slice. */
+function parseQuizJson(text: string): {
+  title?: string;
+  questions?: Array<{
+    text?: string;
+    options?: Record<string, string>;
+    correctKey?: string;
+  }>;
+} {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const raw = (fenced?.[1] || text).trim();
+
+  const tryParse = (s: string) => {
+    return JSON.parse(s) as {
+      title?: string;
+      questions?: Array<{
+        text?: string;
+        options?: Record<string, string>;
+        correctKey?: string;
+      }>;
+    };
+  };
+
+  try {
+    return tryParse(raw);
+  } catch {
+    /* continue */
+  }
+
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    try {
+      return tryParse(raw.slice(start, end + 1));
+    } catch {
+      /* continue */
+    }
+  }
+
+  const salvaged = extractQuestionsFromPartial(raw);
+  if (salvaged.questions.length) {
+    return {
+      title: salvaged.title || undefined,
+      questions: salvaged.questions as Array<{
+        text?: string;
+        options?: Record<string, string>;
+        correctKey?: string;
+      }>,
+    };
+  }
+
+  throw new Error(
+    "Model did not return valid quiz JSON (response may have been truncated). Try Intermediate (10) or Basic (5), or retry Advanced."
+  );
+}
+
 function shuffleWithSeed<T>(items: T[], seed: number): T[] {
   const arr = [...items];
   let s = seed >>> 0 || 1;
@@ -72,6 +173,12 @@ function normalizeQuestionText(text: string): string {
     .trim();
 }
 
+function maxTokensForCount(count: number): number {
+  if (count >= 20) return 8192;
+  if (count >= 10) return 6144;
+  return 4096;
+}
+
 const FOCUS_ANGLES = [
   "definitions and precise terminology",
   "practical real-world application",
@@ -86,7 +193,6 @@ const FOCUS_ANGLES = [
 ] as const;
 
 export class ExamGeneratorService {
-  /** Ephemeral practice quiz for students / certificate users (not persisted as Quiz). */
   static async generatePractice(input: {
     userId: string;
     question: string;
@@ -96,7 +202,6 @@ export class ExamGeneratorService {
     documentIds?: string[];
     attachmentText?: string;
     count?: number;
-    /** When true (student exams), documentIds are required. */
     requireDocuments?: boolean;
   }): Promise<PracticeQuizPayload> {
     const language = normalizeLang(input.language);
@@ -126,46 +231,77 @@ export class ExamGeneratorService {
     const secondaryAngle =
       FOCUS_ANGLES[(recent.attemptCount + requestSeed + 3) % FOCUS_ANGLES.length];
 
-    let generated = await this.runQuizGeneration({
-      userId: input.userId,
-      language,
-      count,
-      materialText: material.text,
-      userFocus: input.question,
-      requestSeed,
-      angle,
-      secondaryAngle,
-      avoidQuestions: recent.questionTexts,
-      weakTopics: recent.weakHints,
-      attemptNumber: recent.attemptCount + 1,
-    });
+    const batchSize = count > 10 ? 10 : count;
+    const batches: Array<{ title: string | null; questions: PracticeQuestion[] }> = [];
+    let avoid = [...recent.questionTexts];
+    let remaining = count;
+    let batchIndex = 0;
 
-    const overlap = this.countOverlap(
-      generated.questions.map((q) => q.text),
-      recent.questionTexts
-    );
-    if (overlap >= Math.max(2, Math.floor(count / 2))) {
-      generated = await this.runQuizGeneration({
+    while (remaining > 0 && batchIndex < 3) {
+      const n = Math.min(batchSize, remaining);
+      const batch = await this.runQuizGeneration({
         userId: input.userId,
         language,
-        count,
+        count: n,
         materialText: material.text,
         userFocus: input.question,
-        requestSeed: (requestSeed + 7919) >>> 0,
-        angle: secondaryAngle,
-        secondaryAngle: angle,
-        avoidQuestions: [
-          ...recent.questionTexts,
-          ...generated.questions.map((q) => q.text),
-        ],
+        requestSeed: (requestSeed + batchIndex * 9973) >>> 0,
+        angle: FOCUS_ANGLES[(recent.attemptCount + requestSeed + batchIndex) % FOCUS_ANGLES.length],
+        secondaryAngle:
+          FOCUS_ANGLES[
+            (recent.attemptCount + requestSeed + batchIndex + 3) % FOCUS_ANGLES.length
+          ],
+        avoidQuestions: avoid,
         weakTopics: recent.weakHints,
-        attemptNumber: recent.attemptCount + 1,
-        forceUnique: true,
+        attemptNumber: recent.attemptCount + 1 + batchIndex,
       });
+      if (!batch.questions.length) break;
+      batches.push(batch);
+      avoid = [...avoid, ...batch.questions.map((q) => q.text)];
+      remaining = count - batches.reduce((s, b) => s + b.questions.length, 0);
+      batchIndex += 1;
+      if (batch.questions.length < Math.min(3, n)) break;
+    }
+
+    let generated = {
+      title: batches.find((b) => b.title)?.title || null,
+      questions: batches.flatMap((b) => b.questions).slice(0, count),
+    };
+
+    if (count <= 10) {
+      const overlap = this.countOverlap(
+        generated.questions.map((q) => q.text),
+        recent.questionTexts
+      );
+      if (overlap >= Math.max(2, Math.floor(count / 2))) {
+        generated = await this.runQuizGeneration({
+          userId: input.userId,
+          language,
+          count,
+          materialText: material.text,
+          userFocus: input.question,
+          requestSeed: (requestSeed + 7919) >>> 0,
+          angle: secondaryAngle,
+          secondaryAngle: angle,
+          avoidQuestions: [
+            ...recent.questionTexts,
+            ...generated.questions.map((q) => q.text),
+          ],
+          weakTopics: recent.weakHints,
+          attemptNumber: recent.attemptCount + 1,
+          forceUnique: true,
+        });
+      }
     }
 
     if (generated.questions.length < 2) {
       throw new Error("Could not generate enough quiz questions from the selected materials");
+    }
+
+    if (count >= 20 && generated.questions.length < 10) {
+      throw new Error(
+        "Advanced exam was truncated. Please retry Advanced, or try Intermediate (10)."
+      );
     }
 
     const titleSuffix = (requestSeed % 900) + 100;
@@ -264,8 +400,8 @@ export class ExamGeneratorService {
         ? [
             "Do NOT repeat or lightly rephrase any of these previous questions:",
             ...input.avoidQuestions
-              .slice(0, 25)
-              .map((t, i) => `${i + 1}. ${t.slice(0, 220)}`),
+              .slice(0, 20)
+              .map((t, i) => `${i + 1}. ${t.slice(0, 180)}`),
           ].join("\n")
         : "This learner has few prior exams — still make questions fresh and non-generic.";
 
@@ -276,28 +412,34 @@ export class ExamGeneratorService {
             .join(" | ")}`
         : "";
 
+    const materialCap = input.count >= 10 ? 8000 : 12000;
+
     const prompt = [
-      "Generate a short practice quiz as JSON only.",
+      "Generate a practice quiz as compact JSON only. No markdown, no commentary.",
       languageInstruction(input.language),
       `Create exactly ${input.count} multiple-choice questions from the material.`,
       'Schema: {"title":"...","questions":[{"text":"...","options":{"A":"...","B":"...","C":"...","D":"..."},"correctKey":"A"}]}',
       "correctKey must be one of A|B|C|D. Every question must be answerable from the material.",
-      `Uniqueness token: exam-${input.requestSeed}-n${input.attemptNumber}. Each request must produce a DIFFERENT quiz.`,
+      "Keep stems and options concise (1–2 short sentences). Close every brace/bracket — incomplete JSON is invalid.",
+      `Uniqueness token: exam-${input.requestSeed}-n${input.attemptNumber}.`,
       `Primary focus angle: ${input.angle}.`,
       `Also include at least one question using: ${input.secondaryAngle}.`,
-      "Mix difficulty: ~40% easy recall, ~40% medium application, ~20% harder analysis.",
-      "Vary stems (what/why/how/which/scenario). Do not copy sentences verbatim from the material.",
-      "Plausible distractors only — no joke options. Spread correctKey across A/B/C/D (not all the same).",
+      "Mix difficulty. Vary stems. Plausible distractors. Spread correctKey across A/B/C/D.",
       input.forceUnique
-        ? "CRITICAL: Prior output was too similar to old exams. Invent completely new stems, options, and scenarios."
+        ? "CRITICAL: Invent completely new stems, options, and scenarios vs prior exams."
         : "",
       avoidBlock,
       weakBlock,
       input.userFocus ? `User focus: ${input.userFocus}` : "",
-      `\nMaterial sample (unique slice for this request):\n${input.materialText.slice(0, 12000)}`,
+      `\nMaterial sample:\n${input.materialText.slice(0, materialCap)}`,
     ]
       .filter(Boolean)
       .join("\n");
+
+    const chatOpts = {
+      maxTokens: maxTokensForCount(input.count),
+      temperature: 0.55,
+    };
 
     const result = await AiProviderService.chat(
       "EXAM_GENERATOR",
@@ -305,10 +447,11 @@ export class ExamGeneratorService {
         { role: "system", content: prompt },
         {
           role: "user",
-          content: `Generate a brand-new quiz JSON now (token ${input.requestSeed}). Do not reuse prior questions.`,
+          content: `Return ONLY valid complete JSON for exactly ${input.count} questions (token ${input.requestSeed}).`,
         },
       ],
-      input.userId
+      input.userId,
+      chatOpts
     ).catch(async () =>
       AiProviderService.chat(
         "TEACHING_ASSISTANT",
@@ -316,21 +459,15 @@ export class ExamGeneratorService {
           { role: "system", content: prompt },
           {
             role: "user",
-            content: `Generate a brand-new quiz JSON now (token ${input.requestSeed}). Do not reuse prior questions.`,
+            content: `Return ONLY valid complete JSON for exactly ${input.count} questions (token ${input.requestSeed}).`,
           },
         ],
-        input.userId
+        input.userId,
+        chatOpts
       )
     );
 
-    const parsed = parseJsonBlock(result.text) as {
-      title?: string;
-      questions?: Array<{
-        text?: string;
-        options?: Record<string, string>;
-        correctKey?: string;
-      }>;
-    };
+    const parsed = parseQuizJson(result.text);
 
     const questions = (parsed.questions || [])
       .filter((q) => q.text && q.options && q.correctKey)
@@ -347,7 +484,6 @@ export class ExamGeneratorService {
     };
   }
 
-  /** Admin/teacher: create a real Quiz from KB documents. */
   static async generateAndPublish(input: {
     actorId: string;
     educationalStageId: string;
@@ -416,10 +552,6 @@ export class ExamGeneratorService {
     return { preview: null, quiz, citations: practice.citations, questions };
   }
 
-  /**
-   * Load material text with a per-request random slice so consecutive exams
-   * see different passages even from the same documents.
-   */
   private static async loadMaterialText(input: {
     userId: string;
     question: string;
@@ -467,7 +599,6 @@ export class ExamGeneratorService {
         byDoc.set(c.documentId, list);
       }
 
-      // Round-robin across documents after shuffling each doc's chunks.
       const queues = [...byDoc.values()].map((list, idx) =>
         shuffleWithSeed(list, seed + idx * 97)
       );
@@ -477,11 +608,11 @@ export class ExamGeneratorService {
       while (picked.length < target && queues.some((q) => q.length) && guard < 500) {
         guard += 1;
         const order = shuffleWithSeed(
-          queues.map((_, i) => i).filter((i) => queues[i].length > 0),
+          queues.map((_, i) => i).filter((i) => queues[i]!.length > 0),
           seed + guard
         );
         for (const i of order) {
-          const next = queues[i].shift();
+          const next = queues[i]!.shift();
           if (next) picked.push(next);
           if (picked.length >= target) break;
         }
@@ -496,8 +627,7 @@ export class ExamGeneratorService {
         });
       }
     } else if (input.allowRagFallback !== false) {
-      const angleHint =
-        FOCUS_ANGLES[seed % FOCUS_ANGLES.length];
+      const angleHint = FOCUS_ANGLES[seed % FOCUS_ANGLES.length];
       const embed = await EmbeddingService.embedText(
         [input.question || "quiz from materials", angleHint, `seed:${seed}`]
           .filter(Boolean)

@@ -193,7 +193,12 @@ export class AiProviderService {
     return adapter.testConnection(config);
   }
 
-  static async chat(moduleKey: AiModuleKey | undefined, messages: ChatMessage[], userId?: string) {
+  static async chat(
+    moduleKey: AiModuleKey | undefined,
+    messages: ChatMessage[],
+    userId?: string,
+    overrides?: { maxTokens?: number; temperature?: number }
+  ) {
     const started = Date.now();
     const needsVision = messages.some((m) =>
       (m.parts || []).some((p) => p.type === "image" && Boolean(p.dataBase64))
@@ -202,7 +207,16 @@ export class AiProviderService {
       moduleKey,
       async (p, config) => {
         const adapter = getAdapter(p.type);
-        return adapter.chat(config, messages);
+        const next: ProviderConfig = {
+          ...config,
+          ...(overrides?.maxTokens != null
+            ? { maxTokens: Math.max(config.maxTokens, overrides.maxTokens) }
+            : {}),
+          ...(overrides?.temperature != null
+            ? { temperature: overrides.temperature }
+            : {}),
+        };
+        return adapter.chat(next, messages);
       },
       needsVision
         ? {
