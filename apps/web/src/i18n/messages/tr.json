@@ -128,6 +128,8 @@
     "aiNoMaterialsInsights": "Profesyonel sertifika ilgi alanların için henüz hazır materyal yok. Yöneticiden yüklemesini iste.",
     "aiMaterialsProcessingStage": "Aşaman için materyaller hâlâ işleniyor. Biraz sonra tekrar dene.",
     "aiMaterialsProcessingInsights": "Ilgi alanı materyallerin hâlâ işleniyor. Biraz sonra tekrar dene.",
+    "aiMaterialsFailedStage": "Aşama materyallerinin işlenmesi başarısız. Yöneticiden Temel Bilgi'de yeniden işlemesini iste.",
+    "aiMaterialsFailedInsights": "Ilgi alanı materyallerinin işlenmesi başarısız. Yöneticiden yeniden işlemesini iste.",
     "insightsTitle": "İlgi alanlarım",
     "insightsHint": "1–5 Profesyonel Sertifika ilgi alanı seçin. Kurslar ve YZ bunlara göre çalışır.",
     "insightsSave": "İlgi alanlarını kaydet",

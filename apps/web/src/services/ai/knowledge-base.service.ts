@@ -110,7 +110,8 @@ export class KnowledgeBaseService {
         status: "PENDING",
       },
     });
-    void this.processDocument(doc.id);
+    // Processing is kicked from the API route via next/server `after`, or
+    // recovered by requeueStuckDocuments if the host killed background work.
     return doc;
   }
 
@@ -169,7 +170,7 @@ export class KnowledgeBaseService {
       },
     });
 
-    void this.processDocument(id);
+    await this.processDocument(id);
     return { ok: true };
   }
 
@@ -319,6 +320,52 @@ export class KnowledgeBaseService {
         },
       });
     }
+  }
+
+  /**
+   * Re-queue docs stuck in PENDING/PROCESSING (common when serverless kills
+   * fire-and-forget processing mid-run).
+   */
+  static async requeueStuckDocuments(opts?: {
+    olderThanMs?: number;
+    educationalStageId?: string | null;
+    subjectIds?: string[];
+    take?: number;
+  }) {
+    const olderThanMs = opts?.olderThanMs ?? 90_000;
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const stuck = await prisma.kbDocument.findMany({
+      where: {
+        deletedAt: null,
+        instructorId: null,
+        status: { in: ["PENDING", "PROCESSING"] },
+        updatedAt: { lt: cutoff },
+        ...(opts?.educationalStageId
+          ? { educationalStageId: opts.educationalStageId }
+          : {}),
+        ...(opts?.subjectIds?.length
+          ? { subjectId: { in: opts.subjectIds } }
+          : {}),
+      },
+      orderBy: { updatedAt: "asc" },
+      take: opts?.take ?? 5,
+      select: { id: true },
+    });
+
+    for (const d of stuck) {
+      // Reset to PENDING then process; avoid concurrent double-runs via updatedAt bump.
+      await prisma.kbDocument.update({
+        where: { id: d.id },
+        data: { status: "PENDING", errorMessage: "Requeued after stuck processing" },
+      });
+      try {
+        await this.processDocument(d.id);
+      } catch (e) {
+        console.error("[kb] requeue process failed", d.id, e);
+      }
+    }
+
+    return stuck.length;
   }
 }
 

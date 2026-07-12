@@ -128,6 +128,8 @@
     "aiNoMaterialsInsights": "No READY materials for your Professional Certificate insights yet. Ask an admin to upload them.",
     "aiMaterialsProcessingStage": "Materials for your stage are still processing. Try again shortly.",
     "aiMaterialsProcessingInsights": "Materials for your insights are still processing. Try again shortly.",
+    "aiMaterialsFailedStage": "Materials for your stage failed processing. Ask an admin to Reprocess them in Basic Knowledge.",
+    "aiMaterialsFailedInsights": "Materials for your insights failed processing. Ask an admin to Reprocess them.",
     "insightsTitle": "My insights",
     "insightsHint": "Select 1–5 Professional Certificate insights. Courses and AI follow these.",
     "insightsSave": "Save insights",

@@ -163,15 +163,21 @@ export default function StudentAiPage() {
     const list = (data.documents || []) as KbDoc[];
     if (!list.length) {
       const pending = Number(data.meta?.pendingForStage || 0);
+      const failed = Number(data.meta?.failedCount || 0);
       const insights = data.meta?.scope === "insights";
+      const reason = data.meta?.emptyReason as string | undefined;
       const emptyMsg =
-        pending > 0
+        reason === "failed" || (pending === 0 && failed > 0)
           ? insights
-            ? t.student.aiMaterialsProcessingInsights
-            : t.student.aiMaterialsProcessingStage
-          : insights
-            ? t.student.aiNoMaterialsInsights
-            : t.student.aiNoMaterialsStage;
+            ? t.student.aiMaterialsFailedInsights
+            : t.student.aiMaterialsFailedStage
+          : reason === "processing" || pending > 0
+            ? insights
+              ? t.student.aiMaterialsProcessingInsights
+              : t.student.aiMaterialsProcessingStage
+            : insights
+              ? t.student.aiNoMaterialsInsights
+              : t.student.aiNoMaterialsStage;
       alert(emptyMsg || t.student.aiNoMaterials);
       return;
     }

@@ -915,6 +915,8 @@
       "noMaterialsInsights": "Profesyonel sertifika ilgi alanların için henüz hazır materyal yok. Yöneticiden yüklemesini iste.",
       "materialsProcessingStage": "Aşaman için materyaller hâlâ işleniyor. Biraz sonra tekrar dene.",
       "materialsProcessingInsights": "Ilgi alanı materyallerin hâlâ işleniyor. Biraz sonra tekrar dene.",
+      "materialsFailedStage": "Aşama materyallerinin işlenmesi başarısız. Yöneticiden Temel Bilgi'de yeniden işlemesini iste.",
+      "materialsFailedInsights": "Ilgi alanı materyallerinin işlenmesi başarısız. Yöneticiden yeniden işlemesini iste.",
       "examSelectAnswers": "Her soru için bir cevap seç. Süre işliyor.",
       "examSubmit": "Sınavı gönder",
       "examPassed": "Geçti",

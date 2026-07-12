@@ -105,6 +105,15 @@ export class AiExamService {
     if (!stageId) return [];
     if (isCert && !interestIds.length) return [];
 
+    // Recover docs stuck mid-processing so exams don't forever show "still processing".
+    const { KnowledgeBaseService } = await import("./knowledge-base.service");
+    await KnowledgeBaseService.requeueStuckDocuments({
+      educationalStageId: stageId,
+      subjectIds: isCert ? interestIds : undefined,
+      olderThanMs: 60_000,
+      take: 3,
+    });
+
     const select = {
       id: true,
       fileName: true,
@@ -155,22 +164,52 @@ export class AiExamService {
           ?.subject.stageId ?? null
       : profile?.studentProfile?.educationalStageId ?? null;
 
-    const pendingForStage =
+    const stageFilter =
       stageId && (!isCert || interestIds.length)
-        ? await prisma.kbDocument.count({
+        ? {
+            deletedAt: null as null,
+            instructorId: null as null,
+            educationalStageId: stageId,
+            ...(isCert ? { subjectId: { in: interestIds } } : {}),
+          }
+        : null;
+
+    const [pendingForStage, readyCount, failedCount] = stageFilter
+      ? await Promise.all([
+          prisma.kbDocument.count({
             where: {
-              deletedAt: null,
-              instructorId: null,
-              educationalStageId: stageId,
+              ...stageFilter,
               status: { in: ["PENDING", "PROCESSING"] },
-              ...(isCert ? { subjectId: { in: interestIds } } : {}),
             },
-          })
-        : 0;
+          }),
+          prisma.kbDocument.count({
+            where: { ...stageFilter, status: "READY" },
+          }),
+          prisma.kbDocument.count({
+            where: { ...stageFilter, status: "FAILED" },
+          }),
+        ])
+      : [0, 0, 0];
+
+    let emptyReason:
+      | "none"
+      | "processing"
+      | "failed"
+      | "no_stage"
+      | "no_insights"
+      | null = null;
+    if (!stageId) emptyReason = "no_stage";
+    else if (isCert && !interestIds.length) emptyReason = "no_insights";
+    else if (readyCount === 0 && pendingForStage > 0) emptyReason = "processing";
+    else if (readyCount === 0 && failedCount > 0) emptyReason = "failed";
+    else if (readyCount === 0) emptyReason = "none";
 
     return {
       stageId,
       pendingForStage,
+      readyCount,
+      failedCount,
+      emptyReason,
       scope: isCert ? ("insights" as const) : ("stage" as const),
     };
   }

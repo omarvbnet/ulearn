@@ -355,18 +355,29 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     if (!mounted) return;
     if (docs.isEmpty) {
       final pending = (meta?['pendingForStage'] as num?)?.toInt() ?? 0;
+      final failed = (meta?['failedCount'] as num?)?.toInt() ?? 0;
       final insights = meta?['scope']?.toString() == 'insights';
-      final msg = pending > 0
-          ? l10n.t(
-              insights
-                  ? 'mobile.ai.materialsProcessingInsights'
-                  : 'mobile.ai.materialsProcessingStage',
-            )
-          : l10n.t(
-              insights
-                  ? 'mobile.ai.noMaterialsInsights'
-                  : 'mobile.ai.noMaterialsStage',
-            );
+      final reason = meta?['emptyReason']?.toString();
+      final String msg;
+      if (reason == 'failed' || (pending == 0 && failed > 0)) {
+        msg = l10n.t(
+          insights
+              ? 'mobile.ai.materialsFailedInsights'
+              : 'mobile.ai.materialsFailedStage',
+        );
+      } else if (reason == 'processing' || pending > 0) {
+        msg = l10n.t(
+          insights
+              ? 'mobile.ai.materialsProcessingInsights'
+              : 'mobile.ai.materialsProcessingStage',
+        );
+      } else {
+        msg = l10n.t(
+          insights
+              ? 'mobile.ai.noMaterialsInsights'
+              : 'mobile.ai.noMaterialsStage',
+        );
+      }
       _toast(msg);
       return;
     }

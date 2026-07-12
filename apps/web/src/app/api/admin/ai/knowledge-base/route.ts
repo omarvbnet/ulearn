@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { KnowledgeBaseService } from "@/services/ai";
@@ -8,6 +9,16 @@ export async function GET(request: Request) {
   if (auth.error) return auth.error;
   const { searchParams } = new URL(request.url);
   const stageId = searchParams.get("educationalStageId");
+  // Recover stuck PENDING/PROCESSING docs for this stage when admin opens KB.
+  if (stageId && stageId !== "unscoped") {
+    after(() =>
+      KnowledgeBaseService.requeueStuckDocuments({
+        educationalStageId: stageId,
+        olderThanMs: 60_000,
+        take: 5,
+      })
+    );
+  }
   const documents = await KnowledgeBaseService.list({
     status: searchParams.get("status") || undefined,
     q: searchParams.get("q") || undefined,
@@ -82,5 +93,6 @@ export async function POST(request: Request) {
       courseId: parsed.data.courseId,
     },
   });
+  after(() => KnowledgeBaseService.processDocument(doc.id));
   return json({ document: doc }, 201);
 }
