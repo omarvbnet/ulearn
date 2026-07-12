@@ -10,6 +10,7 @@ import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/l10n/locale_provider.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/glass.dart';
+import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/ai/ai_exam_panel.dart';
 
 class _PendingAttachment {
@@ -322,17 +323,23 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     final api = context.read<ApiClient>();
     final errGeneric = context.l10n.t('mobile.ai.errorGeneric');
     final noMaterials = context.l10n.t('mobile.ai.noMaterials');
+    final materialsProcessing = context.l10n.t('mobile.ai.materialsProcessing');
     List<Map<String, dynamic>> docs = [];
+    Map<String, dynamic>? meta;
     try {
       final data = await api.get('/api/ai/kb-documents');
       docs = ((data['documents'] as List?) ?? []).cast<Map<String, dynamic>>();
+      meta = data['meta'] is Map
+          ? Map<String, dynamic>.from(data['meta'] as Map)
+          : null;
     } catch (e) {
       _toast(e is ApiException ? e.message : errGeneric);
       return;
     }
     if (!mounted) return;
     if (docs.isEmpty) {
-      _toast(noMaterials);
+      final pending = (meta?['pendingForStage'] as num?)?.toInt() ?? 0;
+      _toast(pending > 0 ? materialsProcessing : noMaterials);
       return;
     }
 
@@ -504,7 +511,17 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         onOpen: _openConversation,
       ),
       appBar: GlassAppBar(
-        title: Text(l10n.t('mobile.ai.title')),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ULearnLogo(size: 26, glow: 0.7),
+            const SizedBox(width: 8),
+            Text(
+              l10n.t('mobile.ai.title'),
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
         leading: IconButton(
           icon: const Icon(Icons.history_rounded),
           tooltip: l10n.t('mobile.ai.history'),
@@ -867,10 +884,10 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                         _sending ? null : () => _pick(imagesOnly: false),
                     icon: const Icon(Icons.attach_file_rounded),
                   ),
-                  IconButton(
+              IconButton(
                     tooltip: l10n.t('mobile.ai.generateExam'),
                     onPressed: _sending ? null : _startExamFlow,
-                    icon: Icon(Icons.quiz_outlined, color: AppTheme.accent),
+                    icon: const ULearnLogo(size: 22, glow: 0.55),
                   ),
                   Expanded(
                     child: TextField(
@@ -943,7 +960,7 @@ class _EmptyState extends StatelessWidget {
           ),
           child: Column(
             children: [
-              Icon(Icons.auto_awesome, size: 36, color: AppTheme.accent),
+              const ULearnLogo(size: 44, glow: 0.8),
               const SizedBox(height: 12),
               Text(
                 l10n.t('mobile.ai.emptyTitle'),
@@ -952,6 +969,7 @@ class _EmptyState extends StatelessWidget {
                   color: AppTheme.foreground,
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
+                  letterSpacing: 0.4,
                 ),
               ),
               const SizedBox(height: 8),
@@ -967,7 +985,7 @@ class _EmptyState extends StatelessWidget {
                   backgroundColor: AppTheme.accent,
                   foregroundColor: Colors.black,
                 ),
-                icon: const Icon(Icons.quiz_outlined),
+                icon: const ULearnLogo(size: 18, glow: 0.4),
                 label: Text(l10n.t('mobile.ai.generateExam')),
               ),
             ],

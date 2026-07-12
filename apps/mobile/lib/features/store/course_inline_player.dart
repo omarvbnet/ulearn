@@ -16,6 +16,23 @@ import 'package:ulearn/features/video/video_protection.dart';
 import 'package:video_player/video_player.dart';
 import 'package:ulearn/core/widgets/glass.dart';
 
+/// A single item shown in the YouTube-style fullscreen playlist rail.
+class CoursePlaylistItem {
+  const CoursePlaylistItem({
+    required this.id,
+    required this.title,
+    required this.canWatch,
+    this.completed = false,
+    this.durationLabel,
+  });
+
+  final String id;
+  final String title;
+  final bool canWatch;
+  final bool completed;
+  final String? durationLabel;
+}
+
 /// Inline / fullscreen course video player with brand logo, cast watermark,
 /// completion tracking, and standard transport controls.
 class CourseInlinePlayer extends StatefulWidget {
@@ -30,6 +47,8 @@ class CourseInlinePlayer extends StatefulWidget {
     this.freePreviewLimitSec,
     this.onPreviewLimitReached,
     this.initialPositionSec,
+    this.playlist = const [],
+    this.onSelectPlaylistItem,
   });
 
   final String url;
@@ -43,6 +62,9 @@ class CourseInlinePlayer extends StatefulWidget {
   final VoidCallback? onPreviewLimitReached;
   /// Resume playback from this second when the lesson is incomplete.
   final int? initialPositionSec;
+  /// Optional lesson rail shown beside the video in fullscreen (YouTube-style).
+  final List<CoursePlaylistItem> playlist;
+  final ValueChanged<String>? onSelectPlaylistItem;
 
   @override
   State<CourseInlinePlayer> createState() => _CourseInlinePlayerState();
@@ -267,7 +289,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
 
   Future<void> _enterFullscreen() async {
     if (_controller == null || _error != null) return;
-    await Navigator.of(context).push(
+    final selectedId = await Navigator.of(context).push<String>(
       MaterialPageRoute(
         fullscreenDialog: true,
         builder: (_) => _FullscreenPlayer(
@@ -277,6 +299,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
           speed: _speed,
           videoUrl: widget.url,
           lessonId: widget.lessonId,
+          playlist: widget.playlist,
           onSpeed: (s) => setState(() {
             _speed = s;
             _controller!.setPlaybackSpeed(s);
@@ -284,6 +307,12 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
         ),
       ),
     );
+    if (!mounted) return;
+    if (selectedId != null &&
+        selectedId.isNotEmpty &&
+        selectedId != widget.lessonId) {
+      widget.onSelectPlaylistItem?.call(selectedId);
+    }
   }
 
   @override
@@ -552,6 +581,7 @@ class _FullscreenPlayer extends StatefulWidget {
     required this.onSpeed,
     required this.videoUrl,
     this.lessonId,
+    this.playlist = const [],
   });
 
   final VideoPlayerController controller;
@@ -561,6 +591,7 @@ class _FullscreenPlayer extends StatefulWidget {
   final ValueChanged<double> onSpeed;
   final String videoUrl;
   final String? lessonId;
+  final List<CoursePlaylistItem> playlist;
 
   @override
   State<_FullscreenPlayer> createState() => _FullscreenPlayerState();
@@ -568,6 +599,7 @@ class _FullscreenPlayer extends StatefulWidget {
 
 class _FullscreenPlayerState extends State<_FullscreenPlayer> {
   bool _showControls = true;
+  bool _showPlaylist = true;
 
   @override
   void initState() {
@@ -594,102 +626,328 @@ class _FullscreenPlayerState extends State<_FullscreenPlayer> {
 
   @override
   Widget build(BuildContext context) {
+    final hasPlaylist = widget.playlist.length > 1;
+    final showRail = hasPlaylist && _showPlaylist;
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: GestureDetector(
-          onTap: () => setState(() => _showControls = !_showControls),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Center(
-                child: AspectRatio(
-                  aspectRatio: widget.controller.value.aspectRatio,
-                  child: VideoPlayer(widget.controller),
-                ),
-              ),
-              const VideoBrandLogo(markSize: 26),
-              DynamicWatermark(controller: widget.protection),
-              CastingIdentityBanner(controller: widget.protection),
-              ScreenshotBlockOverlay(visible: widget.protection.screenshotBlocked),
-              AnimatedOpacity(
-                opacity: _showControls ? 1 : 0,
-                duration: const Duration(milliseconds: 220),
-                child: ValueListenableBuilder<VideoPlayerValue>(
-                  valueListenable: widget.controller,
-                  builder: (context, value, _) => Column(
-                    children: [
-                      GlassAppBar(
-                        leading: IconButton(
-                          icon: const Icon(Icons.arrow_back, color: Colors.white),
-                          onPressed: () => Navigator.of(context).pop(),
-                        ),
-                        title: Text(widget.title, style: const TextStyle(color: Colors.white)),
-                        actions: [
-                          IconButton(
-                            icon: Icon(
-                              widget.protection.isCasting
-                                  ? Icons.cast_connected
-                                  : Icons.cast_outlined,
-                              color: widget.protection.isCasting
-                                  ? AppTheme.accent
-                                  : Colors.white70,
-                            ),
-                            onPressed: () => openCourseCastScreen(
-                              context,
-                              url: widget.videoUrl,
-                              title: widget.title,
-                              protection: widget.protection,
-                              lessonId: widget.lessonId,
-                              positionMs: widget.controller.value.position.inMilliseconds,
-                              onPause: () => widget.controller.pause(),
-                              onResume: () => widget.controller.play(),
-                            ),
-                          ),
-                        ],
+        child: Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() => _showControls = !_showControls),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Center(
+                      child: AspectRatio(
+                        aspectRatio: widget.controller.value.aspectRatio == 0
+                            ? 16 / 9
+                            : widget.controller.value.aspectRatio,
+                        child: VideoPlayer(widget.controller),
                       ),
-                      const Spacer(),
-                      Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
+                    ),
+                    const VideoBrandLogo(markSize: 26),
+                    DynamicWatermark(controller: widget.protection),
+                    CastingIdentityBanner(controller: widget.protection),
+                    ScreenshotBlockOverlay(
+                      visible: widget.protection.screenshotBlocked,
+                    ),
+                    AnimatedOpacity(
+                      opacity: _showControls ? 1 : 0,
+                      duration: const Duration(milliseconds: 220),
+                      child: ValueListenableBuilder<VideoPlayerValue>(
+                        valueListenable: widget.controller,
+                        builder: (context, value, _) => Column(
                           children: [
-                            VideoProgressIndicator(widget.controller, allowScrubbing: true),
-                            Row(
-                              children: [
+                            GlassAppBar(
+                              leading: IconButton(
+                                icon: const Icon(
+                                  Icons.arrow_back,
+                                  color: Colors.white,
+                                ),
+                                onPressed: () => Navigator.of(context).pop(),
+                              ),
+                              title: Text(
+                                widget.title,
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              actions: [
+                                if (hasPlaylist)
+                                  IconButton(
+                                    tooltip: _showPlaylist
+                                        ? context.l10n
+                                            .t('mobile.store.hidePlaylist')
+                                        : context.l10n
+                                            .t('mobile.store.showPlaylist'),
+                                    icon: Icon(
+                                      _showPlaylist
+                                          ? Icons.playlist_remove_outlined
+                                          : Icons.playlist_play_outlined,
+                                      color: Colors.white,
+                                      size: 22,
+                                    ),
+                                    onPressed: () => setState(
+                                      () => _showPlaylist = !_showPlaylist,
+                                    ),
+                                  ),
                                 IconButton(
                                   icon: Icon(
-                                    value.isPlaying ? Icons.pause : Icons.play_arrow,
-                                    color: Colors.white,
-                                    size: 32,
+                                    widget.protection.isCasting
+                                        ? Icons.cast_connected
+                                        : Icons.cast_outlined,
+                                    color: widget.protection.isCasting
+                                        ? AppTheme.accent
+                                        : Colors.white70,
                                   ),
-                                  onPressed: () => value.isPlaying
-                                      ? widget.controller.pause()
-                                      : widget.controller.play(),
-                                ),
-                                PopupMenuButton<double>(
-                                  initialValue: widget.speed,
-                                  onSelected: widget.onSpeed,
-                                  itemBuilder: (_) => [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
-                                      .map((s) =>
-                                          PopupMenuItem(value: s, child: Text('${s}x')))
-                                      .toList(),
-                                  child: Text(
-                                    '${widget.speed}x',
-                                    style: const TextStyle(color: Colors.white),
+                                  onPressed: () => openCourseCastScreen(
+                                    context,
+                                    url: widget.videoUrl,
+                                    title: widget.title,
+                                    protection: widget.protection,
+                                    lessonId: widget.lessonId,
+                                    positionMs: widget
+                                        .controller.value.position.inMilliseconds,
+                                    onPause: () => widget.controller.pause(),
+                                    onResume: () => widget.controller.play(),
                                   ),
                                 ),
                               ],
                             ),
+                            const Spacer(),
+                            Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                children: [
+                                  VideoProgressIndicator(
+                                    widget.controller,
+                                    allowScrubbing: true,
+                                  ),
+                                  Row(
+                                    children: [
+                                      IconButton(
+                                        icon: Icon(
+                                          value.isPlaying
+                                              ? Icons.pause
+                                              : Icons.play_arrow,
+                                          color: Colors.white,
+                                          size: 32,
+                                        ),
+                                        onPressed: () => value.isPlaying
+                                            ? widget.controller.pause()
+                                            : widget.controller.play(),
+                                      ),
+                                      PopupMenuButton<double>(
+                                        initialValue: widget.speed,
+                                        onSelected: widget.onSpeed,
+                                        itemBuilder: (_) =>
+                                            [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+                                                .map(
+                                                  (s) => PopupMenuItem(
+                                                    value: s,
+                                                    child: Text('${s}x'),
+                                                  ),
+                                                )
+                                                .toList(),
+                                        child: Text(
+                                          '${widget.speed}x',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      if (hasPlaylist && !_showPlaylist)
+                                        IconButton(
+                                          tooltip: context.l10n
+                                              .t('mobile.store.showPlaylist'),
+                                          icon: const Icon(
+                                            Icons.playlist_play_outlined,
+                                            color: Colors.white,
+                                            size: 22,
+                                          ),
+                                          onPressed: () => setState(
+                                            () => _showPlaylist = true,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeOutCubic,
+              width: showRail ? 280 : 0,
+              child: showRail
+                  ? _FullscreenPlaylistRail(
+                      items: widget.playlist,
+                      activeId: widget.lessonId,
+                      onPick: (id) => Navigator.of(context).pop(id),
+                      onHide: () => setState(() => _showPlaylist = false),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+class _FullscreenPlaylistRail extends StatelessWidget {
+  const _FullscreenPlaylistRail({
+    required this.items,
+    required this.activeId,
+    required this.onPick,
+    required this.onHide,
+  });
+
+  final List<CoursePlaylistItem> items;
+  final String? activeId;
+  final ValueChanged<String> onPick;
+  final VoidCallback onHide;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Material(
+      color: const Color(0xFF0B0B12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    l10n.t('mobile.store.playlist'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: l10n.t('mobile.store.hidePlaylist'),
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  onPressed: onHide,
+                  icon: const Icon(
+                    Icons.chevron_right,
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: Colors.white12),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              itemCount: items.length,
+              itemBuilder: (context, i) {
+                final item = items[i];
+                final active = item.id == activeId;
+                return InkWell(
+                  onTap: item.canWatch ? () => onPick(item.id) : null,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                    decoration: BoxDecoration(
+                      color: active
+                          ? AppTheme.accent.withValues(alpha: 0.16)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: active
+                            ? AppTheme.accent.withValues(alpha: 0.45)
+                            : Colors.white10,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          '${i + 1}',
+                          style: TextStyle(
+                            color: active ? AppTheme.accent : Colors.white54,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: item.canWatch
+                                      ? Colors.white
+                                      : Colors.white38,
+                                  fontWeight: active
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                  fontSize: 12.5,
+                                  height: 1.25,
+                                ),
+                              ),
+                              if (item.durationLabel != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  item.durationLabel!,
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (item.completed)
+                          const Icon(
+                            Icons.check_circle,
+                            size: 16,
+                            color: Color(0xFF22C55E),
+                          )
+                        else if (!item.canWatch)
+                          const Icon(
+                            Icons.lock_outline,
+                            size: 16,
+                            color: Colors.white38,
+                          )
+                        else if (active)
+                          const Icon(
+                            Icons.play_arrow_rounded,
+                            size: 18,
+                            color: AppTheme.accent,
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

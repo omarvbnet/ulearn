@@ -766,6 +766,28 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                           ? (active['watchPositionSec'] as num?)?.toInt()
                           : null,
                       onCompleted: active != null ? () => _onLessonCompleted(active) : null,
+                      playlist: [
+                        for (var i = 0; i < lessons.length; i++)
+                          CoursePlaylistItem(
+                            id: lessons[i]['id']?.toString() ?? '$i',
+                            title: _lessonTitle(context, lessons[i], i),
+                            canWatch: _canWatch(lessons[i], unlocked),
+                            completed: _isLessonCompleted(lessons[i]),
+                            durationLabel: formatDuration(
+                              (lessons[i]['durationSec'] as num?)?.toInt() ?? 0,
+                            ),
+                          ),
+                      ],
+                      onSelectPlaylistItem: (id) {
+                        Map<String, dynamic>? lesson;
+                        for (final l in lessons) {
+                          if (l['id']?.toString() == id) {
+                            lesson = l;
+                            break;
+                          }
+                        }
+                        if (lesson != null) _selectLesson(lesson, unlocked);
+                      },
                       freePreviewLimitSec: !unlocked &&
                               active?['previewOnly'] == true &&
                               (active?['freePreviewSec'] as num?) != null

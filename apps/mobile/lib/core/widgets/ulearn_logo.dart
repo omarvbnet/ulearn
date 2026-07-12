@@ -50,7 +50,7 @@ class ULearnLogoRow extends StatelessWidget {
         ShaderMask(
           shaderCallback: (bounds) => AppTheme.gradient.createShader(bounds),
           child: Text(
-            'U Learn',
+            'u learn',
             style: TextStyle(
               fontSize: fontSize,
               fontWeight: FontWeight.w700,

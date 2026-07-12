@@ -75,7 +75,12 @@ export class AiExamService {
         studentProfile: { select: { educationalStageId: true } },
         certificateProfile: {
           select: {
-            interests: { select: { subjectId: true, subject: { select: { stageId: true } } } },
+            interests: {
+              select: {
+                subjectId: true,
+                subject: { select: { stageId: true } },
+              },
+            },
           },
         },
       },
@@ -92,30 +97,113 @@ export class AiExamService {
       ? certStageId
       : profile.studentProfile?.educationalStageId ?? null;
 
-    if (!stageId) return [];
+    const baseWhere = {
+      status: "READY" as const,
+      deletedAt: null,
+    };
 
-    const docs = await prisma.kbDocument.findMany({
-      where: {
-        status: "READY",
-        deletedAt: null,
-        educationalStageId: stageId,
-        ...(isCert && interestIds.length
-          ? { subjectId: { in: interestIds } }
-          : {}),
-      },
-      orderBy: { updatedAt: "desc" },
-      take: 100,
-      select: {
-        id: true,
-        fileName: true,
-        subjectId: true,
-        educationalStageId: true,
-        pageCount: true,
-        updatedAt: true,
-      },
-    });
+    // 1) Prefer READY docs for the student's stage.
+    let docs =
+      stageId
+        ? await prisma.kbDocument.findMany({
+            where: {
+              ...baseWhere,
+              educationalStageId: stageId,
+            },
+            orderBy: { updatedAt: "desc" },
+            take: 100,
+            select: {
+              id: true,
+              fileName: true,
+              subjectId: true,
+              educationalStageId: true,
+              pageCount: true,
+              updatedAt: true,
+            },
+          })
+        : [];
+
+    // 2) Certificate track: prefer interest subjects, but keep stage docs with no subject.
+    if (isCert && interestIds.length && docs.length) {
+      const scoped = docs.filter(
+        (d) => !d.subjectId || interestIds.includes(d.subjectId)
+      );
+      if (scoped.length) docs = scoped;
+    }
+
+    // 3) If nothing for the stage, include unscoped READY uploads (admin left stage blank).
+    if (!docs.length) {
+      docs = await prisma.kbDocument.findMany({
+        where: {
+          ...baseWhere,
+          educationalStageId: null,
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 100,
+        select: {
+          id: true,
+          fileName: true,
+          subjectId: true,
+          educationalStageId: true,
+          pageCount: true,
+          updatedAt: true,
+        },
+      });
+    }
+
+    // 4) Last resort: any READY docs (so exams work while stage mapping is fixed).
+    if (!docs.length) {
+      docs = await prisma.kbDocument.findMany({
+        where: baseWhere,
+        orderBy: { updatedAt: "desc" },
+        take: 100,
+        select: {
+          id: true,
+          fileName: true,
+          subjectId: true,
+          educationalStageId: true,
+          pageCount: true,
+          updatedAt: true,
+        },
+      });
+    }
 
     return docs;
+  }
+
+  /** Extra context for empty-state messaging on clients. */
+  static async listKbDocumentsMeta(userId: string) {
+    const profile = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        role: true,
+        studentProfile: { select: { educationalStageId: true } },
+        certificateProfile: {
+          select: {
+            interests: {
+              select: { subject: { select: { stageId: true } } },
+            },
+          },
+        },
+      },
+    });
+    const isCert = profile?.role === "CERTIFICATE_USER";
+    const stageId = isCert
+      ? profile?.certificateProfile?.interests.find((i) => i.subject.stageId)
+          ?.subject.stageId ?? null
+      : profile?.studentProfile?.educationalStageId ?? null;
+
+    const pendingForStage = stageId
+      ? await prisma.kbDocument.count({
+          where: {
+            deletedAt: null,
+            educationalStageId: stageId,
+            status: { in: ["PENDING", "PROCESSING"] },
+          },
+        })
+      : 0;
+
+    return { stageId, pendingForStage };
   }
 
   static async assertDocumentsAllowed(userId: string, documentIds: string[]) {

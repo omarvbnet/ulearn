@@ -60,6 +60,8 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
   const [speed, setSpeed] = useState(1);
   const [completion, setCompletion] = useState(0);
   const [phase, setPhase] = useState<"intro" | "main" | "outro">("main");
+  const [showPlaylist, setShowPlaylist] = useState(true);
+  const [theater, setTheater] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastReported = useRef(0);
@@ -174,11 +176,23 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-3">
-      <div className="space-y-5 xl:col-span-2">
+    <div
+      className={cn(
+        "grid gap-6",
+        theater
+          ? "fixed inset-0 z-50 grid-cols-1 bg-black p-3 xl:grid-cols-[1fr_auto]"
+          : "xl:grid-cols-3"
+      )}
+    >
+      <div className={cn("space-y-5", theater ? "min-h-0" : "xl:col-span-2")}>
         {/* Player */}
         {currentVideo?.fileUrl ? (
-          <div className="animate-scale-in relative overflow-hidden rounded-2xl border border-card-border bg-black shadow-[0_0_48px_rgba(160,32,240,0.15)]">
+          <div
+            className={cn(
+              "animate-scale-in relative overflow-hidden border border-card-border bg-black shadow-[0_0_48px_rgba(160,32,240,0.15)]",
+              theater ? "h-full min-h-[50vh] rounded-xl" : "rounded-2xl"
+            )}
+          >
             <VideoWatermark label={watermark} />
             {phase !== "main" ? (
               <video
@@ -193,7 +207,7 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
                 onContextMenu={(e) => e.preventDefault()}
                 onEnded={() => setPhase("main")}
                 onError={() => setPhase("main")}
-                className="aspect-video w-full"
+                className={cn(theater ? "h-full w-full object-contain" : "aspect-video w-full")}
               />
             ) : (
               <video
@@ -209,7 +223,7 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
                   reportProgress();
                   if (data.introOutro?.outro?.fileUrl) setPhase("outro");
                 }}
-                className="aspect-video w-full"
+                className={cn(theater ? "h-full w-full object-contain" : "aspect-video w-full")}
               />
             )}
             {phase === "intro" && (
@@ -220,6 +234,26 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
                 {t.common.skip} ›
               </button>
             )}
+            <div className="absolute end-3 top-3 z-10 flex gap-2">
+              {videos.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setShowPlaylist((v) => !v)}
+                  className="rounded-lg bg-black/65 p-2 text-white/90 backdrop-blur hover:bg-black/80"
+                  title={showPlaylist ? "Hide list" : "Show list"}
+                >
+                  {showPlaylist ? "»" : "☰"}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setTheater((v) => !v)}
+                className="rounded-lg bg-black/65 p-2 text-white/90 backdrop-blur hover:bg-black/80"
+                title={theater ? "Exit fullscreen" : "Fullscreen"}
+              >
+                {theater ? "✕" : "⛶"}
+              </button>
+            </div>
           </div>
         ) : (
           <Card className="flex aspect-video items-center justify-center">
@@ -227,6 +261,8 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
           </Card>
         )}
 
+        {!theater && (
+          <>
         {/* Controls */}
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm text-muted">{t.student.speed}</span>
@@ -263,13 +299,30 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
 
         {/* Q&A */}
         <QASection lessonId={lessonId} questions={data.lesson.questions} onPosted={load} />
+          </>
+        )}
       </div>
 
-      {/* Sidebar */}
-      <div className="space-y-5">
-        {videos.length > 1 && (
-          <Card className="space-y-2 p-4">
-            <h3 className="mb-2 font-semibold">{t.student.videos}</h3>
+      {/* Sidebar / playlist */}
+      {(showPlaylist || !theater) && (
+      <div
+        className={cn(
+          "space-y-5",
+          theater && "w-[min(320px,36vw)] overflow-y-auto rounded-xl border border-white/10 bg-[#0b0b12] p-3"
+        )}
+      >
+        {videos.length > 1 && showPlaylist && (
+          <Card className={cn("space-y-2 p-4", theater && "border-white/10 bg-transparent")}>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="font-semibold">{t.student.videos}</h3>
+              <button
+                type="button"
+                onClick={() => setShowPlaylist(false)}
+                className="rounded-md px-2 py-1 text-xs text-muted hover:bg-white/5"
+              >
+                ✕
+              </button>
+            </div>
             {videos.map((v, i) => (
               <button
                 key={v.id}
@@ -289,7 +342,7 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
           </Card>
         )}
 
-        {files.length > 0 && (
+        {!theater && files.length > 0 && (
           <Card className="space-y-2 p-4">
             <h3 className="mb-2 font-semibold">{t.student.materials}</h3>
             {files.map((f) => (
@@ -307,7 +360,7 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
           </Card>
         )}
 
-        {data.lesson.quizzes.length > 0 && (
+        {!theater && data.lesson.quizzes.length > 0 && (
           <Card className="space-y-3 p-4">
             <h3 className="font-semibold">{t.student.quizzes}</h3>
             {data.lesson.quizzes.map((q) => (
@@ -320,7 +373,18 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
             ))}
           </Card>
         )}
+
+        {theater && !showPlaylist && (
+          <button
+            type="button"
+            onClick={() => setShowPlaylist(true)}
+            className="rounded-lg bg-white/10 px-3 py-2 text-sm text-white"
+          >
+            Show list
+          </button>
+        )}
       </div>
+      )}
     </div>
   );
 }
