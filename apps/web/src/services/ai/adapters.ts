@@ -291,19 +291,65 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
 export class JinaAdapter implements AiProviderAdapter {
   readonly type = "JINA";
 
-  private base(config: ProviderConfig) {
-    return normalizeJinaBase(config.baseUrl);
+  private embedBase(config: ProviderConfig) {
+    return normalizeJinaBase(config.baseUrl, config.model);
   }
 
-  async chat(_config: ProviderConfig, _messages: ChatMessage[]): Promise<ChatResult> {
-    throw new Error(
-      "Jina AI is embedding-only — assign JINA to the EMBEDDING module, not chat modules."
+  private chatBase(config: ProviderConfig) {
+    return normalizeJinaDeepSearchBase(config.baseUrl);
+  }
+
+  async chat(config: ProviderConfig, messages: ChatMessage[]): Promise<ChatResult> {
+    if (!isJinaDeepSearchModel(config.model || "")) {
+      throw new Error(
+        "This Jina model is for embeddings only. Use jina-deepsearch-v1 for chat / AI Creative, or assign an embedding model to EMBEDDING."
+      );
+    }
+    const url = `${this.chatBase(config)}/chat/completions`;
+    const mapped = messages.map((m) => ({ role: m.role, content: m.content }));
+    const res = await fetchJson(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: config.model || "jina-deepsearch-v1",
+          messages: mapped,
+          temperature: config.temperature,
+          max_tokens: config.maxTokens,
+          reasoning_effort: "medium",
+        }),
+      },
+      Math.max(config.timeoutMs, 120_000)
     );
+    const data = await readApiJson(res, "Jina DeepSearch chat");
+    if (!res.ok) {
+      const err = data.error as { message?: string } | undefined;
+      const detail = err?.message || JSON.stringify(data).slice(0, 200);
+      throw new Error(
+        `Jina DeepSearch chat failed (${res.status}) at ${url}${detail ? `: ${detail}` : ""}`
+      );
+    }
+    const choices = data.choices as { message?: { content?: string } }[] | undefined;
+    const usage = data.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
+    return {
+      text: choices?.[0]?.message?.content || "",
+      tokensIn: usage?.prompt_tokens ?? 0,
+      tokensOut: usage?.completion_tokens ?? 0,
+    };
   }
 
   async embed(config: ProviderConfig, text: string): Promise<EmbeddingResult> {
+    if (isJinaDeepSearchModel(config.model || "")) {
+      throw new Error(
+        "jina-deepsearch-v1 is chat-only. Use jina-embeddings-v4 (or similar) for EMBEDDING."
+      );
+    }
     const model = config.model || "jina-embeddings-v4";
-    const url = `${this.base(config)}/embeddings`;
+    const url = `${this.embedBase(config)}/embeddings`;
     const body: Record<string, unknown> = {
       model,
       input: [text.slice(0, 8000)],
@@ -345,8 +391,12 @@ export class JinaAdapter implements AiProviderAdapter {
 
   async testConnection(config: ProviderConfig) {
     try {
+      if (isJinaDeepSearchModel(config.model || "")) {
+        await this.chat(config, [{ role: "user", content: "Reply with OK" }]);
+        return { ok: true, message: "Jina DeepSearch connection OK" };
+      }
       await this.embed(config, "ulearn ping");
-      return { ok: true, message: "Jina connection OK" };
+      return { ok: true, message: "Jina embeddings connection OK" };
     } catch (e) {
       return { ok: false, message: e instanceof Error ? e.message : "Jina test failed" };
     }
@@ -460,19 +510,32 @@ export function defaultBaseUrlForType(type: string): string | null {
   }
 }
 
+/** Jina embedding / clip models (knowledge base vectors). */
+export function isJinaEmbeddingModel(model: string): boolean {
+  return /jina-embeddings|jina-clip/i.test(model);
+}
+
+/** Jina DeepSearch chat model (research / text generation). */
+export function isJinaDeepSearchModel(model: string): boolean {
+  return /jina-deepsearch|deepsearch/i.test(model);
+}
+
+export function jinaDefaultBaseUrl(model: string): string {
+  return isJinaDeepSearchModel(model)
+    ? "https://deepsearch.jina.ai/v1"
+    : "https://api.jina.ai/v1";
+}
+
 /** True when this provider can run the EMBEDDING module. */
-export function providerSupportsEmbeddings(type: string): boolean {
-  return (
-    type === "GEMINI" ||
-    type === "OPENAI" ||
-    type === "OPENAI_COMPATIBLE" ||
-    type === "JINA"
-  );
+export function providerSupportsEmbeddings(type: string, model?: string): boolean {
+  if (type === "JINA") return isJinaEmbeddingModel(model || "jina-embeddings-v4");
+  return type === "GEMINI" || type === "OPENAI" || type === "OPENAI_COMPATIBLE";
 }
 
 /** True when this provider can run chat / completion modules. */
-export function providerSupportsChat(type: string): boolean {
-  return type !== "JINA";
+export function providerSupportsChat(type: string, model?: string): boolean {
+  if (type === "JINA") return isJinaDeepSearchModel(model || "");
+  return true;
 }
 
 function defaultChatModel(type: string): string {
@@ -521,13 +584,26 @@ export function normalizeOpenAiCompatibleBase(
   return base.replace(/\/$/, "");
 }
 
-/** Normalize Jina base URL (keys from https://jina.ai/api-dashboard/key-manager). */
-export function normalizeJinaBase(baseUrl?: string | null): string {
+/** Normalize Jina embeddings base URL (keys from https://jina.ai/api-dashboard/key-manager). */
+export function normalizeJinaBase(baseUrl?: string | null, model?: string): string {
+  if (model && isJinaDeepSearchModel(model)) {
+    return normalizeJinaDeepSearchBase(baseUrl);
+  }
   let base = (baseUrl || "https://api.jina.ai/v1").trim().replace(/\/$/, "");
   base = base
     .replace(/\/embeddings$/i, "")
     .replace(/\/rerank$/i, "")
     .replace(/\/$/, "");
-  if (!base) base = "https://api.jina.ai/v1";
+  if (!base || /deepsearch\.jina\.ai/i.test(base)) base = "https://api.jina.ai/v1";
+  return base;
+}
+
+/** Normalize Jina DeepSearch chat base URL. */
+export function normalizeJinaDeepSearchBase(baseUrl?: string | null): string {
+  let base = (baseUrl || "https://deepsearch.jina.ai/v1").trim().replace(/\/$/, "");
+  base = base
+    .replace(/\/chat\/completions$/i, "")
+    .replace(/\/$/, "");
+  if (!base || /api\.jina\.ai/i.test(base)) base = "https://deepsearch.jina.ai/v1";
   return base;
 }

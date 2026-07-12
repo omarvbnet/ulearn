@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/ui";
 import { fetchJson, readResponseJson } from "@/lib/fetch-json";
+import {
+  isJinaDeepSearchModel,
+  providerSupportsChat,
+  providerSupportsEmbeddings,
+} from "@/services/ai/adapters";
 
 type Provider = {
   id: string;
@@ -100,10 +105,11 @@ const MODELS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
     { value: "deepseek-reasoner", label: "deepseek-reasoner" },
   ],
   JINA: [
-    { value: "jina-embeddings-v4", label: "jina-embeddings-v4 (recommended)" },
-    { value: "jina-embeddings-v3", label: "jina-embeddings-v3" },
-    { value: "jina-embeddings-v2-base-en", label: "jina-embeddings-v2-base-en" },
-    { value: "jina-clip-v2", label: "jina-clip-v2 (multimodal)" },
+    { value: "jina-embeddings-v4", label: "jina-embeddings-v4 (embeddings · recommended)" },
+    { value: "jina-embeddings-v3", label: "jina-embeddings-v3 (embeddings)" },
+    { value: "jina-embeddings-v2-base-en", label: "jina-embeddings-v2-base-en (embeddings)" },
+    { value: "jina-clip-v2", label: "jina-clip-v2 (embeddings · multimodal)" },
+    { value: "jina-deepsearch-v1", label: "jina-deepsearch-v1 (chat · AI Creative / PPT)" },
   ],
   OPENAI_COMPATIBLE: [
     { value: "gpt-4o-mini", label: "gpt-4o-mini (compatible)" },
@@ -173,6 +179,18 @@ export function AiProvidersClient() {
   useEffect(() => {
     load().catch((e) => setError(e.message));
   }, [load]);
+
+  function onModelChange(model: string) {
+    setForm((f) => {
+      const next = { ...f, model, customModel: "" };
+      if (f.type === "JINA") {
+        next.baseUrl = isJinaDeepSearchModel(model)
+          ? "https://deepsearch.jina.ai/v1"
+          : DEFAULT_BASE_URL.JINA;
+      }
+      return next;
+    });
+  }
 
   function onTypeChange(type: string) {
     const nextModel = DEFAULT_MODEL[type] || "gpt-4o-mini";
@@ -449,7 +467,7 @@ export function AiProvidersClient() {
                 customModel: form.customModel,
               });
             } else {
-              setForm({ ...form, model: v, customModel: "" });
+              onModelChange(v);
             }
           }}
         >
@@ -504,8 +522,10 @@ export function AiProvidersClient() {
           >
             jina.ai/api-dashboard/key-manager
           </a>{" "}
-          (default <code>api.jina.ai/v1</code>) — assign Jina to EMBEDDING only.
-          Keep chat modules on Gemini, OpenAI, DeepSeek, or Claude.
+          (default <code>api.jina.ai/v1</code> for embeddings,{" "}
+          <code>deepsearch.jina.ai/v1</code> for DeepSearch chat) — embedding models →
+          EMBEDDING; <code>jina-deepsearch-v1</code> → AI Creative / chat modules (PPT/text,
+          not image design).
         </p>
         <button
           className="btn btn-primary sm:col-span-2 lg:col-span-3"
@@ -576,17 +596,15 @@ export function AiProvidersClient() {
 
       <PageHeader
         title="Module assignments"
-        description="Route each AI module to a provider. EMBEDDING must be Gemini, OpenAI, or Jina — DeepSeek/Claude/Kimi are chat-only."
+        description="Route each AI module to a provider. EMBEDDING: Gemini, OpenAI, or Jina embedding models. AI Creative: chat providers or Jina DeepSearch (text/PPT only)."
       />
       <div className="card space-y-3 p-4">
         {MODULES.map((moduleKey) => {
           const current = assignments.find((a) => a.moduleKey === moduleKey)?.providerId || "";
           const options =
             moduleKey === "EMBEDDING"
-              ? providers.filter((p) =>
-                  ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE", "JINA"].includes(p.type)
-                )
-              : providers.filter((p) => p.type !== "JINA");
+              ? providers.filter((p) => providerSupportsEmbeddings(p.type, p.model))
+              : providers.filter((p) => providerSupportsChat(p.type, p.model));
           return (
             <label key={moduleKey} className="flex flex-wrap items-center gap-3 text-sm">
               <span className="w-48 font-medium">{moduleKey}</span>
@@ -610,7 +628,13 @@ export function AiProvidersClient() {
               </select>
               {moduleKey === "EMBEDDING" && options.length === 0 ? (
                 <span className="text-xs text-amber-700">
-                  Add Gemini, OpenAI, or Jina first — DeepSeek cannot embed.
+                  Add Gemini, OpenAI, or Jina embeddings first — DeepSeek cannot embed.
+                </span>
+              ) : null}
+              {moduleKey === "AI_CREATIVE" ? (
+                <span className="text-xs text-muted">
+                  Jina: use <code>jina-deepsearch-v1</code> only. Image design needs Gemini/OpenAI
+                  vision.
                 </span>
               ) : null}
             </label>

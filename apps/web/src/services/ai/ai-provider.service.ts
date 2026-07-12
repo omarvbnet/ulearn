@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { AiModuleKey, AiProvider, AiProviderType } from "@prisma/client";
 import { decryptSecret, encryptSecret } from "./crypto";
-import { defaultBaseUrlForType, getAdapter, normalizeOpenAiCompatibleBase, providerSupportsChat, providerSupportsEmbeddings } from "./adapters";
+import { defaultBaseUrlForType, getAdapter, jinaDefaultBaseUrl, normalizeOpenAiCompatibleBase, providerSupportsChat, providerSupportsEmbeddings } from "./adapters";
 import type { ChatMessage, ProviderConfig } from "./types";
 
 function toConfig(p: AiProvider, apiKey: string): ProviderConfig {
@@ -14,7 +14,9 @@ function toConfig(p: AiProvider, apiKey: string): ProviderConfig {
     apiKey,
     baseUrl: openAiCompat
       ? normalizeOpenAiCompatibleBase(p.type, p.baseUrl)
-      : p.baseUrl || defaultBaseUrlForType(p.type),
+      : p.type === "JINA"
+        ? p.baseUrl || jinaDefaultBaseUrl(p.model)
+        : p.baseUrl || defaultBaseUrlForType(p.type),
     model: p.model,
     apiVersion: p.apiVersion,
     timeoutMs: p.timeoutMs,
@@ -114,9 +116,14 @@ export class AiProviderService {
   static async setModuleAssignment(moduleKey: AiModuleKey, providerId: string) {
     const provider = await prisma.aiProvider.findUnique({ where: { id: providerId } });
     if (!provider) throw new Error("Provider not found");
-    if (moduleKey === "EMBEDDING" && !providerSupportsEmbeddings(provider.type)) {
+    if (moduleKey === "EMBEDDING" && !providerSupportsEmbeddings(provider.type, provider.model)) {
       throw new Error(
-        `${provider.type} (${provider.name}) cannot run embeddings. Assign EMBEDDING to Gemini, OpenAI, or Jina.`
+        `${provider.type} (${provider.name}) cannot run embeddings. Assign EMBEDDING to Gemini, OpenAI, or a Jina embedding model.`
+      );
+    }
+    if (moduleKey !== "EMBEDDING" && !providerSupportsChat(provider.type, provider.model)) {
+      throw new Error(
+        `${provider.type} (${provider.name}) is embedding-only. Use jina-deepsearch-v1 for chat / AI Creative.`
       );
     }
     return prisma.aiModuleAssignment.upsert({
@@ -130,9 +137,9 @@ export class AiProviderService {
     return prisma.aiModuleAssignment.findMany({ include: { provider: true } });
   }
 
-  /** First enabled Gemini/OpenAI/compatible provider that has an API key. */
+  /** First enabled Gemini/OpenAI/compatible/Jina-embedding provider that has an API key. */
   static async findEmbeddingCapableProvider(): Promise<AiProvider | null> {
-    return prisma.aiProvider.findFirst({
+    const candidates = await prisma.aiProvider.findMany({
       where: {
         status: "ENABLED",
         type: { in: ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE", "JINA"] },
@@ -140,6 +147,9 @@ export class AiProviderService {
       },
       orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
     });
+    return (
+      candidates.find((p) => providerSupportsEmbeddings(p.type, p.model)) ?? null
+    );
   }
 
   /**
@@ -153,7 +163,7 @@ export class AiProviderService {
     });
     if (
       assigned?.provider?.status === "ENABLED" &&
-      providerSupportsEmbeddings(assigned.provider.type) &&
+      providerSupportsEmbeddings(assigned.provider.type, assigned.provider.model) &&
       assigned.provider.apiKeyEncrypted
     ) {
       return assigned.provider;
@@ -185,7 +195,7 @@ export class AiProviderService {
       where: { status: "ENABLED", isDefault: true },
     });
     // Never resolve a chat-only default for embeddings.
-    if (moduleKey === "EMBEDDING" && fallbackDefault && !providerSupportsEmbeddings(fallbackDefault.type)) {
+    if (moduleKey === "EMBEDDING" && fallbackDefault && !providerSupportsEmbeddings(fallbackDefault.type, fallbackDefault.model)) {
       return this.findEmbeddingCapableProvider();
     }
     return fallbackDefault;
@@ -227,13 +237,13 @@ export class AiProviderService {
     let triedEmbedCapable = false;
     for (const provider of chain) {
       if (!provider.apiKeyEncrypted) continue;
-      if (moduleKey !== "EMBEDDING" && !providerSupportsChat(provider.type)) {
+      if (moduleKey !== "EMBEDDING" && !providerSupportsChat(provider.type, provider.model)) {
         lastError = new Error(
-          `${provider.type} (${provider.name}) is embedding-only. Assign it to EMBEDDING, not ${moduleKey}.`
+          `${provider.type} (${provider.name}) is embedding-only. Use jina-deepsearch-v1 for chat / AI Creative.`
         );
         continue;
       }
-      if (moduleKey === "EMBEDDING" && !providerSupportsEmbeddings(provider.type)) {
+      if (moduleKey === "EMBEDDING" && !providerSupportsEmbeddings(provider.type, provider.model)) {
         lastError = new Error(
           `${provider.type} (${provider.name}) cannot run embeddings. Assign EMBEDDING to Gemini, OpenAI, or Jina.`
         );
