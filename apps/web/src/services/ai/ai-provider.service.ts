@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { AiModuleKey, AiProvider, AiProviderType } from "@prisma/client";
 import { decryptSecret, encryptSecret } from "./crypto";
-import { defaultBaseUrlForType, getAdapter, normalizeOpenAiCompatibleBase, providerSupportsEmbeddings } from "./adapters";
+import { defaultBaseUrlForType, getAdapter, normalizeOpenAiCompatibleBase, providerSupportsChat, providerSupportsEmbeddings } from "./adapters";
 import type { ChatMessage, ProviderConfig } from "./types";
 
 function toConfig(p: AiProvider, apiKey: string): ProviderConfig {
@@ -116,7 +116,7 @@ export class AiProviderService {
     if (!provider) throw new Error("Provider not found");
     if (moduleKey === "EMBEDDING" && !providerSupportsEmbeddings(provider.type)) {
       throw new Error(
-        `${provider.type} (${provider.name}) cannot run embeddings. Assign EMBEDDING to Gemini or OpenAI.`
+        `${provider.type} (${provider.name}) cannot run embeddings. Assign EMBEDDING to Gemini, OpenAI, or Jina.`
       );
     }
     return prisma.aiModuleAssignment.upsert({
@@ -135,7 +135,7 @@ export class AiProviderService {
     return prisma.aiProvider.findFirst({
       where: {
         status: "ENABLED",
-        type: { in: ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE"] },
+        type: { in: ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE", "JINA"] },
         apiKeyEncrypted: { not: null },
       },
       orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
@@ -207,7 +207,7 @@ export class AiProviderService {
       const embedOpts = {
         preferTypes: opts?.preferTypes?.length
           ? opts.preferTypes
-          : ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE"],
+          : ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE", "JINA"],
         skipTypes: [...(opts?.skipTypes || []), "DEEPSEEK", "KIMI", "ANTHROPIC"],
       };
       opts = embedOpts;
@@ -227,9 +227,15 @@ export class AiProviderService {
     let triedEmbedCapable = false;
     for (const provider of chain) {
       if (!provider.apiKeyEncrypted) continue;
+      if (moduleKey !== "EMBEDDING" && !providerSupportsChat(provider.type)) {
+        lastError = new Error(
+          `${provider.type} (${provider.name}) is embedding-only. Assign it to EMBEDDING, not ${moduleKey}.`
+        );
+        continue;
+      }
       if (moduleKey === "EMBEDDING" && !providerSupportsEmbeddings(provider.type)) {
         lastError = new Error(
-          `${provider.type} (${provider.name}) cannot run embeddings. Assign EMBEDDING to Gemini or OpenAI.`
+          `${provider.type} (${provider.name}) cannot run embeddings. Assign EMBEDDING to Gemini, OpenAI, or Jina.`
         );
         continue;
       }
@@ -252,7 +258,7 @@ export class AiProviderService {
     }
     if (moduleKey === "EMBEDDING" && !triedEmbedCapable) {
       throw new Error(
-        "No embedding provider available. Add Gemini (model gemini-embedding-001) or OpenAI with an API key, then assign EMBEDDING to it — DeepSeek/Kimi/Claude are chat-only."
+        "No embedding provider available. Add Gemini, OpenAI, or Jina with an API key, then assign EMBEDDING to it — DeepSeek/Kimi/Claude are chat-only."
       );
     }
     throw lastError instanceof Error ? lastError : new Error("No AI provider available");
@@ -343,6 +349,7 @@ function estimateCost(type: string, tokensIn: number, tokensOut: number): number
     OPENAI_COMPATIBLE: { in: 0.0000001, out: 0.0000004 },
     KIMI: { in: 0.00000012, out: 0.00000012 },
     DEEPSEEK: { in: 0.00000014, out: 0.00000028 },
+    JINA: { in: 0.00000002, out: 0 },
   };
   const r = rates[type] || rates.GEMINI;
   return tokensIn * r.in + tokensOut * r.out;

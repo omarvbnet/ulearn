@@ -1563,6 +1563,7 @@ enum AiProviderType {
   OPENAI_COMPATIBLE
   KIMI
   DEEPSEEK
+  JINA
 }
 
 enum AiProviderStatus {

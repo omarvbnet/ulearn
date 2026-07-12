@@ -59,6 +59,7 @@ const PROVIDER_TYPES = [
   { value: "ANTHROPIC", label: "Claude (Anthropic)" },
   { value: "KIMI", label: "Kimi (Moonshot)" },
   { value: "DEEPSEEK", label: "DeepSeek" },
+  { value: "JINA", label: "Jina AI (Embeddings)" },
   { value: "OPENAI_COMPATIBLE", label: "OpenAI Compatible (custom)" },
 ] as const;
 
@@ -97,6 +98,12 @@ const MODELS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
     { value: "deepseek-chat", label: "deepseek-chat" },
     { value: "deepseek-reasoner", label: "deepseek-reasoner" },
   ],
+  JINA: [
+    { value: "jina-embeddings-v4", label: "jina-embeddings-v4 (recommended)" },
+    { value: "jina-embeddings-v3", label: "jina-embeddings-v3" },
+    { value: "jina-embeddings-v2-base-en", label: "jina-embeddings-v2-base-en" },
+    { value: "jina-clip-v2", label: "jina-clip-v2 (multimodal)" },
+  ],
   OPENAI_COMPATIBLE: [
     { value: "gpt-4o-mini", label: "gpt-4o-mini (compatible)" },
     { value: "deepseek-chat", label: "deepseek-chat" },
@@ -110,6 +117,7 @@ const DEFAULT_BASE_URL: Record<string, string> = {
   ANTHROPIC: "https://api.anthropic.com",
   KIMI: "https://api.moonshot.cn/v1",
   DEEPSEEK: "https://api.deepseek.com/v1",
+  JINA: "https://api.jina.ai/v1",
   OPENAI_COMPATIBLE: "",
 };
 
@@ -119,6 +127,7 @@ const DEFAULT_MODEL: Record<string, string> = {
   ANTHROPIC: "claude-sonnet-4-20250514",
   KIMI: "moonshot-v1-8k",
   DEEPSEEK: "deepseek-chat",
+  JINA: "jina-embeddings-v4",
   OPENAI_COMPATIBLE: "gpt-4o-mini",
 };
 
@@ -472,7 +481,17 @@ export function AiProvidersClient() {
         <p className="sm:col-span-2 lg:col-span-3 text-xs text-muted">
           Claude uses Anthropic keys. Kimi uses Moonshot keys (default{" "}
           <code>api.moonshot.cn/v1</code>). DeepSeek uses DeepSeek keys (default{" "}
-          <code>api.deepseek.com/v1</code>). Keep EMBEDDING on Gemini or OpenAI.
+          <code>api.deepseek.com/v1</code>). Jina uses keys from{" "}
+          <a
+            className="underline"
+            href="https://jina.ai/api-dashboard/key-manager"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            jina.ai/api-dashboard/key-manager
+          </a>{" "}
+          (default <code>api.jina.ai/v1</code>) — assign Jina to EMBEDDING only.
+          Keep chat modules on Gemini, OpenAI, DeepSeek, or Claude.
         </p>
         <button
           className="btn btn-primary sm:col-span-2 lg:col-span-3"
@@ -543,7 +562,7 @@ export function AiProvidersClient() {
 
       <PageHeader
         title="Module assignments"
-        description="Route each AI module to a provider. EMBEDDING must be Gemini or OpenAI — DeepSeek/Claude/Kimi are chat-only."
+        description="Route each AI module to a provider. EMBEDDING must be Gemini, OpenAI, or Jina — DeepSeek/Claude/Kimi are chat-only."
       />
       <div className="card space-y-3 p-4">
         {MODULES.map((moduleKey) => {
@@ -551,9 +570,9 @@ export function AiProvidersClient() {
           const options =
             moduleKey === "EMBEDDING"
               ? providers.filter((p) =>
-                  ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE"].includes(p.type)
+                  ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE", "JINA"].includes(p.type)
                 )
-              : providers;
+              : providers.filter((p) => p.type !== "JINA");
           return (
             <label key={moduleKey} className="flex flex-wrap items-center gap-3 text-sm">
               <span className="w-48 font-medium">{moduleKey}</span>
@@ -577,7 +596,7 @@ export function AiProvidersClient() {
               </select>
               {moduleKey === "EMBEDDING" && options.length === 0 ? (
                 <span className="text-xs text-amber-700">
-                  Add Gemini first — DeepSeek cannot embed.
+                  Add Gemini, OpenAI, or Jina first — DeepSeek cannot embed.
                 </span>
               ) : null}
             </label>

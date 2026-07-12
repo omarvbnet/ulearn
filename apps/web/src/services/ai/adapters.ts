@@ -288,6 +288,71 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
   }
 }
 
+export class JinaAdapter implements AiProviderAdapter {
+  readonly type = "JINA";
+
+  private base(config: ProviderConfig) {
+    return normalizeJinaBase(config.baseUrl);
+  }
+
+  async chat(_config: ProviderConfig, _messages: ChatMessage[]): Promise<ChatResult> {
+    throw new Error(
+      "Jina AI is embedding-only — assign JINA to the EMBEDDING module, not chat modules."
+    );
+  }
+
+  async embed(config: ProviderConfig, text: string): Promise<EmbeddingResult> {
+    const model = config.model || "jina-embeddings-v4";
+    const url = `${this.base(config)}/embeddings`;
+    const body: Record<string, unknown> = {
+      model,
+      input: [text.slice(0, 8000)],
+      dimensions: EMBEDDING_DIMS,
+      normalized: true,
+    };
+    // v3/v4 support task tuning; omit for older models to avoid validation errors.
+    if (/jina-embeddings-v[34]|jina-clip/i.test(model)) {
+      body.task = "retrieval.passage";
+    }
+    const res = await fetchJson(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify(body),
+      },
+      config.timeoutMs
+    );
+    const data = await readApiJson(res, "Jina embed");
+    if (!res.ok) {
+      const err = data.detail as string | undefined;
+      const msg = (data.error as { message?: string } | undefined)?.message || err || "";
+      throw new Error(
+        `Jina embed failed (${res.status}) at ${url}${msg ? `: ${msg}` : ""}`
+      );
+    }
+    const list = data.data as { embedding?: number[] }[] | undefined;
+    const values: number[] = list?.[0]?.embedding || [];
+    const usage = data.usage as { total_tokens?: number } | undefined;
+    return {
+      embedding: truncateOrPad(values),
+      tokensIn: usage?.total_tokens ?? Math.ceil(text.length / 4),
+    };
+  }
+
+  async testConnection(config: ProviderConfig) {
+    try {
+      await this.embed(config, "ulearn ping");
+      return { ok: true, message: "Jina connection OK" };
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : "Jina test failed" };
+    }
+  }
+}
+
 export class AnthropicAdapter implements AiProviderAdapter {
   readonly type = "ANTHROPIC";
 
@@ -365,6 +430,8 @@ export function getAdapter(type: string): AiProviderAdapter {
       return new OpenAiCompatibleAdapter("KIMI");
     case "DEEPSEEK":
       return new OpenAiCompatibleAdapter("DEEPSEEK");
+    case "JINA":
+      return new JinaAdapter();
     case "ANTHROPIC":
       return new AnthropicAdapter();
     default:
@@ -386,6 +453,8 @@ export function defaultBaseUrlForType(type: string): string | null {
     case "DEEPSEEK":
       // Official: both / and /v1 work; /v1 matches OpenAI-compatible clients.
       return "https://api.deepseek.com/v1";
+    case "JINA":
+      return "https://api.jina.ai/v1";
     default:
       return null;
   }
@@ -393,7 +462,17 @@ export function defaultBaseUrlForType(type: string): string | null {
 
 /** True when this provider can run the EMBEDDING module. */
 export function providerSupportsEmbeddings(type: string): boolean {
-  return type === "GEMINI" || type === "OPENAI" || type === "OPENAI_COMPATIBLE";
+  return (
+    type === "GEMINI" ||
+    type === "OPENAI" ||
+    type === "OPENAI_COMPATIBLE" ||
+    type === "JINA"
+  );
+}
+
+/** True when this provider can run chat / completion modules. */
+export function providerSupportsChat(type: string): boolean {
+  return type !== "JINA";
 }
 
 function defaultChatModel(type: string): string {
@@ -440,4 +519,15 @@ export function normalizeOpenAiCompatibleBase(
   }
 
   return base.replace(/\/$/, "");
+}
+
+/** Normalize Jina base URL (keys from https://jina.ai/api-dashboard/key-manager). */
+export function normalizeJinaBase(baseUrl?: string | null): string {
+  let base = (baseUrl || "https://api.jina.ai/v1").trim().replace(/\/$/, "");
+  base = base
+    .replace(/\/embeddings$/i, "")
+    .replace(/\/rerank$/i, "")
+    .replace(/\/$/, "");
+  if (!base) base = "https://api.jina.ai/v1";
+  return base;
 }
