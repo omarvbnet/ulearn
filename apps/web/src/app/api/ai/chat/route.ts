@@ -2,11 +2,18 @@ import { error, json, requireAuth } from "@/lib/api";
 import { AiChatService } from "@/services/ai";
 import { z } from "zod";
 
-const attachmentSchema = z.object({
-  fileName: z.string().min(1).max(240),
-  mimeType: z.string().min(1).max(120),
-  dataBase64: z.string().min(1).max(6_000_000),
-});
+const attachmentSchema = z
+  .object({
+    fileName: z.string().min(1).max(240),
+    mimeType: z.string().min(1).max(120),
+    /** Inline base64 — keep small; large PDFs must use fileKey. */
+    dataBase64: z.string().min(1).max(2_000_000).optional(),
+    fileKey: z.string().min(1).max(500).optional(),
+    fileUrl: z.string().min(1).max(2000).optional(),
+  })
+  .refine((a) => Boolean(a.dataBase64 || a.fileKey || a.fileUrl), {
+    message: "fileKey, fileUrl, or dataBase64 required",
+  });
 
 const schema = z.object({
   question: z.string().max(4000).optional().default(""),
@@ -21,7 +28,7 @@ const schema = z.object({
   documentIds: z.array(z.string()).max(20).optional(),
   /** Practice exam size: Basic=5, Intermediate=10, Advanced=20 */
   count: z.union([z.literal(5), z.literal(10), z.literal(20)]).optional(),
-  attachments: z.array(attachmentSchema).max(4).optional(),
+  attachments: z.array(attachmentSchema).max(8).optional(),
 });
 
 export async function POST(request: Request) {

@@ -9,3 +9,10 @@ export {
   type AiCreativeAccessReason,
 } from "./entitlement.service";
 export { AiCreativeService, type CreativeFileInput } from "./creative.service";
+export {
+  detectCreativeChatIntent,
+  creativeUpgradeMessage,
+  creativeSuccessMessage,
+  toCreativeFiles,
+  type CreativeChatIntent,
+} from "./creative-intent";

@@ -76,6 +76,9 @@ export function languageInstruction(language?: string | null): string {
 export type ChatAttachmentInput = {
   fileName: string;
   mimeType: string;
-  /** Raw base64 (no data: prefix). Max ~4MB decoded per file. */
-  dataBase64: string;
+  /** Raw base64 (no data: prefix). Prefer fileKey for large PDFs. */
+  dataBase64?: string;
+  /** R2 / local upload key from /api/uploads */
+  fileKey?: string;
+  fileUrl?: string;
 };

@@ -12,7 +12,6 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/glass.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/ai/ai_exam_panel.dart';
-import 'package:ulearn/features/ai/creative/creative_studio_screen.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
 
 class _PendingAttachment {
@@ -47,8 +46,9 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   List<Map<String, dynamic>> _conversations = [];
   bool _loadingHistory = false;
 
-  static const _maxBytes = 4 * 1024 * 1024;
-  static const _maxFiles = 4;
+  static const _maxBytes = 40 * 1024 * 1024;
+  static const _maxInlineBytes = 300 * 1024;
+  static const _maxFiles = 8;
 
   @override
   void initState() {
@@ -237,6 +237,64 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  /// Large PDFs / files go through R2 so chat JSON stays small (avoids 413).
+  Future<Map<String, dynamic>> _attachmentPayload(
+    ApiClient api,
+    _PendingAttachment a,
+  ) async {
+    final isPdf = a.mimeType.contains('pdf') ||
+        a.fileName.toLowerCase().endsWith('.pdf');
+    final useUpload = isPdf || a.bytes.length > _maxInlineBytes;
+    if (!useUpload) {
+      return {
+        'fileName': a.fileName,
+        'mimeType': a.mimeType,
+        'dataBase64': base64Encode(a.bytes),
+      };
+    }
+    final category = a.isImage ? 'image' : 'document';
+    final presign = await api.post('/api/uploads', {
+      'filename': a.fileName,
+      'contentType': a.mimeType,
+      'size': a.bytes.length,
+      'category': category,
+      'folder': 'ai-creative',
+    });
+    final uploadUrl = presign['uploadUrl']?.toString();
+    if (uploadUrl == null) throw ApiException('Upload setup failed', 500);
+    await api.putBytes(uploadUrl, a.bytes, a.mimeType);
+    return {
+      'fileName': a.fileName,
+      'mimeType': a.mimeType,
+      'fileKey': presign['key'],
+      if (presign['publicUrl'] != null) 'fileUrl': presign['publicUrl'],
+    };
+  }
+
+  Future<void> _downloadEdited(_ChatBubble m) async {
+    final name = m.editedFileName ?? 'download.bin';
+    try {
+      late final Uint8List bytes;
+      if (m.editedContentBase64 != null && m.editedContentBase64!.isNotEmpty) {
+        bytes = base64Decode(m.editedContentBase64!);
+      } else if (m.editedDownloadUrl != null && m.editedDownloadUrl!.isNotEmpty) {
+        bytes = await context.read<ApiClient>().getBytes(m.editedDownloadUrl!);
+      } else {
+        return;
+      }
+      final path = await FilePicker.saveFile(fileName: name, bytes: bytes);
+      if (!mounted) return;
+      _toast(
+        path != null
+            ? context.l10n.t('mobile.ai.creative.saved')
+            : context.l10n.t('mobile.ai.creative.saveCancelled'),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _toast(e.toString());
+    }
+  }
+
   Future<void> _send() async {
     final q = _controller.text.trim();
     if ((q.isEmpty && _pending.isEmpty) || _sending) return;
@@ -273,15 +331,9 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         if (_conversationId != null) 'conversationId': _conversationId,
         ..._stagePayload(auth),
         if (attachments.isNotEmpty)
-          'attachments': attachments
-              .map(
-                (a) => {
-                  'fileName': a.fileName,
-                  'mimeType': a.mimeType,
-                  'dataBase64': base64Encode(a.bytes),
-                },
-              )
-              .toList(),
+          'attachments': await Future.wait(
+            attachments.map((a) => _attachmentPayload(api, a)),
+          ),
       };
 
       final data = await api.post('/api/ai/chat', payload);
@@ -314,6 +366,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                 .toList(),
             editedFileName: edited?['fileName']?.toString(),
             editedContentBase64: edited?['contentBase64']?.toString(),
+            editedDownloadUrl: edited?['downloadUrl']?.toString(),
+            editedMimeType: edited?['mimeType']?.toString(),
             courseSuggestions: suggestions,
           ),
         );
@@ -579,17 +633,6 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         ),
         actions: [
           IconButton(
-            tooltip: l10n.t('mobile.ai.creative.title'),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const CreativeStudioScreen(),
-                ),
-              );
-            },
-            icon: const Icon(Icons.auto_awesome_mosaic_outlined),
-          ),
-          IconButton(
             tooltip: l10n.t('mobile.ai.newChat'),
             onPressed: _newChat,
             icon: const Icon(Icons.edit_square),
@@ -776,6 +819,22 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                               height: 1.45,
                                             ),
                                           ),
+                                        if (m.editedFileName != null) ...[
+                                          const SizedBox(height: 10),
+                                          OutlinedButton.icon(
+                                            onPressed: () => _downloadEdited(m),
+                                            icon: const Icon(
+                                              Icons.download_rounded,
+                                              size: 18,
+                                            ),
+                                            label: Text(
+                                              context.l10n.t(
+                                                'mobile.ai.downloadFile',
+                                                {'name': m.editedFileName!},
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                         if (m.citations.isNotEmpty) ...[
                                           const SizedBox(height: 8),
                                           Wrap(
@@ -1403,6 +1462,8 @@ class _ChatBubble {
     this.previewImages = const [],
     this.editedFileName,
     this.editedContentBase64,
+    this.editedDownloadUrl,
+    this.editedMimeType,
     this.exam,
     this.examCompleted = false,
     this.examResult,
@@ -1416,6 +1477,8 @@ class _ChatBubble {
   final List<Uint8List> previewImages;
   final String? editedFileName;
   final String? editedContentBase64;
+  final String? editedDownloadUrl;
+  final String? editedMimeType;
   final AiPracticeExamData? exam;
   final bool examCompleted;
   final Map<String, dynamic>? examResult;

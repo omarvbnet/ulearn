@@ -1,7 +1,6 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, PageHeader } from "@/components/ui";
 import { useT } from "@/i18n/client";
@@ -14,6 +13,12 @@ type ChatMsg = {
   exam?: PracticeExam | null;
   examDone?: boolean;
   result?: ExamResult | null;
+  file?: {
+    fileName: string;
+    mimeType?: string;
+    contentBase64?: string;
+    downloadUrl?: string;
+  } | null;
 };
 
 type PracticeExam = {
@@ -64,13 +69,96 @@ export default function StudentAiPage() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
 
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+
+  async function uploadAttachment(file: File) {
+    const category = file.type.startsWith("image/") ? "image" : "document";
+    const useInline = !file.type.includes("pdf") && file.size < 300_000;
+    if (useInline) {
+      const buf = await file.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+      return {
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        dataBase64: btoa(binary),
+      };
+    }
+    const presignRes = await fetch("/api/uploads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: file.name,
+        contentType: file.type || "application/octet-stream",
+        size: file.size,
+        category,
+        folder: "ai-creative",
+      }),
+    });
+    const presign = await presignRes.json();
+    if (!presignRes.ok) throw new Error(presign.error || "Upload failed");
+    const put = await fetch(presign.uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    if (!put.ok) throw new Error("File upload failed");
+    return {
+      fileName: file.name,
+      mimeType: file.type || "application/octet-stream",
+      fileKey: presign.key as string,
+      fileUrl: presign.publicUrl as string | undefined,
+    };
+  }
+
+  async function downloadChatFile(file: NonNullable<ChatMsg["file"]>) {
+    if (file.contentBase64) {
+      const bin = atob(file.contentBase64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: file.mimeType || "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    if (file.downloadUrl) {
+      const res = await fetch(file.downloadUrl);
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  }
+
   async function sendChat(question?: string) {
     const q = (question ?? input).trim();
-    if (!q || sending) return;
+    if ((!q && !pendingFiles.length) || sending) return;
     setSending(true);
     setInput("");
-    setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text: q }]);
+    const files = [...pendingFiles];
+    setPendingFiles([]);
+    setMessages((m) => [
+      ...m,
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        text: q || (files.length ? `Attached: ${files.map((f) => f.name).join(", ")}` : ""),
+      },
+    ]);
     try {
+      const attachments =
+        files.length > 0
+          ? await Promise.all(files.map((f) => uploadAttachment(f)))
+          : undefined;
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -78,14 +166,28 @@ export default function StudentAiPage() {
           question: q,
           language: locale,
           conversationId: conversationId || undefined,
+          attachments,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Chat failed");
       setConversationId(data.conversationId || conversationId);
+      const edited = data.editedFile as ChatMsg["file"] | undefined;
       setMessages((m) => [
         ...m,
-        { id: crypto.randomUUID(), role: "assistant", text: data.answer || "" },
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          text: data.answer || "",
+          file: edited
+            ? {
+                fileName: edited.fileName,
+                mimeType: edited.mimeType,
+                contentBase64: edited.contentBase64,
+                downloadUrl: edited.downloadUrl,
+              }
+            : null,
+        },
       ]);
       void loadHistory();
     } catch (e) {
@@ -305,14 +407,6 @@ export default function StudentAiPage() {
           <PageHeader
             title={t.student.aiPageTitle}
             description={t.student.aiPageHint}
-            actions={
-              <Link
-                href={`/${locale}/student/ai/creative`}
-                className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-white/5"
-              >
-                Creative Studio
-              </Link>
-            }
           />
         </div>
 
@@ -338,6 +432,15 @@ export default function StudentAiPage() {
                     {m.text}
                   </div>
                 ) : null}
+                {m.file ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void downloadChatFile(m.file!)}
+                  >
+                    Download {m.file.fileName}
+                  </Button>
+                ) : null}
                 {m.exam ? (
                   <ExamPanel
                     exam={m.exam}
@@ -357,10 +460,38 @@ export default function StudentAiPage() {
         </div>
 
         <div className="border-t border-border p-3">
-          <div className="mb-2 flex flex-wrap gap-2">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" onClick={openExamPicker} disabled={sending}>
               {t.student.aiGenerateExam}
             </Button>
+            <label className="cursor-pointer rounded-lg border border-border px-3 py-2 text-sm hover:bg-white/5">
+              Attach
+              <input
+                type="file"
+                className="hidden"
+                multiple
+                accept="application/pdf,image/*,.pdf,.png,.jpg,.jpeg,.webp,.docx,.txt"
+                onChange={(e) => {
+                  const next = Array.from(e.target.files || []);
+                  setPendingFiles((prev) => [...prev, ...next].slice(0, 8));
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {pendingFiles.map((f) => (
+              <span key={f.name + f.size} className="text-xs text-muted">
+                {f.name}
+                <button
+                  type="button"
+                  className="ml-1 underline"
+                  onClick={() =>
+                    setPendingFiles((prev) => prev.filter((x) => x !== f))
+                  }
+                >
+                  ×
+                </button>
+              </span>
+            ))}
           </div>
           <form
             className="flex gap-2"
@@ -375,7 +506,7 @@ export default function StudentAiPage() {
               placeholder={t.student.aiPlaceholder}
               className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
             />
-            <Button type="submit" disabled={sending || !input.trim()}>
+            <Button type="submit" disabled={sending || (!input.trim() && !pendingFiles.length)}>
               {t.student.aiSend}
             </Button>
           </form>

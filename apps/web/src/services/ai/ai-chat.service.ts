@@ -18,7 +18,9 @@ const TOP_K = 10;
 const MIN_SIMILARITY = 0.42;
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
-const MAX_ATTACHMENTS = 4;
+/** Uploaded-via-key documents can be larger (proxy-safe). */
+const MAX_KEYED_ATTACHMENT_BYTES = 40 * 1024 * 1024;
+const MAX_ATTACHMENTS = 8;
 
 export class AiChatService {
   static async listConversations(userId: string) {
@@ -61,9 +63,16 @@ export class AiChatService {
   }) {
     const attachments = (input.attachments || []).slice(0, MAX_ATTACHMENTS);
     for (const a of attachments) {
-      const approx = Math.ceil((a.dataBase64.length * 3) / 4);
-      if (approx > MAX_ATTACHMENT_BYTES) {
-        throw new Error(`Attachment too large: ${a.fileName} (max 4MB)`);
+      if (!a.dataBase64 && !a.fileKey && !a.fileUrl) {
+        throw new Error(`Attachment missing data: ${a.fileName}`);
+      }
+      if (a.dataBase64) {
+        const approx = Math.ceil((a.dataBase64.length * 3) / 4);
+        if (approx > MAX_ATTACHMENT_BYTES) {
+          throw new Error(
+            `Attachment too large for inline upload: ${a.fileName} (max 4MB). Upload via file key instead.`
+          );
+        }
       }
     }
 
@@ -157,6 +166,27 @@ export class AiChatService {
 
     const unavailable = unavailableAnswer(language);
     const hasAttachments = attachments.length > 0;
+
+    // Creative Studio actions run inside chat (learners only) when the user asks
+    // to merge / design / edit with or without attachments.
+    const learnerCreative =
+      profile?.role === "STUDENT" || profile?.role === "CERTIFICATE_USER";
+    if (learnerCreative) {
+      const { detectCreativeChatIntent } = await import("./creative/creative-intent");
+      const creativeIntent = detectCreativeChatIntent(question, attachments);
+      if (creativeIntent) {
+        const creativeResult = await this.runCreativeInChat({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          question,
+          language,
+          attachments,
+          intent: creativeIntent,
+        });
+        if (creativeResult) return creativeResult;
+      }
+    }
+
     const processed = await processAttachments(attachments, input.userId);
     const editIntent =
       input.mode === "edit" ||
@@ -578,6 +608,153 @@ export class AiChatService {
     });
   }
 
+  /** Merge / design / image tools triggered from natural chat + attachments. */
+  private static async runCreativeInChat(input: {
+    userId: string;
+    conversationId?: string;
+    question: string;
+    language: string;
+    attachments: ChatAttachmentInput[];
+    intent: import("./creative/creative-intent").CreativeChatIntent;
+  }) {
+    const {
+      AiCreativeEntitlementService,
+      AiCreativeService,
+      creativeUpgradeMessage,
+      creativeSuccessMessage,
+      toCreativeFiles,
+    } = await import("./creative");
+
+    try {
+      await AiCreativeEntitlementService.assertCanRun(input.userId);
+    } catch (e) {
+      const err = e as Error & { code?: string };
+      if (err.code === "AI_CREATIVE_ENTITLEMENT") {
+        return this.persistTurn({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          question: attachmentAwareQuestionLabel(input.question, input.attachments),
+          answer: creativeUpgradeMessage(input.language),
+          citations: [],
+          fromCache: false,
+          attachmentNames: input.attachments.map((a) => a.fileName),
+        });
+      }
+      throw e;
+    }
+
+    const files = toCreativeFiles(input.attachments);
+    const pdfs = files.filter(
+      (f) =>
+        f.mimeType.toLowerCase().includes("pdf") ||
+        f.fileName.toLowerCase().endsWith(".pdf")
+    );
+    const images = files.filter(
+      (f) =>
+        f.mimeType.toLowerCase().startsWith("image/") ||
+        /\.(png|jpe?g|gif|webp)$/i.test(f.fileName)
+    );
+
+    let result: Awaited<ReturnType<typeof AiCreativeService.merge>>;
+    try {
+      switch (input.intent) {
+        case "merge":
+          if (pdfs.length < 2) {
+            return this.persistTurn({
+              userId: input.userId,
+              conversationId: input.conversationId,
+              question: attachmentAwareQuestionLabel(
+                input.question,
+                input.attachments
+              ),
+              answer:
+                input.language === "ar"
+                  ? "لدمج PDF أرفق ملفين على الأقل واطلب الدمج."
+                  : "Attach at least two PDF files and ask me to merge them.",
+              citations: [],
+              fromCache: false,
+              attachmentNames: input.attachments.map((a) => a.fileName),
+            });
+          }
+          result = await AiCreativeService.merge(input.userId, pdfs);
+          break;
+        case "design_ppt":
+        case "design_pdf": {
+          const title =
+            input.question.replace(/^['"\s]+|['"\s]+$/g, "").slice(0, 120) ||
+            "AI Creative";
+          result = await AiCreativeService.design(input.userId, {
+            format: input.intent === "design_ppt" ? "ppt" : "pdf",
+            title,
+            prompt: input.question,
+            language: input.language,
+          });
+          break;
+        }
+        case "image_edit":
+          if (!images[0]) {
+            return this.persistTurn({
+              userId: input.userId,
+              conversationId: input.conversationId,
+              question: attachmentAwareQuestionLabel(
+                input.question,
+                input.attachments
+              ),
+              answer:
+                input.language === "ar"
+                  ? "أرفق صورة واكتب تعليمات التعديل."
+                  : "Attach an image and describe how to edit it.",
+              citations: [],
+              fromCache: false,
+              attachmentNames: input.attachments.map((a) => a.fileName),
+            });
+          }
+          result = await AiCreativeService.image(input.userId, {
+            mode: "edit",
+            prompt: input.question,
+            language: input.language,
+            image: images[0],
+          });
+          break;
+        case "image_design":
+          result = await AiCreativeService.image(input.userId, {
+            mode: "design",
+            prompt: input.question,
+            language: input.language,
+          });
+          break;
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Creative job failed";
+      return this.persistTurn({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        question: attachmentAwareQuestionLabel(input.question, input.attachments),
+        answer: msg,
+        citations: [],
+        fromCache: false,
+        attachmentNames: input.attachments.map((a) => a.fileName),
+      });
+    }
+
+    return this.persistTurn({
+      userId: input.userId,
+      conversationId: input.conversationId,
+      question: attachmentAwareQuestionLabel(input.question, input.attachments),
+      answer: creativeSuccessMessage(input.language, input.intent),
+      citations: [],
+      fromCache: false,
+      attachmentNames: input.attachments.map((a) => a.fileName),
+      editedFile: {
+        fileName: result.fileName || "creative-result.bin",
+        mimeType: result.mimeType || "application/octet-stream",
+        contentBase64: result.dataBase64 || "",
+        downloadUrl: result.downloadUrl,
+        jobId: result.jobId,
+      },
+    });
+  }
+
   private static async persistTurn(input: {
     userId: string;
     conversationId?: string;
@@ -586,7 +763,13 @@ export class AiChatService {
     citations: unknown;
     fromCache: boolean;
     attachmentNames: string[];
-    editedFile?: { fileName: string; mimeType: string; contentBase64: string };
+    editedFile?: {
+      fileName: string;
+      mimeType: string;
+      contentBase64: string;
+      downloadUrl?: string;
+      jobId?: string;
+    };
     practiceQuiz?: unknown;
     examAttemptId?: string;
     courseSuggestions?: unknown;
@@ -693,20 +876,49 @@ async function processAttachments(
 }> {
   const imageParts: ChatContentPart[] = [];
   const texts: string[] = [];
+  const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+  const { r2Client, r2Bucket, isR2Configured } = await import("@/lib/r2");
+  const { readFile } = await import("fs/promises");
+  const path = await import("path");
+
+  async function loadBuffer(a: ChatAttachmentInput): Promise<Buffer | null> {
+    if (a.dataBase64) {
+      const raw = a.dataBase64.replace(/^data:[^;]+;base64,/, "");
+      try {
+        return Buffer.from(raw, "base64");
+      } catch {
+        return null;
+      }
+    }
+    if (a.fileKey && isR2Configured()) {
+      const res = await r2Client.send(
+        new GetObjectCommand({ Bucket: r2Bucket, Key: a.fileKey })
+      );
+      const bytes = await res.Body?.transformToByteArray();
+      return bytes ? Buffer.from(bytes) : null;
+    }
+    if (a.fileKey) {
+      const local = path.join(process.cwd(), "public", "uploads", a.fileKey);
+      return Buffer.from(await readFile(local));
+    }
+    if (a.fileUrl?.startsWith("http")) {
+      const res = await fetch(a.fileUrl);
+      if (!res.ok) return null;
+      return Buffer.from(await res.arrayBuffer());
+    }
+    return null;
+  }
 
   for (const a of attachments) {
     const mime = (a.mimeType || "").toLowerCase();
     const name = a.fileName || "file";
-    const raw = a.dataBase64.replace(/^data:[^;]+;base64,/, "");
-    let buffer: Buffer;
-    try {
-      buffer = Buffer.from(raw, "base64");
-    } catch {
-      texts.push(`[${name}] (invalid file encoding)`);
+    const buffer = await loadBuffer(a);
+    if (!buffer?.length) {
+      texts.push(`[${name}] (empty or unreadable file)`);
       continue;
     }
-    if (!buffer.length) {
-      texts.push(`[${name}] (empty file)`);
+    if (buffer.length > MAX_KEYED_ATTACHMENT_BYTES) {
+      texts.push(`[${name}] (file too large)`);
       continue;
     }
 
@@ -715,7 +927,7 @@ async function processAttachments(
       imageParts.push({
         type: "image",
         mimeType: imageMime,
-        dataBase64: raw,
+        dataBase64: buffer.toString("base64"),
       });
       // OCR so chat-only models (DeepSeek/Kimi) still get the content as text.
       try {
