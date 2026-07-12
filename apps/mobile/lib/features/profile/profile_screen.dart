@@ -18,6 +18,7 @@ import 'package:ulearn/core/theme/theme_mode_provider.dart';
 import 'package:ulearn/features/profile/saved_reels_screen.dart';
 import 'package:ulearn/features/profile/profile_avatar.dart';
 import 'package:ulearn/features/profile/profile_photo_service.dart';
+import 'package:ulearn/features/profile/certificate_insights_screen.dart';
 import 'package:ulearn/features/profile/stage_request_screen.dart';
 import 'package:ulearn/features/rankings/rankings_screen.dart';
 import 'package:ulearn/features/report/my_reports_screen.dart';
@@ -494,6 +495,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     MaterialPageRoute(builder: (_) => const StageRequestScreen()),
                   );
                   if (context.mounted) {
+                    await context.read<AuthProvider>().refreshUser();
+                  }
+                },
+              ),
+            ),
+          ),
+        ],
+        if (user.role == 'CERTIFICATE_USER') ...[
+          const SizedBox(height: 16),
+          StaggeredItem(
+            index: 4,
+            child: Card(
+              child: ListTile(
+                leading: const Icon(Icons.interests_rounded, color: AppTheme.accent),
+                title: Text(l10n.t('mobile.profile.insightsTitle')),
+                subtitle: Text(
+                  user.interestSubjects.isEmpty
+                      ? l10n.t('mobile.profile.insightsHint')
+                      : user.interestSubjects
+                          .map((i) => i.nameFor(context.localeCode))
+                          .join(' · '),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: AppTheme.muted, fontSize: 12),
+                ),
+                trailing: Icon(Icons.chevron_right, color: AppTheme.muted),
+                onTap: () async {
+                  final changed = await Navigator.of(context).push<bool>(
+                    MaterialPageRoute(
+                      builder: (_) => const CertificateInsightsScreen(),
+                    ),
+                  );
+                  if (changed == true && context.mounted) {
                     await context.read<AuthProvider>().refreshUser();
                   }
                 },

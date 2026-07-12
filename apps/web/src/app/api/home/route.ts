@@ -19,6 +19,13 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const explicitStageId = searchParams.get("stageId") ?? undefined;
   const interestSubjectId = searchParams.get("subjectId") ?? undefined;
+  const interestSubjectIdsParam = searchParams.get("subjectIds");
+  const interestSubjectIds = interestSubjectIdsParam
+    ? interestSubjectIdsParam
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : undefined;
   const q = searchParams.get("q") ?? undefined;
   const levelParam = searchParams.get("level") ?? undefined;
   const levels = levelParam
@@ -85,6 +92,10 @@ export async function GET(request: Request) {
     if (explicitStageId === "all") {
       stageId = undefined;
       subjectIds = undefined;
+    } else if (interestSubjectIds?.length) {
+      const allowed = interestSubjectIds.filter((id) => interestIds.includes(id));
+      subjectIds = allowed.length ? allowed : interestIds.length ? interestIds : undefined;
+      stageId = certStage?.id;
     } else if (interestSubjectId && interestIds.includes(interestSubjectId)) {
       subjectId = interestSubjectId;
       stageId = certStage?.id;

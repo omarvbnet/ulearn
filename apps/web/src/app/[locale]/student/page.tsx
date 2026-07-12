@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { CertificateInsightsEditor } from "@/components/certificate-insights-editor";
 import { Badge, Card, PageHeader } from "@/components/ui";
 import { useT } from "@/i18n/client";
 import { getLocalizedField } from "@/lib/utils";
@@ -61,6 +62,8 @@ export default function StudentHomePage() {
           {t.student.underReview}
         </div>
       )}
+
+      <CertificateInsightsEditor />
 
       {aiExamStats && (
         <Link href={`/${locale}/student/ai`} className="mb-6 block">

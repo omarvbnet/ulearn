@@ -268,7 +268,8 @@
       "duration": "{min} dk",
       "awaitingPayment": "Ödeme onayı bekleniyor",
       "continueWatching": "İzlemeye devam et",
-      "resumeCourse": "Kaldığınız yerden devam edin"
+      "resumeCourse": "Kaldığınız yerden devam edin",
+      "allInsights": "Tüm ilgi alanlarım"
     },
     "profile": {
       "tapChangePhoto": "Fotoğrafı değiştirmek için dokunun",
@@ -308,6 +309,16 @@
       "subscriptionsHint": "Paketler, aktivasyon kodları ve planlar",
       "changeStage": "Aşamayı değiştir",
       "changeStageHint": "Sertifikanızla taşınma talep edin",
+      "insightsTitle": "İlgi alanlarım",
+      "insightsHint": "1–5 Profesyonel Sertifika ilgi alanı seçin. Kurslar ve YZ bunlara göre çalışır.",
+      "insightsSave": "İlgi alanlarını kaydet",
+      "insightsSaved": "İlgi alanları güncellendi",
+      "insightsSaveFailed": "İlgi alanları kaydedilemedi",
+      "insightsLoadFailed": "İlgi alanları yüklenemedi",
+      "insightsMin": "En az bir ilgi alanı seçin",
+      "insightsMax": "En fazla 5 ilgi alanı seçebilirsiniz",
+      "insightsCount": "{count} / {max} seçildi",
+      "insightsEmptyCatalog": "Henüz ilgi alanı yok. Yöneticiden eklemesini isteyin.",
       "teacherStudio": "Öğretmen Stüdyosu",
       "teacherStudioHint": "Kurs ve kısa videolar yükleyin",
       "logoutConfirm": "Çıkış yapmak istediğinize emin misiniz?",

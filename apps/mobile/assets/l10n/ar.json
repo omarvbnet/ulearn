@@ -268,7 +268,8 @@
       "duration": "{min} د",
       "awaitingPayment": "بانتظار تأكيد الدفع",
       "continueWatching": "متابعة المشاهدة",
-      "resumeCourse": "أكمل من حيث توقفت"
+      "resumeCourse": "أكمل من حيث توقفت",
+      "allInsights": "كل اهتماماتي"
     },
     "profile": {
       "tapChangePhoto": "اضغط لتغيير الصورة",
@@ -308,6 +309,16 @@
       "subscriptionsHint": "الباقات وأكواد التفعيل والخطط",
       "changeStage": "تغيير المرحلة",
       "changeStageHint": "اطلب نقلاً مع شهادتك",
+      "insightsTitle": "اهتماماتي",
+      "insightsHint": "اختر من 1 إلى 5 اهتمامات للشهادة المهنية. الدورات والذكاء الاصطناعي يعتمدان عليها.",
+      "insightsSave": "حفظ الاهتمامات",
+      "insightsSaved": "تم تحديث الاهتمامات",
+      "insightsSaveFailed": "تعذر حفظ الاهتمامات",
+      "insightsLoadFailed": "تعذر تحميل الاهتمامات",
+      "insightsMin": "اختر اهتماماً واحداً على الأقل",
+      "insightsMax": "يمكنك اختيار حتى 5 اهتمامات",
+      "insightsCount": "{count} من {max} محددة",
+      "insightsEmptyCatalog": "لا توجد اهتمامات متاحة بعد. اطلب من المسؤول إضافتها.",
       "teacherStudio": "استوديو المعلّم",
       "teacherStudioHint": "رفع فيديوهات الدورات والفيديوهات القصيرة",
       "logoutConfirm": "هل أنت متأكد أنك تريد تسجيل الخروج؟",

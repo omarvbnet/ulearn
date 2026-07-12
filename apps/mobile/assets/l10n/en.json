@@ -269,7 +269,8 @@
       "duration": "{min} min",
       "awaitingPayment": "Awaiting payment confirmation",
       "continueWatching": "Continue watching",
-      "resumeCourse": "Pick up where you left off"
+      "resumeCourse": "Pick up where you left off",
+      "allInsights": "All my insights"
     },
     "profile": {
       "tapChangePhoto": "Tap to change photo",
@@ -309,6 +310,16 @@
       "subscriptionsHint": "Packages, activation codes & plans",
       "changeStage": "Change stage",
       "changeStageHint": "Request a move with your certificate",
+      "insightsTitle": "My insights",
+      "insightsHint": "Select 1–5 Professional Certificate insights. Courses and AI use these.",
+      "insightsSave": "Save insights",
+      "insightsSaved": "Insights updated",
+      "insightsSaveFailed": "Could not save insights",
+      "insightsLoadFailed": "Could not load insights",
+      "insightsMin": "Select at least one insight",
+      "insightsMax": "You can select up to 5 insights",
+      "insightsCount": "{count} of {max} selected",
+      "insightsEmptyCatalog": "No insights available yet. Ask an admin to add them.",
       "teacherStudio": "Teacher Studio",
       "teacherStudioHint": "Upload course videos & short videos",
       "logoutConfirm": "Are you sure you want to log out?",

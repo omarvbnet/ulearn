@@ -62,8 +62,9 @@ class HomeFeedState extends State<HomeFeed> {
   String? _error;
 
   // Filters: null stage = my own stage, 'all' = every stage.
+  // Empty interest set = all saved insights; non-empty = subset filter.
   String? _stageFilter;
-  String? _interestFilter;
+  final Set<String> _interestFilters = {};
   String? _levelFilter;
   final _search = TextEditingController();
   Timer? _debounce;
@@ -93,7 +94,8 @@ class HomeFeedState extends State<HomeFeed> {
     try {
       final params = <String, String>{
         'stageId': ?_stageFilter,
-        'subjectId': ?_interestFilter,
+        if (_interestFilters.isNotEmpty)
+          'subjectIds': _interestFilters.join(','),
         'level': ?_levelFilter,
         if (_search.text.trim().isNotEmpty) 'q': _search.text.trim(),
       };
@@ -170,7 +172,7 @@ class HomeFeedState extends State<HomeFeed> {
 
   bool get _hasActiveFilters =>
       _stageFilter != null ||
-      _interestFilter != null ||
+      _interestFilters.isNotEmpty ||
       _levelFilter != null ||
       _search.text.trim().isNotEmpty;
 
@@ -311,7 +313,7 @@ class HomeFeedState extends State<HomeFeed> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
                 child: Text(
-                  'Areas of interest',
+                  context.l10n.t('mobile.profile.insightsTitle'),
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -319,25 +321,55 @@ class HomeFeedState extends State<HomeFeed> {
                   ),
                 ),
               ),
-              ListTile(
-                leading: const Icon(Icons.clear_all, color: AppTheme.accent),
-                title: const Text('All my interests'),
-                trailing: _interestFilter == null
-                    ? const Icon(Icons.check, color: AppTheme.accent)
-                    : null,
-                onTap: () => Navigator.pop(ctx, 'interest:all'),
+              StatefulBuilder(
+                builder: (ctx2, setLocal) {
+                  return Column(
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.clear_all, color: AppTheme.accent),
+                        title: Text(context.l10n.t('mobile.home.allInsights')),
+                        trailing: _interestFilters.isEmpty
+                            ? const Icon(Icons.check, color: AppTheme.accent)
+                            : null,
+                        onTap: () {
+                          setState(() => _interestFilters.clear());
+                          Navigator.pop(ctx, 'interest:done');
+                        },
+                      ),
+                      ..._interests.map((s) {
+                        final id = s['id'].toString();
+                        final selected = _interestFilters.contains(id);
+                        return CheckboxListTile(
+                          value: selected,
+                          secondary: Icon(
+                            Icons.interests_outlined,
+                            color: AppTheme.muted,
+                          ),
+                          title: Text(localizedText(s, locale, prefix: 'name')),
+                          activeColor: AppTheme.accent,
+                          onChanged: (on) {
+                            setState(() {
+                              if (on == true) {
+                                _interestFilters.add(id);
+                              } else {
+                                _interestFilters.remove(id);
+                              }
+                            });
+                            setLocal(() {});
+                          },
+                        );
+                      }),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.pop(ctx, 'interest:done'),
+                          child: Text(context.l10n.t('common.save')),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
-              ..._interests.map((s) {
-                final id = s['id'].toString();
-                return ListTile(
-                  leading: Icon(Icons.interests_outlined, color: AppTheme.muted),
-                  title: Text(localizedText(s, locale, prefix: 'name')),
-                  trailing: _interestFilter == id
-                      ? const Icon(Icons.check, color: AppTheme.accent)
-                      : null,
-                  onTap: () => Navigator.pop(ctx, 'interest:$id'),
-                );
-              }),
             ],
           ],
         ),
@@ -346,9 +378,8 @@ class HomeFeedState extends State<HomeFeed> {
     );
 
     if (picked == null || !mounted) return;
-    if (picked.startsWith('interest:')) {
-      final id = picked.substring('interest:'.length);
-      setState(() => _interestFilter = id == 'all' ? null : id);
+    if (picked == 'interest:done') {
+      // Interest filters already applied via setState in the sheet.
     } else {
       setState(() => _stageFilter = picked == 'mine' ? null : picked);
     }
