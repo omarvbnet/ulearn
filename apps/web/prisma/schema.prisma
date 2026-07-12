@@ -1554,6 +1554,8 @@ enum AiProviderType {
   OPENAI
   ANTHROPIC
   OPENAI_COMPATIBLE
+  KIMI
+  DEEPSEEK
 }
 
 enum AiProviderStatus {

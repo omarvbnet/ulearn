@@ -134,7 +134,13 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
   }
 
   private base(config: ProviderConfig) {
-    return (config.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "");
+    const fallback =
+      this.type === "KIMI"
+        ? "https://api.moonshot.cn/v1"
+        : this.type === "DEEPSEEK"
+          ? "https://api.deepseek.com/v1"
+          : "https://api.openai.com/v1";
+    return (config.baseUrl || fallback).replace(/\/$/, "");
   }
 
   async chat(config: ProviderConfig, messages: ChatMessage[]): Promise<ChatResult> {
@@ -219,6 +225,11 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
 
   async testConnection(config: ProviderConfig) {
     try {
+      // Kimi / DeepSeek are chat-first; embeddings may be unsupported on the same key.
+      if (this.type === "KIMI" || this.type === "DEEPSEEK") {
+        await this.chat(config, [{ role: "user", content: "Reply with OK" }]);
+        return { ok: true, message: `${this.type} connection OK` };
+      }
       await this.embed(config, "ulearn ping");
       return { ok: true, message: `${this.type} connection OK` };
     } catch (e) {
@@ -298,9 +309,31 @@ export function getAdapter(type: string): AiProviderAdapter {
       return new OpenAiCompatibleAdapter("OPENAI");
     case "OPENAI_COMPATIBLE":
       return new OpenAiCompatibleAdapter("OPENAI_COMPATIBLE");
+    case "KIMI":
+      return new OpenAiCompatibleAdapter("KIMI");
+    case "DEEPSEEK":
+      return new OpenAiCompatibleAdapter("DEEPSEEK");
     case "ANTHROPIC":
       return new AnthropicAdapter();
     default:
       throw new Error(`Unsupported AI provider type: ${type}`);
+  }
+}
+
+/** Default API base URLs when admin leaves Base URL blank. */
+export function defaultBaseUrlForType(type: string): string | null {
+  switch (type) {
+    case "GEMINI":
+      return "https://generativelanguage.googleapis.com";
+    case "OPENAI":
+      return "https://api.openai.com/v1";
+    case "ANTHROPIC":
+      return "https://api.anthropic.com";
+    case "KIMI":
+      return "https://api.moonshot.cn/v1";
+    case "DEEPSEEK":
+      return "https://api.deepseek.com/v1";
+    default:
+      return null;
   }
 }

@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { AiModuleKey, AiProvider, AiProviderType } from "@prisma/client";
 import { decryptSecret, encryptSecret } from "./crypto";
-import { getAdapter } from "./adapters";
+import { defaultBaseUrlForType, getAdapter } from "./adapters";
 import type { ChatMessage, ProviderConfig } from "./types";
 
 function toConfig(p: AiProvider, apiKey: string): ProviderConfig {
@@ -51,7 +51,7 @@ export class AiProviderService {
         name: input.name,
         type: input.type,
         apiKeyEncrypted: input.apiKey ? encryptSecret(input.apiKey) : null,
-        baseUrl: input.baseUrl,
+        baseUrl: input.baseUrl || defaultBaseUrlForType(input.type) || null,
         model: input.model,
         apiVersion: input.apiVersion,
         timeoutMs: input.timeoutMs ?? 60000,
@@ -213,6 +213,8 @@ function estimateCost(type: string, tokensIn: number, tokensOut: number): number
     OPENAI: { in: 0.00000015, out: 0.0000006 },
     ANTHROPIC: { in: 0.000003, out: 0.000015 },
     OPENAI_COMPATIBLE: { in: 0.0000001, out: 0.0000004 },
+    KIMI: { in: 0.00000012, out: 0.00000012 },
+    DEEPSEEK: { in: 0.00000014, out: 0.00000028 },
   };
   const r = rates[type] || rates.GEMINI;
   return tokensIn * r.in + tokensOut * r.out;

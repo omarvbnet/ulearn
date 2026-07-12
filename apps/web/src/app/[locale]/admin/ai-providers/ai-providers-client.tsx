@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/ui";
 
 type Provider = {
@@ -50,6 +50,77 @@ const MODULES = [
   "RECOMMENDATION",
 ] as const;
 
+const PROVIDER_TYPES = [
+  { value: "GEMINI", label: "Google Gemini" },
+  { value: "OPENAI", label: "OpenAI" },
+  { value: "ANTHROPIC", label: "Claude (Anthropic)" },
+  { value: "KIMI", label: "Kimi (Moonshot)" },
+  { value: "DEEPSEEK", label: "DeepSeek" },
+  { value: "OPENAI_COMPATIBLE", label: "OpenAI Compatible (custom)" },
+] as const;
+
+const MODELS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
+  GEMINI: [
+    { value: "gemini-2.0-flash", label: "gemini-2.0-flash" },
+    { value: "gemini-2.5-flash", label: "gemini-2.5-flash" },
+    { value: "gemini-2.5-pro", label: "gemini-2.5-pro" },
+    { value: "gemini-1.5-flash", label: "gemini-1.5-flash" },
+    { value: "gemini-1.5-pro", label: "gemini-1.5-pro" },
+    { value: "gemini-embedding-001", label: "gemini-embedding-001 (embeddings)" },
+  ],
+  OPENAI: [
+    { value: "gpt-4o", label: "gpt-4o" },
+    { value: "gpt-4o-mini", label: "gpt-4o-mini" },
+    { value: "gpt-4.1", label: "gpt-4.1" },
+    { value: "gpt-4.1-mini", label: "gpt-4.1-mini" },
+    { value: "o4-mini", label: "o4-mini" },
+    { value: "text-embedding-3-small", label: "text-embedding-3-small (embeddings)" },
+  ],
+  ANTHROPIC: [
+    { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
+    { value: "claude-opus-4-20250514", label: "Claude Opus 4" },
+    { value: "claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet (latest)" },
+    { value: "claude-3-5-haiku-latest", label: "Claude 3.5 Haiku (latest)" },
+    { value: "claude-3-haiku-20240307", label: "Claude 3 Haiku" },
+  ],
+  KIMI: [
+    { value: "moonshot-v1-8k", label: "moonshot-v1-8k" },
+    { value: "moonshot-v1-32k", label: "moonshot-v1-32k" },
+    { value: "moonshot-v1-128k", label: "moonshot-v1-128k" },
+    { value: "moonshot-v1-auto", label: "moonshot-v1-auto" },
+    { value: "kimi-latest", label: "kimi-latest" },
+  ],
+  DEEPSEEK: [
+    { value: "deepseek-chat", label: "deepseek-chat" },
+    { value: "deepseek-reasoner", label: "deepseek-reasoner" },
+  ],
+  OPENAI_COMPATIBLE: [
+    { value: "gpt-4o-mini", label: "gpt-4o-mini (compatible)" },
+    { value: "deepseek-chat", label: "deepseek-chat" },
+    { value: "moonshot-v1-8k", label: "moonshot-v1-8k" },
+  ],
+};
+
+const DEFAULT_BASE_URL: Record<string, string> = {
+  GEMINI: "https://generativelanguage.googleapis.com",
+  OPENAI: "https://api.openai.com/v1",
+  ANTHROPIC: "https://api.anthropic.com",
+  KIMI: "https://api.moonshot.cn/v1",
+  DEEPSEEK: "https://api.deepseek.com/v1",
+  OPENAI_COMPATIBLE: "",
+};
+
+const DEFAULT_MODEL: Record<string, string> = {
+  GEMINI: "gemini-2.0-flash",
+  OPENAI: "gpt-4o-mini",
+  ANTHROPIC: "claude-sonnet-4-20250514",
+  KIMI: "moonshot-v1-8k",
+  DEEPSEEK: "deepseek-chat",
+  OPENAI_COMPATIBLE: "gpt-4o-mini",
+};
+
+const CUSTOM_MODEL = "__custom__";
+
 export function AiProvidersClient() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -61,10 +132,21 @@ export function AiProvidersClient() {
     name: "Gemini Default",
     type: "GEMINI",
     model: "gemini-2.0-flash",
+    customModel: "",
     apiKey: "",
-    baseUrl: "",
+    baseUrl: DEFAULT_BASE_URL.GEMINI,
     isDefault: true,
   });
+
+  const modelOptions = useMemo(
+    () => MODELS_BY_TYPE[form.type] || MODELS_BY_TYPE.OPENAI_COMPATIBLE,
+    [form.type]
+  );
+
+  const modelSelectValue = useMemo(() => {
+    if (modelOptions.some((m) => m.value === form.model)) return form.model;
+    return CUSTOM_MODEL;
+  }, [form.model, modelOptions]);
 
   const load = useCallback(async () => {
     const r = await fetch("/api/admin/ai/providers");
@@ -77,6 +159,23 @@ export function AiProvidersClient() {
   useEffect(() => {
     load().catch((e) => setError(e.message));
   }, [load]);
+
+  function onTypeChange(type: string) {
+    const nextModel = DEFAULT_MODEL[type] || "gpt-4o-mini";
+    setForm((f) => ({
+      ...f,
+      type,
+      model: nextModel,
+      customModel: "",
+      baseUrl: DEFAULT_BASE_URL[type] ?? f.baseUrl,
+      name:
+        f.name === "Gemini Default" ||
+        f.name.endsWith(" Default") ||
+        PROVIDER_TYPES.some((t) => f.name === `${t.label} Default`)
+          ? `${PROVIDER_TYPES.find((t) => t.value === type)?.label || type} Default`
+          : f.name,
+    }));
+  }
 
   async function runDiagnostics() {
     setDiagBusy(true);
@@ -97,17 +196,23 @@ export function AiProvidersClient() {
     setBusy(true);
     setError("");
     try {
+      const model =
+        modelSelectValue === CUSTOM_MODEL ? form.customModel.trim() : form.model;
+      if (!model) throw new Error("Select or enter a model");
       const r = await fetch("/api/admin/ai/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...form,
+          name: form.name,
+          type: form.type,
+          model,
           baseUrl: form.baseUrl || undefined,
           apiKey: form.apiKey || undefined,
+          isDefault: form.isDefault,
         }),
       });
       if (!r.ok) throw new Error((await r.json()).error || "Create failed");
-      setForm({ ...form, apiKey: "" });
+      setForm((f) => ({ ...f, apiKey: "" }));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
@@ -179,7 +284,7 @@ export function AiProvidersClient() {
     <div>
       <PageHeader
         title="AI Providers"
-        description="Configure Gemini / OpenAI / Anthropic providers, defaults, and module routing (SUPER_ADMIN)"
+        description="Configure Gemini, OpenAI, Claude, Kimi, DeepSeek and custom OpenAI-compatible providers (SUPER_ADMIN)"
       />
       {error ? <p className="mb-4 text-sm text-red-600">{error}</p> : null}
 
@@ -200,70 +305,72 @@ export function AiProvidersClient() {
             {diagBusy ? "Running…" : "Run connection test"}
           </button>
         </div>
-
         {diagnostics ? (
-          <div className="space-y-3 border-t border-card-border pt-3">
-            <p className="text-sm">
-              Overall:{" "}
-              <span className={diagnostics.ok ? "text-emerald-600 font-semibold" : "text-red-600 font-semibold"}>
+          <div className="space-y-3 border-t border-card-border pt-3 text-sm">
+            <div className="flex flex-wrap gap-3">
+              <span
+                className={
+                  diagnostics.ok
+                    ? "text-emerald-600 font-semibold"
+                    : "text-red-600 font-semibold"
+                }
+              >
                 {diagnostics.ok ? "Healthy" : "Issues found"}
               </span>
-              {" · "}
-              {diagnostics.latencyMs}ms · {new Date(diagnostics.checkedAt).toLocaleString()}
-            </p>
-            <div className="grid gap-2 sm:grid-cols-3 text-sm">
-              <div className="rounded-lg border border-card-border p-3">
+              <span className="text-muted">
+                {diagnostics.latencyMs}ms · {new Date(diagnostics.checkedAt).toLocaleString()}
+              </span>
+            </div>
+            <ul className="grid gap-1 sm:grid-cols-2">
+              <li>
                 Embedding: {diagnostics.embedding.ok ? "OK" : "FAIL"}
                 {diagnostics.embedding.ok
                   ? ` (${diagnostics.embedding.dims}d, ${diagnostics.embedding.latencyMs}ms)`
                   : ` — ${diagnostics.embedding.error}`}
-              </div>
-              <div className="rounded-lg border border-card-border p-3">
+              </li>
+              <li>
                 Chat: {diagnostics.chat.ok ? "OK" : "FAIL"}
                 {diagnostics.chat.ok
                   ? ` (${diagnostics.chat.latencyMs}ms)`
                   : ` — ${diagnostics.chat.error}`}
-              </div>
-              <div className="rounded-lg border border-card-border p-3">
-                KB: {diagnostics.knowledgeBase.ready} ready / {diagnostics.knowledgeBase.total} total
+              </li>
+              <li>
+                KB: {diagnostics.knowledgeBase.ready} ready / {diagnostics.knowledgeBase.total}{" "}
+                total
                 {diagnostics.knowledgeBase.failed
                   ? ` · ${diagnostics.knowledgeBase.failed} failed`
                   : ""}
-              </div>
-            </div>
-
+              </li>
+            </ul>
             {diagnostics.knowledgeBase.byStage.length ? (
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
+                <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="text-muted">
-                      <th className="py-1 pr-3">Stage</th>
-                      <th className="py-1 pr-3">Ready</th>
-                      <th className="py-1 pr-3">Failed</th>
-                      <th className="py-1 pr-3">Pending</th>
-                      <th className="py-1">Total</th>
+                      <th className="py-1 pe-3">Stage</th>
+                      <th className="py-1 pe-3">Ready</th>
+                      <th className="py-1 pe-3">Failed</th>
+                      <th className="py-1">Pending</th>
                     </tr>
                   </thead>
                   <tbody>
                     {diagnostics.knowledgeBase.byStage.map((s) => (
                       <tr key={s.stageId} className="border-t border-card-border/60">
-                        <td className="py-1.5 pr-3">{s.stageName}</td>
-                        <td className="py-1.5 pr-3">{s.ready}</td>
-                        <td className="py-1.5 pr-3">{s.failed}</td>
-                        <td className="py-1.5 pr-3">{s.pending}</td>
-                        <td className="py-1.5">{s.total}</td>
+                        <td className="py-1 pe-3">{s.stageName}</td>
+                        <td className="py-1 pe-3">{s.ready}</td>
+                        <td className="py-1 pe-3">{s.failed}</td>
+                        <td className="py-1">{s.pending}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             ) : null}
-
             <ul className="space-y-2">
               {diagnostics.issues.map((i) => (
                 <li
                   key={i.code + i.message}
-                  className={`rounded-lg px-3 py-2 text-sm ${
+                  className={`rounded-lg px-3 py-2 ${
                     i.severity === "error"
                       ? "bg-red-500/10 text-red-700 dark:text-red-300"
                       : i.severity === "warning"
@@ -282,7 +389,10 @@ export function AiProvidersClient() {
         ) : null}
       </div>
 
-      <form onSubmit={createProvider} className="card mb-6 grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+      <form
+        onSubmit={createProvider}
+        className="card mb-6 grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3"
+      >
         <input
           className="input"
           placeholder="Name"
@@ -293,20 +403,48 @@ export function AiProvidersClient() {
         <select
           className="input"
           value={form.type}
-          onChange={(e) => setForm({ ...form, type: e.target.value })}
+          onChange={(e) => onTypeChange(e.target.value)}
         >
-          <option value="GEMINI">Gemini</option>
-          <option value="OPENAI">OpenAI</option>
-          <option value="ANTHROPIC">Anthropic</option>
-          <option value="OPENAI_COMPATIBLE">OpenAI Compatible</option>
+          {PROVIDER_TYPES.map((t) => (
+            <option key={t.value} value={t.value}>
+              {t.label}
+            </option>
+          ))}
         </select>
-        <input
+        <select
           className="input"
-          placeholder="Model"
-          value={form.model}
-          onChange={(e) => setForm({ ...form, model: e.target.value })}
-          required
-        />
+          value={modelSelectValue}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === CUSTOM_MODEL) {
+              setForm({
+                ...form,
+                model: form.customModel || "",
+                customModel: form.customModel,
+              });
+            } else {
+              setForm({ ...form, model: v, customModel: "" });
+            }
+          }}
+        >
+          {modelOptions.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label}
+            </option>
+          ))}
+          <option value={CUSTOM_MODEL}>Custom model…</option>
+        </select>
+        {modelSelectValue === CUSTOM_MODEL ? (
+          <input
+            className="input"
+            placeholder="Custom model id"
+            value={form.customModel}
+            onChange={(e) =>
+              setForm({ ...form, customModel: e.target.value, model: e.target.value })
+            }
+            required
+          />
+        ) : null}
         <input
           className="input"
           placeholder="API key"
@@ -316,7 +454,7 @@ export function AiProvidersClient() {
         />
         <input
           className="input"
-          placeholder="Base URL (optional)"
+          placeholder="Base URL (auto-filled for known providers)"
           value={form.baseUrl}
           onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
         />
@@ -328,7 +466,16 @@ export function AiProvidersClient() {
           />
           Set as default
         </label>
-        <button className="btn btn-primary sm:col-span-2 lg:col-span-3" disabled={busy} type="submit">
+        <p className="sm:col-span-2 lg:col-span-3 text-xs text-muted">
+          Claude uses Anthropic keys. Kimi uses Moonshot keys (default{" "}
+          <code>api.moonshot.cn/v1</code>). DeepSeek uses DeepSeek keys (default{" "}
+          <code>api.deepseek.com/v1</code>). Keep EMBEDDING on Gemini or OpenAI.
+        </p>
+        <button
+          className="btn btn-primary sm:col-span-2 lg:col-span-3"
+          disabled={busy}
+          type="submit"
+        >
           Add provider
         </button>
       </form>
@@ -347,6 +494,7 @@ export function AiProvidersClient() {
               </div>
               <div className="text-sm text-muted">
                 {p.type} · {p.model} · {p.status} · key {p.hasApiKey ? "set" : "missing"}
+                {p.baseUrl ? ` · ${p.baseUrl}` : ""}
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -411,14 +559,19 @@ export function AiProvidersClient() {
                 <option value="">—</option>
                 {providers.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} ({p.type})
+                    {p.name} ({p.type} · {p.model})
                   </option>
                 ))}
               </select>
             </label>
           );
         })}
-        <button className="btn btn-primary" disabled={busy || !providers.length} onClick={saveAssignments} type="button">
+        <button
+          className="btn btn-primary"
+          disabled={busy || !providers.length}
+          onClick={saveAssignments}
+          type="button"
+        >
           Save assignments
         </button>
       </div>
