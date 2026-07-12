@@ -205,17 +205,13 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      final msg = e.toString();
-      final fallback = context.l10n.t('mobile.ai.unavailable');
-      // Don't mask API/config failures as "not in materials".
-      final text = (msg.contains('ApiException') ||
-              msg.contains('No AI provider') ||
-              msg.contains('embed') ||
-              msg.contains('401') ||
-              msg.contains('403') ||
-              msg.contains('500'))
-          ? context.l10n.t('mobile.ai.errorGeneric')
-          : fallback;
+      final msg = e is ApiException ? e.message : e.toString();
+      // Prefer the real API error so balance/config issues are visible.
+      final text = msg.trim().isNotEmpty &&
+              msg != 'Request failed' &&
+              !msg.contains('SocketException')
+          ? msg
+          : context.l10n.t('mobile.ai.errorGeneric');
       setState(() {
         _messages.add(
           _ChatBubble(

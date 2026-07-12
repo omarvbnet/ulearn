@@ -194,68 +194,77 @@ export class AiChatService {
     if (!hasAttachments && !editIntent) {
       const cached = await prisma.aiResponseCache.findUnique({ where: { cacheKey } });
       if (cached && (!cached.expiresAt || cached.expiresAt > new Date())) {
-        await prisma.aiResponseCache.update({
-          where: { id: cached.id },
-          data: { hitCount: { increment: 1 } },
-        });
-        return this.persistTurn({
-          userId: input.userId,
-          conversationId: input.conversationId,
-          question,
-          answer: cached.answer,
-          citations: cached.citations,
-          fromCache: true,
-          attachmentNames: [],
-        });
+        // Don't replay hard-unavailable cache forever — allow a fresh model pass.
+        const cachedText = String(cached.answer || "");
+        const isHardUnavail =
+          cachedText === unavailable ||
+          cachedText.includes("غير متوفرة في المواد") ||
+          cachedText.includes("not available in the educational material");
+        if (!isHardUnavail) {
+          await prisma.aiResponseCache.update({
+            where: { id: cached.id },
+            data: { hitCount: { increment: 1 } },
+          });
+          return this.persistTurn({
+            userId: input.userId,
+            conversationId: input.conversationId,
+            question,
+            answer: cached.answer,
+            citations: cached.citations,
+            fromCache: true,
+            attachmentNames: [],
+          });
+        }
       }
     }
 
-    const qEmbed = await EmbeddingService.embedText(
-      [question, processed.textExcerpt].filter(Boolean).join("\n").slice(0, 8000),
-      input.userId
-    );
+    let qEmbed: number[] | null = null;
+    let embedFailed = false;
+    try {
+      qEmbed = await EmbeddingService.embedText(
+        [question, processed.textExcerpt].filter(Boolean).join("\n").slice(0, 8000),
+        input.userId
+      );
+    } catch (e) {
+      // Embeddings may be misconfigured; DeepSeek/chat should still answer.
+      embedFailed = true;
+      console.warn(
+        "[ai/chat] embedding failed — continuing without RAG",
+        e instanceof Error ? e.message : e
+      );
+    }
 
     // Prefer this student's stage / certificate interest materials first.
-    const hits = await VectorSearchService.search(qEmbed, {
-      educationalStageId: stageId,
-      subjectId: subjectId,
-      subjectIds: subjectId ? undefined : subjectIds,
-      subjectStrict: Boolean(isCert && (subjectIds?.length || subjectId)),
-      courseId: input.courseId,
-      lesson: input.lesson,
-      topK: TOP_K,
-      minSimilarity: MIN_SIMILARITY,
-      preferLanguage: language,
-      stageStrict: true,
-    });
+    const hits = qEmbed
+      ? await VectorSearchService.search(qEmbed, {
+          educationalStageId: stageId,
+          subjectId: subjectId,
+          subjectIds: subjectId ? undefined : subjectIds,
+          subjectStrict: Boolean(isCert && (subjectIds?.length || subjectId)),
+          courseId: input.courseId,
+          lesson: input.lesson,
+          topK: TOP_K,
+          minSimilarity: MIN_SIMILARITY,
+          preferLanguage: language,
+          stageStrict: true,
+        })
+      : [];
 
     const best = hits[0]?.similarity ?? 0;
-    if (!hits.length && !hasAttachments) {
-      const readyForStage = stageId
-        ? await prisma.kbDocument.count({
-            where: {
-              status: "READY",
-              deletedAt: null,
-              educationalStageId: stageId,
-              ...(isCert && interestIds.length
-                ? { subjectId: { in: interestIds } }
-                : {}),
-            },
-          })
-        : await prisma.kbDocument.count({
-            where: { status: "READY", deletedAt: null },
-          });
-      const emptyKb = readyForStage === 0;
-      return this.persistTurn({
-        userId: input.userId,
-        conversationId: input.conversationId,
-        question,
-        answer: emptyKb ? emptyKnowledgeBaseAnswer(language) : unavailable,
-        citations: [],
-        fromCache: false,
-        attachmentNames: [],
-      });
-    }
+    const readyForStage = stageId
+      ? await prisma.kbDocument.count({
+          where: {
+            status: "READY",
+            deletedAt: null,
+            educationalStageId: stageId,
+            ...(isCert && interestIds.length
+              ? { subjectId: { in: interestIds } }
+              : {}),
+          },
+        })
+      : await prisma.kbDocument.count({
+          where: { status: "READY", deletedAt: null },
+        });
 
     const context = hits.length ? compressContext(hits) : "";
     const memoryBlurb = StudentMemoryService.toPromptBlurb(memory);
@@ -272,6 +281,7 @@ export class AiChatService {
       .filter(Boolean)
       .join("; ");
 
+    const noCurriculumHits = !hits.length && !hasAttachments;
     const system = editIntent
       ? [
           "You are U Learn document editor assistant.",
@@ -291,7 +301,7 @@ export class AiChatService {
           .filter(Boolean)
           .join("\n")
       : [
-          "You are U Learn Teaching Assistant.",
+          "You are U Learn Teaching Assistant — a helpful tutor.",
           languageInstruction(language),
           studentBlurb
             ? `Know this student: ${studentBlurb}. Address them by name when natural.`
@@ -301,15 +311,26 @@ export class AiChatService {
             ? "The student attached files/photos. Use them to understand the question (homework photo, worksheet, PDF notes). Prefer answering from the attachment when the question is about it."
             : "",
           isCert
-            ? "Scope answers to the student's areas of interest and professional certificate materials."
+            ? "Prefer the student's areas of interest when giving examples."
             : "",
           context
-            ? "For curriculum facts, answer ONLY using the retrieved educational material below (plus the attachments when relevant)."
-            : "No matching curriculum chunks were retrieved. If attachments are present, help with those; otherwise say the unavailable line.",
-          "If you cannot answer from retrieved material or attachments, reply exactly with this unavailable message (same language):",
-          unavailable,
-          "Do not invent curriculum facts outside retrieved material + attachments.",
-          "Keep answers clear and educational. Cite document names/pages when helpful.",
+            ? "For curriculum facts, prioritize the retrieved educational material below (plus attachments when relevant). Cite document names/pages when helpful."
+            : noCurriculumHits
+              ? [
+                  readyForStage === 0
+                    ? "No READY knowledge-base materials are uploaded for this student's stage/interests yet."
+                    : "No closely matching chunks were retrieved for this question (retrieval may be weak).",
+                  embedFailed
+                    ? "Note: embedding/retrieval is currently degraded — answer as a general tutor."
+                    : "",
+                  "Still help the student: explain concepts, give study tips, and work through problems step by step.",
+                  "Clearly say when your answer is general tutoring and not quoted from U Learn uploaded materials.",
+                  "Do NOT invent that a specific uploaded PDF/page says something it does not.",
+                ]
+                  .filter(Boolean)
+                  .join(" ")
+              : "",
+          "Keep answers clear and educational.",
           context ? `\nRetrieved material:\n${context}` : "",
           processed.textExcerpt
             ? `\nExtracted text from attached documents:\n${processed.textExcerpt}`
@@ -341,7 +362,14 @@ export class AiChatService {
     ];
 
     const result = await AiProviderService.chat("TEACHING_ASSISTANT", messages, input.userId);
-    let answer = result.text.trim() || unavailable;
+    let answer = result.text.trim();
+    if (!answer) {
+      answer = embedFailed
+        ? language === "ar"
+          ? "تعذر توليد إجابة الآن. تحقق من مزود الدردشة أو أعد المحاولة."
+          : "Could not generate an answer right now. Check the chat provider or try again."
+        : unavailable;
+    }
     let editedFile:
       | { fileName: string; mimeType: string; contentBase64: string }
       | undefined;
@@ -360,11 +388,13 @@ export class AiChatService {
       }
     }
 
+    // Only force the unavailable line when we had strong retrieval but the model refused.
     if (
       !hasAttachments &&
       !editIntent &&
-      /i (don't|do not) have|not in (the )?(context|material)/i.test(answer) &&
-      best < 0.65
+      hits.length > 0 &&
+      best >= 0.65 &&
+      /i (don't|do not) have|not in (the )?(context|material)/i.test(answer)
     ) {
       answer = unavailable;
     }
@@ -375,7 +405,7 @@ export class AiChatService {
       similarity: Math.round(h.similarity * 1000) / 1000,
     }));
 
-    if (!hasAttachments && !editIntent) {
+    if (!hasAttachments && !editIntent && !embedFailed) {
       await prisma.aiResponseCache.upsert({
         where: { cacheKey },
         create: {
@@ -385,13 +415,13 @@ export class AiChatService {
           subjectId: subjectId ?? null,
           answer,
           citations,
-          embedding: qEmbed,
+          embedding: qEmbed || [],
           expiresAt: new Date(Date.now() + CACHE_TTL_MS),
         },
         update: {
           answer,
           citations,
-          embedding: qEmbed,
+          embedding: qEmbed || [],
           expiresAt: new Date(Date.now() + CACHE_TTL_MS),
           hitCount: { increment: 1 },
         },
@@ -481,20 +511,6 @@ function normalizeLang(raw?: string | null): string {
   if (v.startsWith("tr")) return "tr";
   if (v.startsWith("en")) return "en";
   return v.slice(0, 2) || "en";
-}
-
-function emptyKnowledgeBaseAnswer(language?: string | null): string {
-  const lang = normalizeLang(language);
-  switch (lang) {
-    case "ar":
-      return "قاعدة المعرفة فارغة أو ما زالت قيد المعالجة. اطلب من المسؤول رفع المواد التعليمية وإعادة معالجتها.";
-    case "ku":
-      return "بنکەی زانیاری بەتاڵە یان هێشتا لە پرۆسەدایە. داوا لە بەڕێوەبەر بکە ماددە فێرکارییەکان بار بکات و دووبارە پرۆسێس بکات.";
-    case "tr":
-      return "Bilgi tabanı boş veya hâlâ işleniyor. Yöneticiden eğitim materyallerini yüklemesini ve yeniden işlemesini isteyin.";
-    default:
-      return "The knowledge base is empty or still processing. Ask an admin to upload educational materials and reprocess them.";
-  }
 }
 
 function stageNameForLang(
