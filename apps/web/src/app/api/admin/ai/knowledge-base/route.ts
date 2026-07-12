@@ -1,4 +1,5 @@
 import { error, json, requireAuth } from "@/lib/api";
+import { prisma } from "@/lib/prisma";
 import { KnowledgeBaseService } from "@/services/ai";
 import { z } from "zod";
 
@@ -48,6 +49,22 @@ export async function POST(request: Request) {
   if (!parsed.data.fileKey && !parsed.data.fileUrl) {
     return error("fileKey or fileUrl is required", 422, "VALIDATION");
   }
+
+  const stage = await prisma.educationalStage.findUnique({
+    where: { id: parsed.data.educationalStageId },
+    select: { isCertificateTrack: true },
+  });
+  if (!stage) {
+    return error("Educational stage not found", 422, "VALIDATION");
+  }
+  if (stage.isCertificateTrack && !parsed.data.subjectId) {
+    return error(
+      "Area of Interest (subjectId) is required for Professional Certificates materials",
+      422,
+      "VALIDATION"
+    );
+  }
+
   const doc = await KnowledgeBaseService.createUpload({
     fileName: parsed.data.fileName,
     fileKey: parsed.data.fileKey,

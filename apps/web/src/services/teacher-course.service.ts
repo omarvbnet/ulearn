@@ -796,6 +796,7 @@ export class TeacherCourseService {
   static async listPublishedCourses(filter?: {
     stageId?: string;
     subjectId?: string;
+    subjectIds?: string[];
     teacherId?: string;
     q?: string;
     levels?: TeacherLevel[];
@@ -807,6 +808,9 @@ export class TeacherCourseService {
         deletedAt: null,
         ...(filter?.stageId ? { stageId: filter.stageId } : {}),
         ...(filter?.subjectId ? { subjectId: filter.subjectId } : {}),
+        ...(filter?.subjectIds?.length
+          ? { subjectId: { in: filter.subjectIds } }
+          : {}),
         ...(filter?.teacherId ? { teacherId: filter.teacherId } : {}),
         // Free-text search across course titles, teacher names and video titles.
         ...(q

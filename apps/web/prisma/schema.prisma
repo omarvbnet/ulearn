@@ -262,7 +262,22 @@ model CertificateProfile {
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interests CertificateProfileInterest[]
+}
+
+/// Areas of interest for CERTIFICATE_USER (subjects under a certificate-track stage).
+model CertificateProfileInterest {
+  id        String   @id @default(cuid())
+  profileId String
+  subjectId String
+  createdAt DateTime @default(now())
+
+  profile CertificateProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  subject Subject            @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, subjectId])
+  @@index([subjectId])
 }
 
 enum TeacherLevel {
@@ -1014,6 +1029,8 @@ model EducationalStage {
   description String?
   sortOrder   Int       @default(0)
   isActive    Boolean   @default(true)
+  /// Professional / certificate track (areas of interest live as subjects under this stage).
+  isCertificateTrack Boolean @default(false)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
@@ -1028,6 +1045,7 @@ model EducationalStage {
 
   @@index([countryId])
   @@index([deletedAt])
+  @@index([isCertificateTrack])
 }
 
 model Subject {
@@ -1056,6 +1074,7 @@ model Subject {
   quizzes    Quiz[]
   certificates Certificate[]
   courses    Course[]
+  certificateInterests CertificateProfileInterest[]
 
   @@index([countryId])
   @@index([stageId])

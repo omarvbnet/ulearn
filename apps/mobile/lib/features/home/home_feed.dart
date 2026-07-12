@@ -52,6 +52,7 @@ class HomeFeed extends StatefulWidget {
 class HomeFeedState extends State<HomeFeed> {
   Map<String, dynamic>? _stage;
   List<Map<String, dynamic>> _stages = [];
+  List<Map<String, dynamic>> _interests = [];
   List<Map<String, dynamic>> _ads = [];
   List<Map<String, dynamic>> _courses = [];
   List<Map<String, dynamic>> _continueWatching = [];
@@ -61,6 +62,7 @@ class HomeFeedState extends State<HomeFeed> {
 
   // Filters: null stage = my own stage, 'all' = every stage.
   String? _stageFilter;
+  String? _interestFilter;
   String? _levelFilter;
   final _search = TextEditingController();
   Timer? _debounce;
@@ -90,6 +92,7 @@ class HomeFeedState extends State<HomeFeed> {
     try {
       final params = <String, String>{
         'stageId': ?_stageFilter,
+        'subjectId': ?_interestFilter,
         'level': ?_levelFilter,
         if (_search.text.trim().isNotEmpty) 'q': _search.text.trim(),
       };
@@ -136,6 +139,8 @@ class HomeFeedState extends State<HomeFeed> {
       setState(() {
         _stage = data['stage'] as Map<String, dynamic>?;
         _stages = ((data['stages'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+        _interests =
+            ((data['interests'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
         _ads = ((data['ads'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
         _courses = homeCourses;
         _continueWatching = continueItems;
@@ -161,7 +166,10 @@ class HomeFeedState extends State<HomeFeed> {
   }
 
   bool get _hasActiveFilters =>
-      _stageFilter != null || _levelFilter != null || _search.text.trim().isNotEmpty;
+      _stageFilter != null ||
+      _interestFilter != null ||
+      _levelFilter != null ||
+      _search.text.trim().isNotEmpty;
 
   String _stageLabel(BuildContext context, String locale) {
     final l10n = context.l10n;
@@ -295,6 +303,39 @@ class HomeFeedState extends State<HomeFeed> {
                 onTap: () => Navigator.pop(ctx, id),
               );
             }),
+            if (_interests.isNotEmpty) ...[
+              Divider(color: AppTheme.cardBorder),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                child: Text(
+                  'Areas of interest',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.muted,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.clear_all, color: AppTheme.accent),
+                title: const Text('All my interests'),
+                trailing: _interestFilter == null
+                    ? const Icon(Icons.check, color: AppTheme.accent)
+                    : null,
+                onTap: () => Navigator.pop(ctx, 'interest:all'),
+              ),
+              ..._interests.map((s) {
+                final id = s['id'].toString();
+                return ListTile(
+                  leading: Icon(Icons.interests_outlined, color: AppTheme.muted),
+                  title: Text(localizedText(s, locale, prefix: 'name')),
+                  trailing: _interestFilter == id
+                      ? const Icon(Icons.check, color: AppTheme.accent)
+                      : null,
+                  onTap: () => Navigator.pop(ctx, 'interest:$id'),
+                );
+              }),
+            ],
           ],
         ),
       );
@@ -302,7 +343,12 @@ class HomeFeedState extends State<HomeFeed> {
     );
 
     if (picked == null || !mounted) return;
-    setState(() => _stageFilter = picked == 'mine' ? null : picked);
+    if (picked.startsWith('interest:')) {
+      final id = picked.substring('interest:'.length);
+      setState(() => _interestFilter = id == 'all' ? null : id);
+    } else {
+      setState(() => _stageFilter = picked == 'mine' ? null : picked);
+    }
     _load(soft: true);
   }
 

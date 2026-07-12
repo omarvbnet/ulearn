@@ -44,11 +44,17 @@ export class AiChatService {
     conversationId?: string;
     stageId?: string | null;
     subjectId?: string | null;
+    /** Prefer these subjects (certificate interests). */
+    subjectIds?: string[];
     courseId?: string | null;
     /** App UI language: en | ar | ku | tr */
     language?: string | null;
     lesson?: string | null;
     attachments?: ChatAttachmentInput[];
+    /** chat | practice_quiz | edit (edit also auto-detected from question + attachments). */
+    mode?: "chat" | "practice_quiz" | "edit";
+    /** KB document ids for practice quiz material selection. */
+    documentIds?: string[];
   }) {
     const attachments = (input.attachments || []).slice(0, MAX_ATTACHMENTS);
     for (const a of attachments) {
@@ -71,6 +77,7 @@ export class AiChatService {
       select: {
         fullLegalName: true,
         locale: true,
+        role: true,
         studentProfile: {
           select: {
             educationalStageId: true,
@@ -80,32 +87,111 @@ export class AiChatService {
             },
           },
         },
+        certificateProfile: {
+          select: {
+            interests: {
+              include: {
+                subject: {
+                  select: {
+                    id: true,
+                    nameEn: true,
+                    nameAr: true,
+                    nameKu: true,
+                    nameTr: true,
+                    stageId: true,
+                    stage: {
+                      select: {
+                        id: true,
+                        nameEn: true,
+                        nameAr: true,
+                        nameKu: true,
+                        nameTr: true,
+                        isCertificateTrack: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
 
     const language = normalizeLang(input.language || profile?.locale);
-    const stageId =
-      input.stageId ?? profile?.studentProfile?.educationalStageId ?? null;
+    const isCert = profile?.role === "CERTIFICATE_USER";
+    const interestSubjects =
+      profile?.certificateProfile?.interests.map((i) => i.subject) ?? [];
+    const interestIds = interestSubjects.map((s) => s.id);
+    const certStage = interestSubjects.find((s) => s.stage)?.stage ?? null;
+
+    let stageId =
+      input.stageId ??
+      (isCert
+        ? certStage?.id ?? null
+        : profile?.studentProfile?.educationalStageId ?? null);
+    let subjectId = input.subjectId ?? null;
+    let subjectIds =
+      input.subjectIds?.length
+        ? input.subjectIds
+        : isCert && interestIds.length
+          ? interestIds
+          : undefined;
+    if (isCert && subjectId && interestIds.length && !interestIds.includes(subjectId)) {
+      subjectId = null;
+    }
+    if (isCert && !stageId && certStage) stageId = certStage.id;
+
     const studentName = profile?.fullLegalName?.trim() || null;
-    const stage = profile?.studentProfile?.educationalStage;
-    const stageName = stage
-      ? stageNameForLang(stage, language)
-      : null;
+    const stage = isCert
+      ? certStage
+      : profile?.studentProfile?.educationalStage;
+    const stageName = stage ? stageNameForLang(stage, language) : null;
     const grade = profile?.studentProfile?.grade || null;
+    const interestNames = interestSubjects
+      .map((s) => stageNameForLang(s, language))
+      .filter(Boolean);
 
     const unavailable = unavailableAnswer(language);
     const hasAttachments = attachments.length > 0;
     const processed = await processAttachments(attachments);
+    const editIntent =
+      input.mode === "edit" ||
+      (hasAttachments && wantsAttachmentEdit(question));
+    const practiceQuiz = input.mode === "practice_quiz";
+
+    if (practiceQuiz) {
+      const { ExamGeneratorService } = await import("./exam-generator.service");
+      const quiz = await ExamGeneratorService.generatePractice({
+        userId: input.userId,
+        question,
+        language,
+        educationalStageId: stageId,
+        subjectIds: subjectId ? [subjectId] : subjectIds,
+        documentIds: input.documentIds,
+        attachmentText: processed.textExcerpt,
+      });
+      return this.persistTurn({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        question,
+        answer: formatPracticeQuizAnswer(quiz, language),
+        citations: quiz.citations,
+        fromCache: false,
+        attachmentNames: attachments.map((a) => a.fileName),
+        practiceQuiz: quiz,
+      });
+    }
 
     // Skip response cache when attachments are present (unique visual/doc context).
     const norm = EmbeddingService.normalizeQuestion(question);
     const cacheKey = EmbeddingService.hashQuestion(
-      `${norm}|${language}`,
+      `${norm}|${language}|${editIntent ? "edit" : "chat"}`,
       stageId,
-      input.subjectId
+      subjectId || subjectIds?.slice().sort().join(",") || null
     );
 
-    if (!hasAttachments) {
+    if (!hasAttachments && !editIntent) {
       const cached = await prisma.aiResponseCache.findUnique({ where: { cacheKey } });
       if (cached && (!cached.expiresAt || cached.expiresAt > new Date())) {
         await prisma.aiResponseCache.update({
@@ -129,40 +215,12 @@ export class AiChatService {
       input.userId
     );
 
-    if (!hasAttachments) {
-      const nearCaches = await prisma.aiResponseCache.findMany({
-        where: {
-          stageId: stageId ?? undefined,
-          subjectId: input.subjectId ?? undefined,
-          expiresAt: { gt: new Date() },
-        },
-        take: 40,
-        orderBy: { createdAt: "desc" },
-      });
-      for (const c of nearCaches) {
-        if (!c.embedding?.length) continue;
-        if (EmbeddingService.cosineSimilarity(qEmbed, c.embedding) >= 0.96) {
-          await prisma.aiResponseCache.update({
-            where: { id: c.id },
-            data: { hitCount: { increment: 1 } },
-          });
-          return this.persistTurn({
-            userId: input.userId,
-            conversationId: input.conversationId,
-            question,
-            answer: c.answer,
-            citations: c.citations,
-            fromCache: true,
-            attachmentNames: [],
-          });
-        }
-      }
-    }
-
-    // Prefer this student's stage materials first (never other stages).
+    // Prefer this student's stage / certificate interest materials first.
     const hits = await VectorSearchService.search(qEmbed, {
       educationalStageId: stageId,
-      subjectId: input.subjectId,
+      subjectId: subjectId,
+      subjectIds: subjectId ? undefined : subjectIds,
+      subjectStrict: Boolean(isCert && (subjectIds?.length || subjectId)),
       courseId: input.courseId,
       lesson: input.lesson,
       topK: TOP_K,
@@ -178,7 +236,10 @@ export class AiChatService {
             where: {
               status: "READY",
               deletedAt: null,
-              OR: [{ educationalStageId: stageId }, { educationalStageId: null }],
+              educationalStageId: stageId,
+              ...(isCert && interestIds.length
+                ? { subjectId: { in: interestIds } }
+                : {}),
             },
           })
         : await prisma.kbDocument.count({
@@ -200,34 +261,62 @@ export class AiChatService {
     const memoryBlurb = StudentMemoryService.toPromptBlurb(memory);
     const studentBlurb = [
       studentName ? `Student name: ${studentName}` : null,
-      stageName ? `Educational stage: ${stageName}` : null,
+      stageName
+        ? isCert
+          ? `Professional track: ${stageName}`
+          : `Educational stage: ${stageName}`
+        : null,
+      interestNames.length ? `Areas of interest: ${interestNames.join(", ")}` : null,
       grade ? `Grade: ${grade}` : null,
     ]
       .filter(Boolean)
       .join("; ");
 
-    const system = [
-      "You are U Learn Teaching Assistant.",
-      languageInstruction(language),
-      studentBlurb ? `Know this student: ${studentBlurb}. Address them by name when natural.` : "",
-      memoryBlurb ? `Learning memory: ${memoryBlurb}` : "",
-      hasAttachments
-        ? "The student attached files/photos. Use them to understand the question (homework photo, worksheet, PDF notes)."
-        : "",
-      context
-        ? "For curriculum facts, answer ONLY using the retrieved educational material below (plus the attachments when relevant)."
-        : "No matching curriculum chunks were retrieved. If attachments are present, help with those; otherwise say the unavailable line.",
-      "If you cannot answer from retrieved material or attachments, reply exactly with this unavailable message (same language):",
-      unavailable,
-      "Do not invent curriculum facts outside retrieved material + attachments.",
-      "Keep answers clear and educational. Cite document names/pages when helpful.",
-      context ? `\nRetrieved material:\n${context}` : "",
-      processed.textExcerpt
-        ? `\nExtracted text from attached documents:\n${processed.textExcerpt}`
-        : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
+    const system = editIntent
+      ? [
+          "You are U Learn document editor assistant.",
+          languageInstruction(language),
+          "The user attached a file and asked you to edit it.",
+          "Apply the requested edits to the attachment content (correct, rewrite, improve, restructure as asked).",
+          "Respond with a short note of what you changed, then the FULL revised document text inside a single markdown fence marked as text:",
+          "```text",
+          "...full revised content...",
+          "```",
+          "Do not invent unrelated curriculum. Stay faithful to the attachment unless the user asked to expand.",
+          processed.textExcerpt
+            ? `\nOriginal extracted text:\n${processed.textExcerpt}`
+            : "Original content is in the attached image(s) — transcribe and edit as requested.",
+          context ? `\nOptional related curriculum context:\n${context}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : [
+          "You are U Learn Teaching Assistant.",
+          languageInstruction(language),
+          studentBlurb
+            ? `Know this student: ${studentBlurb}. Address them by name when natural.`
+            : "",
+          memoryBlurb ? `Learning memory: ${memoryBlurb}` : "",
+          hasAttachments
+            ? "The student attached files/photos. Use them to understand the question (homework photo, worksheet, PDF notes). Prefer answering from the attachment when the question is about it."
+            : "",
+          isCert
+            ? "Scope answers to the student's areas of interest and professional certificate materials."
+            : "",
+          context
+            ? "For curriculum facts, answer ONLY using the retrieved educational material below (plus the attachments when relevant)."
+            : "No matching curriculum chunks were retrieved. If attachments are present, help with those; otherwise say the unavailable line.",
+          "If you cannot answer from retrieved material or attachments, reply exactly with this unavailable message (same language):",
+          unavailable,
+          "Do not invent curriculum facts outside retrieved material + attachments.",
+          "Keep answers clear and educational. Cite document names/pages when helpful.",
+          context ? `\nRetrieved material:\n${context}` : "",
+          processed.textExcerpt
+            ? `\nExtracted text from attached documents:\n${processed.textExcerpt}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
 
     const history = input.conversationId
       ? await prisma.aiMessage.findMany({
@@ -253,9 +342,27 @@ export class AiChatService {
 
     const result = await AiProviderService.chat("TEACHING_ASSISTANT", messages, input.userId);
     let answer = result.text.trim() || unavailable;
+    let editedFile:
+      | { fileName: string; mimeType: string; contentBase64: string }
+      | undefined;
+
+    if (editIntent) {
+      const extracted = extractFencedText(answer);
+      if (extracted) {
+        const baseName =
+          attachments[0]?.fileName?.replace(/\.[^.]+$/, "") || "edited";
+        const body = extracted;
+        editedFile = {
+          fileName: `${baseName}-edited.txt`,
+          mimeType: "text/plain;charset=utf-8",
+          contentBase64: Buffer.from(body, "utf8").toString("base64"),
+        };
+      }
+    }
 
     if (
       !hasAttachments &&
+      !editIntent &&
       /i (don't|do not) have|not in (the )?(context|material)/i.test(answer) &&
       best < 0.65
     ) {
@@ -268,14 +375,14 @@ export class AiChatService {
       similarity: Math.round(h.similarity * 1000) / 1000,
     }));
 
-    if (!hasAttachments) {
+    if (!hasAttachments && !editIntent) {
       await prisma.aiResponseCache.upsert({
         where: { cacheKey },
         create: {
           cacheKey,
           questionNorm: norm,
           stageId,
-          subjectId: input.subjectId ?? null,
+          subjectId: subjectId ?? null,
           answer,
           citations,
           embedding: qEmbed,
@@ -291,7 +398,7 @@ export class AiChatService {
       });
     }
 
-    void StudentMemoryService.recordQuestion(input.userId, question, input.subjectId);
+    void StudentMemoryService.recordQuestion(input.userId, question, subjectId);
 
     return this.persistTurn({
       userId: input.userId,
@@ -301,6 +408,7 @@ export class AiChatService {
       citations,
       fromCache: false,
       attachmentNames: attachments.map((a) => a.fileName),
+      editedFile,
     });
   }
 
@@ -312,6 +420,8 @@ export class AiChatService {
     citations: unknown;
     fromCache: boolean;
     attachmentNames: string[];
+    editedFile?: { fileName: string; mimeType: string; contentBase64: string };
+    practiceQuiz?: unknown;
   }) {
     let conversationId = input.conversationId;
     if (!conversationId) {
@@ -358,6 +468,8 @@ export class AiChatService {
       answer: input.answer,
       citations: input.citations,
       fromCache: input.fromCache,
+      editedFile: input.editedFile,
+      practiceQuiz: input.practiceQuiz,
     };
   }
 }
@@ -457,4 +569,47 @@ function compressContext(hits: RetrievedChunk[]): string {
     used += block.length;
   }
   return parts.join("\n\n---\n\n");
+}
+
+function wantsAttachmentEdit(question: string): boolean {
+  return /\b(edit|correct|rewrite|fix|improve|revise|proofread|update|change|تعديل|صحح|أعد|اصلح|حسّن|حسن)\b/i.test(
+    question
+  );
+}
+
+function extractFencedText(answer: string): string | null {
+  const m = answer.match(/```(?:text|txt|markdown|md)?\s*([\s\S]*?)```/i);
+  if (m?.[1]?.trim()) return m[1].trim();
+  return null;
+}
+
+function formatPracticeQuizAnswer(
+  quiz: {
+    title: string;
+    questions: Array<{ text: string; options: Record<string, string>; correctKey: string }>;
+  },
+  language: string
+): string {
+  const header =
+    language === "ar"
+      ? "اختبار تدريبي"
+      : language === "ku"
+        ? "تاقیکردنەوەی ڕاهێنان"
+        : language === "tr"
+          ? "Alıştırma sınavı"
+          : "Practice quiz";
+  const lines = [`${header}: ${quiz.title}`, ""];
+  quiz.questions.forEach((q, i) => {
+    lines.push(`${i + 1}. ${q.text}`);
+    for (const [k, v] of Object.entries(q.options)) {
+      lines.push(`   ${k}) ${v}`);
+    }
+    lines.push("");
+  });
+  lines.push(
+    language === "ar"
+      ? "(الإجابات الصحيحة محفوظة للتقييم داخل التطبيق.)"
+      : "(Correct answers are kept for in-app scoring.)"
+  );
+  return lines.join("\n");
 }

@@ -39,6 +39,28 @@ export const IRAQ_EDUCATIONAL_STAGES = [
   { nameEn: "6th Literary", nameAr: "السادس ادبي", nameKu: "شەشەم ئەدەبی", nameTr: "6. Edebiyat", sortOrder: 15 },
 ] as const;
 
+/** Professional certificates track — used as an educational stage for KB + courses. */
+export const IRAQ_CERTIFICATE_STAGE = {
+  nameEn: "Professional Certificates",
+  nameAr: "الشهادات المهنية",
+  nameKu: "بڕوانامە پیشەییەکان",
+  nameTr: "Mesleki Sertifikalar",
+  sortOrder: 100,
+  isCertificateTrack: true,
+} as const;
+
+/** Areas of interest under the Professional Certificates stage. */
+export const CERTIFICATE_INTEREST_SUBJECTS = [
+  { nameEn: "Electric", nameAr: "الكهرباء", nameKu: "کارەبا", nameTr: "Elektrik", sortOrder: 1 },
+  { nameEn: "Fiber Networks", nameAr: "شبكات الألياف", nameKu: "تۆڕی فایبەر", nameTr: "Fiber Ağlar", sortOrder: 2 },
+  { nameEn: "Smart Home", nameAr: "المنزل الذكي", nameKu: "ماڵی زیرا", nameTr: "Akıllı Ev", sortOrder: 3 },
+  { nameEn: "Civil", nameAr: "المدني", nameKu: "مەدەنی", nameTr: "İnşaat", sortOrder: 4 },
+  { nameEn: "HSE", nameAr: "الصحة والسلامة والبيئة", nameKu: "تەندروستی و سەلامەتی", nameTr: "İSG", sortOrder: 5 },
+  { nameEn: "Programming", nameAr: "البرمجة", nameKu: "بەرنامەسازی", nameTr: "Programlama", sortOrder: 6 },
+  { nameEn: "Mechanical", nameAr: "الميكانيك", nameKu: "میکانیک", nameTr: "Mekanik", sortOrder: 7 },
+  { nameEn: "Cooling and Heating", nameAr: "التبريد والتدفئة", nameKu: "ساردکردنەوە و گەرمکردنەوە", nameTr: "Soğutma ve Isıtma", sortOrder: 8 },
+] as const;
+
 /** Stage-agnostic teaching specialties (max 3 per teacher profile). */
 export const TEACHER_SPECIALTY_SUBJECTS = [
   { nameEn: "Mathematics", nameAr: "الرياضيات", nameKu: "بیرکاری", nameTr: "Matematik", sortOrder: 1 },

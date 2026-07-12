@@ -7,7 +7,12 @@ export async function GET(request: Request) {
   const countryId = searchParams.get("countryId") ?? undefined;
 
   const stages = await prisma.educationalStage.findMany({
-    where: { isActive: true, deletedAt: null, ...(countryId ? { countryId } : {}) },
+    where: {
+      isActive: true,
+      deletedAt: null,
+      isCertificateTrack: false,
+      ...(countryId ? { countryId } : {}),
+    },
     orderBy: { sortOrder: "asc" },
     select: {
       id: true,
@@ -16,6 +21,7 @@ export async function GET(request: Request) {
       nameAr: true,
       nameKu: true,
       nameTr: true,
+      isCertificateTrack: true,
     },
   });
 

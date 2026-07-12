@@ -43,6 +43,8 @@ export interface RegisterCertificateInput {
   educationalQualification?: string;
   specialization?: string;
   occupation?: string;
+  /** Areas of interest (subjects under a certificate-track stage). Required: 1–5. */
+  interestSubjectIds: string[];
   locale?: Locale;
 }
 
@@ -241,6 +243,23 @@ export class AuthService {
     meta?: { ipAddress?: string }
   ) {
     const phone = input.phone.replace(/\s+/g, "");
+    const interestIds = [...new Set(input.interestSubjectIds.filter(Boolean))];
+    if (interestIds.length < 1 || interestIds.length > 5) {
+      return { success: false as const, error: "INTERESTS_REQUIRED" };
+    }
+
+    const interests = await prisma.subject.findMany({
+      where: {
+        id: { in: interestIds },
+        deletedAt: null,
+        isActive: true,
+        stage: { isCertificateTrack: true, deletedAt: null },
+      },
+      select: { id: true },
+    });
+    if (interests.length !== interestIds.length) {
+      return { success: false as const, error: "INVALID_INTERESTS" };
+    }
 
     const existing = await prisma.user.findFirst({ where: { phone, deletedAt: null } });
     if (existing) {
@@ -268,10 +287,32 @@ export class AuthService {
             educationalQualification: input.educationalQualification,
             specialization: input.specialization,
             occupation: input.occupation,
+            interests: {
+              create: interestIds.map((subjectId) => ({ subjectId })),
+            },
           },
         },
       },
-      include: { certificateProfile: true },
+      include: {
+        certificateProfile: {
+          include: {
+            interests: {
+              include: {
+                subject: {
+                  select: {
+                    id: true,
+                    nameEn: true,
+                    nameAr: true,
+                    nameKu: true,
+                    nameTr: true,
+                    stageId: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     });
 
     await LoggingService.log({
@@ -279,7 +320,7 @@ export class AuthService {
       action: "REGISTER",
       entityType: "User",
       entityId: user.id,
-      newValue: { role: "CERTIFICATE_USER", phone },
+      newValue: { role: "CERTIFICATE_USER", phone, interestSubjectIds: interestIds },
       ipAddress: meta?.ipAddress,
     });
 

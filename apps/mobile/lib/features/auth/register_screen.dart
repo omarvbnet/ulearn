@@ -30,6 +30,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   List<Map<String, dynamic>> _countries = [];
   List<Map<String, dynamic>> _provinces = [];
   List<Map<String, dynamic>> _stages = [];
+  List<Map<String, dynamic>> _interests = [];
+  final Set<String> _selectedInterestIds = {};
   String? _countryId;
   String? _provinceId;
   String? _stageId;
@@ -71,7 +73,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _provinces = provinces;
       _provinceId = provinces.isNotEmpty ? provinces.first['id']?.toString() : null;
     });
-    if (reloadStages && countryId != null) _loadStages(countryId);
+    if (reloadStages && countryId != null) {
+      _loadStages(countryId);
+      _loadInterests(countryId);
+    }
   }
 
   Future<void> _loadStages(String countryId) async {
@@ -82,6 +87,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _stages =
             ((data['stages'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
         _stageId = null;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _loadInterests(String countryId) async {
+    try {
+      final data = await context
+          .read<ApiClient>()
+          .get('/api/certificate-interests?countryId=$countryId');
+      if (!mounted) return;
+      setState(() {
+        _interests =
+            ((data['interests'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+        _selectedInterestIds.clear();
       });
     } catch (_) {}
   }
@@ -165,6 +184,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = l10n.t('mobile.register.selectStage'));
       return;
     }
+    if (_type == 'STUDENT') {
+      final parentPhone = _parentPhone.text.trim();
+      if (parentPhone.length < 8) {
+        setState(() => _error = 'Parent phone is required (at least 8 digits).');
+        return;
+      }
+      final parentEmail = _parentEmail.text.trim();
+      if (parentEmail.isNotEmpty &&
+          !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(parentEmail)) {
+        setState(() => _error =
+            'Parent email is invalid. Leave it blank or enter a valid email.');
+        return;
+      }
+    }
+    if (_type == 'CERTIFICATE' && _selectedInterestIds.isEmpty) {
+      setState(() => _error = 'Select at least one area of interest');
+      return;
+    }
 
     setState(() {
       _loading = true;
@@ -192,6 +229,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         final parentEmail = _parentEmail.text.trim();
         if (parentEmail.isNotEmpty) payload['parentEmail'] = parentEmail;
         payload['educationalStageId'] = _stageId;
+      } else {
+        payload['interestSubjectIds'] = _selectedInterestIds.toList();
       }
 
       final data = await api.post('/api/auth/register', payload);
@@ -213,8 +252,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String _friendlyRegisterError(String raw) {
     final l10n = context.l10n;
     final code = raw.replaceFirst('ApiException: ', '').trim();
+    // Prefer the human message from the API when present.
+    if (code.contains('Parent phone') ||
+        code.contains('Parent email') ||
+        code.contains('areas of interest') ||
+        code.contains('National ID') ||
+        code.contains('educational stage') ||
+        code.contains('already registered') ||
+        code.contains('required') ||
+        code.contains('invalid')) {
+      return code;
+    }
     return switch (code) {
       'PHONE_EXISTS' => l10n.t('mobile.register.phoneExists'),
+      'INTERESTS_REQUIRED' || 'INVALID_INTERESTS' =>
+        'Select 1–5 valid areas of interest',
       'VALIDATION_ERROR' || 'Validation failed' =>
         l10n.t('mobile.register.validationFailed'),
       _ => code.isNotEmpty ? code : l10n.t('mobile.error.generic'),
@@ -366,6 +418,41 @@ class _RegisterScreenState extends State<RegisterScreen> {
               onChanged: (v) => setState(() => _stageId = v),
               decoration: InputDecoration(labelText: '${l10n.authStage} *'),
             ),
+          ] else ...[
+            const SizedBox(height: 16),
+            Text(
+              'Areas of interest * (1–5)',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _interests.map((i) {
+                final id = i['id'].toString();
+                final selected = _selectedInterestIds.contains(id);
+                return FilterChip(
+                  label: Text(_localizedName(i, 'Interest')),
+                  selected: selected,
+                  onSelected: (on) {
+                    setState(() {
+                      if (on) {
+                        if (_selectedInterestIds.length < 5) {
+                          _selectedInterestIds.add(id);
+                        }
+                      } else {
+                        _selectedInterestIds.remove(id);
+                      }
+                    });
+                  },
+                );
+              }).toList(),
+            ),
+            if (_interests.isEmpty)
+              Text(
+                'No interest areas available',
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
+              ),
           ],
           const SizedBox(height: 24),
           ElevatedButton(

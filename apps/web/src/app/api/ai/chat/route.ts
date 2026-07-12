@@ -13,9 +13,12 @@ const schema = z.object({
   conversationId: z.string().optional(),
   stageId: z.string().optional(),
   subjectId: z.string().optional(),
+  subjectIds: z.array(z.string()).optional(),
   courseId: z.string().optional(),
   language: z.string().max(16).optional(),
   lesson: z.string().optional(),
+  mode: z.enum(["chat", "practice_quiz", "edit"]).optional(),
+  documentIds: z.array(z.string()).max(20).optional(),
   attachments: z.array(attachmentSchema).max(4).optional(),
 });
 

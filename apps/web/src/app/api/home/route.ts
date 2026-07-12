@@ -9,6 +9,7 @@ const LEVELS: TeacherLevel[] = ["GOOD", "EXCELLENT", "MASTER"];
 
 /**
  * Mobile home feed. Public browse supported; engagement fields fill in when signed in.
+ * CERTIFICATE_USER: filter courses by areas of interest (subjectIds).
  */
 export async function GET(request: Request) {
   const session = await optionalAuth();
@@ -16,6 +17,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const explicitStageId = searchParams.get("stageId") ?? undefined;
+  const interestSubjectId = searchParams.get("subjectId") ?? undefined;
   const q = searchParams.get("q") ?? undefined;
   const levelParam = searchParams.get("level") ?? undefined;
   const levels = levelParam
@@ -33,13 +35,68 @@ export async function GET(request: Request) {
               },
             },
           },
+          certificateProfile: {
+            include: {
+              interests: {
+                include: {
+                  subject: {
+                    select: {
+                      id: true,
+                      nameEn: true,
+                      nameAr: true,
+                      nameKu: true,
+                      nameTr: true,
+                      stageId: true,
+                      stage: {
+                        select: {
+                          id: true,
+                          nameEn: true,
+                          nameAr: true,
+                          nameKu: true,
+                          nameTr: true,
+                          isCertificateTrack: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       })
     : null;
 
-  const stage = user?.studentProfile?.educationalStage ?? null;
-  const stageId =
-    explicitStageId === "all" ? undefined : (explicitStageId ?? stage?.id);
+  const isCertificateUser = user?.role === "CERTIFICATE_USER";
+  const interestSubjects =
+    user?.certificateProfile?.interests.map((i) => i.subject) ?? [];
+  const interestIds = interestSubjects.map((s) => s.id);
+  const certStage = interestSubjects.find((s) => s.stage)?.stage ?? null;
+
+  const schoolStage = user?.studentProfile?.educationalStage ?? null;
+  const stage = isCertificateUser ? certStage : schoolStage;
+
+  let stageId: string | undefined;
+  let subjectIds: string[] | undefined;
+  let subjectId: string | undefined;
+
+  if (isCertificateUser) {
+    if (explicitStageId === "all") {
+      stageId = undefined;
+      subjectIds = undefined;
+    } else if (interestSubjectId && interestIds.includes(interestSubjectId)) {
+      subjectId = interestSubjectId;
+      stageId = certStage?.id;
+    } else if (interestIds.length) {
+      subjectIds = interestIds;
+      stageId = certStage?.id;
+    } else if (certStage?.id) {
+      stageId = certStage.id;
+    }
+  } else {
+    stageId =
+      explicitStageId === "all" ? undefined : (explicitStageId ?? schoolStage?.id);
+  }
 
   const now = new Date();
   const [adsRaw, courses, stages] = await Promise.all([
@@ -58,11 +115,28 @@ export async function GET(request: Request) {
           : {}),
       },
     }),
-    TeacherCourseService.listPublishedCourses({ stageId, q, levels }),
+    TeacherCourseService.listPublishedCourses({
+      stageId,
+      subjectId,
+      subjectIds,
+      q,
+      levels,
+    }),
     prisma.educationalStage.findMany({
-      where: { isActive: true, deletedAt: null },
+      where: {
+        isActive: true,
+        deletedAt: null,
+        ...(isCertificateUser ? { isCertificateTrack: true } : { isCertificateTrack: false }),
+      },
       orderBy: { sortOrder: "asc" },
-      select: { id: true, nameEn: true, nameAr: true, nameKu: true, nameTr: true },
+      select: {
+        id: true,
+        nameEn: true,
+        nameAr: true,
+        nameKu: true,
+        nameTr: true,
+        isCertificateTrack: true,
+      },
     }),
   ]);
 
@@ -93,5 +167,11 @@ export async function GET(request: Request) {
     await TeacherCourseService.enrichCoursesForUser(courses, userId)
   );
 
-  return json({ stage, stages, ads: adsOut, courses: coursesOut });
+  return json({
+    stage,
+    stages,
+    interests: interestSubjects,
+    courses: coursesOut,
+    ads: adsOut,
+  });
 }

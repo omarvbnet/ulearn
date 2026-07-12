@@ -145,11 +145,18 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       final locale = context.read<LocaleProvider>().code.toLowerCase();
       final unavailable = context.l10n.t('mobile.ai.unavailable');
 
-      final data = await api.post('/api/ai/chat', {
+      final payload = <String, dynamic>{
         'question': q,
         'language': locale,
         if (_conversationId != null) 'conversationId': _conversationId,
-        if (auth.user?.stage?.id != null) 'stageId': auth.user!.stage!.id,
+        if (auth.user?.role == 'CERTIFICATE_USER') ...{
+          if (auth.user?.certificateStage?.id != null)
+            'stageId': auth.user!.certificateStage!.id,
+          if (auth.user!.interestSubjects.isNotEmpty)
+            'subjectIds':
+                auth.user!.interestSubjects.map((s) => s.id).toList(),
+        } else if (auth.user?.stage?.id != null)
+          'stageId': auth.user!.stage!.id,
         if (attachments.isNotEmpty)
           'attachments': attachments
               .map(
@@ -160,10 +167,18 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                 },
               )
               .toList(),
-      });
+      };
+
+      final data = await api.post('/api/ai/chat', payload);
       if (!mounted) return;
       final answer = data['answer']?.toString() ?? unavailable;
       final citations = (data['citations'] as List?) ?? const [];
+      final edited = data['editedFile'] as Map<String, dynamic>?;
+      String? editedLabel;
+      if (edited != null) {
+        editedLabel = edited['fileName']?.toString();
+        // Store base64 on the bubble for share/save via snackbar action.
+      }
       setState(() {
         _conversationId = data['conversationId']?.toString() ?? _conversationId;
         _messages.add(
@@ -180,9 +195,14 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                 })
                 .whereType<String>()
                 .toList(),
+            editedFileName: editedLabel,
+            editedContentBase64: edited?['contentBase64']?.toString(),
           ),
         );
       });
+      if (editedLabel != null && mounted) {
+        _toast('Edited file ready: $editedLabel (long-press message to copy)');
+      }
     } catch (e) {
       if (!mounted) return;
       final msg = e.toString();
@@ -210,6 +230,63 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     }
   }
 
+  Future<void> _sendPracticeQuiz() async {
+    if (_sending) return;
+    final q = _controller.text.trim().isEmpty
+        ? 'Generate a practice quiz from my materials'
+        : _controller.text.trim();
+    setState(() {
+      _sending = true;
+      _messages.add(_ChatBubble(role: 'user', text: q));
+      _controller.clear();
+    });
+    _scrollToEnd();
+    try {
+      final api = context.read<ApiClient>();
+      final auth = context.read<AuthProvider>();
+      final locale = context.read<LocaleProvider>().code.toLowerCase();
+      final payload = <String, dynamic>{
+        'question': q,
+        'language': locale,
+        'mode': 'practice_quiz',
+        if (_conversationId != null) 'conversationId': _conversationId,
+        if (auth.user?.role == 'CERTIFICATE_USER') ...{
+          if (auth.user?.certificateStage?.id != null)
+            'stageId': auth.user!.certificateStage!.id,
+          if (auth.user!.interestSubjects.isNotEmpty)
+            'subjectIds':
+                auth.user!.interestSubjects.map((s) => s.id).toList(),
+        } else if (auth.user?.stage?.id != null)
+          'stageId': auth.user!.stage!.id,
+      };
+      final data = await api.post('/api/ai/chat', payload);
+      if (!mounted) return;
+      setState(() {
+        _conversationId = data['conversationId']?.toString() ?? _conversationId;
+        _messages.add(
+          _ChatBubble(
+            role: 'assistant',
+            text: data['answer']?.toString() ??
+                context.l10n.t('mobile.ai.unavailable'),
+          ),
+        );
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _messages.add(
+          _ChatBubble(
+            role: 'assistant',
+            text: context.l10n.t('mobile.ai.errorGeneric'),
+          ),
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _sending = false);
+      _scrollToEnd();
+    }
+  }
+
   void _scrollToEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
@@ -227,7 +304,14 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     final auth = context.watch<AuthProvider>();
     final locale = context.watch<LocaleProvider>().code;
     final name = auth.user?.fullLegalName;
-    final stageName = auth.user?.stage?.nameFor(locale);
+    final stageName = auth.user?.role == 'CERTIFICATE_USER'
+        ? (auth.user?.certificateStage?.nameFor(locale) ??
+            (auth.user!.interestSubjects.isNotEmpty
+                ? auth.user!.interestSubjects
+                    .map((s) => s.nameFor(locale))
+                    .join(', ')
+                : null))
+        : auth.user?.stage?.nameFor(locale);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -467,6 +551,18 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                     onPressed: _sending ? null : () => _pick(imagesOnly: false),
                     icon: const Icon(Icons.attach_file_rounded),
                   ),
+                  IconButton(
+                    tooltip: 'Practice quiz',
+                    onPressed: _sending
+                        ? null
+                        : () {
+                            _controller.text = _controller.text.trim().isEmpty
+                                ? 'Generate a practice quiz from my materials'
+                                : _controller.text;
+                            _sendPracticeQuiz();
+                          },
+                    icon: const Icon(Icons.quiz_outlined),
+                  ),
                   Expanded(
                     child: TextField(
                       controller: _controller,
@@ -515,6 +611,8 @@ class _ChatBubble {
     this.citations = const [],
     this.attachmentNames = const [],
     this.previewImages = const [],
+    this.editedFileName,
+    this.editedContentBase64,
   });
 
   final String role;
@@ -522,4 +620,6 @@ class _ChatBubble {
   final List<String> citations;
   final List<String> attachmentNames;
   final List<Uint8List> previewImages;
+  final String? editedFileName;
+  final String? editedContentBase64;
 }

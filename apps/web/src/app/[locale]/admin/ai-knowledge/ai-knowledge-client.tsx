@@ -24,6 +24,7 @@ type Stage = {
   id: string;
   nameEn: string;
   nameAr: string;
+  isCertificateTrack?: boolean;
   subjects: { id: string; nameEn: string; nameAr: string }[];
 };
 
@@ -48,6 +49,8 @@ export function AiKnowledgeClient() {
   const [activeStageId, setActiveStageId] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+  const [quizMsg, setQuizMsg] = useState("");
   const [meta, setMeta] = useState({
     language: "en",
     grade: "",
@@ -63,6 +66,7 @@ export function AiKnowledgeClient() {
     [stages, activeStageId]
   );
   const subjects = activeStage?.subjects ?? [];
+  const isCertTrack = Boolean(activeStage?.isCertificateTrack);
 
   const load = useCallback(async (stageId: string) => {
     if (!stageId) {
@@ -100,6 +104,10 @@ export function AiKnowledgeClient() {
     if (!file) return;
     if (!activeStageId) {
       setError("Select an educational stage before uploading.");
+      return;
+    }
+    if (isCertTrack && !meta.subjectId) {
+      setError("Select an Area of Interest (subject) for Professional Certificates materials.");
       return;
     }
     setBusy(true);
@@ -174,18 +182,21 @@ export function AiKnowledgeClient() {
           onChange={(e) => {
             setActiveStageId(e.target.value);
             setMeta((m) => ({ ...m, subjectId: "" }));
+            setSelectedDocIds([]);
           }}
         >
           <option value="">Select a stage…</option>
           {stages.map((s) => (
             <option key={s.id} value={s.id}>
               {s.nameEn}
+              {s.isCertificateTrack ? " (Certificates)" : ""}
             </option>
           ))}
         </Select>
         <FieldHint>
-          Switch stages to manage each curriculum separately. AI chat for a student in this stage
-          will fetch these materials first.
+          Switch stages to manage each curriculum separately. Use{" "}
+          <strong>Professional Certificates</strong> for certificate-user materials by area of
+          interest. AI chat fetches matching materials for each learner.
         </FieldHint>
         {activeStage ? (
           <p className="mt-3 text-sm text-muted">
@@ -231,16 +242,22 @@ export function AiKnowledgeClient() {
 
             <div>
               <Select
-                label="Subject"
+                label={isCertTrack ? "Area of Interest *" : "Subject"}
                 value={meta.subjectId}
                 onChange={(e) => setMeta({ ...meta, subjectId: e.target.value })}
               >
-                <option value="">Any subject in stage</option>
+                <option value="">
+                  {isCertTrack ? "Select area…" : "Any subject in stage"}
+                </option>
                 {subjects.map((s) => (
                   <option key={s.id} value={s.id}>{s.nameEn}</option>
                 ))}
               </Select>
-              <FieldHint>Optional subject within the selected stage.</FieldHint>
+              <FieldHint>
+                {isCertTrack
+                  ? "Required for certificate-track materials so AI and courses match user interests."
+                  : "Optional subject within the selected stage."}
+              </FieldHint>
             </div>
 
             <div>
@@ -301,15 +318,77 @@ export function AiKnowledgeClient() {
           <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
             Materials in this stage
           </h3>
+          {docs.some((d) => d.status === "READY") ? (
+            <div className="card mb-4 flex flex-wrap items-center gap-3 p-4">
+              <button
+                className="btn"
+                type="button"
+                disabled={busy || selectedDocIds.length < 1}
+                onClick={async () => {
+                  setBusy(true);
+                  setQuizMsg("");
+                  setError("");
+                  try {
+                    const r = await fetch("/api/admin/ai/generate-quiz", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        educationalStageId: activeStageId,
+                        subjectId: meta.subjectId || undefined,
+                        documentIds: selectedDocIds,
+                        publish: true,
+                        language: meta.language || "en",
+                      }),
+                    });
+                    const data = await r.json();
+                    if (!r.ok) throw new Error(data.error || "Quiz generation failed");
+                    setQuizMsg(
+                      data.quiz?.id
+                        ? `Quiz created (${data.quiz.id}) with ${data.quiz.questions?.length ?? "?"} questions.`
+                        : "Quiz generated."
+                    );
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Quiz failed");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Generate quiz from selected
+              </button>
+              <span className="text-sm text-muted">
+                {selectedDocIds.length} selected READY doc(s)
+              </span>
+              {quizMsg ? <p className="w-full text-sm text-emerald-600">{quizMsg}</p> : null}
+            </div>
+          ) : null}
           <div className="space-y-3">
             {docs.map((d) => (
               <div key={d.id} className="card flex flex-wrap items-center justify-between gap-3 p-4">
-                <div>
-                  <div className="font-semibold">{d.fileName}</div>
-                  <div className="text-sm text-muted">
-                    {d.status} · v{d.version} · {d.chunkCount} chunks
-                    {d.grade ? ` · ${d.grade}` : ""}
-                    {d.errorMessage ? ` · ${d.errorMessage}` : ""}
+                <div className="flex items-start gap-3">
+                  {d.status === "READY" ? (
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={selectedDocIds.includes(d.id)}
+                      onChange={(e) => {
+                        setSelectedDocIds((prev) =>
+                          e.target.checked
+                            ? [...prev, d.id]
+                            : prev.filter((id) => id !== d.id)
+                        );
+                      }}
+                    />
+                  ) : (
+                    <span className="mt-1 inline-block w-4" />
+                  )}
+                  <div>
+                    <div className="font-semibold">{d.fileName}</div>
+                    <div className="text-sm text-muted">
+                      {d.status} · v{d.version} · {d.chunkCount} chunks
+                      {d.grade ? ` · ${d.grade}` : ""}
+                      {d.errorMessage ? ` · ${d.errorMessage}` : ""}
+                    </div>
                   </div>
                 </div>
                 <div className="flex gap-2">

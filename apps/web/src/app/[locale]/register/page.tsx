@@ -17,6 +17,12 @@ type Stage = {
   nameAr: string;
 };
 
+type Interest = {
+  id: string;
+  nameEn: string;
+  nameAr: string;
+};
+
 function RegisterForm() {
   const { locale } = useParams<{ locale: string }>();
   const searchParams = useSearchParams();
@@ -27,6 +33,8 @@ function RegisterForm() {
   const [type, setType] = useState<"STUDENT" | "CERTIFICATE">("STUDENT");
   const [countries, setCountries] = useState<Country[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
+  const [interests, setInterests] = useState<Interest[]>([]);
+  const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploadingId, setUploadingId] = useState(false);
   const [error, setError] = useState("");
@@ -68,6 +76,10 @@ function RegisterForm() {
       .then((r) => r.json())
       .then((d) => setStages(d.stages || []))
       .catch(() => setStages([]));
+    fetch(`/api/certificate-interests?countryId=${form.countryId}`)
+      .then((r) => r.json())
+      .then((d) => setInterests(d.interests || []))
+      .catch(() => setInterests([]));
   }, [form.countryId]);
 
   const provinces =
@@ -75,6 +87,14 @@ function RegisterForm() {
 
   function set(key: string, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function toggleInterest(id: string) {
+    setSelectedInterests((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 5) return prev;
+      return [...prev, id];
+    });
   }
 
   async function uploadId(file: File) {
@@ -120,6 +140,22 @@ function RegisterForm() {
       setError("Please select your educational stage");
       return;
     }
+    if (type === "STUDENT") {
+      const parentPhone = form.parentPhone.trim();
+      if (parentPhone.length < 8) {
+        setError("Parent phone is required (at least 8 digits).");
+        return;
+      }
+      const parentEmail = form.parentEmail.trim();
+      if (parentEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(parentEmail)) {
+        setError("Parent email is invalid. Leave it blank or enter a valid email.");
+        return;
+      }
+    }
+    if (type === "CERTIFICATE" && selectedInterests.length < 1) {
+      setError("Please select at least one area of interest");
+      return;
+    }
 
     setLoading(true);
     setError("");
@@ -130,9 +166,10 @@ function RegisterForm() {
               type,
               phone,
               ...form,
+              parentPhone: form.parentPhone.trim(),
+              parentEmail: form.parentEmail.trim() || undefined,
               nationalIdImage,
-              email: form.email || undefined,
-              parentEmail: form.parentEmail || undefined,
+              email: form.email.trim() || undefined,
               locale: locale.toUpperCase(),
             }
           : {
@@ -142,12 +179,13 @@ function RegisterForm() {
               gender: form.gender,
               countryId: form.countryId,
               provinceId: form.provinceId,
-              email: form.email || undefined,
+              email: form.email.trim() || undefined,
               nationalId: form.nationalId,
               nationalIdImage,
               educationalQualification: form.educationalQualification,
               specialization: form.specialization,
               occupation: form.occupation,
+              interestSubjectIds: selectedInterests,
               locale: locale.toUpperCase(),
             };
 
@@ -157,7 +195,15 @@ function RegisterForm() {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Registration failed");
+      if (!res.ok) {
+        const detailMsg = Array.isArray(data.details)
+          ? data.details
+              .map((d: { path?: string; message?: string }) => d.message)
+              .filter(Boolean)
+              .join(" ")
+          : "";
+        throw new Error(data.error || detailMsg || "Registration failed");
+      }
       router.push(`/${locale}/pending`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
@@ -316,13 +362,46 @@ function RegisterForm() {
             </>
           ) : (
             <>
+              <div className="sm:col-span-2">
+                <p className="mb-2 text-sm font-medium">
+                  Areas of Interest * (select 1–5)
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {interests.map((i) => {
+                    const on = selectedInterests.includes(i.id);
+                    return (
+                      <button
+                        key={i.id}
+                        type="button"
+                        onClick={() => toggleInterest(i.id)}
+                        className={`rounded-lg border px-3 py-1.5 text-sm transition ${
+                          on
+                            ? "border-primary bg-primary/20 text-foreground"
+                            : "border-card-border text-muted hover:border-accent/40"
+                        }`}
+                      >
+                        {isAr ? i.nameAr : i.nameEn}
+                      </button>
+                    );
+                  })}
+                </div>
+                {!interests.length ? (
+                  <p className="mt-2 text-xs text-muted">
+                    No interest areas available for this country yet.
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs text-muted">
+                    {selectedInterests.length}/5 selected
+                  </p>
+                )}
+              </div>
               <Input
                 label="Educational Qualification"
                 value={form.educationalQualification}
                 onChange={(e) => set("educationalQualification", e.target.value)}
               />
               <Input
-                label="Specialization"
+                label="Specialization (optional)"
                 value={form.specialization}
                 onChange={(e) => set("specialization", e.target.value)}
               />

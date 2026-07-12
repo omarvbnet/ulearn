@@ -42,9 +42,43 @@ const certificateSchema = baseSchema.extend({
   educationalQualification: optionalString,
   specialization: optionalString,
   occupation: optionalString,
+  interestSubjectIds: z.array(z.string().min(1)).min(1).max(5),
 });
 
 const schema = z.discriminatedUnion("type", [studentSchema, certificateSchema]);
+
+const FIELD_MESSAGES: Record<string, string> = {
+  phone: "Phone number is required (at least 8 digits).",
+  fullLegalName: "Full legal name is required.",
+  gender: "Please select a gender.",
+  countryId: "Please select a country.",
+  provinceId: "Please select a province.",
+  email: "Email address is invalid.",
+  nationalId: "National ID is required.",
+  nationalIdImage: "Please upload your national ID image.",
+  parentPhone: "Parent phone is required (at least 8 digits).",
+  parentEmail: "Parent email is invalid. Leave it blank or enter a valid email.",
+  educationalStageId: "Please select your educational stage.",
+  interestSubjectIds: "Select 1–5 areas of interest.",
+};
+
+function friendlyValidationMessage(
+  issues: { path: string; message: string }[]
+): string {
+  const messages = issues.map((i) => {
+    const field = i.path.split(".").pop() || i.path;
+    if (FIELD_MESSAGES[field]) return FIELD_MESSAGES[field];
+    if (FIELD_MESSAGES[i.path]) return FIELD_MESSAGES[i.path];
+    if (/email/i.test(i.message) || /email/i.test(field)) {
+      return `${field} is not a valid email address.`;
+    }
+    if (/too small|required|min/i.test(i.message)) {
+      return `${field} is required.`;
+    }
+    return `${field}: ${i.message}`;
+  });
+  return [...new Set(messages)].join(" ");
+}
 
 export async function POST(request: Request) {
   try {
@@ -55,8 +89,11 @@ export async function POST(request: Request) {
         path: i.path.join("."),
         message: i.message,
       }));
+      const message = friendlyValidationMessage(details);
       console.warn("[auth/register] validation failed", details);
-      return error("Validation failed", 400, "VALIDATION_ERROR", { details });
+      return error(message || "Validation failed", 400, "VALIDATION_ERROR", {
+        details,
+      });
     }
 
     const ip = getClientIp(request);
@@ -82,7 +119,16 @@ export async function POST(request: Request) {
           );
 
     if (!result.success) {
-      return error(result.error, 400, result.error);
+      const code = result.error;
+      const human =
+        code === "PHONE_EXISTS"
+          ? "This phone number is already registered."
+          : code === "INTERESTS_REQUIRED"
+            ? "Select 1–5 areas of interest."
+            : code === "INVALID_INTERESTS"
+              ? "One or more areas of interest are invalid."
+              : code;
+      return error(human, 400, code);
     }
 
     return json(result, 201);

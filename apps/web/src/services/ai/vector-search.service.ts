@@ -15,6 +15,10 @@ export type RetrievedChunk = {
 export type SearchFilters = {
   educationalStageId?: string | null;
   subjectId?: string | null;
+  /** Restrict to any of these subjects (certificate areas of interest). */
+  subjectIds?: string[];
+  /** When true with subjectIds: only those subjects (no null subject fallback). */
+  subjectStrict?: boolean;
   courseId?: string | null;
   /** Soft boost only — never exclude mismatched languages. */
   preferLanguage?: string | null;
@@ -82,7 +86,16 @@ export class VectorSearchService {
         );
       }
 
-      if (filters.subjectId) {
+      if (filters.subjectIds?.length) {
+        params.push(filters.subjectIds);
+        if (filters.subjectStrict) {
+          clauses.push(`AND d."subjectId" = ANY($${params.length}::text[])`);
+        } else {
+          clauses.push(
+            `AND (d."subjectId" = ANY($${params.length}::text[]) OR d."subjectId" IS NULL)`
+          );
+        }
+      } else if (filters.subjectId) {
         params.push(filters.subjectId);
         clauses.push(`AND (d."subjectId" = $${params.length} OR d."subjectId" IS NULL)`);
       }
@@ -169,9 +182,18 @@ export class VectorSearchService {
         status: "READY",
         deletedAt: null,
         ...stageWhere,
-        ...(filters.subjectId
-          ? { OR: [{ subjectId: filters.subjectId }, { subjectId: null }] }
-          : {}),
+        ...(filters.subjectIds?.length
+          ? filters.subjectStrict
+            ? { subjectId: { in: filters.subjectIds } }
+            : {
+                OR: [
+                  { subjectId: { in: filters.subjectIds } },
+                  { subjectId: null },
+                ],
+              }
+          : filters.subjectId
+            ? { OR: [{ subjectId: filters.subjectId }, { subjectId: null }] }
+            : {}),
         ...(filters.courseId
           ? { OR: [{ courseId: filters.courseId }, { courseId: null }] }
           : {}),
@@ -227,6 +249,12 @@ function rankAndCut(
       let score = r.similarity;
       const meta = r.metadata;
       if (filters.subjectId && meta.subjectId === filters.subjectId) score += 0.05;
+      if (
+        filters.subjectIds?.length &&
+        typeof meta.subjectId === "string" &&
+        filters.subjectIds.includes(meta.subjectId)
+      )
+        score += 0.05;
       if (
         filters.educationalStageId &&
         meta.educationalStageId === filters.educationalStageId

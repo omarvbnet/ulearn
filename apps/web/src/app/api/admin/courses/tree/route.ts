@@ -10,30 +10,32 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const countryId = searchParams.get("countryId") ?? undefined;
 
-  const stages = await prisma.educationalStage.findMany({
-    where: { deletedAt: null, ...(countryId ? { countryId } : {}) },
-    orderBy: { sortOrder: "asc" },
-    include: {
-      country: { select: { id: true, nameEn: true, code: true } },
-      subjects: {
-        where: { deletedAt: null },
-        orderBy: { sortOrder: "asc" },
-        include: {
-          chapters: {
-            where: { deletedAt: null },
-            orderBy: { sortOrder: "asc" },
-            include: {
-              lessons: {
-                where: { deletedAt: null },
-                orderBy: { sortOrder: "asc" },
-                include: {
-                  contents: {
-                    where: { deletedAt: null },
-                    orderBy: { sortOrder: "asc" },
-                  },
-                  quizzes: {
-                    where: { deletedAt: null },
-                    select: { id: true, titleEn: true, isActive: true },
+  const [stages, orphanSubjects] = await Promise.all([
+    prisma.educationalStage.findMany({
+      where: { deletedAt: null, ...(countryId ? { countryId } : {}) },
+      orderBy: { sortOrder: "asc" },
+      include: {
+        country: { select: { id: true, nameEn: true, code: true } },
+        subjects: {
+          where: { deletedAt: null },
+          orderBy: { sortOrder: "asc" },
+          include: {
+            chapters: {
+              where: { deletedAt: null },
+              orderBy: { sortOrder: "asc" },
+              include: {
+                lessons: {
+                  where: { deletedAt: null },
+                  orderBy: { sortOrder: "asc" },
+                  include: {
+                    contents: {
+                      where: { deletedAt: null },
+                      orderBy: { sortOrder: "asc" },
+                    },
+                    quizzes: {
+                      where: { deletedAt: null },
+                      select: { id: true, titleEn: true, isActive: true },
+                    },
                   },
                 },
               },
@@ -41,32 +43,31 @@ export async function GET(request: Request) {
           },
         },
       },
-    },
-  });
-
-  const orphanSubjects = await prisma.subject.findMany({
-    where: { deletedAt: null, stageId: null, ...(countryId ? { countryId } : {}) },
-    orderBy: { sortOrder: "asc" },
-    include: {
-      chapters: {
-        where: { deletedAt: null },
-        orderBy: { sortOrder: "asc" },
-        include: {
-          lessons: {
-            where: { deletedAt: null },
-            orderBy: { sortOrder: "asc" },
-            include: {
-              contents: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-              quizzes: {
-                where: { deletedAt: null },
-                select: { id: true, titleEn: true, isActive: true },
+    }),
+    prisma.subject.findMany({
+      where: { deletedAt: null, stageId: null, ...(countryId ? { countryId } : {}) },
+      orderBy: { sortOrder: "asc" },
+      include: {
+        chapters: {
+          where: { deletedAt: null },
+          orderBy: { sortOrder: "asc" },
+          include: {
+            lessons: {
+              where: { deletedAt: null },
+              orderBy: { sortOrder: "asc" },
+              include: {
+                contents: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+                quizzes: {
+                  where: { deletedAt: null },
+                  select: { id: true, titleEn: true, isActive: true },
+                },
               },
             },
           },
         },
       },
-    },
-  });
+    }),
+  ]);
 
   return json({ stages, orphanSubjects });
 }

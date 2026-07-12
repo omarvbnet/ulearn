@@ -1,5 +1,11 @@
 import { PrismaClient } from "@prisma/client";
-import { IRAQ_EDUCATIONAL_STAGES, IRAQ_PROVINCES, TEACHER_SPECIALTY_SUBJECTS } from "./iraq-data";
+import {
+  CERTIFICATE_INTEREST_SUBJECTS,
+  IRAQ_CERTIFICATE_STAGE,
+  IRAQ_EDUCATIONAL_STAGES,
+  IRAQ_PROVINCES,
+  TEACHER_SPECIALTY_SUBJECTS,
+} from "./iraq-data";
 
 const prisma = new PrismaClient();
 
@@ -66,20 +72,92 @@ async function main() {
           nameTr: s.nameTr,
           sortOrder: s.sortOrder,
           isActive: true,
+          isCertificateTrack: false,
         },
       });
     } else {
       await prisma.educationalStage.create({
-        data: { countryId: iraq.id, ...s },
+        data: { countryId: iraq.id, ...s, isCertificateTrack: false },
+      });
+    }
+  }
+
+  let certStage = await prisma.educationalStage.findFirst({
+    where: {
+      countryId: iraq.id,
+      isCertificateTrack: true,
+      deletedAt: null,
+    },
+  });
+  if (certStage) {
+    certStage = await prisma.educationalStage.update({
+      where: { id: certStage.id },
+      data: {
+        nameEn: IRAQ_CERTIFICATE_STAGE.nameEn,
+        nameAr: IRAQ_CERTIFICATE_STAGE.nameAr,
+        nameKu: IRAQ_CERTIFICATE_STAGE.nameKu,
+        nameTr: IRAQ_CERTIFICATE_STAGE.nameTr,
+        sortOrder: IRAQ_CERTIFICATE_STAGE.sortOrder,
+        isActive: true,
+        isCertificateTrack: true,
+      },
+    });
+  } else {
+    certStage = await prisma.educationalStage.create({
+      data: {
+        countryId: iraq.id,
+        nameEn: IRAQ_CERTIFICATE_STAGE.nameEn,
+        nameAr: IRAQ_CERTIFICATE_STAGE.nameAr,
+        nameKu: IRAQ_CERTIFICATE_STAGE.nameKu,
+        nameTr: IRAQ_CERTIFICATE_STAGE.nameTr,
+        sortOrder: IRAQ_CERTIFICATE_STAGE.sortOrder,
+        isCertificateTrack: true,
+      },
+    });
+  }
+
+  for (const interest of CERTIFICATE_INTEREST_SUBJECTS) {
+    const existing = await prisma.subject.findFirst({
+      where: {
+        countryId: iraq.id,
+        stageId: certStage.id,
+        nameEn: interest.nameEn,
+        deletedAt: null,
+      },
+    });
+    if (existing) {
+      await prisma.subject.update({
+        where: { id: existing.id },
+        data: {
+          nameAr: interest.nameAr,
+          nameKu: interest.nameKu,
+          nameTr: interest.nameTr,
+          sortOrder: interest.sortOrder,
+          isActive: true,
+          isCertificateProgram: true,
+        },
+      });
+    } else {
+      await prisma.subject.create({
+        data: {
+          countryId: iraq.id,
+          stageId: certStage.id,
+          nameEn: interest.nameEn,
+          nameAr: interest.nameAr,
+          nameKu: interest.nameKu,
+          nameTr: interest.nameTr,
+          sortOrder: interest.sortOrder,
+          isCertificateProgram: true,
+        },
       });
     }
   }
 
   let stage = await prisma.educationalStage.findFirst({
-    where: { countryId: iraq.id, sortOrder: 10 },
+    where: { countryId: iraq.id, sortOrder: 10, isCertificateTrack: false },
   });
   stage ??= await prisma.educationalStage.findFirst({
-    where: { countryId: iraq.id, deletedAt: null },
+    where: { countryId: iraq.id, deletedAt: null, isCertificateTrack: false },
     orderBy: { sortOrder: "asc" },
   });
 
@@ -138,14 +216,22 @@ async function main() {
   certProgram ??= await prisma.subject.create({
     data: {
       countryId: iraq.id,
+      stageId: certStage.id,
       nameEn: "Professional English",
       nameAr: "الإنجليزية المهنية",
       nameKu: "ئینگلیزی پیشەیی",
       nameTr: "Mesleki İngilizce",
       isCertificateProgram: true,
       totalHours: 20,
+      sortOrder: 50,
     },
   });
+  if (certProgram.stageId !== certStage.id) {
+    await prisma.subject.update({
+      where: { id: certProgram.id },
+      data: { stageId: certStage.id, isCertificateProgram: true },
+    });
+  }
 
   let chapter = await prisma.chapter.findFirst({
     where: { subjectId: subject.id, nameEn: "Algebra Basics" },
@@ -347,7 +433,13 @@ async function main() {
     },
   });
 
-  // One certificate user
+  // One certificate user with areas of interest
+  const electric = await prisma.subject.findFirst({
+    where: { countryId: iraq.id, stageId: certStage.id, nameEn: "Electric", deletedAt: null },
+  });
+  const civil = await prisma.subject.findFirst({
+    where: { countryId: iraq.id, stageId: certStage.id, nameEn: "Civil", deletedAt: null },
+  });
   const certUser = await prisma.user.upsert({
     where: { phone: "+9647100000010" },
     update: {},
@@ -365,10 +457,36 @@ async function main() {
           educationalQualification: "Bachelor of Engineering",
           specialization: "Civil Engineering",
           occupation: "Site Engineer",
+          interests: {
+            create: [electric, civil]
+              .filter(Boolean)
+              .map((s) => ({ subjectId: s!.id })),
+          },
         },
       },
     },
   });
+  const certProfile = await prisma.certificateProfile.findUnique({
+    where: { userId: certUser.id },
+  });
+  if (certProfile && electric) {
+    await prisma.certificateProfileInterest.upsert({
+      where: {
+        profileId_subjectId: { profileId: certProfile.id, subjectId: electric.id },
+      },
+      create: { profileId: certProfile.id, subjectId: electric.id },
+      update: {},
+    });
+  }
+  if (certProfile && civil) {
+    await prisma.certificateProfileInterest.upsert({
+      where: {
+        profileId_subjectId: { profileId: certProfile.id, subjectId: civil.id },
+      },
+      create: { profileId: certProfile.id, subjectId: civil.id },
+      update: {},
+    });
+  }
 
   /* ── Subscriptions for the first two students ──── */
   const expiry = new Date(new Date().getFullYear() + 1, 6, 15);
