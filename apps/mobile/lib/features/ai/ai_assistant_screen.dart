@@ -371,7 +371,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       return;
     }
 
-    final selected = await showModalBottomSheet<List<String>>(
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: AppTheme.card,
@@ -380,11 +380,17 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       ),
       builder: (ctx) => _MaterialPickerSheet(documents: docs),
     );
-    if (selected == null || selected.isEmpty || !mounted) return;
-    await _generateExam(selected);
+    if (selected == null || !mounted) return;
+    final ids = ((selected['documentIds'] as List?) ?? [])
+        .map((e) => e.toString())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    final count = (selected['count'] as num?)?.toInt() ?? 5;
+    if (ids.isEmpty) return;
+    await _generateExam(ids, count);
   }
 
-  Future<void> _generateExam(List<String> documentIds) async {
+  Future<void> _generateExam(List<String> documentIds, int count) async {
     final q = context.l10n.t('mobile.ai.generateExamPrompt');
     setState(() {
       _sending = true;
@@ -400,6 +406,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         'language': locale,
         'mode': 'practice_quiz',
         'documentIds': documentIds,
+        'count': count == 10 || count == 20 ? count : 5,
         if (_conversationId != null) 'conversationId': _conversationId,
         ..._stagePayload(auth),
       };
@@ -1168,15 +1175,16 @@ class _MaterialPickerSheet extends StatefulWidget {
 
 class _MaterialPickerSheetState extends State<_MaterialPickerSheet> {
   final Set<String> _selected = {};
+  int _count = 5;
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.72,
+      initialChildSize: 0.78,
       minChildSize: 0.45,
-      maxChildSize: 0.92,
+      maxChildSize: 0.94,
       builder: (context, scroll) {
         return Column(
           children: [
@@ -1206,6 +1214,40 @@ class _MaterialPickerSheetState extends State<_MaterialPickerSheet> {
                   Text(
                     l10n.t('mobile.ai.pickMaterialsHint'),
                     style: TextStyle(color: AppTheme.muted, fontSize: 13),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    l10n.t('mobile.ai.examDifficulty'),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: AppTheme.foreground,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _DifficultyChip(
+                        label: l10n.t('mobile.ai.examBasic'),
+                        subtitle: '5',
+                        selected: _count == 5,
+                        onTap: () => setState(() => _count = 5),
+                      ),
+                      _DifficultyChip(
+                        label: l10n.t('mobile.ai.examIntermediate'),
+                        subtitle: '10',
+                        selected: _count == 10,
+                        onTap: () => setState(() => _count = 10),
+                      ),
+                      _DifficultyChip(
+                        label: l10n.t('mobile.ai.examAdvanced'),
+                        subtitle: '20',
+                        selected: _count == 20,
+                        onTap: () => setState(() => _count = 20),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1248,7 +1290,10 @@ class _MaterialPickerSheetState extends State<_MaterialPickerSheet> {
                 child: FilledButton(
                   onPressed: _selected.isEmpty
                       ? null
-                      : () => Navigator.pop(context, _selected.toList()),
+                      : () => Navigator.pop(context, {
+                            'documentIds': _selected.toList(),
+                            'count': _count,
+                          }),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.accent,
                     foregroundColor: Colors.black,
@@ -1264,6 +1309,64 @@ class _MaterialPickerSheetState extends State<_MaterialPickerSheet> {
           ],
         );
       },
+    );
+  }
+}
+
+class _DifficultyChip extends StatelessWidget {
+  const _DifficultyChip({
+    required this.label,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected
+          ? AppTheme.accent.withValues(alpha: 0.2)
+          : AppTheme.card,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? AppTheme.accent : AppTheme.cardBorder,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  color: AppTheme.foreground,
+                ),
+              ),
+              Text(
+                '$subtitle Q',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: selected ? AppTheme.accent : AppTheme.muted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

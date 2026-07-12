@@ -100,7 +100,7 @@ export class ExamGeneratorService {
     requireDocuments?: boolean;
   }): Promise<PracticeQuizPayload> {
     const language = normalizeLang(input.language);
-    const count = Math.min(Math.max(input.count ?? 5, 3), 10);
+    const count = Math.min(Math.max(input.count ?? 5, 3), 20);
     const requestSeed = (Date.now() ^ ((Math.random() * 0xffffffff) >>> 0)) >>> 0;
 
     if (input.requireDocuments && !input.documentIds?.length) {

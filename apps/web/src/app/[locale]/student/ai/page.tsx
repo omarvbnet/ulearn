@@ -45,6 +45,7 @@ export default function StudentAiPage() {
   const [docs, setDocs] = useState<KbDoc[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
+  const [examCount, setExamCount] = useState<5 | 10 | 20>(5);
   const endRef = useRef<HTMLDivElement>(null);
 
   const loadHistory = useCallback(async () => {
@@ -176,6 +177,7 @@ export default function StudentAiPage() {
     }
     setDocs(list);
     setSelectedDocs([]);
+    setExamCount(5);
     setPickerOpen(true);
   }
 
@@ -194,6 +196,7 @@ export default function StudentAiPage() {
           language: locale,
           mode: "practice_quiz",
           documentIds: selectedDocs,
+          count: examCount,
           conversationId: conversationId || undefined,
         }),
       });
@@ -367,6 +370,33 @@ export default function StudentAiPage() {
             <div className="border-b border-border p-4">
               <h3 className="font-semibold">{t.student.aiPickMaterials}</h3>
               <p className="mt-1 text-sm text-muted">{t.student.aiPickMaterialsHint}</p>
+              <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted">
+                {t.student.aiExamDifficulty}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(
+                  [
+                    { count: 5 as const, label: t.student.aiExamBasic },
+                    { count: 10 as const, label: t.student.aiExamIntermediate },
+                    { count: 20 as const, label: t.student.aiExamAdvanced },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.count}
+                    type="button"
+                    onClick={() => setExamCount(opt.count)}
+                    className={cn(
+                      "rounded-xl border px-3 py-2 text-sm font-medium transition",
+                      examCount === opt.count
+                        ? "border-accent bg-accent/15 text-accent"
+                        : "border-border text-muted hover:border-accent/40"
+                    )}
+                  >
+                    {opt.label}
+                    <span className="ms-1 text-xs opacity-80">({opt.count})</span>
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="max-h-[50vh] space-y-1 overflow-y-auto p-3">
               {docs.map((d) => {

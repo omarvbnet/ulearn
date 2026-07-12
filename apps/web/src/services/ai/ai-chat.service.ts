@@ -56,6 +56,8 @@ export class AiChatService {
     mode?: "chat" | "practice_quiz" | "edit";
     /** KB document ids for practice quiz material selection. */
     documentIds?: string[];
+    /** Practice exam size: 5 | 10 | 20 */
+    count?: 5 | 10 | 20;
   }) {
     const attachments = (input.attachments || []).slice(0, MAX_ATTACHMENTS);
     for (const a of attachments) {
@@ -176,7 +178,7 @@ export class AiChatService {
         subjectIds: subjectId ? [subjectId] : subjectIds,
         documentIds,
         requireDocuments: true,
-        count: 5,
+        count: input.count === 10 || input.count === 20 ? input.count : 5,
       });
 
       // Ensure conversation exists before linking the attempt.

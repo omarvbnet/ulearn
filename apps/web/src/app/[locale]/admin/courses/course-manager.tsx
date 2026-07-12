@@ -36,8 +36,13 @@ type Chapter = {
 type Subject = {
   id: string;
   nameEn: string;
+  nameAr: string;
+  nameKu: string;
+  nameTr: string;
   isActive: boolean;
   isCertificateProgram: boolean;
+  totalHours?: number | null;
+  sortOrder: number;
   chapters: Chapter[];
 };
 
@@ -49,6 +54,7 @@ type Stage = {
   nameTr: string;
   sortOrder: number;
   isActive: boolean;
+  isCertificateTrack: boolean;
   country: { id: string; nameEn: string; code: string };
   subjects: Subject[];
 };
@@ -58,7 +64,8 @@ type Country = { id: string; nameEn: string; code: string };
 type ModalState =
   | { kind: "stage" }
   | { kind: "editStage"; stage: Stage }
-  | { kind: "subject"; stageId: string; countryId: string }
+  | { kind: "subject"; stageId: string; countryId: string; isCertificateTrack?: boolean }
+  | { kind: "editSubject"; subject: Subject; isCertificateTrack?: boolean }
   | { kind: "chapter"; subjectId: string }
   | { kind: "lesson"; chapterId: string }
   | { kind: "content"; lessonId: string }
@@ -182,25 +189,40 @@ export function CourseManager() {
               >
                 <Chevron open={expanded.has(stage.id)} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold">{stage.nameEn}</p>
+                  <p className="truncate font-semibold">
+                    {stage.nameEn}
+                    {stage.isCertificateTrack ? (
+                      <span className="ms-2 text-xs font-medium text-accent">· Professional Certificates</span>
+                    ) : null}
+                  </p>
                   <p className="text-xs text-muted">
-                    {stage.country.nameEn} · {stage.subjects.length} subjects
+                    {stage.country.nameEn} · {stage.subjects.length}{" "}
+                    {stage.isCertificateTrack ? "insights" : "subjects"}
                   </p>
                 </div>
                 {!stage.isActive && <Badge status="SUSPENDED">Inactive</Badge>}
                 <RowActions
-                  onAdd={() => setModal({ kind: "subject", stageId: stage.id, countryId: stage.country.id })}
-                  addLabel="+ Subject"
+                  onAdd={() =>
+                    setModal({
+                      kind: "subject",
+                      stageId: stage.id,
+                      countryId: stage.country.id,
+                      isCertificateTrack: stage.isCertificateTrack,
+                    })
+                  }
+                  addLabel={stage.isCertificateTrack ? "+ Insight" : "+ Subject"}
                   onEdit={() => setModal({ kind: "editStage", stage })}
                   onDelete={() => remove("stage", stage.id, stage.nameEn)}
                 />
               </div>
 
-              {/* Subjects */}
+              {/* Subjects / Insights */}
               {expanded.has(stage.id) && (
                 <div className="animate-slide-down border-t border-card-border bg-black/20 p-3 ps-8">
                   {stage.subjects.length === 0 && (
-                    <p className="py-2 text-sm text-muted">No subjects yet.</p>
+                    <p className="py-2 text-sm text-muted">
+                      {stage.isCertificateTrack ? "No insights yet." : "No subjects yet."}
+                    </p>
                   )}
                   {stage.subjects.map((subject) => (
                     <div key={subject.id} className="mb-2 rounded-xl border border-card-border/60">
@@ -211,12 +233,27 @@ export function CourseManager() {
                         <Chevron open={expanded.has(subject.id)} />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium">{subject.nameEn}</p>
-                          <p className="text-xs text-muted">{subject.chapters.length} chapters</p>
+                          <p className="text-xs text-muted">
+                            {stage.isCertificateTrack
+                              ? "Certificate insight"
+                              : `${subject.chapters.length} chapters`}
+                          </p>
                         </div>
-                        {subject.isCertificateProgram && <Badge status="FREE">Certificate</Badge>}
+                        {(subject.isCertificateProgram || stage.isCertificateTrack) && (
+                          <Badge status="FREE">
+                            {stage.isCertificateTrack ? "Insight" : "Certificate"}
+                          </Badge>
+                        )}
                         <RowActions
                           onAdd={() => setModal({ kind: "chapter", subjectId: subject.id })}
                           addLabel="+ Chapter"
+                          onEdit={() =>
+                            setModal({
+                              kind: "editSubject",
+                              subject,
+                              isCertificateTrack: stage.isCertificateTrack,
+                            })
+                          }
                           onDelete={() => remove("subject", subject.id, subject.nameEn)}
                         />
                       </div>
@@ -304,7 +341,27 @@ export function CourseManager() {
         <EditStageModal stage={modal.stage} saving={saving} setSaving={setSaving} onDone={() => { setModal(null); load(); }} onClose={() => setModal(null)} toast={toast} />
       )}
       {modal?.kind === "subject" && (
-        <SubjectModal stageId={modal.stageId} countryId={modal.countryId} saving={saving} setSaving={setSaving} onDone={() => { setModal(null); load(); }} onClose={() => setModal(null)} toast={toast} />
+        <SubjectModal
+          stageId={modal.stageId}
+          countryId={modal.countryId}
+          isCertificateTrack={Boolean(modal.isCertificateTrack)}
+          saving={saving}
+          setSaving={setSaving}
+          onDone={() => { setModal(null); load(); }}
+          onClose={() => setModal(null)}
+          toast={toast}
+        />
+      )}
+      {modal?.kind === "editSubject" && (
+        <EditSubjectModal
+          subject={modal.subject}
+          isCertificateTrack={Boolean(modal.isCertificateTrack)}
+          saving={saving}
+          setSaving={setSaving}
+          onDone={() => { setModal(null); load(); }}
+          onClose={() => setModal(null)}
+          toast={toast}
+        />
       )}
       {modal?.kind === "chapter" && (
         <SimpleNamedModal
@@ -376,6 +433,15 @@ async function post(endpoint: string, payload: unknown) {
   return res.ok;
 }
 
+async function patch(endpoint: string, payload: unknown) {
+  const res = await fetch(endpoint, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return res.ok;
+}
+
 function StageModal({ countries, saving, setSaving, onDone, onClose, toast }: ModalCommon & { countries: Country[] }) {
   const [names, setNames] = useState(emptyNames);
   const [countryId, setCountryId] = useState(countries[0]?.id ?? "");
@@ -440,9 +506,18 @@ function EditStageModal({ stage, saving, setSaving, onDone, onClose, toast }: Mo
   );
 }
 
-function SubjectModal({ stageId, countryId, saving, setSaving, onDone, onClose, toast }: ModalCommon & { stageId: string; countryId: string }) {
+function SubjectModal({
+  stageId,
+  countryId,
+  isCertificateTrack = false,
+  saving,
+  setSaving,
+  onDone,
+  onClose,
+  toast,
+}: ModalCommon & { stageId: string; countryId: string; isCertificateTrack?: boolean }) {
   const [names, setNames] = useState(emptyNames);
-  const [isCert, setIsCert] = useState(false);
+  const [isCert, setIsCert] = useState(isCertificateTrack);
   const [hours, setHours] = useState("");
 
   async function submit(e: React.FormEvent) {
@@ -452,25 +527,105 @@ function SubjectModal({ stageId, countryId, saving, setSaving, onDone, onClose, 
       ...names,
       stageId,
       countryId,
-      isCertificateProgram: isCert,
+      isCertificateProgram: isCertificateTrack || isCert,
       totalHours: hours ? Number(hours) : 0,
     });
     setSaving(false);
-    if (ok) { toast("Subject created"); onDone(); } else toast("Failed to create subject", "error");
+    if (ok) {
+      toast(isCertificateTrack ? "Insight created" : "Subject created");
+      onDone();
+    } else {
+      toast(isCertificateTrack ? "Failed to create insight" : "Failed to create subject", "error");
+    }
   }
 
   return (
-    <Modal open onClose={onClose} title="New Subject">
+    <Modal open onClose={onClose} title={isCertificateTrack ? "New Certificate Insight" : "New Subject"}>
       <form onSubmit={submit} className="space-y-4">
         <NameFields value={names} onChange={setNames} />
-        <label className="flex items-center gap-3 text-sm">
-          <input type="checkbox" checked={isCert} onChange={(e) => setIsCert(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />
-          Certificate program (experience certificate track)
-        </label>
-        {isCert && (
+        {isCertificateTrack ? (
+          <p className="text-xs text-muted">
+            Insights appear in Professional Certificate user multi-select and filter courses / AI materials.
+          </p>
+        ) : (
+          <label className="flex items-center gap-3 text-sm">
+            <input type="checkbox" checked={isCert} onChange={(e) => setIsCert(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />
+            Certificate program (experience certificate track)
+          </label>
+        )}
+        {(isCertificateTrack || isCert) && (
           <Input label="Total hours" type="number" min="0" step="0.5" value={hours} onChange={(e) => setHours(e.target.value)} />
         )}
-        <Button type="submit" disabled={saving} className="w-full">{saving ? "Saving…" : "Create Subject"}</Button>
+        <Button type="submit" disabled={saving} className="w-full">
+          {saving ? "Saving…" : isCertificateTrack ? "Create Insight" : "Create Subject"}
+        </Button>
+      </form>
+    </Modal>
+  );
+}
+
+function EditSubjectModal({
+  subject,
+  isCertificateTrack = false,
+  saving,
+  setSaving,
+  onDone,
+  onClose,
+  toast,
+}: ModalCommon & { subject: Subject; isCertificateTrack?: boolean }) {
+  const [names, setNames] = useState<Names>({
+    nameEn: subject.nameEn || "",
+    nameAr: subject.nameAr || "",
+    nameKu: subject.nameKu || "",
+    nameTr: subject.nameTr || "",
+  });
+  const [isCert, setIsCert] = useState(subject.isCertificateProgram || isCertificateTrack);
+  const [hours, setHours] = useState(
+    subject.totalHours != null ? String(subject.totalHours) : ""
+  );
+  const [sortOrder, setSortOrder] = useState(String(subject.sortOrder ?? 0));
+  const [isActive, setIsActive] = useState(subject.isActive);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    const ok = await patch(`/api/admin/subjects/${subject.id}`, {
+      ...names,
+      isCertificateProgram: isCertificateTrack || isCert,
+      totalHours: hours ? Number(hours) : 0,
+      sortOrder: Number(sortOrder) || 0,
+      isActive,
+    });
+    setSaving(false);
+    if (ok) {
+      toast(isCertificateTrack ? "Insight updated" : "Subject updated");
+      onDone();
+    } else {
+      toast(isCertificateTrack ? "Failed to update insight" : "Failed to update subject", "error");
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={isCertificateTrack ? "Edit Certificate Insight" : "Edit Subject"}>
+      <form onSubmit={submit} className="space-y-4">
+        <NameFields value={names} onChange={setNames} />
+        <Input label="Sort order" type="number" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} />
+        {!isCertificateTrack && (
+          <label className="flex items-center gap-3 text-sm">
+            <input type="checkbox" checked={isCert} onChange={(e) => setIsCert(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />
+            Certificate program
+          </label>
+        )}
+        {(isCertificateTrack || isCert) && (
+          <Input label="Total hours" type="number" min="0" step="0.5" value={hours} onChange={(e) => setHours(e.target.value)} />
+        )}
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+          Active
+        </label>
+        <Button type="submit" disabled={saving} className="w-full">
+          {saving ? "Saving…" : "Save changes"}
+        </Button>
       </form>
     </Modal>
   );
