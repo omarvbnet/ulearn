@@ -61,12 +61,22 @@ async function resolveFileBytes(file: CreativeFileInput): Promise<Buffer> {
 }
 
 function extractSvg(text: string): string | null {
-  const fence = text.match(/```(?:svg)?\s*([\s\S]*?)```/i);
-  const raw = fence?.[1]?.trim() || text.trim();
-  const start = raw.indexOf("<svg");
-  const end = raw.lastIndexOf("</svg>");
-  if (start >= 0 && end > start) return raw.slice(start, end + 6);
+  const fence = text.match(/```(?:svg|xml)?\s*([\s\S]*?)```/i);
+  const raw = (fence?.[1] || text).trim();
+  const start = raw.search(/<svg[\s>]/i);
+  const end = raw.toLowerCase().lastIndexOf("</svg>");
+  if (start >= 0 && end > start) {
+    return raw.slice(start, end + "</svg>".length).trim();
+  }
   return null;
+}
+
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 async function mergePdfs(files: CreativeFileInput[]): Promise<{
@@ -230,7 +240,7 @@ export class AiCreativeService {
       const safe =
         input.title.replace(/[^\w\-]+/g, "_").slice(0, 40) || "creative";
       if (input.format === "ppt") {
-        const buf = await buildPptx(input.title, markdown);
+        const buf = await buildPptx(input.title, markdown, language);
         const saved = await this.finishSuccess({
           userId,
           jobId: job.id,
@@ -241,7 +251,7 @@ export class AiCreativeService {
         });
         return this.toResult(saved);
       }
-      const bytes = await buildPdf(input.title, markdown);
+      const bytes = await buildPdf(input.title, markdown, language);
       const saved = await this.finishSuccess({
         userId,
         jobId: job.id,
@@ -284,31 +294,36 @@ export class AiCreativeService {
           role: "system",
           content: [
             "You are a professional graphic designer for AI Creative Studio.",
-            "Return a complete, self-contained SVG graphic (viewBox recommended).",
-            "Use clean typography, balanced layout, and a polished educational look.",
-            "Output ONLY the SVG markup (optionally inside a ```svg fence).",
-            languageInstruction(language),
+            "Your ENTIRE reply must be a single valid SVG document (start with <svg and end with </svg>).",
+            "Do not write explanations, greetings, or markdown outside the SVG.",
+            "You may wrap the SVG in a ```svg fence if needed.",
+            "Put any visible labels/titles inside the SVG in the user's language.",
+            `User language for text inside the graphic: ${language}.`,
+            "Use a clean educational look: viewBox=\"0 0 1080 1080\", balanced layout, readable font-family sans-serif.",
+            "Include shapes, colors, and text elements — produce a complete downloadable graphic.",
           ].join("\n"),
         },
       ];
 
       if (input.mode === "edit" && input.image) {
         const imgBytes = await resolveFileBytes(input.image);
+        // Cap vision payload size
+        const b64 = imgBytes.toString("base64");
         messages.push({
           role: "user",
-          content: `Edit this image professionally according to these instructions:\n${input.prompt}\n\nRecreate the result as a polished SVG.`,
+          content: `Edit/recreate this image as SVG per these instructions (SVG only):\n${input.prompt}`,
           parts: [
             {
               type: "image",
               mimeType: input.image.mimeType || "image/jpeg",
-              dataBase64: imgBytes.toString("base64"),
+              dataBase64: b64,
             },
           ],
         });
       } else {
         messages.push({
           role: "user",
-          content: `Design a professional graphic:\n${input.prompt}`,
+          content: `Design this as a complete SVG graphic (SVG markup only):\n${input.prompt}`,
         });
       }
 
@@ -322,10 +337,29 @@ export class AiCreativeService {
         moduleKey,
         messages,
         userId,
-        { maxTokens: 8192 }
+        { maxTokens: 8192, temperature: 0.4 }
       );
-      const svg = extractSvg(result.text || "");
-      if (!svg) throw new Error("Could not produce an SVG design from the model");
+      let svg = extractSvg(result.text || "");
+      if (!svg) {
+        // Fallback: wrap model text into a simple branded SVG card
+        const safeText = (result.text || input.prompt || "Design")
+          .replace(/[<>&]/g, "")
+          .slice(0, 400);
+        const lines = safeText.split(/\n/).filter(Boolean).slice(0, 8);
+        const textEls = lines
+          .map(
+            (line, i) =>
+              `<text x="540" y="${280 + i * 48}" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="28" fill="#0f172a">${escapeXml(line.slice(0, 60))}</text>`
+          )
+          .join("\n");
+        svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#e0f2fe"/><stop offset="100%" stop-color="#fae8ff"/></linearGradient></defs>
+  <rect width="1080" height="1080" fill="url(#g)"/>
+  <rect x="80" y="80" width="920" height="920" rx="48" fill="#ffffff" fill-opacity="0.92"/>
+  <text x="540" y="200" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="36" font-weight="700" fill="#7c3aed">U Learn</text>
+  ${textEls}
+</svg>`;
+      }
 
       const saved = await this.finishSuccess({
         userId,

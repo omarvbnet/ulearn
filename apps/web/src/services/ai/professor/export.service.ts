@@ -7,10 +7,15 @@ import {
   Paragraph,
   TextRun,
 } from "docx";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, rgb } from "pdf-lib";
 // pptxgenjs CJS export is the constructor itself
 import PptxGenJS from "pptxgenjs";
 import type { ProfessorArtifactKind } from "@prisma/client";
+import {
+  embedDocumentFonts,
+  preparePdfText,
+  pptTextOptions,
+} from "../fonts";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const PptxCtor = (PptxGenJS as any).default ?? PptxGenJS;
@@ -44,43 +49,54 @@ function splitSections(md: string): Array<{ heading: string; body: string }> {
   });
 }
 
-export async function buildPdf(title: string, markdown: string): Promise<Uint8Array> {
+export async function buildPdf(
+  title: string,
+  markdown: string,
+  language?: string | null
+): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const sample = `${title}\n${markdown}`;
+  const { regular: font, bold, rtl } = await embedDocumentFonts(
+    pdf,
+    sample,
+    language
+  );
   let page = pdf.addPage();
   let { width, height } = page.getSize();
   const margin = 50;
   let y = height - margin;
 
-  const draw = (text: string, size: number, isBold = false) => {
+  const draw = (raw: string, size: number, isBold = false) => {
     const f = isBold ? bold : font;
+    const text = preparePdfText(raw);
+    // Arabic: split by spaces still works after reshape for wrapping approx.
     const words = text.split(/\s+/);
     let line = "";
     const maxW = width - margin * 2;
+    const flush = (toDraw: string) => {
+      if (!toDraw) return;
+      if (y < margin + 20) {
+        page = pdf.addPage();
+        ({ width, height } = page.getSize());
+        y = height - margin;
+      }
+      const tw = f.widthOfTextAtSize(toDraw, size);
+      const x = rtl ? Math.max(margin, width - margin - tw) : margin;
+      page.drawText(toDraw, { x, y, size, font: f, color: rgb(0.1, 0.1, 0.15) });
+      y -= size + 6;
+    };
     for (const w of words) {
       const test = line ? `${line} ${w}` : w;
       if (f.widthOfTextAtSize(test, size) > maxW) {
-        if (y < margin + 20) {
-          page = pdf.addPage();
-          ({ width, height } = page.getSize());
-          y = height - margin;
-        }
-        page.drawText(line, { x: margin, y, size, font: f, color: rgb(0.1, 0.1, 0.15) });
-        y -= size + 6;
+        flush(line);
         line = w;
       } else {
         line = test;
       }
     }
     if (line) {
-      if (y < margin + 20) {
-        page = pdf.addPage();
-        ({ width, height } = page.getSize());
-        y = height - margin;
-      }
-      page.drawText(line, { x: margin, y, size, font: f, color: rgb(0.1, 0.1, 0.15) });
-      y -= size + 10;
+      flush(line);
+      y -= 4;
     }
   };
 
@@ -94,14 +110,16 @@ export async function buildPdf(title: string, markdown: string): Promise<Uint8Ar
     draw(para.slice(0, 2000), 11);
   }
 
-  // page numbers
+  // page numbers (Western digits — always Latin-safe)
   const pages = pdf.getPages();
+  const pageFont = font;
   pages.forEach((p, i) => {
-    p.drawText(`${i + 1} / ${pages.length}`, {
+    const label = `${i + 1} / ${pages.length}`;
+    p.drawText(label, {
       x: width / 2 - 20,
       y: 24,
       size: 9,
-      font,
+      font: pageFont,
       color: rgb(0.4, 0.4, 0.45),
     });
   });
@@ -144,10 +162,21 @@ async function buildDocx(title: string, markdown: string): Promise<Buffer> {
   return Packer.toBuffer(doc);
 }
 
-export async function buildPptx(title: string, markdown: string): Promise<Buffer> {
+export async function buildPptx(
+  title: string,
+  markdown: string,
+  language?: string | null
+): Promise<Buffer> {
   const pptx = new PptxCtor();
-  pptx.author = "AI Professor Studio";
+  pptx.author = "U Learn AI";
   pptx.title = title;
+  const rtl = (language || "").toLowerCase().startsWith("ar") ||
+    (language || "").toLowerCase().startsWith("ku");
+  if (rtl) {
+    pptx.rtlMode = true;
+    pptx.theme = { lang: "ar", headFontFace: "Arial", bodyFontFace: "Arial" };
+  }
+
   const cover = pptx.addSlide();
   cover.addText(title, {
     x: 0.5,
@@ -157,14 +186,16 @@ export async function buildPptx(title: string, markdown: string): Promise<Buffer
     fontSize: 28,
     bold: true,
     color: "0F172A",
+    ...pptTextOptions(language),
   });
-  cover.addText("AI Professor Studio", {
+  cover.addText("U Learn AI", {
     x: 0.5,
     y: 4,
     w: 9,
     h: 0.4,
     fontSize: 14,
     color: "64748B",
+    ...pptTextOptions(language),
   });
 
   for (const section of splitSections(markdown).slice(0, 20)) {
@@ -177,6 +208,7 @@ export async function buildPptx(title: string, markdown: string): Promise<Buffer
       fontSize: 22,
       bold: true,
       color: "0F172A",
+      ...pptTextOptions(language),
     });
     const bullets = section.body
       .split(/\n/)
@@ -184,8 +216,19 @@ export async function buildPptx(title: string, markdown: string): Promise<Buffer
       .filter(Boolean)
       .slice(0, 8);
     slide.addText(
-      bullets.map((b: string) => ({ text: b.slice(0, 180), options: { bullet: true } })),
-      { x: 0.5, y: 1.2, w: 9, h: 4, fontSize: 14, color: "334155" }
+      bullets.map((b: string) => ({
+        text: b.slice(0, 180),
+        options: { bullet: true, ...pptTextOptions(language) },
+      })),
+      {
+        x: 0.5,
+        y: 1.2,
+        w: 9,
+        h: 4,
+        fontSize: 14,
+        color: "334155",
+        ...pptTextOptions(language),
+      }
     );
   }
 
@@ -231,7 +274,7 @@ export class ProfessorExportService {
           })
         );
       } else if (fmt === "pdf") {
-        const bytes = await buildPdf(input.title, input.markdown);
+        const bytes = await buildPdf(input.title, input.markdown, input.language);
         artifacts.push(
           await prisma.professorArtifact.create({
             data: {
@@ -259,7 +302,7 @@ export class ProfessorExportService {
           })
         );
       } else if (fmt === "pptx") {
-        const buf = await buildPptx(input.title, input.markdown);
+        const buf = await buildPptx(input.title, input.markdown, input.language);
         artifacts.push(
           await prisma.professorArtifact.create({
             data: {

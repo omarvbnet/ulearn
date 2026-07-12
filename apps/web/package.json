@@ -20,8 +20,11 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",
     "@aws-sdk/s3-request-presigner": "^3.1079.0",
+    "@pdf-lib/fontkit": "^1.1.1",
     "@prisma/client": "^6.19.3",
+    "arabic-reshaper": "^1.1.0",
     "bcryptjs": "^3.0.3",
+    "bidi-js": "^1.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "confbox": "^0.2.4",
