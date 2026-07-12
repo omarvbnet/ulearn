@@ -389,6 +389,16 @@ export function AiKnowledgeClient() {
                       {d.grade ? ` · ${d.grade}` : ""}
                       {d.errorMessage ? ` · ${d.errorMessage}` : ""}
                     </div>
+                    {d.status === "FAILED" &&
+                    /embed|EMBEDDING|DeepSeek|cannot run embeddings/i.test(
+                      d.errorMessage || ""
+                    ) ? (
+                      <p className="mt-1 text-xs text-amber-800">
+                        Fix: Admin → AI Providers → assign EMBEDDING to Gemini
+                        (gemini-embedding-001) or OpenAI, then Reprocess this file.
+                        DeepSeek is chat-only and cannot index materials.
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <div className="flex gap-2">

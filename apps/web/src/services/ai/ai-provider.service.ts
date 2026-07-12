@@ -112,6 +112,13 @@ export class AiProviderService {
   }
 
   static async setModuleAssignment(moduleKey: AiModuleKey, providerId: string) {
+    const provider = await prisma.aiProvider.findUnique({ where: { id: providerId } });
+    if (!provider) throw new Error("Provider not found");
+    if (moduleKey === "EMBEDDING" && !providerSupportsEmbeddings(provider.type)) {
+      throw new Error(
+        `${provider.type} (${provider.name}) cannot run embeddings. Assign EMBEDDING to Gemini or OpenAI.`
+      );
+    }
     return prisma.aiModuleAssignment.upsert({
       where: { moduleKey },
       create: { moduleKey, providerId },
@@ -123,17 +130,65 @@ export class AiProviderService {
     return prisma.aiModuleAssignment.findMany({ include: { provider: true } });
   }
 
+  /** First enabled Gemini/OpenAI/compatible provider that has an API key. */
+  static async findEmbeddingCapableProvider(): Promise<AiProvider | null> {
+    return prisma.aiProvider.findFirst({
+      where: {
+        status: "ENABLED",
+        type: { in: ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE"] },
+        apiKeyEncrypted: { not: null },
+      },
+      orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
+    });
+  }
+
+  /**
+   * If EMBEDDING points at DeepSeek/Kimi/Claude (or is missing), reassign to
+   * Gemini/OpenAI when one exists — fixes KB ingest without a manual admin hop.
+   */
+  static async ensureEmbeddingAssignment(): Promise<AiProvider | null> {
+    const assigned = await prisma.aiModuleAssignment.findUnique({
+      where: { moduleKey: "EMBEDDING" },
+      include: { provider: true },
+    });
+    if (
+      assigned?.provider?.status === "ENABLED" &&
+      providerSupportsEmbeddings(assigned.provider.type) &&
+      assigned.provider.apiKeyEncrypted
+    ) {
+      return assigned.provider;
+    }
+
+    const capable = await this.findEmbeddingCapableProvider();
+    if (!capable) return null;
+
+    await prisma.aiModuleAssignment.upsert({
+      where: { moduleKey: "EMBEDDING" },
+      create: { moduleKey: "EMBEDDING", providerId: capable.id },
+      update: { providerId: capable.id },
+    });
+    return capable;
+  }
+
   static async resolveProvider(moduleKey?: AiModuleKey): Promise<AiProvider | null> {
-    if (moduleKey) {
+    if (moduleKey === "EMBEDDING") {
+      const healed = await this.ensureEmbeddingAssignment();
+      if (healed) return healed;
+    } else if (moduleKey) {
       const assigned = await prisma.aiModuleAssignment.findUnique({
         where: { moduleKey },
         include: { provider: true },
       });
       if (assigned?.provider?.status === "ENABLED") return assigned.provider;
     }
-    return prisma.aiProvider.findFirst({
+    const fallbackDefault = await prisma.aiProvider.findFirst({
       where: { status: "ENABLED", isDefault: true },
     });
+    // Never resolve a chat-only default for embeddings.
+    if (moduleKey === "EMBEDDING" && fallbackDefault && !providerSupportsEmbeddings(fallbackDefault.type)) {
+      return this.findEmbeddingCapableProvider();
+    }
+    return fallbackDefault;
   }
 
   static async withFallback<T>(
@@ -147,6 +202,16 @@ export class AiProviderService {
       orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
     });
     let chain = primary ? [primary, ...fallbacks] : fallbacks;
+    if (moduleKey === "EMBEDDING") {
+      // Prefer embed-capable providers; never call DeepSeek/Kimi/Claude for vectors.
+      const embedOpts = {
+        preferTypes: opts?.preferTypes?.length
+          ? opts.preferTypes
+          : ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE"],
+        skipTypes: [...(opts?.skipTypes || []), "DEEPSEEK", "KIMI", "ANTHROPIC"],
+      };
+      opts = embedOpts;
+    }
     if (opts?.preferTypes?.length) {
       const preferred = chain.filter((p) => opts.preferTypes!.includes(p.type));
       const rest = chain.filter((p) => !opts.preferTypes!.includes(p.type));
@@ -155,9 +220,11 @@ export class AiProviderService {
     if (opts?.skipTypes?.length) {
       const skipped = chain.filter((p) => opts.skipTypes!.includes(p.type));
       const keep = chain.filter((p) => !opts.skipTypes!.includes(p.type));
-      chain = keep.length ? keep : skipped; // if only skipped exist, still try
+      // For embeddings, never fall back to chat-only providers.
+      chain = moduleKey === "EMBEDDING" ? keep : keep.length ? keep : skipped;
     }
     let lastError: unknown;
+    let triedEmbedCapable = false;
     for (const provider of chain) {
       if (!provider.apiKeyEncrypted) continue;
       if (moduleKey === "EMBEDDING" && !providerSupportsEmbeddings(provider.type)) {
@@ -166,6 +233,7 @@ export class AiProviderService {
         );
         continue;
       }
+      if (moduleKey === "EMBEDDING") triedEmbedCapable = true;
       try {
         const apiKey = decryptSecret(provider.apiKeyEncrypted);
         const result = await run(provider, toConfig(provider, apiKey));
@@ -181,6 +249,11 @@ export class AiProviderService {
           },
         });
       }
+    }
+    if (moduleKey === "EMBEDDING" && !triedEmbedCapable) {
+      throw new Error(
+        "No embedding provider available. Add Gemini (model gemini-embedding-001) or OpenAI with an API key, then assign EMBEDDING to it — DeepSeek/Kimi/Claude are chat-only."
+      );
     }
     throw lastError instanceof Error ? lastError : new Error("No AI provider available");
   }

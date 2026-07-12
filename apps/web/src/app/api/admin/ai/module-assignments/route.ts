@@ -26,8 +26,12 @@ export async function PUT(request: Request) {
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
   const results = [];
-  for (const a of parsed.data.assignments) {
-    results.push(await AiProviderService.setModuleAssignment(a.moduleKey, a.providerId));
+  try {
+    for (const a of parsed.data.assignments) {
+      results.push(await AiProviderService.setModuleAssignment(a.moduleKey, a.providerId));
+    }
+  } catch (e) {
+    return error(e instanceof Error ? e.message : "Assignment failed", 400, "INVALID_ASSIGNMENT");
   }
   return json({ assignments: results });
 }

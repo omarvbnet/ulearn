@@ -84,19 +84,9 @@ export class AiDiagnosticsService {
     let embedMs = 0;
     let embedError: string | null = null;
     let embedDims = 0;
-    const canTryEmbed =
-      withKey.length > 0 &&
-      (!embedProvider || !chatOnlyTypes.has(embedProvider.type));
-    if (withKey.length && !canTryEmbed) {
-      embedError =
-        "No embedding-capable provider available (DeepSeek/Kimi/Claude cannot embed).";
-      issues.push({
-        severity: "error",
-        code: "EMBED_FAIL",
-        message: `Embedding failed: ${embedError}`,
-        fix: "Add Gemini (or OpenAI) and assign it to the EMBEDDING module.",
-      });
-    } else if (canTryEmbed) {
+    // Always try embed via withFallback/ensureEmbeddingAssignment — even if
+    // EMBEDDING was wrongly pointed at DeepSeek (auto-heals to Gemini when present).
+    if (withKey.length) {
       const t0 = Date.now();
       try {
         const vec = await AiProviderService.embed("U Learn diagnostics ping");
@@ -111,6 +101,14 @@ export class AiDiagnosticsService {
             fix: "Check EMBEDDING module provider and model (use gemini-embedding-001).",
           });
         } else {
+          if (embedProvider && chatOnlyTypes.has(embedProvider.type)) {
+            issues.push({
+              severity: "warning",
+              code: "EMBED_AUTO_HEALED",
+              message: `EMBEDDING was assigned to ${embedProvider.type}; runtime used an embedding-capable provider instead.`,
+              fix: "Save EMBEDDING → Gemini (or OpenAI) on the AI Providers page so the assignment matches runtime.",
+            });
+          }
           issues.push({
             severity: "ok",
             code: "EMBED_OK",
@@ -127,7 +125,7 @@ export class AiDiagnosticsService {
           message: `Embedding failed: ${embedError}`,
           fix: emptyBody
             ? "EMBEDDING provider returned an empty response. Use a dedicated Gemini provider (model gemini-embedding-001, Base URL https://generativelanguage.googleapis.com) with a valid Gemini API key — not DeepSeek."
-            : "Assign EMBEDDING to Gemini with gemini-embedding-001 (DeepSeek cannot embed).",
+            : "Add Gemini (gemini-embedding-001) or OpenAI with an API key and assign EMBEDDING to it. DeepSeek cannot embed.",
         });
       }
     }
