@@ -964,7 +964,7 @@
         "requestSent": "Aktivasyon talebi gönderildi. Yönetici inceleyecek.",
         "saved": "Dosya kaydedildi",
         "saveCancelled": "Kayıt iptal edildi",
-        "fileTooLarge": "Her dosya 8 MB altında olmalıdır.",
+        "fileTooLarge": "Her dosya 40 MB altında olmalıdır.",
         "statusFree": "{remaining} ücretsiz kullanım kaldı",
         "statusSub": "Yaratıcı Stüdyo planı aktif",
         "statusCourses": "{count}/{unlock} ücretli kurs ile açıldı",

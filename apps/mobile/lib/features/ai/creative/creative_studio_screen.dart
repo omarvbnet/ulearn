@@ -89,7 +89,7 @@ class _CreativeStudioScreenState extends State<CreativeStudioScreen>
     );
     final f = pick?.files.firstOrNull;
     if (f?.bytes == null) return null;
-    if (f!.bytes!.length > 8 * 1024 * 1024) {
+    if (f!.bytes!.length > 40 * 1024 * 1024) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(context.l10n.t('mobile.ai.creative.fileTooLarge'))),
@@ -123,11 +123,38 @@ class _CreativeStudioScreenState extends State<CreativeStudioScreen>
     }
   }
 
+  Future<Map<String, dynamic>> _uploadFile(_PickedFile file, {required String category}) async {
+    final api = context.read<ApiClient>();
+    final presign = await api.post('/api/uploads', {
+      'filename': file.fileName,
+      'contentType': file.mimeType,
+      'size': file.bytes.length,
+      'category': category,
+      'folder': 'ai-creative',
+    });
+    final uploadUrl = presign['uploadUrl']?.toString();
+    if (uploadUrl == null) throw ApiException('Upload setup failed', 500);
+    await api.putBytes(uploadUrl, file.bytes, file.mimeType);
+    return {
+      'fileName': file.fileName,
+      'mimeType': file.mimeType,
+      'fileKey': presign['key'],
+      if (presign['publicUrl'] != null) 'fileUrl': presign['publicUrl'],
+    };
+  }
+
   Future<void> _saveResult(Map<String, dynamic> result) async {
     final name = result['fileName'] as String? ?? 'creative-result.bin';
     final b64 = result['dataBase64'] as String?;
-    if (b64 == null) return;
-    final bytes = base64Decode(b64);
+    final downloadUrl = result['downloadUrl'] as String?;
+    late final Uint8List bytes;
+    if (b64 != null && b64.isNotEmpty) {
+      bytes = base64Decode(b64);
+    } else if (downloadUrl != null && downloadUrl.isNotEmpty) {
+      bytes = await context.read<ApiClient>().getBytes(downloadUrl);
+    } else {
+      return;
+    }
     final path = await FilePicker.saveFile(
       fileName: name,
       bytes: bytes,
@@ -384,8 +411,12 @@ class _CreativeStudioScreenState extends State<CreativeStudioScreen>
               ? null
               : () => _run(() async {
                     final api = context.read<ApiClient>();
+                    final uploaded = <Map<String, dynamic>>[];
+                    for (final f in _mergeFiles) {
+                      uploaded.add(await _uploadFile(f, category: 'document'));
+                    }
                     return api.post('/api/ai/creative/merge', {
-                      'files': _mergeFiles.map((f) => f.toJson()).toList(),
+                      'files': uploaded,
                     });
                   }),
           child: _busy
@@ -517,11 +548,18 @@ class _CreativeStudioScreenState extends State<CreativeStudioScreen>
               ? null
               : () => _run(() async {
                     final api = context.read<ApiClient>();
+                    Map<String, dynamic>? imagePayload;
+                    if (_editImage != null) {
+                      imagePayload = await _uploadFile(
+                        _editImage!,
+                        category: 'image',
+                      );
+                    }
                     return api.post('/api/ai/creative/image', {
                       'mode': _imageMode,
                       'prompt': _imagePromptCtrl.text.trim(),
                       'language': locale,
-                      if (_editImage != null) 'image': _editImage!.toJson(),
+                      if (imagePayload != null) 'image': imagePayload,
                     });
                   }),
           child: _busy

@@ -1,6 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { PDFDocument } from "pdf-lib";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
+import { readFile } from "fs/promises";
+import path from "path";
 import type { AiCreativeTool, Prisma } from "@prisma/client";
+import { r2Client, r2Bucket, isR2Configured } from "@/lib/r2";
 import { AiProviderService } from "../ai-provider.service";
 import { languageInstruction } from "../types";
 import type { ChatMessage } from "../types";
@@ -13,15 +17,47 @@ import {
 export type CreativeFileInput = {
   fileName: string;
   mimeType: string;
-  dataBase64: string;
+  dataBase64?: string;
+  fileKey?: string;
+  fileUrl?: string;
 };
 
 function stripDataUrl(b64: string) {
   return b64.replace(/^data:[^;]+;base64,/, "");
 }
 
-function decodeFile(file: CreativeFileInput): Buffer {
-  return Buffer.from(stripDataUrl(file.dataBase64), "base64");
+async function loadBytes(fileKey?: string | null, fileUrl?: string | null): Promise<Uint8Array> {
+  if (fileKey && isR2Configured()) {
+    const res = await r2Client.send(
+      new GetObjectCommand({ Bucket: r2Bucket, Key: fileKey })
+    );
+    const bytes = await res.Body?.transformToByteArray();
+    if (!bytes) throw new Error("Empty uploaded file");
+    return bytes;
+  }
+  if (fileKey) {
+    const local = path.join(process.cwd(), "public", "uploads", fileKey);
+    return new Uint8Array(await readFile(local));
+  }
+  if (fileUrl?.startsWith("http") || fileUrl?.startsWith("/")) {
+    const url = fileUrl.startsWith("http")
+      ? fileUrl
+      : `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}${fileUrl}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Failed to fetch uploaded file");
+    return new Uint8Array(await res.arrayBuffer());
+  }
+  throw new Error("No file source");
+}
+
+async function resolveFileBytes(file: CreativeFileInput): Promise<Buffer> {
+  if (file.fileKey || file.fileUrl) {
+    return Buffer.from(await loadBytes(file.fileKey, file.fileUrl));
+  }
+  if (file.dataBase64) {
+    return Buffer.from(stripDataUrl(file.dataBase64), "base64");
+  }
+  throw new Error(`Missing file data for ${file.fileName}`);
 }
 
 function extractSvg(text: string): string | null {
@@ -40,7 +76,7 @@ async function mergePdfs(files: CreativeFileInput[]): Promise<{
 }> {
   const out = await PDFDocument.create();
   for (const f of files) {
-    const buf = decodeFile(f);
+    const buf = await resolveFileBytes(f);
     const isPdf =
       f.mimeType.includes("pdf") || f.fileName.toLowerCase().endsWith(".pdf");
     if (!isPdf) {
@@ -257,6 +293,7 @@ export class AiCreativeService {
       ];
 
       if (input.mode === "edit" && input.image) {
+        const imgBytes = await resolveFileBytes(input.image);
         messages.push({
           role: "user",
           content: `Edit this image professionally according to these instructions:\n${input.prompt}\n\nRecreate the result as a polished SVG.`,
@@ -264,7 +301,7 @@ export class AiCreativeService {
             {
               type: "image",
               mimeType: input.image.mimeType || "image/jpeg",
-              dataBase64: stripDataUrl(input.image.dataBase64),
+              dataBase64: imgBytes.toString("base64"),
             },
           ],
         });
@@ -320,13 +357,17 @@ export class AiCreativeService {
     countedAsUse: boolean;
     createdAt: Date;
   }) {
+    // Prefer download URL for large artifacts (avoids proxy body limits on base64 JSON).
+    const includeInline =
+      !job.resultContent || job.resultContent.length < 400_000;
     return {
       jobId: job.id,
       tool: job.tool,
       status: job.status,
       fileName: job.resultFileName,
       mimeType: job.resultMime,
-      dataBase64: job.resultContent,
+      dataBase64: includeInline ? job.resultContent : null,
+      downloadUrl: `/api/ai/creative/jobs/${job.id}/download`,
       countedAsUse: job.countedAsUse,
       createdAt: job.createdAt.toISOString(),
     };

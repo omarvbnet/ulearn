@@ -4,11 +4,17 @@ import { z } from "zod";
 
 const CREATIVE_ROLES = ["STUDENT", "CERTIFICATE_USER"] as const;
 
-const fileSchema = z.object({
-  fileName: z.string().min(1).max(240),
-  mimeType: z.string().min(1).max(120),
-  dataBase64: z.string().min(1).max(12_000_000),
-});
+const fileSchema = z
+  .object({
+    fileName: z.string().min(1).max(240),
+    mimeType: z.string().min(1).max(120),
+    dataBase64: z.string().min(1).max(2_000_000).optional(),
+    fileKey: z.string().min(1).max(500).optional(),
+    fileUrl: z.string().min(1).max(2000).optional(),
+  })
+  .refine((f) => Boolean(f.fileKey || f.fileUrl || f.dataBase64), {
+    message: "fileKey, fileUrl, or dataBase64 required",
+  });
 
 const schema = z.object({
   files: z.array(fileSchema).min(2).max(12),

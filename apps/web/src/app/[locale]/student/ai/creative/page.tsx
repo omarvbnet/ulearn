@@ -47,15 +47,56 @@ function downloadBase64(fileName: string, mime: string, b64: string) {
   URL.revokeObjectURL(url);
 }
 
-async function fileToPayload(file: File) {
-  const buf = await file.arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+async function downloadResult(result: {
+  fileName?: string;
+  mimeType?: string;
+  dataBase64?: string | null;
+  downloadUrl?: string;
+}) {
+  const name = result.fileName || "creative-result.bin";
+  const mime = result.mimeType || "application/octet-stream";
+  if (result.dataBase64) {
+    downloadBase64(name, mime, result.dataBase64);
+    return;
+  }
+  if (result.downloadUrl) {
+    const res = await fetch(result.downloadUrl);
+    if (!res.ok) throw new Error("Download failed");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function uploadCreativeFile(file: File, category: "document" | "image") {
+  const presignRes = await fetch("/api/uploads", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filename: file.name,
+      contentType: file.type || "application/octet-stream",
+      size: file.size,
+      category,
+      folder: "ai-creative",
+    }),
+  });
+  const presign = await presignRes.json();
+  if (!presignRes.ok) throw new Error(presign.error || "Upload setup failed");
+  const put = await fetch(presign.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type || "application/octet-stream" },
+    body: file,
+  });
+  if (!put.ok) throw new Error("File upload failed");
   return {
     fileName: file.name,
     mimeType: file.type || "application/octet-stream",
-    dataBase64: btoa(binary),
+    fileKey: presign.key as string,
+    fileUrl: presign.publicUrl as string | undefined,
   };
 }
 
@@ -117,8 +158,7 @@ export default function CreativeStudioPage() {
         return;
       }
       if (!res.ok) throw new Error(data.error || "Request failed");
-      const result = data.result;
-      downloadBase64(result.fileName, result.mimeType, result.dataBase64);
+      await downloadResult(data.result);
       toast("Download started");
       await loadStatus();
     } catch (e) {
@@ -227,7 +267,10 @@ export default function CreativeStudioPage() {
             disabled={busy || mergeFiles.length < 2}
             onClick={() =>
               void (async () => {
-                const files = await Promise.all(mergeFiles.map(fileToPayload));
+                const files = [];
+                for (const f of mergeFiles) {
+                  files.push(await uploadCreativeFile(f, "document"));
+                }
                 await run("/api/ai/creative/merge", { files });
               })()
             }
@@ -318,7 +361,9 @@ export default function CreativeStudioPage() {
                   mode: imageMode,
                   prompt: imagePrompt.trim(),
                   language: locale,
-                  image: imageFile ? await fileToPayload(imageFile) : undefined,
+                  image: imageFile
+                    ? await uploadCreativeFile(imageFile, "image")
+                    : undefined,
                 });
               })()
             }

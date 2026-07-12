@@ -975,7 +975,7 @@
         "requestSent": "Activation request sent. An admin will review it.",
         "saved": "File saved",
         "saveCancelled": "Save cancelled",
-        "fileTooLarge": "Each file must be under 8 MB.",
+        "fileTooLarge": "Each file must be under 40 MB.",
         "statusFree": "{remaining} free uses left",
         "statusSub": "AI Creative plan active",
         "statusCourses": "Unlocked via {count}/{unlock} paid courses",

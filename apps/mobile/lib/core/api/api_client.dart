@@ -49,13 +49,39 @@ class ApiClient {
         if (_token != null) 'Cookie': 'ulearn_session=$_token',
       };
 
+  Map<String, dynamic> _decodeBody(String body, int statusCode) {
+    final trimmed = body.trim();
+    if (trimmed.isEmpty) {
+      throw ApiException(
+        statusCode == 413
+            ? 'File too large for upload'
+            : 'Empty response ($statusCode)',
+        statusCode,
+      );
+    }
+    try {
+      final decoded = jsonDecode(trimmed);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    } catch (_) {
+      // Non-JSON (e.g. nginx "Request Entity Too Large")
+    }
+    final message = trimmed.length > 180 ? '${trimmed.substring(0, 180)}…' : trimmed;
+    throw ApiException(
+      statusCode == 413 || message.toLowerCase().contains('too large')
+          ? 'Files are too large to send directly. Try fewer or smaller PDFs.'
+          : message,
+      statusCode >= 400 ? statusCode : 500,
+    );
+  }
+
   Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body) async {
     final res = await http.post(
       Uri.parse('$baseUrl$path'),
       headers: _headers,
       body: jsonEncode(body),
     );
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    final data = _decodeBody(res.body, res.statusCode);
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);
     }
@@ -64,7 +90,7 @@ class ApiClient {
 
   Future<Map<String, dynamic>> get(String path) async {
     final res = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    final data = _decodeBody(res.body, res.statusCode);
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);
     }
@@ -77,7 +103,7 @@ class ApiClient {
       headers: _headers,
       body: jsonEncode(body),
     );
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    final data = _decodeBody(res.body, res.statusCode);
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);
     }
@@ -90,11 +116,27 @@ class ApiClient {
       headers: _headers,
       body: body != null ? jsonEncode(body) : null,
     );
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    final data = _decodeBody(res.body, res.statusCode);
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);
     }
     return data;
+  }
+
+  /// Authenticated binary GET (e.g. creative job download).
+  Future<Uint8List> getBytes(String path) async {
+    final res = await http.get(
+      Uri.parse(absoluteUrl(path)),
+      headers: {
+        if (_token != null) 'Authorization': 'Bearer $_token',
+        if (_token != null) 'Cookie': 'ulearn_session=$_token',
+      },
+    );
+    if (res.statusCode >= 400) {
+      _decodeBody(res.body, res.statusCode);
+      throw ApiException('Download failed', res.statusCode);
+    }
+    return res.bodyBytes;
   }
 
   /// Raw binary PUT used for presigned/direct file uploads (small payloads).

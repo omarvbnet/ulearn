@@ -12,11 +12,12 @@ export async function POST(request: Request) {
   if (auth.error) return auth.error;
 
   const body = await request.json();
-  const { filename, contentType, size, category } = body as {
+  const { filename, contentType, size, category, folder } = body as {
     filename?: string;
     contentType?: string;
     size?: number;
     category?: "image" | "document";
+    folder?: string;
   };
 
   if (!filename || !contentType || !size || !category) {
@@ -35,7 +36,12 @@ export async function POST(request: Request) {
     return error(message, 422, validation.error);
   }
 
-  const key = buildKey("stage-certificates", filename, auth.session.userId);
+  const allowedFolders = new Set(["stage-certificates", "ai-creative"]);
+  const uploadFolder =
+    typeof folder === "string" && allowedFolders.has(folder)
+      ? folder
+      : "stage-certificates";
+  const key = buildKey(uploadFolder, filename, auth.session.userId);
 
   if (!r2Configured) {
     return json({
