@@ -52,7 +52,53 @@ export default function StudentAiPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const [examCount, setExamCount] = useState<5 | 10 | 20>(5);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
+
+  const quickPrompts =
+    locale === "ar"
+      ? ["احتاج ملخص عن المادة", "احتاج مرشحات وزارية عن المادة", "اشرح درس اليوم خطوة بخطوة"]
+      : locale === "ku"
+        ? [
+            "پێویستم بە پوختەی وانە/ماددەکە هەیە",
+            "پێویستم بە فلتەری وەزاری هەیە بۆ ماددەکە",
+            "وانەی ئەمڕۆ هەنگاو بە هەنگاو ڕوون بکەرەوە",
+          ]
+        : locale === "tr"
+          ? [
+              "Bu ders/materyal için net bir özet istiyorum",
+              "Bu ders için bakanlık tarzı sınav filtreleri istiyorum",
+              "Bugünkü dersi adım adım anlat",
+            ]
+          : [
+              "I need a clear summary of this subject/material",
+              "I need ministry-style exam filters for this subject",
+              "Explain today's lesson step by step",
+            ];
+
+  const attachmentPrompts = [
+    locale === "ar"
+      ? "لخص المادة من الملفات المرفقة بوضوح"
+      : "Summarize the attached material clearly",
+    locale === "ar"
+      ? "أنشئ مرشحات وزارية من المادة المرفقة"
+      : "Create ministry-style exam filters from the attached material",
+    locale === "ar"
+      ? "صمم عرض PowerPoint من الملفات المرفقة"
+      : "Design a PowerPoint presentation from my attached file(s)",
+    locale === "ar"
+      ? "صمم صورة تعليمية احترافية من الملفات المرفقة"
+      : "Design a professional educational image from my attached file(s)",
+    ...(pendingFiles.filter(
+      (f) => f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")
+    ).length >= 2
+      ? [
+          locale === "ar"
+            ? "ادمج ملفات PDF المرفقة في ملف واحد"
+            : "Merge the attached PDF files into one file",
+        ]
+      : []),
+  ];
 
   const loadHistory = useCallback(async () => {
     const res = await fetch("/api/ai/conversations");
@@ -68,8 +114,6 @@ export default function StudentAiPage() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
-
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
   async function uploadAttachment(file: File) {
     const category = file.type.startsWith("image/") ? "image" : "document";
@@ -412,7 +456,22 @@ export default function StudentAiPage() {
 
         <div className="flex-1 space-y-3 overflow-y-auto p-4">
           {!messages.length && (
-            <Card className="border-dashed text-center text-muted">{t.student.aiEmpty}</Card>
+            <Card className="space-y-3 border-dashed">
+              <p className="text-center text-muted">{t.student.aiEmpty}</p>
+              <div className="flex flex-wrap justify-center gap-2">
+                {quickPrompts.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    disabled={sending}
+                    onClick={() => void sendChat(p)}
+                    className="rounded-full border border-border px-3 py-1.5 text-xs hover:bg-white/5"
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </Card>
           )}
           {messages.map((m) => (
             <div
@@ -493,6 +552,36 @@ export default function StudentAiPage() {
               </span>
             ))}
           </div>
+          {pendingFiles.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {attachmentPrompts.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  disabled={sending}
+                  onClick={() => void sendChat(p)}
+                  className="rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs"
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          )}
+          {!pendingFiles.length && messages.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {quickPrompts.slice(0, 2).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  disabled={sending}
+                  onClick={() => void sendChat(p)}
+                  className="rounded-full border border-border px-3 py-1 text-xs hover:bg-white/5"
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          )}
           <form
             className="flex gap-2"
             onSubmit={(e) => {

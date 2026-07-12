@@ -909,6 +909,63 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                     },
                   ),
           ),
+          if (_pending.isEmpty && _messages.isNotEmpty)
+            SizedBox(
+              height: 40,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                children: [
+                  ActionChip(
+                    label: Text(
+                      context.l10n.t('mobile.ai.promptSummary'),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    onPressed: () {
+                      _controller.text =
+                          context.l10n.t('mobile.ai.promptSummary');
+                      _send();
+                    },
+                    backgroundColor: AppTheme.card,
+                    side: BorderSide(color: AppTheme.cardBorder),
+                  ),
+                  const SizedBox(width: 8),
+                  ActionChip(
+                    label: Text(
+                      context.l10n.t('mobile.ai.promptMinistry'),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    onPressed: () {
+                      _controller.text =
+                          context.l10n.t('mobile.ai.promptMinistry');
+                      _send();
+                    },
+                    backgroundColor: AppTheme.card,
+                    side: BorderSide(color: AppTheme.cardBorder),
+                  ),
+                ],
+              ),
+            ),
+          if (_pending.isNotEmpty)
+            _AttachmentPromptBar(
+              hasPdf: _pending.any(
+                (a) =>
+                    a.mimeType.contains('pdf') ||
+                    a.fileName.toLowerCase().endsWith('.pdf'),
+              ),
+              hasImage: _pending.any((a) => a.isImage),
+              pdfCount: _pending
+                  .where(
+                    (a) =>
+                        a.mimeType.contains('pdf') ||
+                        a.fileName.toLowerCase().endsWith('.pdf'),
+                  )
+                  .length,
+              onAsk: (prompt) {
+                _controller.text = prompt;
+                _send();
+              },
+            ),
           if (_pending.isNotEmpty)
             SizedBox(
               height: 78,
@@ -1060,6 +1117,8 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final prompts = [
+      l10n.t('mobile.ai.promptSummary'),
+      l10n.t('mobile.ai.promptMinistry'),
       l10n.t('mobile.ai.promptExplain'),
       l10n.t('mobile.ai.promptPractice'),
       l10n.t('mobile.ai.promptWeak'),
@@ -1115,6 +1174,15 @@ class _EmptyState extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 18),
+        Text(
+          l10n.t('mobile.ai.quickPrompts'),
+          style: TextStyle(
+            color: AppTheme.muted,
+            fontWeight: FontWeight.w700,
+            fontSize: 12,
+          ),
+        ),
+        const SizedBox(height: 8),
         ...prompts.map(
           (p) => Padding(
             padding: const EdgeInsets.only(bottom: 8),
@@ -1134,6 +1202,66 @@ class _EmptyState extends StatelessWidget {
                 style: TextStyle(color: AppTheme.foreground),
               ),
             ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AttachmentPromptBar extends StatelessWidget {
+  const _AttachmentPromptBar({
+    required this.hasPdf,
+    required this.hasImage,
+    required this.pdfCount,
+    required this.onAsk,
+  });
+
+  final bool hasPdf;
+  final bool hasImage;
+  final int pdfCount;
+  final void Function(String prompt) onAsk;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final chips = <String>[
+      l10n.t('mobile.ai.promptSummaryAttached'),
+      l10n.t('mobile.ai.promptMinistryAttached'),
+      if (hasPdf || !hasImage) l10n.t('mobile.ai.promptDesignPptAttached'),
+      if (hasImage || hasPdf) l10n.t('mobile.ai.promptDesignImageAttached'),
+      if (pdfCount >= 2) l10n.t('mobile.ai.promptMergeAttached'),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+          child: Text(
+            l10n.t('mobile.ai.promptsWithFiles'),
+            style: TextStyle(
+              color: AppTheme.muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        SizedBox(
+          height: 40,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            itemCount: chips.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              final label = chips[i];
+              return ActionChip(
+                label: Text(label, style: const TextStyle(fontSize: 12)),
+                onPressed: () => onAsk(label),
+                backgroundColor: AppTheme.card,
+                side: BorderSide(color: AppTheme.cardBorder),
+              );
+            },
           ),
         ),
       ],

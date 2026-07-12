@@ -45,7 +45,7 @@ export function detectCreativeChatIntent(
   const imageEditWords =
     /\b(edit|improve|redesign|fix|retouch|enhance)\b|عدل|عدّل|حسّن|حسن|دەستکاری|düzenle|iyileştir/i;
   const imageDesignWords =
-    /(?:design|create|generate|make|draw).{0,48}(?:image|logo|poster|banner|graphic|illustration|icon|picture)|(?:صمم|تصميم|أنشئ|انشئ|ارسم).{0,48}(?:صورة|شعار|بوستر|بانر|رسمة)|(?:دروست|دیزاین).{0,48}(?:وێنە|لۆگۆ)|(?:tasarla|oluştur|çiz).{0,48}(?:görsel|logo|afiş|resim)|تصميم\s*صورة|صورة\s*(?:احترافية|جديدة)|logo\s*design/i;
+    /(?:design|create|generate|make|draw).{0,48}(?:image|logo|poster|banner|graphic|illustration|icon|picture)|(?:صمم|تصميم|أنشئ|انشئ|ارسم).{0,48}(?:صورة|شعار|بوستر|بانر|رسمة)|(?:دروست|دیزاین).{0,48}(?:وێنە|لۆگۆ)|(?:tasarla|oluştur|çiz).{0,48}(?:görsel|logo|afiş|resim)|تصميم\s*صورة|صورة\s*(?:احترافية|جديدة|تعليمية)|logo\s*design|صورة تعليمية|من الملفات المرفقة.*(?:صورة|تصميم)|(?:صورة|تصميم).*(?:المرفق|المرفقة)/i;
 
   if (pdfs.length >= 2 && (mergeWords.test(ql) || !q)) return "merge";
   if (pdfs.length >= 2 && mergeWords.test(ql)) return "merge";
@@ -54,17 +54,21 @@ export function detectCreativeChatIntent(
   if (imageDesignWords.test(ql)) return "image_design";
   if (
     designWords.test(ql) &&
-    /image|logo|poster|banner|graphic|picture|صورة|شعار|وێنە|görsel|resim/i.test(ql) &&
-    images.length === 0
+    /image|logo|poster|banner|graphic|picture|صورة|شعار|وێنە|görsel|resim|تعليمية/i.test(
+      ql
+    )
   ) {
     return "image_design";
   }
 
-  // Prefer PPT when user mentions presentation (even without explicit "design")
-  if (pptWords.test(ql) && (designWords.test(ql) || /صمم|تصميم|اعمل|سوي|سوی/i.test(ql))) {
+  // Prefer PPT when user mentions presentation from attachments / explicit design
+  if (
+    pptWords.test(ql) &&
+    (designWords.test(ql) ||
+      /صمم|تصميم|اعمل|سوي|سوی|من الملفات|المرفق/i.test(ql))
+  ) {
     return "design_ppt";
   }
-  if (pptWords.test(ql) && designWords.test(ql)) return "design_ppt";
   if (pdfDocWords.test(ql) && designWords.test(ql) && pdfs.length < 2) {
     return "design_pdf";
   }

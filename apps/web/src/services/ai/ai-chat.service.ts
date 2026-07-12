@@ -433,6 +433,12 @@ export class AiChatService {
                 "If attachment text is empty and you cannot see an image, ask them to re-upload a clearer photo or PDF/DOCX/TXT.",
               ].join(" ")
             : "",
+          /ملخص|summary|summariz|پوختە|özet/i.test(question)
+            ? "The student asked for a summary. Produce a clear structured summary with: title, key points, important definitions, and a short revision checklist. Prefer attached material and retrieved curriculum."
+            : "",
+          /مرشح|وزاري|وزارية|ministry.?style|exam filter|فلتەر|filtre/i.test(question)
+            ? "The student asked for ministry-style exam filters (مرشحات وزارية). Generate likely exam questions in the local ministry style: mix MCQ and short answer, cover high-yield topics from the material, group by difficulty, and include brief answer keys."
+            : "",
           isCert
             ? "Prefer the student's areas of interest when giving examples."
             : "",
@@ -680,14 +686,30 @@ export class AiChatService {
           break;
         case "design_ppt":
         case "design_pdf": {
+          let outline: string | undefined;
+          if (input.attachments.length) {
+            const processed = await processAttachments(
+              input.attachments,
+              input.userId
+            );
+            outline = processed.textExcerpt.slice(0, 12000) || undefined;
+          }
           const title =
-            input.question.replace(/^['"\s]+|['"\s]+$/g, "").slice(0, 120) ||
-            "AI Creative";
+            input.question.replace(/^['"\s]+|['"\s]+$/g, "").slice(0, 80) ||
+            (input.language === "ar" ? "عرض تعليمي" : "Study presentation");
           result = await AiCreativeService.design(input.userId, {
             format: input.intent === "design_ppt" ? "ppt" : "pdf",
             title,
-            prompt: input.question,
+            prompt: [
+              input.question,
+              outline
+                ? "Build the presentation/document from the attached source material below."
+                : "",
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
             language: input.language,
+            outline,
           });
           break;
         }
@@ -716,13 +738,34 @@ export class AiChatService {
             image: images[0],
           });
           break;
-        case "image_design":
-          result = await AiCreativeService.image(input.userId, {
-            mode: "design",
-            prompt: input.question,
-            language: input.language,
-          });
+        case "image_design": {
+          // If an image is attached, treat as edit/recreate; otherwise design from prompt (+ PDF text if any).
+          if (images[0]) {
+            result = await AiCreativeService.image(input.userId, {
+              mode: "edit",
+              prompt: input.question,
+              language: input.language,
+              image: images[0],
+            });
+          } else {
+            let extra = "";
+            if (input.attachments.length) {
+              const processed = await processAttachments(
+                input.attachments,
+                input.userId
+              );
+              extra = processed.textExcerpt.slice(0, 4000);
+            }
+            result = await AiCreativeService.image(input.userId, {
+              mode: "design",
+              prompt: extra
+                ? `${input.question}\n\nSource material:\n${extra}`
+                : input.question,
+              language: input.language,
+            });
+          }
           break;
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Creative job failed";
