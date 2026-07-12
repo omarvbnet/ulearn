@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader, Select, Input } from "@/components/ui";
+import { fetchJson, readResponseJson } from "@/lib/fetch-json";
 
 type Doc = {
   id: string;
@@ -73,11 +74,10 @@ export function AiKnowledgeClient() {
       setDocs([]);
       return;
     }
-    const r = await fetch(
+    const { res, data } = await fetchJson<{ documents?: Doc[] }>(
       `/api/admin/ai/knowledge-base?educationalStageId=${encodeURIComponent(stageId)}`
     );
-    if (!r.ok) throw new Error("SUPER_ADMIN required");
-    const data = await r.json();
+    if (!res.ok) throw new Error("SUPER_ADMIN required");
     setDocs(data.documents || []);
   }, []);
 
@@ -113,7 +113,7 @@ export function AiKnowledgeClient() {
     setBusy(true);
     setError("");
     try {
-      const presign = await fetch("/api/admin/uploads", {
+      const presignRes = await fetch("/api/admin/uploads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -124,8 +124,11 @@ export function AiKnowledgeClient() {
           folder: "kb",
         }),
       });
-      if (!presign.ok) throw new Error("Upload URL failed");
-      const { uploadUrl, key, publicUrl } = await presign.json();
+      if (!presignRes.ok) throw new Error("Upload URL failed");
+      const presignData = await readResponseJson<{ uploadUrl: string; key: string; publicUrl: string }>(
+        presignRes
+      );
+      const { uploadUrl, key, publicUrl } = presignData;
 
       const put = await fetch(uploadUrl, {
         method: "PUT",
@@ -153,8 +156,10 @@ export function AiKnowledgeClient() {
         }),
       });
       if (!create.ok) {
-        const err = await create.json().catch(() => ({}));
-        throw new Error(err.error || "KB create failed");
+        const err = await readResponseJson<{ error?: string }>(create).catch(
+          () => ({ error: undefined }) as { error?: string }
+        );
+        throw new Error(err.error || `KB create failed (HTTP ${create.status})`);
       }
       await load(activeStageId);
     } catch (err) {

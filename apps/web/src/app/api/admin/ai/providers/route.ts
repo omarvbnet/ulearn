@@ -3,6 +3,18 @@ import { AiProviderService } from "@/services/ai";
 import { AiProviderType } from "@prisma/client";
 import { z } from "zod";
 
+function providerCreateError(e: unknown) {
+  const msg = e instanceof Error ? e.message : "Create failed";
+  if (/JINA|AiProviderType|enum/i.test(msg)) {
+    return error(
+      'Database is missing the JINA provider type. Run in SQL: ALTER TYPE "AiProviderType" ADD VALUE IF NOT EXISTS \'JINA\';',
+      500,
+      "DB_MIGRATION"
+    );
+  }
+  return error(msg, 500, "CREATE_FAILED");
+}
+
 export async function GET() {
   const auth = await requireAuth(["SUPER_ADMIN"]);
   if (auth.error) return auth.error;
@@ -34,9 +46,22 @@ export async function POST(request: Request) {
   if (auth.error) return auth.error;
   const parsed = createSchema.safeParse(await request.json());
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
-  const provider = await AiProviderService.create({
-    ...parsed.data,
-    baseUrl: parsed.data.baseUrl || undefined,
-  });
-  return json({ provider: { ...provider, apiKeyEncrypted: undefined, hasApiKey: Boolean(provider.apiKeyEncrypted) } }, 201);
+  try {
+    const provider = await AiProviderService.create({
+      ...parsed.data,
+      baseUrl: parsed.data.baseUrl || undefined,
+    });
+    return json(
+      {
+        provider: {
+          ...provider,
+          apiKeyEncrypted: undefined,
+          hasApiKey: Boolean(provider.apiKeyEncrypted),
+        },
+      },
+      201
+    );
+  } catch (e) {
+    return providerCreateError(e);
+  }
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/ui";
+import { fetchJson, readResponseJson } from "@/lib/fetch-json";
 
 type Provider = {
   id: string;
@@ -161,9 +162,10 @@ export function AiProvidersClient() {
   }, [form.model, modelOptions]);
 
   const load = useCallback(async () => {
-    const r = await fetch("/api/admin/ai/providers");
-    if (!r.ok) throw new Error("SUPER_ADMIN required");
-    const data = await r.json();
+    const { res, data } = await fetchJson<{ providers?: Provider[]; assignments?: Assignment[] }>(
+      "/api/admin/ai/providers"
+    );
+    if (!res.ok) throw new Error("SUPER_ADMIN required");
     setProviders(data.providers || []);
     setAssignments(data.assignments || []);
   }, []);
@@ -193,9 +195,15 @@ export function AiProvidersClient() {
     setDiagBusy(true);
     setError("");
     try {
-      const r = await fetch("/api/admin/ai/diagnostics", { method: "POST" });
-      if (!r.ok) throw new Error("Diagnostics failed");
-      setDiagnostics(await r.json());
+      const { res, data } = await fetchJson<Diagnostics>("/api/admin/ai/diagnostics", {
+        method: "POST",
+      });
+      if (!res.ok) {
+        throw new Error(
+          (data as { error?: string }).error || `Diagnostics failed (HTTP ${res.status})`
+        );
+      }
+      setDiagnostics(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Diagnostics failed");
     } finally {
@@ -211,7 +219,7 @@ export function AiProvidersClient() {
       const model =
         modelSelectValue === CUSTOM_MODEL ? form.customModel.trim() : form.model;
       if (!model) throw new Error("Select or enter a model");
-      const r = await fetch("/api/admin/ai/providers", {
+      const { res, data } = await fetchJson<{ error?: string }>("/api/admin/ai/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -223,7 +231,7 @@ export function AiProvidersClient() {
           isDefault: form.isDefault,
         }),
       });
-      if (!r.ok) throw new Error((await r.json()).error || "Create failed");
+      if (!res.ok) throw new Error(data.error || `Create failed (HTTP ${res.status})`);
       setForm((f) => ({ ...f, apiKey: "" }));
       await load();
     } catch (err) {
@@ -254,8 +262,14 @@ export function AiProvidersClient() {
     setBusy(true);
     try {
       const r = await fetch(`/api/admin/ai/providers/${id}/test`, { method: "POST" });
-      const data = await r.json();
+      const data = await readResponseJson<{ ok?: boolean; message?: string; error?: string }>(r);
+      if (!r.ok) {
+        alert(data.error || data.message || `Test failed (HTTP ${r.status})`);
+        return;
+      }
       alert(data.message || (data.ok ? "OK" : "Failed"));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Test failed");
     } finally {
       setBusy(false);
     }
@@ -264,7 +278,7 @@ export function AiProvidersClient() {
   async function saveAssignments() {
     setBusy(true);
     try {
-      const r = await fetch("/api/admin/ai/module-assignments", {
+      const { res, data } = await fetchJson<{ error?: string }>("/api/admin/ai/module-assignments", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -275,7 +289,7 @@ export function AiProvidersClient() {
           }).filter((a) => a.providerId),
         }),
       });
-      if (!r.ok) throw new Error("Save assignments failed");
+      if (!res.ok) throw new Error(data.error || `Save assignments failed (HTTP ${res.status})`);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
