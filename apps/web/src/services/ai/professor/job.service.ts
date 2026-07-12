@@ -85,7 +85,7 @@ export class ProfessorJobService {
   /** Fire-and-forget runner with progress + error capture. */
   static enqueue(
     jobId: string,
-    runner: (report: (progress: number) => Promise<void>) => Promise<Prisma.InputJsonValue | void>
+    runner: (report: (progress: number) => Promise<void>) => Promise<unknown>
   ) {
     void (async () => {
       try {
@@ -93,7 +93,11 @@ export class ProfessorJobService {
         const result = await runner(async (progress) => {
           await this.markProgress(jobId, progress);
         });
-        await this.markSucceeded(jobId, result ?? undefined);
+        const resultJson =
+          result === undefined || result === null
+            ? undefined
+            : (JSON.parse(JSON.stringify(result)) as Prisma.InputJsonValue);
+        await this.markSucceeded(jobId, resultJson);
       } catch (e) {
         await this.markFailed(
           jobId,
