@@ -154,7 +154,7 @@ export class AiChatService {
 
     const unavailable = unavailableAnswer(language);
     const hasAttachments = attachments.length > 0;
-    const processed = await processAttachments(attachments);
+    const processed = await processAttachments(attachments, input.userId);
     const editIntent =
       input.mode === "edit" ||
       (hasAttachments && wantsAttachmentEdit(question));
@@ -340,7 +340,9 @@ export class AiChatService {
           "Do not invent unrelated curriculum. Stay faithful to the attachment unless the user asked to expand.",
           processed.textExcerpt
             ? `\nOriginal extracted text:\n${processed.textExcerpt}`
-            : "Original content is in the attached image(s) — transcribe and edit as requested.",
+            : processed.imageParts.length
+              ? "Original content is in the attached image(s) — transcribe and edit as requested."
+              : "Attachment content could not be extracted.",
           context ? `\nOptional related curriculum context:\n${context}` : "",
         ]
           .filter(Boolean)
@@ -353,7 +355,11 @@ export class AiChatService {
             : "",
           memoryBlurb ? `Learning memory: ${memoryBlurb}` : "",
           hasAttachments
-            ? "The student attached files/photos. Use them to understand the question (homework photo, worksheet, PDF notes). Prefer answering from the attachment when the question is about it."
+            ? [
+                "The student attached files/photos. Their content is provided below and/or as images.",
+                "You MUST analyze the attachment content. Never say the file did not arrive, was not received, or that you cannot access attachments when content is present below.",
+                "If attachment text is empty and you cannot see an image, ask them to re-upload a clearer photo or PDF/DOCX/TXT.",
+              ].join(" ")
             : "",
           isCert
             ? "Prefer the student's areas of interest when giving examples."
@@ -378,8 +384,10 @@ export class AiChatService {
           "Keep answers clear and educational.",
           context ? `\nRetrieved material:\n${context}` : "",
           processed.textExcerpt
-            ? `\nExtracted text from attached documents:\n${processed.textExcerpt}`
-            : "",
+            ? `\nExtracted text from attached documents/photos (treat as the student's file content):\n${processed.textExcerpt}`
+            : hasAttachments
+              ? "\nNote: attachment bytes were received but text could not be extracted yet — if images are attached, read them visually."
+              : "",
         ]
           .filter(Boolean)
           .join("\n");
@@ -392,7 +400,19 @@ export class AiChatService {
         })
       : [];
 
-    const userParts: ChatContentPart[] = [...processed.imageParts];
+    // Prefer transcribed text for chat-only models (DeepSeek). Keep raw images
+    // only when OCR produced little/no text so a vision model can still help.
+    const ocrStrong = processed.textExcerpt.replace(/\s+/g, " ").trim().length > 80;
+    const userParts: ChatContentPart[] = ocrStrong ? [] : [...processed.imageParts];
+    const userContent = [
+      question,
+      processed.textExcerpt
+        ? `\n\n[Attached file content]\n${processed.textExcerpt}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("");
+
     const messages: ChatMessage[] = [
       { role: "system", content: system },
       ...history.reverse().map((m) => ({
@@ -401,10 +421,31 @@ export class AiChatService {
       })),
       {
         role: "user",
-        content: question,
+        content: userContent || question,
         parts: userParts.length ? userParts : undefined,
       },
     ];
+
+    // If files were attached but we got neither OCR text nor images, fail clearly.
+    if (
+      hasAttachments &&
+      !processed.textExcerpt.trim() &&
+      !processed.imageParts.length
+    ) {
+      const failMsg =
+        language === "ar"
+          ? "استلمت الملف لكن تعذر قراءة محتواه. أعد رفع صورة أوضح أو ملف PDF/DOCX/TXT."
+          : "The file was received but its content could not be read. Please re-upload a clearer photo or a PDF/DOCX/TXT file.";
+      return this.persistTurn({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        question: attachmentAwareQuestionLabel(question, attachments),
+        answer: failMsg,
+        citations: [],
+        fromCache: false,
+        attachmentNames: attachments.map((a) => a.fileName),
+      });
+    }
 
     const result = await AiProviderService.chat("TEACHING_ASSISTANT", messages, input.userId);
     let answer = result.text.trim();
@@ -583,7 +624,10 @@ function attachmentAwareQuestionLabel(question: string, attachments: ChatAttachm
   return `${question}\n[attachments: ${names}]`;
 }
 
-async function processAttachments(attachments: ChatAttachmentInput[]): Promise<{
+async function processAttachments(
+  attachments: ChatAttachmentInput[],
+  userId?: string
+): Promise<{
   imageParts: ChatContentPart[];
   textExcerpt: string;
 }> {
@@ -594,14 +638,39 @@ async function processAttachments(attachments: ChatAttachmentInput[]): Promise<{
     const mime = (a.mimeType || "").toLowerCase();
     const name = a.fileName || "file";
     const raw = a.dataBase64.replace(/^data:[^;]+;base64,/, "");
-    const buffer = Buffer.from(raw, "base64");
+    let buffer: Buffer;
+    try {
+      buffer = Buffer.from(raw, "base64");
+    } catch {
+      texts.push(`[${name}] (invalid file encoding)`);
+      continue;
+    }
+    if (!buffer.length) {
+      texts.push(`[${name}] (empty file)`);
+      continue;
+    }
 
     if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(name)) {
+      const imageMime = mime.startsWith("image/") ? mime : "image/jpeg";
       imageParts.push({
         type: "image",
-        mimeType: mime.startsWith("image/") ? mime : "image/jpeg",
+        mimeType: imageMime,
         dataBase64: raw,
       });
+      // OCR so chat-only models (DeepSeek/Kimi) still get the content as text.
+      try {
+        const { OcrService } = await import("./ocr.service");
+        const ocr = await OcrService.extractFromImage(buffer, imageMime, name, userId);
+        if (ocr.trim()) {
+          texts.push(`[${name} — transcribed from photo]\n${ocr.trim()}`);
+        } else {
+          texts.push(
+            `[${name}] (photo attached; OCR returned no text — model should read the image if supported)`
+          );
+        }
+      } catch {
+        texts.push(`[${name}] (photo attached; transcription unavailable)`);
+      }
       continue;
     }
 
@@ -609,9 +678,18 @@ async function processAttachments(attachments: ChatAttachmentInput[]): Promise<{
       const extracted = await extractTextFromBuffer(buffer, mime, name);
       if (extracted.text?.trim()) {
         texts.push(`[${name}]\n${extracted.text.trim().slice(0, 12000)}`);
+      } else {
+        const { OcrService } = await import("./ocr.service");
+        texts.push(
+          await OcrService.describeUnreadablePdf(name)
+        );
       }
-    } catch {
-      texts.push(`[${name}] (could not extract text — unsupported or binary)`);
+    } catch (e) {
+      texts.push(
+        `[${name}] (could not extract text: ${
+          e instanceof Error ? e.message : "unsupported format"
+        })`
+      );
     }
   }
 

@@ -138,14 +138,25 @@ export class AiProviderService {
 
   static async withFallback<T>(
     moduleKey: AiModuleKey | undefined,
-    run: (provider: AiProvider, config: ProviderConfig) => Promise<T>
+    run: (provider: AiProvider, config: ProviderConfig) => Promise<T>,
+    opts?: { preferTypes?: string[]; skipTypes?: string[] }
   ): Promise<{ result: T; provider: AiProvider }> {
     const primary = await this.resolveProvider(moduleKey);
     const fallbacks = await prisma.aiProvider.findMany({
       where: { status: "ENABLED", ...(primary ? { id: { not: primary.id } } : {}) },
       orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
     });
-    const chain = primary ? [primary, ...fallbacks] : fallbacks;
+    let chain = primary ? [primary, ...fallbacks] : fallbacks;
+    if (opts?.preferTypes?.length) {
+      const preferred = chain.filter((p) => opts.preferTypes!.includes(p.type));
+      const rest = chain.filter((p) => !opts.preferTypes!.includes(p.type));
+      chain = [...preferred, ...rest];
+    }
+    if (opts?.skipTypes?.length) {
+      const skipped = chain.filter((p) => opts.skipTypes!.includes(p.type));
+      const keep = chain.filter((p) => !opts.skipTypes!.includes(p.type));
+      chain = keep.length ? keep : skipped; // if only skipped exist, still try
+    }
     let lastError: unknown;
     for (const provider of chain) {
       if (!provider.apiKeyEncrypted) continue;
@@ -184,10 +195,22 @@ export class AiProviderService {
 
   static async chat(moduleKey: AiModuleKey | undefined, messages: ChatMessage[], userId?: string) {
     const started = Date.now();
-    const { result, provider } = await this.withFallback(moduleKey, async (p, config) => {
-      const adapter = getAdapter(p.type);
-      return adapter.chat(config, messages);
-    });
+    const needsVision = messages.some((m) =>
+      (m.parts || []).some((p) => p.type === "image" && Boolean(p.dataBase64))
+    );
+    const { result, provider } = await this.withFallback(
+      moduleKey,
+      async (p, config) => {
+        const adapter = getAdapter(p.type);
+        return adapter.chat(config, messages);
+      },
+      needsVision
+        ? {
+            preferTypes: ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE"],
+            skipTypes: ["DEEPSEEK", "KIMI"],
+          }
+        : undefined
+    );
     await prisma.aiUsageLog.create({
       data: {
         providerId: provider.id,
