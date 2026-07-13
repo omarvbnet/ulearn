@@ -146,3 +146,20 @@ export function materialSelectMessage(
         : "No READY materials yet — ask an admin to upload them in Basic Knowledge.";
   }
 }
+
+export function chapterSelectMessage(
+  language: string,
+  materialName?: string
+): string {
+  const name = materialName ? ` (${materialName})` : "";
+  switch (language.slice(0, 2)) {
+    case "ar":
+      return `اختر الفصل أو القسم من المادة${name} بالضغط على أحد الأزرار:`;
+    case "ku":
+      return `بەش/وانەی ماددە${name} هەڵبژێرە بە کرتەکردن لەسەر دوگمەیەک:`;
+    case "tr":
+      return `Materyal${name} içinden bölüm seçmek için bir düğmeye dokun:`;
+    default:
+      return `Select a chapter/section from the material${name} by tapping a button:`;
+  }
+}

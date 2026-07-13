@@ -15,17 +15,37 @@ export type AiCreativeOffer = {
 
 export type AiCreativeConfig = {
   freeUses: number;
+  /** Paid store courses required to unlock AI without IAP. */
   courseUnlockCount: number;
+  /** @deprecated Prefer monthlyUsd — kept for older clients. */
   monthlyPrice: number;
+  /** @deprecated Prefer monthlyUsd / yearlyIqd. */
   currency: string;
+  /** Monthly AI plan price in USD (Apple / Play IAP). */
+  monthlyUsd: number;
+  /** Yearly AI plan price in IQD (Apple / Play IAP). */
+  yearlyIqd: number;
+  appleProductIdMonthly: string;
+  appleProductIdYearly: string;
+  googleProductIdMonthly: string;
+  googleProductIdYearly: string;
+  /** User AI messages before this date do not consume free uses. */
+  meteringStartedAt: string;
   offers: AiCreativeOffer[];
 };
 
 export const DEFAULT_AI_CREATIVE_CONFIG: AiCreativeConfig = {
   freeUses: 5,
   courseUnlockCount: 6,
-  monthlyPrice: 15000,
-  currency: "IQD",
+  monthlyPrice: 4.99,
+  currency: "USD",
+  monthlyUsd: 4.99,
+  yearlyIqd: 60000,
+  appleProductIdMonthly: "com.ulearn.ai.monthly",
+  appleProductIdYearly: "com.ulearn.ai.yearly",
+  googleProductIdMonthly: "ai_monthly",
+  googleProductIdYearly: "ai_yearly",
+  meteringStartedAt: "2026-07-13T00:00:00.000Z",
   offers: [],
 };
 
@@ -39,6 +59,7 @@ export type AiCreativePlanLabel =
   | "FREE"
   | "COURSES_UNLOCK"
   | "MONTHLY"
+  | "YEARLY"
   | string;
 
 export type AiCreativeEntitlementStatus = {
@@ -50,8 +71,16 @@ export type AiCreativeEntitlementStatus = {
   remaining: number;
   courseCount: number;
   unlockCount: number;
+  /** True when paid course count already unlocks AI (no IAP required). */
+  hasCourseOffer: boolean;
   monthlyPrice: number;
   currency: string;
+  monthlyUsd: number;
+  yearlyIqd: number;
+  appleProductIdMonthly: string;
+  appleProductIdYearly: string;
+  googleProductIdMonthly: string;
+  googleProductIdYearly: string;
   offers: AiCreativeOffer[];
   subscription: {
     id: string;
@@ -71,10 +100,25 @@ export type AiCreativeEntitlementStatus = {
   }>;
 };
 
+function num(v: unknown, fallback: number): number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : fallback;
+}
+
+function str(v: unknown, fallback: string): string {
+  return typeof v === "string" && v.trim() ? v.trim() : fallback;
+}
+
 function parseConfig(value: unknown): AiCreativeConfig {
   if (!value || typeof value !== "object") return { ...DEFAULT_AI_CREATIVE_CONFIG };
   const v = value as Record<string, unknown>;
   const offersRaw = Array.isArray(v.offers) ? v.offers : [];
+  const monthlyUsd = num(
+    v.monthlyUsd,
+    typeof v.monthlyPrice === "number" && String(v.currency || "").toUpperCase() === "USD"
+      ? (v.monthlyPrice as number)
+      : DEFAULT_AI_CREATIVE_CONFIG.monthlyUsd
+  );
+  const yearlyIqd = num(v.yearlyIqd, DEFAULT_AI_CREATIVE_CONFIG.yearlyIqd);
   return {
     freeUses:
       typeof v.freeUses === "number" && v.freeUses >= 0
@@ -84,14 +128,30 @@ function parseConfig(value: unknown): AiCreativeConfig {
       typeof v.courseUnlockCount === "number" && v.courseUnlockCount >= 0
         ? Math.floor(v.courseUnlockCount)
         : DEFAULT_AI_CREATIVE_CONFIG.courseUnlockCount,
-    monthlyPrice:
-      typeof v.monthlyPrice === "number" && v.monthlyPrice >= 0
-        ? v.monthlyPrice
-        : DEFAULT_AI_CREATIVE_CONFIG.monthlyPrice,
-    currency:
-      typeof v.currency === "string" && v.currency.trim()
-        ? v.currency.trim()
-        : DEFAULT_AI_CREATIVE_CONFIG.currency,
+    monthlyPrice: monthlyUsd,
+    currency: "USD",
+    monthlyUsd,
+    yearlyIqd,
+    appleProductIdMonthly: str(
+      v.appleProductIdMonthly,
+      DEFAULT_AI_CREATIVE_CONFIG.appleProductIdMonthly
+    ),
+    appleProductIdYearly: str(
+      v.appleProductIdYearly,
+      DEFAULT_AI_CREATIVE_CONFIG.appleProductIdYearly
+    ),
+    googleProductIdMonthly: str(
+      v.googleProductIdMonthly,
+      DEFAULT_AI_CREATIVE_CONFIG.googleProductIdMonthly
+    ),
+    googleProductIdYearly: str(
+      v.googleProductIdYearly,
+      DEFAULT_AI_CREATIVE_CONFIG.googleProductIdYearly
+    ),
+    meteringStartedAt: str(
+      v.meteringStartedAt,
+      DEFAULT_AI_CREATIVE_CONFIG.meteringStartedAt
+    ),
     offers: offersRaw
       .filter((o): o is Record<string, unknown> => !!o && typeof o === "object")
       .map((o) => ({
@@ -153,48 +213,62 @@ export class AiCreativeEntitlementService {
       select: { countryId: true },
     });
     const config = await this.getConfig(user?.countryId);
+    const meteringFrom = new Date(config.meteringStartedAt);
+    const meteringOk = !Number.isNaN(meteringFrom.getTime())
+      ? meteringFrom
+      : new Date(DEFAULT_AI_CREATIVE_CONFIG.meteringStartedAt);
 
-    const [used, courseCount, activeSub, packages] = await Promise.all([
-      prisma.aiCreativeJob.count({
-        where: { userId, status: "SUCCEEDED", countedAsUse: true },
-      }),
-      prisma.coursePurchase.count({
-        where: {
-          userId,
-          status: "PAID",
-        },
-      }),
-      prisma.subscription.findFirst({
-        where: {
-          userId,
-          status: "ACTIVE",
-          package: { type: "AI_CREATIVE", deletedAt: null },
-          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-        },
-        include: {
-          package: {
-            select: {
-              id: true,
-              nameEn: true,
-              durationDays: true,
+    const [creativeUsed, chatUsed, courseCount, activeSub, packages] =
+      await Promise.all([
+        prisma.aiCreativeJob.count({
+          where: { userId, status: "SUCCEEDED", countedAsUse: true },
+        }),
+        prisma.aiMessage.count({
+          where: {
+            userId,
+            role: "USER",
+            createdAt: { gte: meteringOk },
+          },
+        }),
+        prisma.coursePurchase.count({
+          where: {
+            userId,
+            status: "PAID",
+          },
+        }),
+        prisma.subscription.findFirst({
+          where: {
+            userId,
+            status: "ACTIVE",
+            package: { type: "AI_CREATIVE", deletedAt: null },
+            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+          },
+          include: {
+            package: {
+              select: {
+                id: true,
+                nameEn: true,
+                durationDays: true,
+              },
             },
           },
-        },
-        orderBy: { expiresAt: "desc" },
-      }),
-      prisma.subscriptionPackage.findMany({
-        where: {
-          type: "AI_CREATIVE",
-          isActive: true,
-          deletedAt: null,
-          ...(user?.countryId ? { countryId: user.countryId } : {}),
-        },
-        orderBy: { price: "asc" },
-      }),
-    ]);
+          orderBy: { expiresAt: "desc" },
+        }),
+        prisma.subscriptionPackage.findMany({
+          where: {
+            type: "AI_CREATIVE",
+            isActive: true,
+            deletedAt: null,
+            ...(user?.countryId ? { countryId: user.countryId } : {}),
+          },
+          orderBy: { price: "asc" },
+        }),
+      ]);
 
+    const used = creativeUsed + chatUsed;
     const remaining = Math.max(0, config.freeUses - used);
     const offers = config.offers.filter((o) => o.active);
+    const hasCourseOffer = courseCount >= config.courseUnlockCount;
 
     let access = false;
     let reason: AiCreativeAccessReason = "NONE";
@@ -205,10 +279,12 @@ export class AiCreativeEntitlementService {
       reason = "SUBSCRIPTION";
       const days = activeSub.package.durationDays;
       plan =
-        days != null && days <= 35
-          ? activeSub.package.nameEn || "MONTHLY"
-          : activeSub.package.nameEn || "MONTHLY";
-    } else if (courseCount >= config.courseUnlockCount) {
+        days != null && days >= 300
+          ? "YEARLY"
+          : days != null && days <= 35
+            ? "MONTHLY"
+            : activeSub.package.nameEn || "MONTHLY";
+    } else if (hasCourseOffer) {
       access = true;
       reason = "COURSES_UNLOCK";
       plan = "COURSES_UNLOCK";
@@ -227,8 +303,15 @@ export class AiCreativeEntitlementService {
       remaining,
       courseCount,
       unlockCount: config.courseUnlockCount,
-      monthlyPrice: config.monthlyPrice,
-      currency: config.currency,
+      hasCourseOffer,
+      monthlyPrice: config.monthlyUsd,
+      currency: "USD",
+      monthlyUsd: config.monthlyUsd,
+      yearlyIqd: config.yearlyIqd,
+      appleProductIdMonthly: config.appleProductIdMonthly,
+      appleProductIdYearly: config.appleProductIdYearly,
+      googleProductIdMonthly: config.googleProductIdMonthly,
+      googleProductIdYearly: config.googleProductIdYearly,
       offers,
       subscription: activeSub
         ? {
@@ -254,7 +337,7 @@ export class AiCreativeEntitlementService {
   static async assertCanRun(userId: string): Promise<AiCreativeEntitlementStatus> {
     const status = await this.getStatus(userId);
     if (!status.access) {
-      const err = new Error("AI Creative Studio entitlement required") as Error & {
+      const err = new Error("AI subscription or free plan required") as Error & {
         code: string;
         status: AiCreativeEntitlementStatus;
       };
@@ -267,8 +350,6 @@ export class AiCreativeEntitlementService {
 
   /**
    * Mark a finished job as a free-tier use when the run was allowed via FREE.
-   * Pass the reason from assertCanRun (before the job) so post-success status
-   * changes do not skip accounting.
    */
   static async recordUse(
     userId: string,

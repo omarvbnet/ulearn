@@ -179,8 +179,12 @@ function AiCreativeConfigCard() {
   const [saving, setSaving] = useState(false);
   const [freeUses, setFreeUses] = useState("5");
   const [courseUnlockCount, setCourseUnlockCount] = useState("6");
-  const [monthlyPrice, setMonthlyPrice] = useState("15000");
-  const [currency, setCurrency] = useState("IQD");
+  const [monthlyUsd, setMonthlyUsd] = useState("4.99");
+  const [yearlyIqd, setYearlyIqd] = useState("60000");
+  const [appleMonthly, setAppleMonthly] = useState("com.ulearn.ai.monthly");
+  const [appleYearly, setAppleYearly] = useState("com.ulearn.ai.yearly");
+  const [googleMonthly, setGoogleMonthly] = useState("ai_monthly");
+  const [googleYearly, setGoogleYearly] = useState("ai_yearly");
   const [offersJson, setOffersJson] = useState("[]");
 
   useEffect(() => {
@@ -194,9 +198,18 @@ function AiCreativeConfigCard() {
         if (typeof v.freeUses === "number") setFreeUses(String(v.freeUses));
         if (typeof v.courseUnlockCount === "number")
           setCourseUnlockCount(String(v.courseUnlockCount));
-        if (typeof v.monthlyPrice === "number")
-          setMonthlyPrice(String(v.monthlyPrice));
-        if (typeof v.currency === "string") setCurrency(v.currency);
+        if (typeof v.monthlyUsd === "number") setMonthlyUsd(String(v.monthlyUsd));
+        else if (typeof v.monthlyPrice === "number" && v.currency === "USD")
+          setMonthlyUsd(String(v.monthlyPrice));
+        if (typeof v.yearlyIqd === "number") setYearlyIqd(String(v.yearlyIqd));
+        if (typeof v.appleProductIdMonthly === "string")
+          setAppleMonthly(v.appleProductIdMonthly);
+        if (typeof v.appleProductIdYearly === "string")
+          setAppleYearly(v.appleProductIdYearly);
+        if (typeof v.googleProductIdMonthly === "string")
+          setGoogleMonthly(v.googleProductIdMonthly);
+        if (typeof v.googleProductIdYearly === "string")
+          setGoogleYearly(v.googleProductIdYearly);
         if (Array.isArray(v.offers)) setOffersJson(JSON.stringify(v.offers, null, 2));
       }
       setLoading(false);
@@ -221,15 +234,21 @@ function AiCreativeConfigCard() {
         value: {
           freeUses: Number(freeUses),
           courseUnlockCount: Number(courseUnlockCount),
-          monthlyPrice: Number(monthlyPrice),
-          currency,
+          monthlyUsd: Number(monthlyUsd),
+          yearlyIqd: Number(yearlyIqd),
+          monthlyPrice: Number(monthlyUsd),
+          currency: "USD",
+          appleProductIdMonthly: appleMonthly,
+          appleProductIdYearly: appleYearly,
+          googleProductIdMonthly: googleMonthly,
+          googleProductIdYearly: googleYearly,
           offers,
         },
       }),
     });
     setSaving(false);
-    if (res.ok) toast("AI Creative config saved");
-    else toast("Failed to save AI Creative config", "error");
+    if (res.ok) toast("AI plan config saved");
+    else toast("Failed to save AI plan config", "error");
   }
 
   if (loading) return <SkeletonRows rows={2} />;
@@ -237,11 +256,11 @@ function AiCreativeConfigCard() {
   return (
     <Card className="space-y-4 md:col-span-2">
       <div>
-        <h3 className="font-semibold">AI Creative Studio</h3>
+        <h3 className="font-semibold">AI plans & entitlements</h3>
         <p className="mt-1 text-sm text-muted">
-          Free uses, paid-course unlock threshold, monthly price, and time-boxed offers.
-          Create matching <code className="text-xs">AI_CREATIVE</code> packages under
-          Subscriptions for checkout.
+          Free uses and course-unlock threshold. Monthly price is USD; yearly is IQD.
+          Learners without the course offer must pay via Apple / Google in-app purchase.
+          Product IDs must match App Store Connect and Google Play Console.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -260,17 +279,42 @@ function AiCreativeConfigCard() {
           onChange={(e) => setCourseUnlockCount(e.target.value)}
         />
         <Input
-          label="Monthly price"
+          label="Monthly price (USD)"
           type="number"
           min="0"
-          value={monthlyPrice}
-          onChange={(e) => setMonthlyPrice(e.target.value)}
+          step="0.01"
+          value={monthlyUsd}
+          onChange={(e) => setMonthlyUsd(e.target.value)}
         />
-        <Select label="Currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
-          <option value="IQD">IQD</option>
-          <option value="USD">USD</option>
-          <option value="TRY">TRY</option>
-        </Select>
+        <Input
+          label="Yearly price (IQD)"
+          type="number"
+          min="0"
+          value={yearlyIqd}
+          onChange={(e) => setYearlyIqd(e.target.value)}
+        />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Input
+          label="Apple product ID (monthly)"
+          value={appleMonthly}
+          onChange={(e) => setAppleMonthly(e.target.value)}
+        />
+        <Input
+          label="Apple product ID (yearly)"
+          value={appleYearly}
+          onChange={(e) => setAppleYearly(e.target.value)}
+        />
+        <Input
+          label="Google product ID (monthly)"
+          value={googleMonthly}
+          onChange={(e) => setGoogleMonthly(e.target.value)}
+        />
+        <Input
+          label="Google product ID (yearly)"
+          value={googleYearly}
+          onChange={(e) => setGoogleYearly(e.target.value)}
+        />
       </div>
       <div>
         <label className="mb-1 block text-sm font-medium">
@@ -285,7 +329,7 @@ function AiCreativeConfigCard() {
         />
       </div>
       <Button disabled={saving} onClick={() => void saveConfig()}>
-        {saving ? "Saving…" : "Save AI Creative Config"}
+        {saving ? "Saving…" : "Save AI Plan Config"}
       </Button>
     </Card>
   );

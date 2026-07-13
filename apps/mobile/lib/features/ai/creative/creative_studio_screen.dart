@@ -238,7 +238,8 @@ class _CreativeStudioScreenState extends State<CreativeStudioScreen>
                 l10n.t('mobile.ai.creative.upgradeBody', {
                   'unlock': '${status['unlockCount']}',
                   'courses': '${status['courseCount']}',
-                  'price': '${status['monthlyPrice']} ${status['currency']}',
+                  'price':
+                      '${status['monthlyUsd'] ?? status['monthlyPrice']} USD / ${status['yearlyIqd'] ?? ''} IQD',
                 }),
                 style: TextStyle(color: Colors.grey.shade700, height: 1.4),
               ),

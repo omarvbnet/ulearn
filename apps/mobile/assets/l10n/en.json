@@ -1005,7 +1005,20 @@
       "promptCheckUnderstanding": "Quiz me lightly on what I just learned",
       "continueLearning": "Continue learning",
       "pickMaterialToAnswer": "Choose a material",
-      "pickMaterialToAnswerHint": "Pick one stage material so the AI can answer from it accurately."
+      "pickMaterialToAnswerHint": "Pick one stage material so the AI can answer from it accurately.",
+      "pickChapterToAnswer": "Choose a chapter",
+      "pickChapterToAnswerHint": "Pick a chapter or section so the AI answers only from that part.",
+      "upgradePlan": "Upgrade Plan",
+      "upgradeTitle": "Unlock AI",
+      "upgradeBody": "You have {courses}/{unlock} paid courses for the admin unlock offer. Or subscribe: monthly {monthly}, yearly {yearly}.",
+      "upgradeMonthly": "Monthly — {price}",
+      "upgradeYearly": "Yearly — {price}",
+      "upgradePayApple": "Payment via Apple In-App Purchase",
+      "upgradePayGoogle": "Payment via Google Play Billing",
+      "upgradeCourseUnlocked": "You already unlocked AI with paid courses — pull to refresh.",
+      "upgradePending": "Purchase started. If AI does not unlock, wait a moment or restore purchases.",
+      "lockedTitle": "AI plan ended",
+      "lockedBody": "Your free AI uses or subscription has ended. Upgrade to continue learning with AI."
     },
     "error": {
       "generic": "Something went wrong",

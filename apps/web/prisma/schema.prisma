@@ -236,6 +236,7 @@ model User {
   professorArtifacts   ProfessorArtifact[]
   professorQuestions   ProfessorQuestionBankItem[]
   aiCreativeJobs       AiCreativeJob[]
+  aiIapPurchases       AiIapPurchase[]
 
   @@index([role, status])
   @@index([countryId])
@@ -2034,3 +2035,23 @@ model AiCreativeJob {
   @@index([userId, createdAt])
   @@index([countedAsUse])
 }
+
+/// Apple / Google Play purchases that unlock AI_CREATIVE subscriptions.
+model AiIapPurchase {
+  id             String   @id @default(cuid())
+  userId         String
+  platform       String // APPLE | GOOGLE
+  productId      String
+  transactionId  String   @unique
+  purchaseToken  String?
+  plan           String // MONTHLY | YEARLY
+  subscriptionId String?
+  raw            Json?
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([platform, productId])
+}
+

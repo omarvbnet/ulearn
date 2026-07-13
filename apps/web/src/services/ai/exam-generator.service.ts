@@ -205,6 +205,9 @@ export class ExamGeneratorService {
     attachmentText?: string;
     count?: number;
     requireDocuments?: boolean;
+    chapterHeading?: string | null;
+    chunkFrom?: number | null;
+    chunkTo?: number | null;
   }): Promise<PracticeQuizPayload> {
     const language = normalizeLang(input.language);
     const count = Math.min(Math.max(input.count ?? 5, 3), 20);
@@ -224,6 +227,9 @@ export class ExamGeneratorService {
         attachmentText: input.attachmentText,
         allowRagFallback: !input.requireDocuments,
         sampleSeed: requestSeed,
+        chapterHeading: input.chapterHeading,
+        chunkFrom: input.chunkFrom,
+        chunkTo: input.chunkTo,
       }),
       this.loadRecentExamContext(input.userId),
     ]);
@@ -546,6 +552,7 @@ export class ExamGeneratorService {
       languageInstruction(input.language),
       `Create exactly ${input.count} multiple-choice questions from the material.`,
       'Schema: {"title":"...","questions":[{"text":"...","options":{"A":"...","B":"...","C":"...","D":"..."},"correctKey":"A"}]}',
+      "STRICT: Use ONLY the provided material/chapter text. Do not invent topics outside it.",
       "correctKey must be one of A|B|C|D. Every question must be answerable from the material.",
       "When the material contains shapes/diagrams/figures, write at least one question that refers to those shapes so they can be painted for the student.",
       "Keep stems and options concise (1–2 short sentences). Close every brace/bracket — incomplete JSON is invalid.",
@@ -689,6 +696,12 @@ export class ExamGeneratorService {
     attachmentText?: string;
     allowRagFallback?: boolean;
     sampleSeed?: number;
+    /** Restrict chunks to this chapter/section title (or "__all__"). */
+    chapterHeading?: string | null;
+    chunkFrom?: number | null;
+    chunkTo?: number | null;
+    pageFrom?: number | null;
+    pageTo?: number | null;
   }) {
     const citations: Array<{ documentName: string; page: number | null }> = [];
     const parts: string[] = [];
@@ -715,44 +728,120 @@ export class ExamGeneratorService {
               : {}),
           },
         },
-        take: 240,
+        take: 400,
         orderBy: { chunkIndex: "asc" },
         include: { document: { select: { fileName: true } } },
       });
 
-      const byDoc = new Map<string, typeof chunks>();
-      for (const c of chunks) {
-        const list = byDoc.get(c.documentId) || [];
-        list.push(c);
-        byDoc.set(c.documentId, list);
-      }
-
-      const queues = [...byDoc.values()].map((list, idx) =>
-        shuffleWithSeed(list, seed + idx * 97)
-      );
-      const picked: typeof chunks = [];
-      const target = Math.min(48, chunks.length || 0);
-      let guard = 0;
-      while (picked.length < target && queues.some((q) => q.length) && guard < 500) {
-        guard += 1;
-        const order = shuffleWithSeed(
-          queues.map((_, i) => i).filter((i) => queues[i]!.length > 0),
-          seed + guard
-        );
-        for (const i of order) {
-          const next = queues[i]!.shift();
-          if (next) picked.push(next);
-          if (picked.length >= target) break;
+      let scoped = chunks;
+      const chapter = (input.chapterHeading || "").trim();
+      if (chapter && chapter !== "__all__") {
+        const pageMatch = chapter.match(/^Pages?\s+(\d+)\s*[–-]\s*(\d+)/i);
+        if (pageMatch) {
+          const from = Number(pageMatch[1]);
+          const to = Number(pageMatch[2]);
+          scoped = chunks.filter(
+            (c) =>
+              c.pageNumber != null &&
+              c.pageNumber >= from &&
+              c.pageNumber <= to
+          );
+        } else if (
+          input.chunkFrom != null &&
+          input.chunkTo != null &&
+          input.chunkTo >= input.chunkFrom
+        ) {
+          scoped = chunks.filter(
+            (c) =>
+              c.chunkIndex >= input.chunkFrom! &&
+              c.chunkIndex <= input.chunkTo!
+          );
+        } else {
+          // Match heading: exact metadata.heading or text starting with heading
+          const key = chapter.toLowerCase();
+          const withHeading = chunks.filter((c) => {
+            const meta = (c.metadata || {}) as Record<string, unknown>;
+            const h =
+              typeof meta.heading === "string"
+                ? meta.heading.toLowerCase()
+                : "";
+            return (
+              h === key ||
+              c.text.toLowerCase().startsWith(key) ||
+              c.text.toLowerCase().includes(`\n${key}`)
+            );
+          });
+          if (withHeading.length) {
+            // Expand to section range: from first matching heading to next different heading
+            const startIdx = withHeading[0]!.chunkIndex;
+            let endIdx = chunks.at(-1)?.chunkIndex ?? startIdx;
+            for (const c of chunks) {
+              if (c.chunkIndex <= startIdx) continue;
+              const meta = (c.metadata || {}) as Record<string, unknown>;
+              const h =
+                typeof meta.heading === "string" ? meta.heading.trim() : "";
+              if (h && h.toLowerCase() !== key) {
+                endIdx = c.chunkIndex - 1;
+                break;
+              }
+            }
+            scoped = chunks.filter(
+              (c) => c.chunkIndex >= startIdx && c.chunkIndex <= endIdx
+            );
+          }
         }
+        if (!scoped.length) scoped = chunks;
       }
 
-      const ordered = shuffleWithSeed(picked, seed ^ 0x9e3779b9);
-      for (const c of ordered) {
-        parts.push(`[${c.document.fileName}]\n${c.text}`);
-        citations.push({
-          documentName: c.document.fileName,
-          page: c.pageNumber,
-        });
+      // Prefer contiguous chapter body over random sample when chapter is set
+      if (chapter && chapter !== "__all__" && scoped.length) {
+        const ordered = scoped.slice(0, 80);
+        for (const c of ordered) {
+          parts.push(`[${c.document.fileName} · ${chapter}]\n${c.text}`);
+          citations.push({
+            documentName: c.document.fileName,
+            page: c.pageNumber,
+          });
+        }
+      } else {
+        const byDoc = new Map<string, typeof scoped>();
+        for (const c of scoped) {
+          const list = byDoc.get(c.documentId) || [];
+          list.push(c);
+          byDoc.set(c.documentId, list);
+        }
+
+        const queues = [...byDoc.values()].map((list, idx) =>
+          shuffleWithSeed(list, seed + idx * 97)
+        );
+        const picked: typeof scoped = [];
+        const target = Math.min(48, scoped.length || 0);
+        let guard = 0;
+        while (
+          picked.length < target &&
+          queues.some((q) => q.length) &&
+          guard < 500
+        ) {
+          guard += 1;
+          const order = shuffleWithSeed(
+            queues.map((_, i) => i).filter((i) => queues[i]!.length > 0),
+            seed + guard
+          );
+          for (const i of order) {
+            const next = queues[i]!.shift();
+            if (next) picked.push(next);
+            if (picked.length >= target) break;
+          }
+        }
+
+        const ordered = shuffleWithSeed(picked, seed ^ 0x9e3779b9);
+        for (const c of ordered) {
+          parts.push(`[${c.document.fileName}]\n${c.text}`);
+          citations.push({
+            documentName: c.document.fileName,
+            page: c.pageNumber,
+          });
+        }
       }
     } else if (input.allowRagFallback !== false) {
       const angleHint = FOCUS_ANGLES[seed % FOCUS_ANGLES.length];
@@ -800,6 +889,9 @@ export class ExamGeneratorService {
     educationalStageId?: string | null;
     subjectIds?: string[];
     question?: string;
+    chapterHeading?: string | null;
+    chunkFrom?: number | null;
+    chunkTo?: number | null;
   }) {
     return this.loadMaterialText({
       userId: input.userId,
@@ -807,6 +899,9 @@ export class ExamGeneratorService {
       educationalStageId: input.educationalStageId,
       subjectIds: input.subjectIds,
       documentIds: input.documentIds,
+      chapterHeading: input.chapterHeading,
+      chunkFrom: input.chunkFrom,
+      chunkTo: input.chunkTo,
       allowRagFallback: false,
     });
   }

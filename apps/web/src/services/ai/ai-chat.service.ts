@@ -62,6 +62,10 @@ export class AiChatService {
     mode?: "chat" | "practice_quiz" | "edit" | "explain_observe" | "from_materials";
     /** KB document ids for practice quiz / explain-observe material selection. */
     documentIds?: string[];
+    /** Chapter/section title within the selected material. */
+    chapterHeading?: string | null;
+    chunkFrom?: number | null;
+    chunkTo?: number | null;
     /** Practice exam size: 5 | 10 | 20 */
     count?: 5 | 10 | 20;
   }) {
@@ -171,60 +175,128 @@ export class AiChatService {
     const unavailable = unavailableAnswer(language);
     const hasAttachments = attachments.length > 0;
 
-    // Creative Studio actions run inside chat (learners only) when the user asks
-    // to merge / design / edit with or without attachments.
+    // Learners need an active free/course/AI subscription to use AI chat.
     const learnerCreative =
       profile?.role === "STUDENT" || profile?.role === "CERTIFICATE_USER";
     if (learnerCreative) {
-      const { detectCreativeChatIntent } = await import("./creative/creative-intent");
-      const creativeIntent = detectCreativeChatIntent(question, attachments);
-      if (creativeIntent) {
-        const creativeResult = await this.runCreativeInChat({
-          userId: input.userId,
-          conversationId: input.conversationId,
-          question,
-          language,
-          attachments,
-          intent: creativeIntent,
-        });
-        if (creativeResult) return creativeResult;
+      try {
+        await (
+          await import("./creative/entitlement.service")
+        ).AiCreativeEntitlementService.assertCanRun(input.userId);
+      } catch (e) {
+        const err = e as Error & {
+          code?: string;
+          status?: import("./creative/entitlement.service").AiCreativeEntitlementStatus;
+        };
+        if (err.code === "AI_CREATIVE_ENTITLEMENT") {
+          const { creativeUpgradeMessage } = await import(
+            "./creative/creative-intent"
+          );
+          return {
+            conversationId: input.conversationId || null,
+            messageId: null,
+            answer: creativeUpgradeMessage(language),
+            citations: [],
+            fromCache: false,
+            needsUpgrade: true,
+            entitlement: err.status || null,
+          };
+        }
+        throw e;
       }
+    }
+
+    // Creative Studio: attachments are the escape hatch for external files.
+    // Without attachments, design/file generation must use stage material → chapter.
+    const { detectCreativeChatIntent } = await import("./creative/creative-intent");
+    const creativeIntent = learnerCreative
+      ? detectCreativeChatIntent(question, attachments)
+      : null;
+
+    if (creativeIntent && attachments.length > 0) {
+      const creativeResult = await this.runCreativeInChat({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        question,
+        language,
+        attachments,
+        intent: creativeIntent,
+      });
+      if (creativeResult) return creativeResult;
+    }
+    if (
+      creativeIntent &&
+      !attachments.length &&
+      (creativeIntent === "merge" || creativeIntent === "image_edit")
+    ) {
+      const creativeResult = await this.runCreativeInChat({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        question,
+        language,
+        attachments,
+        intent: creativeIntent,
+      });
+      if (creativeResult) return creativeResult;
     }
 
     const {
       detectExplainObserveIntent,
       materialSelectMessage,
+      chapterSelectMessage,
       isChitchatOrMeta,
       matchMentionedMaterials,
       dedupeMaterialsByFileName,
     } = await import("./creative/figure-prompts");
     const { AiExamService } = await import("./ai-exam.service");
 
+    const practiceQuiz = input.mode === "practice_quiz";
     const explainObserve =
       input.mode === "explain_observe" ||
       (learnerCreative &&
         !attachments.length &&
-        input.mode !== "practice_quiz" &&
+        !practiceQuiz &&
         input.mode !== "edit" &&
         detectExplainObserveIntent(question));
 
-    // Grounded curriculum Q&A: learners pick a stage material unless they
-    // already selected docs, attached files, named a material, or are chatting casually.
+    const creativeNeedsMaterial =
+      Boolean(creativeIntent) &&
+      !attachments.length &&
+      creativeIntent !== "merge" &&
+      creativeIntent !== "image_edit";
+
+    // Grounded curriculum: material buttons → chapter buttons → answer/exam/file.
+    // Attachments outside stage materials allow external knowledge / editing.
     const skipMaterialGate =
-      input.mode === "practice_quiz" ||
-      input.mode === "edit" ||
-      attachments.length > 0;
+      input.mode === "edit" || attachments.length > 0;
 
     const wantsGroundedAnswer =
       learnerCreative &&
       !skipMaterialGate &&
+      !practiceQuiz &&
       !input.documentIds?.length &&
       !isChitchatOrMeta(question) &&
       (explainObserve ||
+        creativeNeedsMaterial ||
         input.mode === "from_materials" ||
         Boolean(question.trim()));
 
-    if (learnerCreative && !skipMaterialGate && (explainObserve || wantsGroundedAnswer || input.mode === "from_materials")) {
+    const pendingMode: string = practiceQuiz
+      ? "practice_quiz"
+      : creativeNeedsMaterial && creativeIntent
+        ? creativeIntent
+        : "explain_observe";
+
+    if (
+      learnerCreative &&
+      !skipMaterialGate &&
+      (practiceQuiz ||
+        explainObserve ||
+        wantsGroundedAnswer ||
+        creativeNeedsMaterial ||
+        input.mode === "from_materials" ||
+        Boolean(input.documentIds?.length))
+    ) {
       const library = await AiExamService.listKbDocumentsForUser(input.userId);
       const materials = dedupeMaterialsByFileName(
         library.map((d) => ({
@@ -238,7 +310,6 @@ export class AiChatService {
       if (!documentIds.length) {
         documentIds = matchMentionedMaterials(question, materials);
       }
-      // Never auto-select dozens of duplicate-named uploads — one material max on mention.
       if (documentIds.length > 1) {
         documentIds = documentIds.slice(0, 1);
       }
@@ -251,10 +322,186 @@ export class AiChatService {
           citations: [],
           fromCache: false,
           needsMaterialSelection: true,
-          pendingMode: "explain_observe" as const,
+          pendingMode,
           pendingQuestion: question,
+          pendingCount: practiceQuiz
+            ? input.count === 10 || input.count === 20
+              ? input.count
+              : 5
+            : undefined,
           materials,
         };
+      }
+
+      const chapterHeading = (input.chapterHeading || "").trim();
+      if (!chapterHeading) {
+        const chapters = await AiExamService.listDocumentChapters(
+          input.userId,
+          documentIds[0]!
+        );
+        const materialName =
+          materials.find((m) => m.id === documentIds[0])?.fileName ||
+          undefined;
+        const onlyWholeFile =
+          chapters.length <= 1 &&
+          (chapters[0]?.id === "__all__" ||
+            chapters[0]?.title === materialName);
+
+        if (!onlyWholeFile) {
+          return {
+            conversationId: input.conversationId || null,
+            messageId: null,
+            answer: chapterSelectMessage(language, materialName),
+            citations: [],
+            fromCache: false,
+            needsChapterSelection: true,
+            pendingMode,
+            pendingQuestion: question,
+            pendingCount: practiceQuiz
+              ? input.count === 10 || input.count === 20
+                ? input.count
+                : 5
+              : undefined,
+            documentIds,
+            chapters: chapters.map((c) => ({
+              id: c.id,
+              title: c.title,
+              chunkFrom: c.chunkFrom,
+              chunkTo: c.chunkTo,
+              pageStart: c.pageStart,
+            })),
+          };
+        }
+
+        // Single whole-file outline → proceed with that scope
+        const autoChapter = chapters[0];
+        const resolvedChapterEarly = autoChapter?.id || "__all__";
+        const chapterOptsEarly = {
+          chapterHeading: resolvedChapterEarly,
+          chunkFrom: autoChapter?.chunkFrom ?? input.chunkFrom,
+          chunkTo: autoChapter?.chunkTo ?? input.chunkTo,
+        };
+
+        if (practiceQuiz) {
+          return this.runPracticeQuizFromMaterials({
+            userId: input.userId,
+            conversationId: input.conversationId,
+            question,
+            language,
+            documentIds,
+            stageId,
+            subjectId,
+            subjectIds,
+            count: input.count,
+            ...chapterOptsEarly,
+          });
+        }
+
+        if (
+          creativeNeedsMaterial &&
+          creativeIntent &&
+          (creativeIntent === "design_ppt" ||
+            creativeIntent === "design_pdf" ||
+            creativeIntent === "design_docx" ||
+            creativeIntent === "image_design")
+        ) {
+          const { ExamGeneratorService } = await import("./exam-generator.service");
+          const allowed = await AiExamService.assertDocumentsAllowed(
+            input.userId,
+            documentIds
+          );
+          const material = await ExamGeneratorService.loadMaterialForDocuments({
+            userId: input.userId,
+            documentIds: allowed,
+            educationalStageId: stageId,
+            subjectIds: subjectId ? [subjectId] : subjectIds,
+            question,
+            ...chapterOptsEarly,
+          });
+          return this.runCreativeInChat({
+            userId: input.userId,
+            conversationId: input.conversationId,
+            question,
+            language,
+            attachments: [],
+            intent: creativeIntent,
+            materialOutline: [
+              `STRICT: Use ONLY this selected stage chapter/material. Do not invent topics outside it.`,
+              `Chapter: ${resolvedChapterEarly}`,
+              material.text.slice(0, 12000),
+            ].join("\n\n"),
+          });
+        }
+
+        return this.runExplainObserveWithMaterials({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          question,
+          language,
+          documentIds,
+          stageId,
+          subjectId,
+          subjectIds,
+          ...chapterOptsEarly,
+        });
+      }
+
+      const resolvedChapter = (input.chapterHeading || "__all__").trim();
+      const chapterOpts = {
+        chapterHeading: resolvedChapter,
+        chunkFrom: input.chunkFrom,
+        chunkTo: input.chunkTo,
+      };
+
+      if (practiceQuiz) {
+        return this.runPracticeQuizFromMaterials({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          question,
+          language,
+          documentIds,
+          stageId,
+          subjectId,
+          subjectIds,
+          count: input.count,
+          ...chapterOpts,
+        });
+      }
+
+      if (
+        creativeNeedsMaterial &&
+        creativeIntent &&
+        (creativeIntent === "design_ppt" ||
+          creativeIntent === "design_pdf" ||
+          creativeIntent === "design_docx" ||
+          creativeIntent === "image_design")
+      ) {
+        const { ExamGeneratorService } = await import("./exam-generator.service");
+        const allowed = await AiExamService.assertDocumentsAllowed(
+          input.userId,
+          documentIds
+        );
+        const material = await ExamGeneratorService.loadMaterialForDocuments({
+          userId: input.userId,
+          documentIds: allowed,
+          educationalStageId: stageId,
+          subjectIds: subjectId ? [subjectId] : subjectIds,
+          question,
+          ...chapterOpts,
+        });
+        return this.runCreativeInChat({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          question,
+          language,
+          attachments: [],
+          intent: creativeIntent,
+          materialOutline: [
+            `STRICT: Use ONLY this selected stage chapter/material. Do not invent topics outside it.`,
+            `Chapter: ${resolvedChapter}`,
+            material.text.slice(0, 12000),
+          ].join("\n\n"),
+        });
       }
 
       return this.runExplainObserveWithMaterials({
@@ -266,6 +513,7 @@ export class AiChatService {
         stageId,
         subjectId,
         subjectIds,
+        ...chapterOpts,
       });
     }
 
@@ -273,69 +521,22 @@ export class AiChatService {
     const editIntent =
       input.mode === "edit" ||
       (hasAttachments && wantsAttachmentEdit(question));
-    const practiceQuiz = input.mode === "practice_quiz";
 
-    if (practiceQuiz) {
-      const { ExamGeneratorService } = await import("./exam-generator.service");
-      const { AiExamService, stripCorrectKeys } = await import("./ai-exam.service");
-      const documentIds = await AiExamService.assertDocumentsAllowed(
-        input.userId,
-        input.documentIds || []
-      );
-      const quiz = await ExamGeneratorService.generatePractice({
+    // Non-learner practice quiz (or any path that skipped the learner gate)
+    if (input.mode === "practice_quiz") {
+      return this.runPracticeQuizFromMaterials({
         userId: input.userId,
+        conversationId: input.conversationId,
         question,
         language,
-        educationalStageId: stageId,
-        subjectIds: subjectId ? [subjectId] : subjectIds,
-        documentIds,
-        requireDocuments: true,
-        count: input.count === 10 || input.count === 20 ? input.count : 5,
-      });
-
-      // Ensure conversation exists before linking the attempt.
-      let conversationId = input.conversationId;
-      if (!conversationId) {
-        const conv = await prisma.aiConversation.create({
-          data: {
-            userId: input.userId,
-            title: (quiz.title || question).slice(0, 80),
-          },
-        });
-        conversationId = conv.id;
-      }
-
-      const attempt = await AiExamService.createAttempt({
-        userId: input.userId,
-        conversationId,
-        documentIds,
-        title: quiz.title,
-        questions: quiz.questions,
-      });
-
-      const publicQuiz = {
-        title: quiz.title,
-        questions: stripCorrectKeys(quiz.questions),
-        citations: quiz.citations,
-        examAttemptId: attempt.id,
-        timeLimitSec: attempt.timeLimitSec,
-      };
-
-      const intro =
-        language === "ar"
-          ? `امتحان جاهز: ${quiz.title}\nاختر الإجابات مباشرة. الوقت: ${attempt.timeLimitSec} ثانية.`
-          : `Exam ready: ${quiz.title}\nSelect your answers below. Time limit: ${attempt.timeLimitSec}s.`;
-
-      return this.persistTurn({
-        userId: input.userId,
-        conversationId,
-        question: question || `Generate exam from ${documentIds.length} material(s)`,
-        answer: intro,
-        citations: quiz.citations,
-        fromCache: false,
-        attachmentNames: [],
-        practiceQuiz: publicQuiz,
-        examAttemptId: attempt.id,
+        documentIds: input.documentIds || [],
+        stageId,
+        subjectId,
+        subjectIds,
+        count: input.count,
+        chapterHeading: input.chapterHeading,
+        chunkFrom: input.chunkFrom,
+        chunkTo: input.chunkTo,
       });
     }
 
@@ -528,7 +729,7 @@ export class AiChatService {
             ? "The student asked for ministry-style exam filters (مرشحات وزارية). Generate likely exam questions in the local ministry style: mix MCQ and short answer, cover high-yield topics from the material, group by difficulty, and include brief answer keys. Add FOLLOW_UPS offering to solve one question together."
             : "",
           context
-            ? "For curriculum facts, prioritize the retrieved educational material below (plus attachments when relevant). Cite document names/pages when helpful."
+            ? "For curriculum facts, use ONLY the retrieved educational material below (plus attachments when the student attached external files for knowledge/editing). Do not invent facts outside that material and the student's request. Cite document names/pages when helpful."
             : noCurriculumHits
               ? [
                   readyForStage === 0
@@ -712,6 +913,8 @@ export class AiChatService {
     language: string;
     attachments: ChatAttachmentInput[];
     intent: import("./creative/creative-intent").CreativeChatIntent;
+    /** Stage chapter text — required grounding when no attachments. */
+    materialOutline?: string;
   }) {
     const {
       AiCreativeEntitlementService,
@@ -777,8 +980,8 @@ export class AiChatService {
         case "design_ppt":
         case "design_pdf":
         case "design_docx": {
-          let outline: string | undefined;
-          if (input.attachments.length) {
+          let outline: string | undefined = input.materialOutline?.trim() || undefined;
+          if (!outline && input.attachments.length) {
             const processed = await processAttachments(
               input.attachments,
               input.userId
@@ -799,7 +1002,7 @@ export class AiChatService {
             prompt: [
               input.question,
               outline
-                ? "Build the presentation/document from the attached source material below. DeepSeek writes text; FLUX will paint professional figures."
+                ? "STRICT: Build ONLY from the selected stage chapter/material (or attached source) below. Do not add outside curriculum topics."
                 : "DeepSeek writes the text; FLUX will paint professional educational figures in the file.",
             ]
               .filter(Boolean)
@@ -835,7 +1038,6 @@ export class AiChatService {
           });
           break;
         case "image_design": {
-          // If an image is attached, treat as edit/recreate; otherwise design from prompt (+ PDF text if any).
           if (images[0]) {
             result = await AiCreativeService.image(input.userId, {
               mode: "edit",
@@ -844,8 +1046,8 @@ export class AiChatService {
               image: images[0],
             });
           } else {
-            let extra = "";
-            if (input.attachments.length) {
+            let extra = input.materialOutline?.trim() || "";
+            if (!extra && input.attachments.length) {
               const processed = await processAttachments(
                 input.attachments,
                 input.userId
@@ -855,7 +1057,7 @@ export class AiChatService {
             result = await AiCreativeService.image(input.userId, {
               mode: "design",
               prompt: extra
-                ? `${input.question}\n\nSource material:\n${extra}`
+                ? `${input.question}\n\nSTRICT source (stage chapter or attachment only):\n${extra}`
                 : input.question,
               language: input.language,
             });
@@ -894,6 +1096,95 @@ export class AiChatService {
     });
   }
 
+  private static async runPracticeQuizFromMaterials(input: {
+    userId: string;
+    conversationId?: string;
+    question: string;
+    language: string;
+    documentIds: string[];
+    stageId?: string | null;
+    subjectId?: string | null;
+    subjectIds?: string[];
+    count?: 5 | 10 | 20;
+    chapterHeading?: string | null;
+    chunkFrom?: number | null;
+    chunkTo?: number | null;
+  }) {
+    const { ExamGeneratorService } = await import("./exam-generator.service");
+    const { AiExamService, stripCorrectKeys } = await import("./ai-exam.service");
+    const documentIds = await AiExamService.assertDocumentsAllowed(
+      input.userId,
+      input.documentIds
+    );
+    const quiz = await ExamGeneratorService.generatePractice({
+      userId: input.userId,
+      question: [
+        input.question,
+        "STRICT: Write exam questions ONLY from the selected chapter/material. Do not invent facts outside it.",
+        input.chapterHeading
+          ? `Chapter scope: ${input.chapterHeading}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      language: input.language,
+      educationalStageId: input.stageId,
+      subjectIds: input.subjectId ? [input.subjectId] : input.subjectIds,
+      documentIds,
+      requireDocuments: true,
+      count: input.count === 10 || input.count === 20 ? input.count : 5,
+      chapterHeading: input.chapterHeading,
+      chunkFrom: input.chunkFrom,
+      chunkTo: input.chunkTo,
+    });
+
+    let conversationId = input.conversationId;
+    if (!conversationId) {
+      const conv = await prisma.aiConversation.create({
+        data: {
+          userId: input.userId,
+          title: (quiz.title || input.question).slice(0, 80),
+        },
+      });
+      conversationId = conv.id;
+    }
+
+    const attempt = await AiExamService.createAttempt({
+      userId: input.userId,
+      conversationId,
+      documentIds,
+      title: quiz.title,
+      questions: quiz.questions,
+    });
+
+    const publicQuiz = {
+      title: quiz.title,
+      questions: stripCorrectKeys(quiz.questions),
+      citations: quiz.citations,
+      examAttemptId: attempt.id,
+      timeLimitSec: attempt.timeLimitSec,
+    };
+
+    const intro =
+      input.language === "ar"
+        ? `امتحان جاهز: ${quiz.title}\nاختر الإجابات مباشرة. الوقت: ${attempt.timeLimitSec} ثانية.`
+        : `Exam ready: ${quiz.title}\nSelect your answers below. Time limit: ${attempt.timeLimitSec}s.`;
+
+    return this.persistTurn({
+      userId: input.userId,
+      conversationId,
+      question:
+        input.question ||
+        `Generate exam from ${documentIds.length} material(s)`,
+      answer: intro,
+      citations: quiz.citations,
+      fromCache: false,
+      attachmentNames: [],
+      practiceQuiz: publicQuiz,
+      examAttemptId: attempt.id,
+    });
+  }
+
   /** Answer from selected KB materials with optional FLUX educational paintings. */
   private static async runExplainObserveWithMaterials(input: {
     userId: string;
@@ -901,6 +1192,9 @@ export class AiChatService {
     question: string;
     language: string;
     documentIds: string[];
+    chapterHeading?: string | null;
+    chunkFrom?: number | null;
+    chunkTo?: number | null;
     stageId?: string | null;
     subjectId?: string | null;
     subjectIds?: string[];
@@ -922,6 +1216,9 @@ export class AiChatService {
         ? [input.subjectId]
         : input.subjectIds,
       question: input.question,
+      chapterHeading: input.chapterHeading,
+      chunkFrom: input.chunkFrom,
+      chunkTo: input.chunkTo,
     });
 
     const system = [
@@ -929,15 +1226,17 @@ export class AiChatService {
         language: input.language,
         audience: "student",
       }),
-      "Mode: answer ONLY from the selected curriculum material(s) the student chose.",
-      "Teach clearly: answer the question, explain concepts step by step, use analogies.",
-      "Cite the material by file name when helpful. Do not invent facts outside it.",
+      "Mode: answer ONLY from the selected curriculum chapter/material the student chose.",
+      "STRICT GROUNDING: Do not add facts, examples, or topics outside that chapter and the student's request.",
+      "If the answer is not in the selected material, say it is not available in that chapter.",
+      "Teach clearly: answer the question, explain concepts step by step, use analogies grounded in the text.",
+      "Cite the material by file name when helpful.",
       "When the topic benefits from a diagram/shape/infographic, add 1–3 figure blocks:",
       "[[FLUX]]",
       "Detailed English shape-only paint brief (geometry, colors, layout — NO Arabic letters).",
       "LABELS: short Arabic labels separated by | (burned with professional fonts after)",
       "[[/FLUX]]",
-      "FLUX briefs must be vivid and specific (composition, main shapes, markers A/B/C).",
+      "FLUX briefs must illustrate ONLY concepts present in the selected chapter.",
     ].join("\n");
 
     const chat = await AiProviderService.chat(
@@ -948,8 +1247,13 @@ export class AiChatService {
           role: "user",
           content: [
             `Student request:\n${input.question}`,
-            `\nSelected material:\n${material.text.slice(0, 14000)}`,
-          ].join("\n"),
+            input.chapterHeading
+              ? `\nSelected chapter: ${input.chapterHeading}`
+              : "",
+            `\nSelected material text:\n${material.text.slice(0, 14000)}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
         },
       ],
       input.userId,

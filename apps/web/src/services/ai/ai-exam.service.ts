@@ -230,6 +230,136 @@ export class AiExamService {
     return documentIds;
   }
 
+  /**
+   * Build a chapter/section outline from chunk headings for one allowed document.
+   */
+  static async listDocumentChapters(userId: string, documentId: string) {
+    await this.assertDocumentsAllowed(userId, [documentId]);
+    const doc = await prisma.kbDocument.findFirst({
+      where: { id: documentId, deletedAt: null, status: "READY" },
+      select: { id: true, fileName: true, chapter: true, pageCount: true },
+    });
+    if (!doc) {
+      return [] as Array<{
+        id: string;
+        title: string;
+        chunkFrom: number;
+        chunkTo: number;
+        pageStart: number | null;
+      }>;
+    }
+
+    const chunks = await prisma.kbChunk.findMany({
+      where: { documentId },
+      orderBy: { chunkIndex: "asc" },
+      select: {
+        chunkIndex: true,
+        pageNumber: true,
+        text: true,
+        metadata: true,
+      },
+    });
+
+    type Outline = {
+      id: string;
+      title: string;
+      chunkFrom: number;
+      chunkTo: number;
+      pageStart: number | null;
+    };
+
+    const headings: Array<{
+      title: string;
+      chunkIndex: number;
+      page: number | null;
+    }> = [];
+    const seen = new Set<string>();
+
+    for (const c of chunks) {
+      const meta = (c.metadata || {}) as Record<string, unknown>;
+      let heading =
+        typeof meta.heading === "string" ? meta.heading.trim() : "";
+      if (!heading) {
+        const first = (c.text || "").split("\n")[0]?.trim() || "";
+        if (
+          /^#{1,3}\s+\S/.test(first) ||
+          /^\d+(\.\d+)*\s+\S.{3,}/.test(first) ||
+          /^(الفصل|باب|الوحدة|فصل|بابەت|وانە)\s*/i.test(first)
+        ) {
+          heading = first.replace(/^#+\s*/, "").slice(0, 120);
+        }
+      }
+      if (!heading || heading.length < 3 || heading.length > 140) continue;
+      const key = heading.toLowerCase().replace(/\s+/g, " ");
+      if (seen.has(key)) continue;
+      if (/^(introduction|intro|محتويات|contents)$/i.test(heading)) continue;
+      seen.add(key);
+      headings.push({
+        title: heading,
+        chunkIndex: c.chunkIndex,
+        page: c.pageNumber,
+      });
+    }
+
+    if (!headings.length && doc.chapter?.trim()) {
+      return [
+        {
+          id: doc.chapter.trim(),
+          title: doc.chapter.trim(),
+          chunkFrom: 0,
+          chunkTo: Math.max(0, chunks.at(-1)?.chunkIndex ?? 0),
+          pageStart: chunks[0]?.pageNumber ?? null,
+        },
+      ];
+    }
+
+    if (headings.length >= 2) {
+      const out: Outline[] = [];
+      for (let i = 0; i < headings.length; i++) {
+        const h = headings[i]!;
+        const next = headings[i + 1];
+        out.push({
+          id: h.title,
+          title: h.title,
+          chunkFrom: h.chunkIndex,
+          chunkTo: next
+            ? next.chunkIndex - 1
+            : (chunks.at(-1)?.chunkIndex ?? h.chunkIndex),
+          pageStart: h.page,
+        });
+      }
+      return out.slice(0, 40);
+    }
+
+    const pageCount = doc.pageCount || 0;
+    if (pageCount >= 4) {
+      const window = Math.max(3, Math.ceil(pageCount / 6));
+      const out: Outline[] = [];
+      for (let start = 1; start <= pageCount; start += window) {
+        const end = Math.min(pageCount, start + window - 1);
+        const title = `Pages ${start}–${end}`;
+        out.push({
+          id: title,
+          title,
+          chunkFrom: 0,
+          chunkTo: chunks.at(-1)?.chunkIndex ?? 0,
+          pageStart: start,
+        });
+      }
+      return out.slice(0, 12);
+    }
+
+    return [
+      {
+        id: "__all__",
+        title: doc.fileName,
+        chunkFrom: 0,
+        chunkTo: chunks.at(-1)?.chunkIndex ?? 0,
+        pageStart: chunks[0]?.pageNumber ?? null,
+      },
+    ];
+  }
+
   static async submit(input: {
     userId: string;
     examAttemptId: string;

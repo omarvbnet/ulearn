@@ -14,6 +14,7 @@ import 'package:ulearn/core/widgets/glass.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/ai/ai_exam_panel.dart';
 import 'package:ulearn/features/ai/ai_message_content.dart';
+import 'package:ulearn/features/ai/ai_upgrade.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
 
 class _PendingAttachment {
@@ -47,6 +48,9 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   final List<_PendingAttachment> _pending = [];
   List<Map<String, dynamic>> _conversations = [];
   bool _loadingHistory = false;
+  AiUpgradeController? _upgrade;
+  bool _entitlementLoading = true;
+  bool _aiLocked = false;
 
   static const _maxBytes = 40 * 1024 * 1024;
   static const _maxInlineBytes = 300 * 1024;
@@ -55,14 +59,63 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadConversations());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _loadEntitlement();
+      await _loadConversations();
+    });
   }
 
   @override
   void dispose() {
+    _upgrade?.dispose();
     _controller.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadEntitlement() async {
+    final auth = context.read<AuthProvider>();
+    final role = auth.user?.role;
+    // Teachers / staff keep AI open without this learner gate.
+    if (role != 'STUDENT' && role != 'CERTIFICATE_USER') {
+      if (mounted) {
+        setState(() {
+          _entitlementLoading = false;
+          _aiLocked = false;
+        });
+      }
+      return;
+    }
+    setState(() => _entitlementLoading = true);
+    try {
+      final api = context.read<ApiClient>();
+      _upgrade ??= AiUpgradeController(api);
+      await _upgrade!.init();
+      if (!mounted) return;
+      setState(() {
+        _aiLocked = !_upgrade!.access;
+        _entitlementLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      // Fail open only while loading status fails? Prefer fail closed for paywall.
+      setState(() {
+        _aiLocked = true;
+        _entitlementLoading = false;
+      });
+    }
+  }
+
+  Future<void> _openUpgrade() async {
+    final c = _upgrade;
+    if (c == null) return;
+    final unlocked = await showAiUpgradeSheet(context, controller: c);
+    if (!mounted) return;
+    if (unlocked == true || c.access) {
+      setState(() => _aiLocked = false);
+    } else {
+      await _loadEntitlement();
+    }
   }
 
   Map<String, dynamic> _stagePayload(AuthProvider auth) {
@@ -397,9 +450,18 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       final data = await api.post('/api/ai/chat', payload);
       if (!mounted) return;
 
+      if (data['needsUpgrade'] == true) {
+        setState(() => _aiLocked = true);
+        await _openUpgrade();
+        return;
+      }
+
       if (data['needsMaterialSelection'] == true) {
         final pendingQ =
             data['pendingQuestion']?.toString() ?? displayText;
+        final pendingMode =
+            data['pendingMode']?.toString() ?? 'explain_observe';
+        final pendingCount = (data['pendingCount'] as num?)?.toInt();
         final materialsRaw = data['materials'];
         final materials = <Map<String, dynamic>>[];
         final seenNames = <String>{};
@@ -426,6 +488,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                   context.l10n.t('mobile.ai.pickMaterialToAnswerHint'),
               selectableMaterials: materials,
               pendingMaterialQuestion: pendingQ,
+              pendingMode: pendingMode,
+              pendingCount: pendingCount,
             ),
           );
         });
@@ -433,6 +497,11 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         if (materials.isEmpty) {
           await _startExplainObserveFlow(pendingQ);
         }
+        return;
+      }
+
+      if (data['needsChapterSelection'] == true) {
+        _showChapterSelectionBubble(data, displayText);
         return;
       }
 
@@ -519,6 +588,192 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           : context.l10n.t('mobile.ai.errorGeneric');
       setState(() {
         _messages.add(_ChatBubble(role: 'assistant', text: text));
+      });
+    } finally {
+      if (mounted) setState(() => _sending = false);
+      _scrollToEnd();
+    }
+  }
+
+  void _showChapterSelectionBubble(
+    Map<String, dynamic> data,
+    String fallbackQuestion,
+  ) {
+    final pendingQ =
+        data['pendingQuestion']?.toString() ?? fallbackQuestion;
+    final pendingMode = data['pendingMode']?.toString() ?? 'explain_observe';
+    final pendingCount = (data['pendingCount'] as num?)?.toInt();
+    final docIds = ((data['documentIds'] as List?) ?? [])
+        .map((e) => e.toString())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    final chapters = <Map<String, dynamic>>[];
+    final chaptersRaw = data['chapters'];
+    if (chaptersRaw is List) {
+      for (final c in chaptersRaw) {
+        if (c is Map) chapters.add(Map<String, dynamic>.from(c));
+      }
+    }
+    setState(() {
+      _conversationId =
+          data['conversationId']?.toString() ?? _conversationId;
+      _messages.add(
+        _ChatBubble(
+          role: 'assistant',
+          text: data['answer']?.toString() ??
+              context.l10n.t('mobile.ai.pickChapterToAnswerHint'),
+          selectableChapters: chapters,
+          pendingMaterialQuestion: pendingQ,
+          pendingMode: pendingMode,
+          pendingDocumentIds: docIds,
+          pendingCount: pendingCount,
+        ),
+      );
+    });
+  }
+
+  Future<void> _continueGroundedRequest({
+    required String question,
+    required String mode,
+    required List<String> documentIds,
+    String? chapterHeading,
+    int? chunkFrom,
+    int? chunkTo,
+    int? count,
+  }) async {
+    setState(() => _sending = true);
+    _scrollToEnd();
+    try {
+      final api = context.read<ApiClient>();
+      final auth = context.read<AuthProvider>();
+      final locale = context.read<LocaleProvider>().code.toLowerCase();
+      final unavailable = context.l10n.t('mobile.ai.unavailable');
+      final isPractice = mode == 'practice_quiz';
+      final isCreative = mode == 'design_ppt' ||
+          mode == 'design_pdf' ||
+          mode == 'design_docx' ||
+          mode == 'image_design';
+      final payload = <String, dynamic>{
+        'question': question,
+        'language': locale,
+        if (!isCreative) 'mode': isPractice ? 'practice_quiz' : 'explain_observe',
+        'documentIds': documentIds,
+        if (chapterHeading != null && chapterHeading.isNotEmpty)
+          'chapterHeading': chapterHeading,
+        if (chunkFrom != null) 'chunkFrom': chunkFrom,
+        if (chunkTo != null) 'chunkTo': chunkTo,
+        if (isPractice) 'count': count == 10 || count == 20 ? count : 5,
+        if (_conversationId != null) 'conversationId': _conversationId,
+        ..._stagePayload(auth),
+      };
+      final data = await api.post('/api/ai/chat', payload);
+      if (!mounted) return;
+
+      if (data['needsChapterSelection'] == true) {
+        _showChapterSelectionBubble(data, question);
+        return;
+      }
+
+      if (isPractice) {
+        final practice = data['practiceQuiz'] as Map<String, dynamic>?;
+        AiPracticeExamData? exam;
+        if (practice != null) {
+          exam = AiPracticeExamData.fromJson({
+            ...practice,
+            'examAttemptId':
+                practice['examAttemptId'] ?? data['examAttemptId'],
+            'timeLimitSec': practice['timeLimitSec'],
+          });
+        }
+        setState(() {
+          _conversationId =
+              data['conversationId']?.toString() ?? _conversationId;
+          _messages.add(
+            _ChatBubble(
+              role: 'assistant',
+              text: data['answer']?.toString() ?? '',
+              exam: exam != null && exam.examAttemptId.isNotEmpty ? exam : null,
+            ),
+          );
+        });
+        _loadConversations();
+        return;
+      }
+
+      final edited = data['editedFile'] as Map<String, dynamic>?;
+      Uint8List? editedPreview;
+      final editedMime = edited?['mimeType']?.toString();
+      final editedName = edited?['fileName']?.toString();
+      final editedB64 = edited?['contentBase64']?.toString();
+      final editedUrl = edited?['downloadUrl']?.toString();
+      final looksImage = (editedMime ?? '').toLowerCase().startsWith('image/') ||
+          (editedName ?? '').toLowerCase().endsWith('.png') ||
+          (editedName ?? '').toLowerCase().endsWith('.jpg') ||
+          (editedName ?? '').toLowerCase().endsWith('.jpeg') ||
+          (editedName ?? '').toLowerCase().endsWith('.webp');
+      if (looksImage) {
+        try {
+          if (editedB64 != null && editedB64.isNotEmpty) {
+            editedPreview = base64Decode(editedB64);
+          } else if (editedUrl != null && editedUrl.isNotEmpty) {
+            editedPreview = await api.getBytes(editedUrl);
+          }
+        } catch (_) {
+          editedPreview = null;
+        }
+      }
+      final rawAnswer = data['answer']?.toString() ?? unavailable;
+      final followUpsRaw = data['followUps'];
+      final followUps = <String>[];
+      if (followUpsRaw is List) {
+        for (final f in followUpsRaw) {
+          final t = f?.toString().trim() ?? '';
+          if (t.isNotEmpty) followUps.add(t);
+        }
+      }
+      if (followUps.isEmpty) {
+        followUps.addAll(AiMessageContent.inferFollowUps(rawAnswer));
+      }
+      final citations = (data['citations'] as List?) ?? const [];
+      setState(() {
+        _conversationId =
+            data['conversationId']?.toString() ?? _conversationId;
+        _messages.add(
+          _ChatBubble(
+            role: 'assistant',
+            text: AiMessageContent.stripFollowUpMarkers(rawAnswer),
+            citations: citations
+                .map((c) {
+                  if (c is! Map) return null;
+                  final name = c['documentName']?.toString() ?? '';
+                  if (name.isEmpty) return null;
+                  return name;
+                })
+                .whereType<String>()
+                .toSet()
+                .toList(),
+            editedFileName: editedName,
+            editedContentBase64: editedB64,
+            editedDownloadUrl: editedUrl,
+            editedMimeType: editedMime,
+            editedImageBytes: editedPreview,
+            followUps: followUps,
+          ),
+        );
+      });
+      _loadConversations();
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e is ApiException ? e.message : e.toString();
+      setState(() {
+        _messages.add(
+          _ChatBubble(
+            role: 'assistant',
+            text: msg.trim().isNotEmpty
+                ? msg
+                : context.l10n.t('mobile.ai.errorGeneric'),
+          ),
+        );
       });
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -635,156 +890,25 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         .where((e) => e.isNotEmpty)
         .toList();
     if (ids.isEmpty) return;
-    await _runExplainObserve(pendingQuestion, ids);
-  }
-
-  Future<void> _runExplainObserve(
-    String question,
-    List<String> documentIds,
-  ) async {
-    setState(() => _sending = true);
-    _scrollToEnd();
-    try {
-      final api = context.read<ApiClient>();
-      final auth = context.read<AuthProvider>();
-      final locale = context.read<LocaleProvider>().code.toLowerCase();
-      final payload = <String, dynamic>{
-        'question': question,
-        'language': locale,
-        'mode': 'explain_observe',
-        'documentIds': documentIds,
-        if (_conversationId != null) 'conversationId': _conversationId,
-        ..._stagePayload(auth),
-      };
-      final data = await api.post('/api/ai/chat', payload);
-      if (!mounted) return;
-      final edited = data['editedFile'] as Map<String, dynamic>?;
-      Uint8List? editedPreview;
-      final editedMime = edited?['mimeType']?.toString();
-      final editedName = edited?['fileName']?.toString();
-      final editedB64 = edited?['contentBase64']?.toString();
-      final editedUrl = edited?['downloadUrl']?.toString();
-      final looksImage =
-          (editedMime ?? '').toLowerCase().startsWith('image/');
-      if (looksImage) {
-        try {
-          if (editedB64 != null && editedB64.isNotEmpty) {
-            editedPreview = base64Decode(editedB64);
-          } else if (editedUrl != null && editedUrl.isNotEmpty) {
-            editedPreview = await api.getBytes(editedUrl);
-          }
-        } catch (_) {
-          editedPreview = null;
-        }
-      }
-      setState(() {
-        _conversationId =
-            data['conversationId']?.toString() ?? _conversationId;
-        final rawAnswer = data['answer']?.toString() ?? '';
-        final followUpsRaw = data['followUps'];
-        final followUps = <String>[];
-        if (followUpsRaw is List) {
-          for (final f in followUpsRaw) {
-            final t = f?.toString().trim() ?? '';
-            if (t.isNotEmpty) followUps.add(t);
-          }
-        }
-        if (followUps.isEmpty) {
-          followUps.addAll(AiMessageContent.inferFollowUps(rawAnswer));
-        }
-        _messages.add(
-          _ChatBubble(
-            role: 'assistant',
-            text: AiMessageContent.stripFollowUpMarkers(rawAnswer),
-            editedFileName: editedName,
-            editedContentBase64: editedB64,
-            editedDownloadUrl: editedUrl,
-            editedMimeType: editedMime,
-            editedImageBytes: editedPreview,
-            followUps: followUps,
-          ),
-        );
-      });
-      _loadConversations();
-    } catch (e) {
-      if (!mounted) return;
-      final msg = e is ApiException ? e.message : e.toString();
-      setState(() {
-        _messages.add(
-          _ChatBubble(
-            role: 'assistant',
-            text: msg.trim().isNotEmpty
-                ? msg
-                : context.l10n.t('mobile.ai.errorGeneric'),
-          ),
-        );
-      });
-    } finally {
-      if (mounted) setState(() => _sending = false);
-      _scrollToEnd();
-    }
+    await _continueGroundedRequest(
+      question: pendingQuestion,
+      mode: 'explain_observe',
+      documentIds: ids,
+    );
   }
 
   Future<void> _generateExam(List<String> documentIds, int count) async {
     final q = context.l10n.t('mobile.ai.generateExamPrompt');
     setState(() {
-      _sending = true;
       _messages.add(_ChatBubble(role: 'user', text: q));
     });
     _scrollToEnd();
-    try {
-      final api = context.read<ApiClient>();
-      final auth = context.read<AuthProvider>();
-      final locale = context.read<LocaleProvider>().code.toLowerCase();
-      final payload = <String, dynamic>{
-        'question': q,
-        'language': locale,
-        'mode': 'practice_quiz',
-        'documentIds': documentIds,
-        'count': count == 10 || count == 20 ? count : 5,
-        if (_conversationId != null) 'conversationId': _conversationId,
-        ..._stagePayload(auth),
-      };
-      final data = await api.post('/api/ai/chat', payload);
-      if (!mounted) return;
-      final practice = data['practiceQuiz'] as Map<String, dynamic>?;
-      AiPracticeExamData? exam;
-      if (practice != null) {
-        exam = AiPracticeExamData.fromJson({
-          ...practice,
-          'examAttemptId':
-              practice['examAttemptId'] ?? data['examAttemptId'],
-          'timeLimitSec': practice['timeLimitSec'],
-        });
-      }
-      setState(() {
-        _conversationId = data['conversationId']?.toString() ?? _conversationId;
-        _messages.add(
-          _ChatBubble(
-            role: 'assistant',
-            text: data['answer']?.toString() ?? '',
-            exam: exam != null && exam.examAttemptId.isNotEmpty ? exam : null,
-          ),
-        );
-      });
-      _loadConversations();
-    } catch (e) {
-      if (!mounted) return;
-      final msg = e is ApiException ? e.message : e.toString();
-      setState(() {
-        _messages.add(
-          _ChatBubble(
-            role: 'assistant',
-            text: msg.trim().isNotEmpty
-                ? msg
-                : context.l10n.t('mobile.ai.errorGeneric'),
-          ),
-        );
-      });
-    } finally {
-      if (mounted) setState(() => _sending = false);
-      _scrollToEnd();
-    }
+    await _continueGroundedRequest(
+      question: q,
+      mode: 'practice_quiz',
+      documentIds: documentIds,
+      count: count,
+    );
   }
 
   Future<void> _submitExam(
@@ -905,14 +1029,24 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           },
         ),
         actions: [
+          if (_aiLocked)
+            IconButton(
+              tooltip: context.l10n.t('mobile.ai.upgradePlan'),
+              onPressed: _openUpgrade,
+              icon: const Icon(Icons.workspace_premium_outlined),
+            ),
           IconButton(
             tooltip: l10n.t('mobile.ai.newChat'),
-            onPressed: _newChat,
+            onPressed: _aiLocked ? null : _newChat,
             icon: const Icon(Icons.edit_square),
           ),
         ],
       ),
-      body: Column(
+      body: _entitlementLoading
+          ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+          : _aiLocked
+              ? AiLockedGate(onUpgrade: _openUpgrade)
+              : Column(
         children: [
           if (name != null || stageName != null)
             Padding(
@@ -1203,7 +1337,9 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                                         final q = m
                                                                 .pendingMaterialQuestion ??
                                                             '';
-                                                        // Clear buttons on this bubble after tap.
+                                                        final mode = m
+                                                                .pendingMode ??
+                                                            'explain_observe';
                                                         setState(() {
                                                           final idx =
                                                               _messages
@@ -1220,11 +1356,14 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                                             );
                                                           }
                                                         });
-                                                        _runExplainObserve(
-                                                          q.isNotEmpty
-                                                              ? q
-                                                              : name,
-                                                          [id],
+                                                        _continueGroundedRequest(
+                                                          question:
+                                                              q.isNotEmpty
+                                                                  ? q
+                                                                  : name,
+                                                          mode: mode,
+                                                          documentIds: [id],
+                                                          count: m.pendingCount,
                                                         );
                                                       },
                                                 backgroundColor: AppTheme
@@ -1241,6 +1380,102 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                                 ),
                                                 label: Text(
                                                   name,
+                                                  style: TextStyle(
+                                                    color: AppTheme.foreground,
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              );
+                                            }).toList(),
+                                          ),
+                                        ],
+                                        if (m.selectableChapters
+                                            .isNotEmpty) ...[
+                                          const SizedBox(height: 12),
+                                          Text(
+                                            context.l10n.t(
+                                              'mobile.ai.pickChapterToAnswer',
+                                            ),
+                                            style: TextStyle(
+                                              color: AppTheme.muted,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Wrap(
+                                            spacing: 8,
+                                            runSpacing: 8,
+                                            children: m.selectableChapters
+                                                .map((ch) {
+                                              final id =
+                                                  ch['id']?.toString() ?? '';
+                                              final title = ch['title']
+                                                      ?.toString() ??
+                                                  id;
+                                              final from =
+                                                  (ch['chunkFrom'] as num?)
+                                                      ?.toInt();
+                                              final to = (ch['chunkTo'] as num?)
+                                                  ?.toInt();
+                                              return ActionChip(
+                                                onPressed: id.isEmpty ||
+                                                        _sending ||
+                                                        m.pendingDocumentIds
+                                                            .isEmpty
+                                                    ? null
+                                                    : () {
+                                                        final q = m
+                                                                .pendingMaterialQuestion ??
+                                                            '';
+                                                        final mode = m
+                                                                .pendingMode ??
+                                                            'explain_observe';
+                                                        setState(() {
+                                                          final idx =
+                                                              _messages
+                                                                  .indexOf(m);
+                                                          if (idx >= 0) {
+                                                            _messages[idx] =
+                                                                _ChatBubble(
+                                                              role: m.role,
+                                                              text: m.text,
+                                                              citations:
+                                                                  m.citations,
+                                                              followUps:
+                                                                  m.followUps,
+                                                            );
+                                                          }
+                                                        });
+                                                        _continueGroundedRequest(
+                                                          question:
+                                                              q.isNotEmpty
+                                                                  ? q
+                                                                  : title,
+                                                          mode: mode,
+                                                          documentIds: m
+                                                              .pendingDocumentIds,
+                                                          chapterHeading: id,
+                                                          chunkFrom: from,
+                                                          chunkTo: to,
+                                                          count: m.pendingCount,
+                                                        );
+                                                      },
+                                                backgroundColor: AppTheme
+                                                    .accent
+                                                    .withValues(alpha: 0.12),
+                                                side: BorderSide(
+                                                  color: AppTheme.primary
+                                                      .withValues(alpha: 0.4),
+                                                ),
+                                                avatar: Icon(
+                                                  Icons.list_alt_rounded,
+                                                  size: 16,
+                                                  color: AppTheme.primary,
+                                                ),
+                                                label: Text(
+                                                  title,
                                                   style: TextStyle(
                                                     color: AppTheme.foreground,
                                                     fontSize: 13,
@@ -2004,7 +2239,11 @@ class _ChatBubble {
     this.courseSuggestions = const [],
     this.followUps = const [],
     this.selectableMaterials = const [],
+    this.selectableChapters = const [],
     this.pendingMaterialQuestion,
+    this.pendingMode,
+    this.pendingDocumentIds = const [],
+    this.pendingCount,
   });
 
   final String role;
@@ -2023,7 +2262,11 @@ class _ChatBubble {
   final List<Map<String, dynamic>> courseSuggestions;
   final List<String> followUps;
   final List<Map<String, dynamic>> selectableMaterials;
+  final List<Map<String, dynamic>> selectableChapters;
   final String? pendingMaterialQuestion;
+  final String? pendingMode;
+  final List<String> pendingDocumentIds;
+  final int? pendingCount;
 }
 
 class _CourseSuggestionsStrip extends StatelessWidget {
