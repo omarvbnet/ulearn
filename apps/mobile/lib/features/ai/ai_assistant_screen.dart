@@ -13,6 +13,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/glass.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/ai/ai_exam_panel.dart';
+import 'package:ulearn/features/ai/ai_message_content.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
 
 class _PendingAttachment {
@@ -142,14 +143,26 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             if (s is Map) suggestions.add(Map<String, dynamic>.from(s));
           }
         }
+        final followUpsRaw = citationsMap?['followUps'];
+        final followUps = <String>[];
+        if (followUpsRaw is List) {
+          for (final f in followUpsRaw) {
+            final t = f?.toString().trim() ?? '';
+            if (t.isNotEmpty) followUps.add(t);
+          }
+        }
+        final content = m['content']?.toString() ?? '';
         bubbles.add(
           _ChatBubble(
             role: role == 'user' ? 'user' : 'assistant',
-            text: m['content']?.toString() ?? '',
+            text: AiMessageContent.stripFollowUpMarkers(content),
             exam: exam != null && exam.examAttemptId.isNotEmpty ? exam : null,
             examCompleted: exam != null,
             examResult: examResult,
             courseSuggestions: suggestions,
+            followUps: followUps.isNotEmpty
+                ? followUps
+                : AiMessageContent.inferFollowUps(content),
           ),
         );
       }
@@ -412,6 +425,18 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           if (s is Map) suggestions.add(Map<String, dynamic>.from(s));
         }
       }
+      final followUpsRaw = data['followUps'];
+      final followUps = <String>[];
+      if (followUpsRaw is List) {
+        for (final f in followUpsRaw) {
+          final t = f?.toString().trim() ?? '';
+          if (t.isNotEmpty) followUps.add(t);
+        }
+      }
+      if (followUps.isEmpty) {
+        followUps.addAll(AiMessageContent.inferFollowUps(answer));
+      }
+      final cleanAnswer = AiMessageContent.stripFollowUpMarkers(answer);
 
       Uint8List? editedPreview;
       final editedMime = edited?['mimeType']?.toString();
@@ -441,7 +466,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         _messages.add(
           _ChatBubble(
             role: 'assistant',
-            text: answer,
+            text: cleanAnswer,
             citations: citations
                 .map((c) {
                   if (c is! Map) return null;
@@ -457,6 +482,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             editedDownloadUrl: editedUrl,
             editedMimeType: editedMime,
             editedImageBytes: editedPreview,
+            followUps: followUps,
             courseSuggestions: suggestions,
           ),
         );
@@ -627,15 +653,28 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       setState(() {
         _conversationId =
             data['conversationId']?.toString() ?? _conversationId;
+        final rawAnswer = data['answer']?.toString() ?? '';
+        final followUpsRaw = data['followUps'];
+        final followUps = <String>[];
+        if (followUpsRaw is List) {
+          for (final f in followUpsRaw) {
+            final t = f?.toString().trim() ?? '';
+            if (t.isNotEmpty) followUps.add(t);
+          }
+        }
+        if (followUps.isEmpty) {
+          followUps.addAll(AiMessageContent.inferFollowUps(rawAnswer));
+        }
         _messages.add(
           _ChatBubble(
             role: 'assistant',
-            text: data['answer']?.toString() ?? '',
+            text: AiMessageContent.stripFollowUpMarkers(rawAnswer),
             editedFileName: editedName,
             editedContentBase64: editedB64,
             editedDownloadUrl: editedUrl,
             editedMimeType: editedMime,
             editedImageBytes: editedPreview,
+            followUps: followUps,
           ),
         );
       });
@@ -748,6 +787,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             citations: old.citations,
             exam: old.exam,
             examCompleted: true,
+            followUps: old.followUps,
+            courseSuggestions: old.courseSuggestions,
           );
         }
         _messages.add(
@@ -771,6 +812,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             citations: old.citations,
             exam: old.exam,
             examCompleted: false,
+            followUps: old.followUps,
+            courseSuggestions: old.courseSuggestions,
           );
         }
       });
@@ -1015,12 +1058,16 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                           const SizedBox(height: 6),
                                         ],
                                         if (m.text.isNotEmpty)
-                                          Text(
-                                            m.text,
-                                            style: TextStyle(
-                                              color: AppTheme.foreground,
-                                              height: 1.45,
-                                            ),
+                                          AiMessageContent(
+                                            text: m.text,
+                                            isUser: isUser,
+                                            followUps: m.followUps,
+                                            onFollowUp: isUser
+                                                ? null
+                                                : (prompt) {
+                                                    _controller.text = prompt;
+                                                    _send();
+                                                  },
                                           ),
                                         if (m.editedImageBytes != null) ...[
                                           const SizedBox(height: 10),
@@ -1341,14 +1388,20 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final prompts = [
+      l10n.t('mobile.ai.promptAnalogy'),
+      l10n.t('mobile.ai.promptStepByStep'),
+      l10n.t('mobile.ai.promptCheckUnderstanding'),
+      l10n.t('mobile.ai.promptExplain'),
+      l10n.t('mobile.ai.promptWeak'),
+      l10n.t('mobile.ai.promptPractice'),
       l10n.t('mobile.ai.promptSummary'),
       l10n.t('mobile.ai.promptMinistry'),
-      l10n.t('mobile.ai.promptEducationalDrawing'),
-      l10n.t('mobile.ai.promptInfographic'),
-      l10n.t('mobile.ai.promptExplain'),
-      l10n.t('mobile.ai.promptPractice'),
-      l10n.t('mobile.ai.promptWeak'),
     ];
+    final isCert =
+        context.read<AuthProvider>().user?.role == 'CERTIFICATE_USER';
+    final emptyHint = isCert
+        ? l10n.t('mobile.ai.emptyHintProfessional')
+        : l10n.t('mobile.ai.emptyHint');
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 40, 24, 24),
       children: [
@@ -1382,7 +1435,7 @@ class _EmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                l10n.t('mobile.ai.emptyHint'),
+                emptyHint,
                 textAlign: TextAlign.center,
                 style: TextStyle(color: AppTheme.muted, height: 1.45),
               ),
@@ -1833,6 +1886,7 @@ class _ChatBubble {
     this.examCompleted = false,
     this.examResult,
     this.courseSuggestions = const [],
+    this.followUps = const [],
   });
 
   final String role;
@@ -1849,6 +1903,7 @@ class _ChatBubble {
   final bool examCompleted;
   final Map<String, dynamic>? examResult;
   final List<Map<String, dynamic>> courseSuggestions;
+  final List<String> followUps;
 }
 
 class _CourseSuggestionsStrip extends StatelessWidget {

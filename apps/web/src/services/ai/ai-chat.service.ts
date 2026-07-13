@@ -6,6 +6,10 @@ import { StudentMemoryService } from "./student-memory.service";
 import { StudentLearningContextService } from "./student-learning-context.service";
 import { extractTextFromBuffer } from "./text-extract";
 import {
+  buildTutoringMethodPrompt,
+  extractFollowUps,
+} from "./tutoring-prompt";
+import {
   languageInstruction,
   unavailableAnswer,
   type ChatAttachmentInput,
@@ -432,6 +436,20 @@ export class AiChatService {
       .join("; ");
 
     const noCurriculumHits = !hits.length && !hasAttachments;
+    const tutoringCore = editIntent
+      ? null
+      : buildTutoringMethodPrompt({
+          language,
+          audience: isCert
+            ? "certificate"
+            : isLearner
+              ? "student"
+              : "general",
+          studentBlurb: studentBlurb || undefined,
+          memoryBlurb: memoryBlurb || undefined,
+          learningCtxBlurb: learningCtx?.promptBlurb || undefined,
+        });
+
     const system = editIntent
       ? [
           "You are U Learn document editor assistant.",
@@ -453,15 +471,7 @@ export class AiChatService {
           .filter(Boolean)
           .join("\n")
       : [
-          "You are U Learn Teaching Assistant — a helpful tutor.",
-          languageInstruction(language),
-          studentBlurb
-            ? `Know this student: ${studentBlurb}. Address them by name when natural.`
-            : "",
-          memoryBlurb ? `Learning memory: ${memoryBlurb}` : "",
-          learningCtx?.promptBlurb
-            ? `\nLearner progress & catalog (use for evaluation and recommendations):\n${learningCtx.promptBlurb}`
-            : "",
+          tutoringCore!,
           hasAttachments
             ? [
                 "The student attached files/photos. Their content is provided below and/or as images.",
@@ -470,13 +480,10 @@ export class AiChatService {
               ].join(" ")
             : "",
           /ملخص|summary|summariz|پوختە|özet/i.test(question)
-            ? "The student asked for a summary. Produce a clear structured summary with: title, key points, important definitions, and a short revision checklist. Prefer attached material and retrieved curriculum."
+            ? "The student asked for a summary. Produce a clear structured summary with: title, key points, important definitions, and a short revision checklist. Prefer attached material and retrieved curriculum. Still use the explanation method and FOLLOW_UPS block."
             : "",
           /مرشح|وزاري|وزارية|ministry.?style|exam filter|فلتەر|filtre/i.test(question)
-            ? "The student asked for ministry-style exam filters (مرشحات وزارية). Generate likely exam questions in the local ministry style: mix MCQ and short answer, cover high-yield topics from the material, group by difficulty, and include brief answer keys."
-            : "",
-          isCert
-            ? "Prefer the student's areas of interest when giving examples."
+            ? "The student asked for ministry-style exam filters (مرشحات وزارية). Generate likely exam questions in the local ministry style: mix MCQ and short answer, cover high-yield topics from the material, group by difficulty, and include brief answer keys. Add FOLLOW_UPS offering to solve one question together."
             : "",
           context
             ? "For curriculum facts, prioritize the retrieved educational material below (plus attachments when relevant). Cite document names/pages when helpful."
@@ -488,14 +495,13 @@ export class AiChatService {
                   embedFailed
                     ? "Note: embedding/retrieval is currently degraded — answer as a general tutor."
                     : "",
-                  "Still help the student: explain concepts, give study tips, and work through problems step by step.",
+                  "Still teach with the full explanation method (steps, analogy, study tip, FOLLOW_UPS).",
                   "Clearly say when your answer is general tutoring and not quoted from U Learn uploaded materials.",
                   "Do NOT invent that a specific uploaded PDF/page says something it does not.",
                 ]
                   .filter(Boolean)
                   .join(" ")
               : "",
-          "Keep answers clear and educational.",
           context ? `\nRetrieved material:\n${context}` : "",
           processed.textExcerpt
             ? `\nExtracted text from attached documents/photos (treat as the student's file content):\n${processed.textExcerpt}`
@@ -599,6 +605,11 @@ export class AiChatService {
       answer = unavailable;
     }
 
+    const { cleanText, followUps } = editIntent
+      ? { cleanText: answer, followUps: [] as string[] }
+      : extractFollowUps(answer);
+    answer = cleanText;
+
     const citations = hits.slice(0, 6).map((h) => ({
       documentName: h.fileName,
       page: h.pageNumber,
@@ -641,6 +652,7 @@ export class AiChatService {
       question: attachmentAwareQuestionLabel(question, attachments),
       answer,
       citations,
+      followUps,
       fromCache: false,
       attachmentNames: attachments.map((a) => a.fileName),
       editedFile,
@@ -872,8 +884,11 @@ export class AiChatService {
     });
 
     const system = [
-      "You are a patient teaching assistant for school students.",
-      languageInstruction(input.language),
+      buildTutoringMethodPrompt({
+        language: input.language,
+        audience: "student",
+      }),
+      "Mode: explain & observe selected curriculum material.",
       "Explain and help the student observe the selected material clearly.",
       "When the material describes shapes, diagrams, figures, geometry, maps, or labeled drawings:",
       "- Describe them accurately in words.",
@@ -882,7 +897,7 @@ export class AiChatService {
       "English shape-only prompt",
       "LABELS: Arabic label 1 | Arabic label 2",
       "[[/FLUX]]",
-      "If there are no shapes, still explain thoroughly and optionally add one clarifying educational diagram.",
+      "If there are no shapes, still explain thoroughly with the tutoring method and optionally add one clarifying educational diagram.",
       "Do not invent facts outside the material.",
     ].join("\n");
 
@@ -904,7 +919,9 @@ export class AiChatService {
 
     const raw = (chat.text || "").trim();
     const { cleanMarkdown, prompts } = extractFluxFigurePrompts(raw);
-    let answer = cleanMarkdown || raw;
+    const withoutFlux = cleanMarkdown || raw;
+    const { cleanText, followUps } = extractFollowUps(withoutFlux);
+    let answer = cleanText;
     let editedFile:
       | {
           fileName: string;
@@ -957,6 +974,7 @@ export class AiChatService {
         ? "تم الشرح من المادة المحددة."
         : "Here is the explanation from your selected material."),
       citations: material.citations,
+      followUps,
       fromCache: false,
       attachmentNames: [],
       editedFile,
@@ -981,6 +999,7 @@ export class AiChatService {
     practiceQuiz?: unknown;
     examAttemptId?: string;
     courseSuggestions?: unknown;
+    followUps?: string[];
   }) {
     let conversationId = input.conversationId;
     if (!conversationId) {
@@ -1019,6 +1038,7 @@ export class AiChatService {
       ...(input.courseSuggestions
         ? { courseSuggestions: input.courseSuggestions }
         : {}),
+      ...(input.followUps?.length ? { followUps: input.followUps } : {}),
     };
 
     const assistant = await prisma.aiMessage.create({
@@ -1036,6 +1056,7 @@ export class AiChatService {
       messageId: assistant.id,
       answer: input.answer,
       citations: input.citations,
+      followUps: input.followUps ?? [],
       fromCache: input.fromCache,
       editedFile: input.editedFile,
       practiceQuiz: input.practiceQuiz,

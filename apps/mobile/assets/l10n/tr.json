@@ -888,7 +888,7 @@
       "title": "u learn",
       "placeholder": "Derslerin hakkında sor…",
       "emptyTitle": "u learn",
-      "emptyHint": "Soru sor, fotoğraf veya PDF ekle — örn. “bu PDF’leri birleştir”, “sunum tasarla…”, “bu görseli düzenle…”.",
+      "emptyHint": "Adım adım anlatım, günlük hayattan benzetme veya alıştırma isteyin — ödev fotoğrafı ya da PDF ekleyebilirsiniz.",
       "downloadFile": "{name} indir",
       "thinking": "Düşünüyor…",
       "unavailable": "İstenen bilgi, U Learn’e yüklenen eğitim materyallerinde mevcut değil.",
@@ -926,7 +926,7 @@
       "examScore": "Puan {score}/{max}",
       "examAnalysis": "YZ bilgi analizi",
       "examReview": "Soru incelemesi",
-      "promptExplain": "Bugünkü dersi adım adım anlat",
+      "promptExplain": "Bugünkü dersi adım adım ve bir benzetmeyle anlat",
       "promptPractice": "Zor bir kavramda pratik yapmama yardım et",
       "promptWeak": "Sınavlarıma göre neyi tekrar etmeliyim?",
       "promptSummary": "Bu ders/materyal için net bir özet istiyorum",
@@ -987,7 +987,12 @@
         "statusCourses": "{count}/{unlock} ücretli kurs ile açıldı",
         "statusLocked": "Ücretsiz kullanım bitti — devam için yükseltin"
       },
-      "explainWithShapes": "Şekil çizerek açıkla"
+      "explainWithShapes": "Şekil çizerek açıkla",
+      "emptyHintProfessional": "Sertifika konularınız için net anlatımlar, iş hayatı örnekleri ve materyallerinizden tekrar ipuçları isteyin.",
+      "promptAnalogy": "Bu kavramı günlük hayattan basit bir benzetmeyle anlat",
+      "promptStepByStep": "Bu soruyu adım adım birlikte çöz ve anlayışımı kontrol et",
+      "promptCheckUnderstanding": "Az önce öğrendiklerimi kısa bir soruyla yokla",
+      "continueLearning": "Öğrenmeye devam et"
     },
     "error": {
       "generic": "Bir şeyler ters gitti",

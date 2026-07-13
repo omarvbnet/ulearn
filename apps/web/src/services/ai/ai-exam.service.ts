@@ -379,14 +379,18 @@ export class AiExamService {
   }) {
     const missed = input.review.filter((r) => !r.isCorrect).slice(0, 6);
     const prompt = [
-      "You are U Learn Teaching Assistant. Analyze this student's practice exam briefly.",
+      "You are U Learn Teaching Assistant — a warm personal tutor reviewing a practice exam.",
       languageInstruction(input.language),
-      `Exam: ${input.title}. Score: ${input.percentage}% (${input.passed ? "passed" : "failed"}). Pass mark 60%.`,
-      "Write 3-6 short sentences: strengths, gaps, and what to study next from the materials.",
-      "Do not invent document names. Be encouraging and specific.",
+      `Exam: ${input.title}. Score: ${input.percentage}% (${input.passed ? "passed" : "needs review"}). Pass mark 60%.`,
+      "Write a short coaching note (Markdown):",
+      "1) Celebrate progress in 1 sentence (use the score honestly).",
+      "2) Name 1–2 concrete gaps from missed items (concepts, not blame).",
+      "3) Give one everyday analogy or mini worked hint for the hardest missed idea.",
+      "4) End with a clear study tip (what to revise next).",
+      "Keep it under ~120 words. Encouraging, specific, no invented document names.",
       missed.length
         ? `Missed topics:\n${missed.map((m) => `- ${m.text}`).join("\n")}`
-        : "The student answered all questions correctly.",
+        : "The student answered all questions correctly — congratulate and suggest a slightly harder challenge.",
     ].join("\n");
 
     const result = await AiProviderService.chat(

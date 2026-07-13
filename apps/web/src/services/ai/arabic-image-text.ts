@@ -4,7 +4,6 @@ import sharp from "sharp";
 import {
   hasArabicScript,
   isRtlLanguage,
-  preparePdfText,
   fluxVisibleTextGuidance,
 } from "./fonts";
 
@@ -129,20 +128,15 @@ export async function burnArabicTypographyOntoPng(
       ? `@font-face{font-family:'NotoNaskhArabic';src:url('file://${fontPath.replace(/\\/g, "/")}');}`
       : "";
 
-    const displayTitle = title
-      ? escapeXml(preparePdfText(title.slice(0, 90)))
-      : "";
+    // SVG/librsvg applies OpenType shaping + bidi — pass LOGICAL Arabic, not pdf visual order.
+    const displayTitle = title ? escapeXml(title.slice(0, 90)) : "";
     const labelLine = labels.length
-      ? escapeXml(
-          preparePdfText(labels.slice(0, 6).join(rtl ? "  ·  " : "  ·  ").slice(0, 140))
-        )
+      ? escapeXml(labels.slice(0, 6).join(rtl ? "  ·  " : "  ·  ").slice(0, 140))
       : !title && needOverlay
         ? escapeXml(
-            preparePdfText(
-              (opts.language || "").startsWith("ar")
-                ? "رسم تعليمي"
-                : "Educational diagram"
-            )
+            (opts.language || "").startsWith("ar")
+              ? "رسم تعليمي"
+              : "Educational diagram"
           )
         : "";
 

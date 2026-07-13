@@ -209,6 +209,8 @@ export class AiCreativeService {
             `Produce a high-quality ${formatLabel} in Markdown.`,
             "Include a clear title, short learning objectives, and ## section headings.",
             "For presentations, keep each ## section suitable for one slide with bullet points.",
+            "Use real ASCII math in Latin letters, e.g. f(x) = 2x + 3 — never replace formulas with placeholders.",
+            "Keep bullets short (one idea each). Prefer ### for sub-topics inside a section.",
             "After each major section that needs a diagram/infographic/shape illustration, add exactly one figure block:",
             "[[FLUX]]",
             "English shape-only image prompt (NO Arabic letters in the picture).",

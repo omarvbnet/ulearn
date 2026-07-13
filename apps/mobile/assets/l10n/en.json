@@ -899,7 +899,7 @@
       "title": "u learn",
       "placeholder": "Ask about your lessons…",
       "emptyTitle": "u learn",
-      "emptyHint": "Ask grounded questions, attach homework photos or PDFs — e.g. “merge these PDFs”, “design a presentation about…”, or “edit this image…”.",
+      "emptyHint": "Ask for step-by-step help, everyday analogies, or practice — attach homework photos or PDFs anytime.",
       "downloadFile": "Download {name}",
       "thinking": "Thinking…",
       "unavailable": "The requested information is not available in the educational material uploaded to U Learn.",
@@ -937,7 +937,7 @@
       "examScore": "Score {score}/{max}",
       "examAnalysis": "AI knowledge analysis",
       "examReview": "Question review",
-      "promptExplain": "Explain today's lesson step by step",
+      "promptExplain": "Explain today's lesson step by step with an analogy",
       "promptPractice": "Help me practice a hard concept",
       "promptWeak": "What should I revise based on my exams?",
       "promptSummary": "I need a clear summary of this subject/material",
@@ -998,7 +998,12 @@
         "statusCourses": "Unlocked via {count}/{unlock} paid courses",
         "statusLocked": "No free uses left — upgrade to continue"
       },
-      "explainWithShapes": "Explain with shapes"
+      "explainWithShapes": "Explain with shapes",
+      "emptyHintProfessional": "Ask for clear walkthroughs of your professional topics, workplace examples, and revision tips from your insight materials.",
+      "promptAnalogy": "Explain this concept with a simple everyday analogy",
+      "promptStepByStep": "Solve this with me step by step and check my understanding",
+      "promptCheckUnderstanding": "Quiz me lightly on what I just learned",
+      "continueLearning": "Continue learning"
     },
     "error": {
       "generic": "Something went wrong",
