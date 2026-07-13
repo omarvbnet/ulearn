@@ -73,7 +73,7 @@ export function isChitchatOrMeta(question: string): boolean {
 
 /**
  * If the user already named a library file, return matching document ids
- * so we can skip the picker.
+ * so we can skip the picker. Dedupes by normalized file name (one id each).
  */
 export function matchMentionedMaterials(
   question: string,
@@ -81,14 +81,38 @@ export function matchMentionedMaterials(
 ): string[] {
   const q = question.toLowerCase();
   const hits: string[] = [];
+  const seenNames = new Set<string>();
   for (const d of docs) {
     const name = d.fileName.replace(/\.[^.]+$/, "").toLowerCase();
-    const compact = name.replace(/[_\-]+/g, " ").trim();
-    if (compact.length >= 4 && (q.includes(compact) || q.includes(name))) {
-      hits.push(d.id);
-    }
+    const compact = name.replace(/[_\-.]+/g, " ").replace(/\s+/g, " ").trim();
+    const key = compact || name;
+    if (key.length < 3) continue;
+    if (!(q.includes(compact) || q.includes(name) || q.includes(key))) continue;
+    if (seenNames.has(key)) continue;
+    seenNames.add(key);
+    hits.push(d.id);
   }
   return hits;
+}
+
+/** Keep one entry per normalized file name (latest wins if callers sort desc). */
+export function dedupeMaterialsByFileName<
+  T extends { id: string; fileName: string },
+>(docs: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const d of docs) {
+    const key = d.fileName
+      .toLowerCase()
+      .replace(/\.[^.]+$/, "")
+      .replace(/[_\-.]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(d);
+  }
+  return out;
 }
 
 export type MaterialOption = {
@@ -101,42 +125,24 @@ export function materialSelectMessage(
   language: string,
   materials?: MaterialOption[]
 ): string {
-  const list =
-    materials && materials.length
-      ? materials
-          .slice(0, 40)
-          .map((m, i) => `${i + 1}. ${m.fileName}`)
-          .join("\n")
-      : "";
-
+  const unique = materials ? dedupeMaterialsByFileName(materials) : [];
+  // Keep the prompt short — the app renders tappable material buttons separately.
   switch (language.slice(0, 2)) {
     case "ar":
-      return [
-        "لتجيبك من مواد مرحلتك بدقة، اختر مادة واحدة من قائمتك:",
-        list || "(لا توجد مواد جاهزة بعد — اطلب من الإدارة رفعها في المعرفة الأساسية)",
-        "",
-        "بعد الاختيار سأشرح وأجيب اعتماداً على المادة التي اخترتها.",
-      ].join("\n");
+      return unique.length
+        ? "لتجيبك من مواد مرحلتك بدقة، اضغط على مادة واحدة من الأزرار بالأسفل:"
+        : "لا توجد مواد جاهزة بعد — اطلب من الإدارة رفعها في المعرفة الأساسية.";
     case "ku":
-      return [
-        "بۆ وەڵامدانەوەی ورد لە ماددەکانی قۆناغەکەت، یەکێک لەم ماددانە هەڵبژێرە:",
-        list || "(هیچ ماددەیەکی ئامادە نییە — داوا لە بەڕێوەبەر بکە باریان بکات)",
-        "",
-        "دوای هەڵبژاردن، وەڵامەکەم لەسەر ئەو ماددەیە دەبێت.",
-      ].join("\n");
+      return unique.length
+        ? "بۆ وەڵامدانەوەی ورد، کرتە لەسەر یەکێک لە دوگمەکانی ماددە بکە:"
+        : "هیچ ماددەیەکی ئامادە نییە — داوا لە بەڕێوەبەر بکە باریان بکات.";
     case "tr":
-      return [
-        "Kademendeki materyallerden doğru yanıtlamak için birini seç:",
-        list || "(Hazır materyal yok — yöneticinin Temel Bilgi’ye yüklemesini iste)",
-        "",
-        "Seçimden sonra yanıtını seçtiğin materyale göre vereceğim.",
-      ].join("\n");
+      return unique.length
+        ? "Doğru yanıt için aşağıdaki materyal düğmelerinden birine dokun:"
+        : "Hazır materyal yok — yöneticinin Temel Bilgi’ye yüklemesini iste.";
     default:
-      return [
-        "To answer accurately from your stage materials, please select one:",
-        list || "(No READY materials yet — ask an admin to upload them in Basic Knowledge)",
-        "",
-        "After you select, I’ll answer using that material.",
-      ].join("\n");
+      return unique.length
+        ? "To answer from your stage materials, tap one of the material buttons below:"
+        : "No READY materials yet — ask an admin to upload them in Basic Knowledge.";
   }
 }

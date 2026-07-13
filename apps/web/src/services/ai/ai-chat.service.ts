@@ -196,6 +196,7 @@ export class AiChatService {
       materialSelectMessage,
       isChitchatOrMeta,
       matchMentionedMaterials,
+      dedupeMaterialsByFileName,
     } = await import("./creative/figure-prompts");
     const { AiExamService } = await import("./ai-exam.service");
 
@@ -225,15 +226,21 @@ export class AiChatService {
 
     if (learnerCreative && !skipMaterialGate && (explainObserve || wantsGroundedAnswer || input.mode === "from_materials")) {
       const library = await AiExamService.listKbDocumentsForUser(input.userId);
-      const materials = library.map((d) => ({
-        id: d.id,
-        fileName: d.fileName,
-        pageCount: d.pageCount,
-      }));
+      const materials = dedupeMaterialsByFileName(
+        library.map((d) => ({
+          id: d.id,
+          fileName: d.fileName,
+          pageCount: d.pageCount,
+        }))
+      );
 
       let documentIds = [...(input.documentIds || [])];
       if (!documentIds.length) {
         documentIds = matchMentionedMaterials(question, materials);
+      }
+      // Never auto-select dozens of duplicate-named uploads — one material max on mention.
+      if (documentIds.length > 1) {
+        documentIds = documentIds.slice(0, 1);
       }
 
       if (!documentIds.length) {
@@ -970,16 +977,21 @@ export class AiChatService {
         ? figureSpecs
         : prompts.length
           ? prompts.map((p) => ({ prompt: p, labels: [] as string[] }))
-          : /(شكل|رسم|diagram|shape|figure|هندس|رسمة)/i.test(
-                `${input.question}\n${material.text}`
-              )
-            ? [
-                {
-                  prompt: `Accurate educational diagram of the key shapes/concepts in this lesson for student observation. Context: ${material.text.slice(0, 800)}`,
-                  labels: [] as string[],
-                },
-              ]
-            : [];
+          : [
+              {
+                prompt: `Educational illustration that matches this exact lesson explanation (same subject, same concepts). Paint the key idea visually.`,
+                labels: [] as string[],
+              },
+            ];
+
+    // One unique citation chip per document name (not per chunk).
+    const citationSeen = new Set<string>();
+    const uniqueCitations = (material.citations || []).filter((c) => {
+      const key = (c.documentName || "").toLowerCase().trim();
+      if (!key || citationSeen.has(key)) return false;
+      citationSeen.add(key);
+      return true;
+    });
 
     for (const spec of paintBriefs.slice(0, 2)) {
       try {
@@ -990,8 +1002,10 @@ export class AiChatService {
             spec.labels.length
               ? `LABELS: ${spec.labels.join(" | ")}`
               : "",
+            // Keep FLUX aligned with the same DeepSeek explanation the student reads.
+            `DeepSeek explanation to illustrate (match the same subject and steps):\n${answer.slice(0, 1200)}`,
             material.text
-              ? `Curriculum context (shapes only):\n${material.text.slice(0, 500)}`
+              ? `Curriculum source excerpt:\n${material.text.slice(0, 500)}`
               : "",
           ]
             .filter(Boolean)
@@ -1009,10 +1023,10 @@ export class AiChatService {
           };
           if (input.language.startsWith("ar")) {
             answer +=
-              "\n\nرسمت الأشكال من المادة للملاحظة — انظر الصورة المرفقة.";
+              "\n\nرسمت الأشكال وفق شرح المادة — انظر الصورة المرفقة.";
           } else {
             answer +=
-              "\n\nI painted the material shapes for observation — see the attached image.";
+              "\n\nI painted a figure that matches this explanation — see the attached image.";
           }
         }
       } catch (e) {
@@ -1030,7 +1044,7 @@ export class AiChatService {
       answer: answer || (input.language.startsWith("ar")
         ? "تم الشرح من المادة المحددة."
         : "Here is the explanation from your selected material."),
-      citations: material.citations,
+      citations: uniqueCitations,
       followUps,
       fromCache: false,
       attachmentNames: [],

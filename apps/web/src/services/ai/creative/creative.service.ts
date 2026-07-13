@@ -416,6 +416,7 @@ export class AiCreativeService {
       });
       const finalPrompt = [
         educationalPrompt,
+        "Illustrate the SAME subject and explanation described in the prompt — do not invent a different topic.",
         input.mode === "edit"
           ? "Edit the provided image according to the instructions. Remove garbled Arabic text; keep shapes crystal clear."
           : "",

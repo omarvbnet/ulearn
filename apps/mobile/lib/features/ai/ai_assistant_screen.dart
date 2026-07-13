@@ -398,6 +398,24 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       if (!mounted) return;
 
       if (data['needsMaterialSelection'] == true) {
+        final pendingQ =
+            data['pendingQuestion']?.toString() ?? displayText;
+        final materialsRaw = data['materials'];
+        final materials = <Map<String, dynamic>>[];
+        final seenNames = <String>{};
+        if (materialsRaw is List) {
+          for (final m in materialsRaw) {
+            if (m is! Map) continue;
+            final map = Map<String, dynamic>.from(m);
+            final name = (map['fileName']?.toString() ?? '')
+                .toLowerCase()
+                .replaceAll(RegExp(r'\s+'), ' ')
+                .trim();
+            if (name.isEmpty || seenNames.contains(name)) continue;
+            seenNames.add(name);
+            materials.add(map);
+          }
+        }
         setState(() {
           _conversationId =
               data['conversationId']?.toString() ?? _conversationId;
@@ -405,23 +423,16 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             _ChatBubble(
               role: 'assistant',
               text: data['answer']?.toString() ??
-                  context.l10n.t('mobile.ai.pickMaterialsHint'),
+                  context.l10n.t('mobile.ai.pickMaterialToAnswerHint'),
+              selectableMaterials: materials,
+              pendingMaterialQuestion: pendingQ,
             ),
           );
         });
-        final pendingQ =
-            data['pendingQuestion']?.toString() ?? displayText;
-        final materialsRaw = data['materials'];
-        final materials = <Map<String, dynamic>>[];
-        if (materialsRaw is List) {
-          for (final m in materialsRaw) {
-            if (m is Map) materials.add(Map<String, dynamic>.from(m));
-          }
+        // If API returned no materials list, fall back to the sheet picker.
+        if (materials.isEmpty) {
+          await _startExplainObserveFlow(pendingQ);
         }
-        await _startExplainObserveFlow(
-          pendingQ,
-          preloadedDocs: materials.isNotEmpty ? materials : null,
-        );
         return;
       }
 
@@ -481,11 +492,11 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                 .map((c) {
                   if (c is! Map) return null;
                   final name = c['documentName']?.toString() ?? '';
-                  final page = c['page'];
                   if (name.isEmpty) return null;
-                  return page != null ? '$name · p.$page' : name;
+                  return name;
                 })
                 .whereType<String>()
+                .toSet()
                 .toList(),
             editedFileName: editedName,
             editedContentBase64: editedB64,
@@ -1128,6 +1139,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                             spacing: 6,
                                             runSpacing: 6,
                                             children: m.citations
+                                                .toSet()
                                                 .map(
                                                   (c) => Container(
                                                     padding:
@@ -1157,6 +1169,86 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                                   ),
                                                 )
                                                 .toList(),
+                                          ),
+                                        ],
+                                        if (m.selectableMaterials
+                                            .isNotEmpty) ...[
+                                          const SizedBox(height: 12),
+                                          Text(
+                                            context.l10n.t(
+                                              'mobile.ai.pickMaterialToAnswer',
+                                            ),
+                                            style: TextStyle(
+                                              color: AppTheme.muted,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Wrap(
+                                            spacing: 8,
+                                            runSpacing: 8,
+                                            children: m.selectableMaterials
+                                                .map((mat) {
+                                              final id =
+                                                  mat['id']?.toString() ?? '';
+                                              final name = mat['fileName']
+                                                      ?.toString() ??
+                                                  'Material';
+                                              return ActionChip(
+                                                onPressed: id.isEmpty ||
+                                                        _sending
+                                                    ? null
+                                                    : () {
+                                                        final q = m
+                                                                .pendingMaterialQuestion ??
+                                                            '';
+                                                        // Clear buttons on this bubble after tap.
+                                                        setState(() {
+                                                          final idx =
+                                                              _messages
+                                                                  .indexOf(m);
+                                                          if (idx >= 0) {
+                                                            _messages[idx] =
+                                                                _ChatBubble(
+                                                              role: m.role,
+                                                              text: m.text,
+                                                              citations:
+                                                                  m.citations,
+                                                              followUps:
+                                                                  m.followUps,
+                                                            );
+                                                          }
+                                                        });
+                                                        _runExplainObserve(
+                                                          q.isNotEmpty
+                                                              ? q
+                                                              : name,
+                                                          [id],
+                                                        );
+                                                      },
+                                                backgroundColor: AppTheme
+                                                    .primary
+                                                    .withValues(alpha: 0.14),
+                                                side: BorderSide(
+                                                  color: AppTheme.accent
+                                                      .withValues(alpha: 0.45),
+                                                ),
+                                                avatar: Icon(
+                                                  Icons.menu_book_rounded,
+                                                  size: 16,
+                                                  color: AppTheme.accent,
+                                                ),
+                                                label: Text(
+                                                  name,
+                                                  style: TextStyle(
+                                                    color: AppTheme.foreground,
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              );
+                                            }).toList(),
                                           ),
                                         ],
                                       ],
@@ -1911,6 +2003,8 @@ class _ChatBubble {
     this.examResult,
     this.courseSuggestions = const [],
     this.followUps = const [],
+    this.selectableMaterials = const [],
+    this.pendingMaterialQuestion,
   });
 
   final String role;
@@ -1928,6 +2022,8 @@ class _ChatBubble {
   final Map<String, dynamic>? examResult;
   final List<Map<String, dynamic>> courseSuggestions;
   final List<String> followUps;
+  final List<Map<String, dynamic>> selectableMaterials;
+  final String? pendingMaterialQuestion;
 }
 
 class _CourseSuggestionsStrip extends StatelessWidget {

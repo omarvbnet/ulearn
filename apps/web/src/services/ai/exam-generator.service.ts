@@ -781,7 +781,16 @@ export class ExamGeneratorService {
       throw new Error("No materials available to generate a quiz");
     }
 
-    return { text: parts.join("\n\n---\n\n"), citations };
+    // Prefer unique document names for UI chips (not one chip per chunk).
+    const seenCite = new Set<string>();
+    const uniqueCitations = citations.filter((c) => {
+      const key = c.documentName.toLowerCase().trim();
+      if (!key || seenCite.has(key)) return false;
+      seenCite.add(key);
+      return true;
+    });
+
+    return { text: parts.join("\n\n---\n\n"), citations: uniqueCitations };
   }
 
   /** Public loader for chat explain/observe flows. */
