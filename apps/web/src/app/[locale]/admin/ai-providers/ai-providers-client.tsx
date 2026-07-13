@@ -7,6 +7,7 @@ import {
   isJinaDeepSearchModel,
   providerSupportsChat,
   providerSupportsEmbeddings,
+  providerSupportsImageGeneration,
 } from "@/services/ai/adapters";
 
 type Provider = {
@@ -57,6 +58,7 @@ const MODULES = [
   "PROFESSOR_CONTENT",
   "PROFESSOR_DOCUMENT",
   "AI_CREATIVE",
+  "AI_CREATIVE_IMAGE",
 ] as const;
 
 const PROVIDER_TYPES = [
@@ -65,7 +67,8 @@ const PROVIDER_TYPES = [
   { value: "ANTHROPIC", label: "Claude (Anthropic)" },
   { value: "KIMI", label: "Kimi (Moonshot)" },
   { value: "DEEPSEEK", label: "DeepSeek" },
-  { value: "JINA", label: "Jina AI (Embeddings)" },
+  { value: "JINA", label: "Jina AI (Embeddings / DeepSearch)" },
+  { value: "FLUX", label: "FLUX.1 Kontext Max (BFL Images)" },
   { value: "OPENAI_COMPATIBLE", label: "OpenAI Compatible (custom)" },
 ] as const;
 
@@ -111,6 +114,12 @@ const MODELS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
     { value: "jina-clip-v2", label: "jina-clip-v2 (embeddings · multimodal)" },
     { value: "jina-deepsearch-v1", label: "jina-deepsearch-v1 (chat · AI Creative / PPT)" },
   ],
+  FLUX: [
+    { value: "flux-kontext-max", label: "FLUX.1 Kontext Max (recommended · generate + edit)" },
+    { value: "flux-kontext-pro", label: "FLUX.1 Kontext Pro" },
+    { value: "flux-2-pro", label: "FLUX.2 Pro" },
+    { value: "flux-2-max", label: "FLUX.2 Max" },
+  ],
   OPENAI_COMPATIBLE: [
     { value: "gpt-4o-mini", label: "gpt-4o-mini (compatible)" },
     { value: "deepseek-chat", label: "deepseek-chat" },
@@ -125,6 +134,7 @@ const DEFAULT_BASE_URL: Record<string, string> = {
   KIMI: "https://api.moonshot.cn/v1",
   DEEPSEEK: "https://api.deepseek.com/v1",
   JINA: "https://api.jina.ai/v1",
+  FLUX: "https://api.bfl.ai",
   OPENAI_COMPATIBLE: "",
 };
 
@@ -135,6 +145,7 @@ const DEFAULT_MODEL: Record<string, string> = {
   KIMI: "moonshot-v1-8k",
   DEEPSEEK: "deepseek-chat",
   JINA: "jina-embeddings-v4",
+  FLUX: "flux-kontext-max",
   OPENAI_COMPATIBLE: "gpt-4o-mini",
 };
 
@@ -523,9 +534,19 @@ export function AiProvidersClient() {
             jina.ai/api-dashboard/key-manager
           </a>{" "}
           (default <code>api.jina.ai/v1</code> for embeddings,{" "}
-          <code>deepsearch.jina.ai/v1</code> for DeepSearch chat) — embedding models →
-          EMBEDDING; <code>jina-deepsearch-v1</code> → AI Creative / chat modules (PPT/text,
-          not image design).
+          <code>deepsearch.jina.ai/v1</code> for DeepSearch chat). FLUX uses BFL keys from{" "}
+          <a
+            className="underline"
+            href="https://dashboard.bfl.ai/get-started"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            dashboard.bfl.ai
+          </a>{" "}
+          (default <code>api.bfl.ai</code>) — assign to{" "}
+          <code>AI_CREATIVE_IMAGE</code> for educational drawings, infographics, and image
+          edits. Embedding models → EMBEDDING; <code>jina-deepsearch-v1</code> → AI Creative /
+          chat (PPT/text).
         </p>
         <button
           className="btn btn-primary sm:col-span-2 lg:col-span-3"
@@ -596,7 +617,7 @@ export function AiProvidersClient() {
 
       <PageHeader
         title="Module assignments"
-        description="Route each AI module to a provider. EMBEDDING: Gemini, OpenAI, or Jina embedding models. AI Creative: chat providers or Jina DeepSearch (text/PPT only)."
+        description="Route each AI module to a provider. EMBEDDING: Gemini/OpenAI/Jina embeddings. AI_CREATIVE: chat (text/PPT). AI_CREATIVE_IMAGE: FLUX.1 Kontext Max for educational drawings, infographics, edits."
       />
       <div className="card space-y-3 p-4">
         {MODULES.map((moduleKey) => {
@@ -604,7 +625,9 @@ export function AiProvidersClient() {
           const options =
             moduleKey === "EMBEDDING"
               ? providers.filter((p) => providerSupportsEmbeddings(p.type, p.model))
-              : providers.filter((p) => providerSupportsChat(p.type, p.model));
+              : moduleKey === "AI_CREATIVE_IMAGE"
+                ? providers.filter((p) => providerSupportsImageGeneration(p.type))
+                : providers.filter((p) => providerSupportsChat(p.type, p.model));
           return (
             <label key={moduleKey} className="flex flex-wrap items-center gap-3 text-sm">
               <span className="w-48 font-medium">{moduleKey}</span>
@@ -631,10 +654,19 @@ export function AiProvidersClient() {
                   Add Gemini, OpenAI, or Jina embeddings first — DeepSeek cannot embed.
                 </span>
               ) : null}
+              {moduleKey === "AI_CREATIVE_IMAGE" && options.length === 0 ? (
+                <span className="text-xs text-amber-700">
+                  Add FLUX.1 Kontext Max (BFL) with an API key for image generate/edit.
+                </span>
+              ) : null}
+              {moduleKey === "AI_CREATIVE_IMAGE" && options.length > 0 ? (
+                <span className="text-xs text-muted">
+                  Educational drawings · infographics · image edit · diagrams for files
+                </span>
+              ) : null}
               {moduleKey === "AI_CREATIVE" ? (
                 <span className="text-xs text-muted">
-                  Jina: use <code>jina-deepsearch-v1</code> only. Image design needs Gemini/OpenAI
-                  vision.
+                  Text/PPT only. Images use AI_CREATIVE_IMAGE (FLUX).
                 </span>
               ) : null}
             </label>

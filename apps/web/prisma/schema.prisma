@@ -1564,6 +1564,7 @@ enum AiProviderType {
   KIMI
   DEEPSEEK
   JINA
+  FLUX
 }
 
 enum AiProviderStatus {
@@ -1580,6 +1581,7 @@ enum AiModuleKey {
   PROFESSOR_CONTENT
   PROFESSOR_DOCUMENT
   AI_CREATIVE
+  AI_CREATIVE_IMAGE
 }
 
 enum KbSourceType {

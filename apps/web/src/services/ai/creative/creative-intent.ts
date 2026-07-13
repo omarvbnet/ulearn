@@ -43,9 +43,9 @@ export function detectCreativeChatIntent(
   const pdfDocWords =
     /\b(pdf|document|report|handout|essay|article)\b|مذكرة|تقرير|مستند|وثيقة|ڕاپۆرت|belge|rapor|doküman/i;
   const imageEditWords =
-    /\b(edit|improve|redesign|fix|retouch|enhance)\b|عدل|عدّل|حسّن|حسن|دەستکاری|düzenle|iyileştir/i;
+    /\b(edit|improve|redesign|fix|retouch|enhance)\b|عدل|عدّل|حسّن|حسن|تعديل\s*الصور|دەستکاری|düzenle|iyileştir/i;
   const imageDesignWords =
-    /(?:design|create|generate|make|draw).{0,48}(?:image|logo|poster|banner|graphic|illustration|icon|picture)|(?:صمم|تصميم|أنشئ|انشئ|ارسم).{0,48}(?:صورة|شعار|بوستر|بانر|رسمة)|(?:دروست|دیزاین).{0,48}(?:وێنە|لۆگۆ)|(?:tasarla|oluştur|çiz).{0,48}(?:görsel|logo|afiş|resim)|تصميم\s*صورة|صورة\s*(?:احترافية|جديدة|تعليمية)|logo\s*design|صورة تعليمية|من الملفات المرفقة.*(?:صورة|تصميم)|(?:صورة|تصميم).*(?:المرفق|المرفقة)/i;
+    /(?:design|create|generate|make|draw).{0,48}(?:image|logo|poster|banner|graphic|illustration|icon|picture|infographic|diagram)|(?:صمم|تصميم|أنشئ|انشئ|ارسم|توليد).{0,48}(?:صورة|شعار|بوستر|بانر|رسمة|رسوم|إنفوجرافيك|انفوجرافيك|توضيحية|هندسية)|(?:دروست|دیزاین).{0,48}(?:وێنە|لۆگۆ)|(?:tasarla|oluştur|çiz).{0,48}(?:görsel|logo|afiş|resim)|تصميم\s*صورة|صورة\s*(?:احترافية|جديدة|تعليمية)|رسوم(?:ات)?\s*(?:تعليمية|هندسية|توضيحية)|إنفوجرافيك|انفوجرافيك|logo\s*design|صورة تعليمية|من الملفات المرفقة.*(?:صورة|تصميم)|(?:صورة|تصميم).*(?:المرفق|المرفقة)/i;
 
   if (pdfs.length >= 2 && (mergeWords.test(ql) || !q)) return "merge";
   if (pdfs.length >= 2 && mergeWords.test(ql)) return "merge";
@@ -97,29 +97,29 @@ export function creativeSuccessMessage(
     merge: "Merged your PDFs. Tap Download to save the file.",
     design_ppt: "Created your presentation. Tap Download to save the PPTX.",
     design_pdf: "Created your PDF. Tap Download to save the file.",
-    image_edit: "Edited your image. Tap Download to save the SVG.",
-    image_design: "Designed your graphic. Tap Download to save the SVG.",
+    image_edit: "Edited your image. Tap Download to save the PNG.",
+    image_design: "Designed your graphic. Tap Download to save the PNG.",
   };
   const ar: Record<CreativeChatIntent, string> = {
     merge: "تم دمج ملفات PDF. اضغط تنزيل لحفظ الملف.",
     design_ppt: "تم إنشاء العرض. اضغط تنزيل لحفظ ملف PPTX.",
     design_pdf: "تم إنشاء ملف PDF. اضغط تنزيل لحفظه.",
-    image_edit: "تم تعديل الصورة. اضغط تنزيل لحفظ SVG.",
-    image_design: "تم تصميم الرسم. اضغط تنزيل لحفظ SVG.",
+    image_edit: "تم تعديل الصورة. اضغط تنزيل لحفظ PNG.",
+    image_design: "تم تصميم الرسم. اضغط تنزيل لحفظ PNG.",
   };
   const ku: Record<CreativeChatIntent, string> = {
     merge: "PDFەکان تێکەڵ کران. داگرتن دابگرە بۆ پاشەکەوتکردن.",
     design_ppt: "پێشکەشکردن دروستکرا. داگرتن دابگرە بۆ PPTX.",
     design_pdf: "PDF دروستکرا. داگرتن دابگرە بۆ پاشەکەوتکردن.",
-    image_edit: "وێنەکە دەستکاری کرا. داگرتن دابگرە بۆ SVG.",
-    image_design: "گرافیکەکە دیزاین کرا. داگرتن دابگرە بۆ SVG.",
+    image_edit: "وێنەکە دەستکاری کرا. داگرتن دابگرە بۆ PNG.",
+    image_design: "گرافیکەکە دیزاین کرا. داگرتن دابگرە بۆ PNG.",
   };
   const tr: Record<CreativeChatIntent, string> = {
     merge: "PDF’ler birleştirildi. Kaydetmek için İndir’e dokunun.",
     design_ppt: "Sunum oluşturuldu. PPTX kaydetmek için İndir’e dokunun.",
     design_pdf: "PDF oluşturuldu. Kaydetmek için İndir’e dokunun.",
-    image_edit: "Görsel düzenlendi. SVG kaydetmek için İndir’e dokunun.",
-    image_design: "Grafik tasarlandı. SVG kaydetmek için İndir’e dokunun.",
+    image_edit: "Görsel düzenlendi. PNG kaydetmek için İndir’e dokunun.",
+    image_design: "Grafik tasarlandı. PNG kaydetmek için İndir’e dokunun.",
   };
   const lang = language.slice(0, 2);
   if (lang === "ar") return ar[intent];

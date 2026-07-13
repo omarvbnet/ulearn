@@ -22,6 +22,21 @@ export type EmbeddingResult = {
   tokensIn: number;
 };
 
+export type ImageGenerationInput = {
+  prompt: string;
+  /** Optional source image for edit / kontext (base64 without data: prefix). */
+  inputImageBase64?: string;
+  mimeType?: string;
+  width?: number;
+  height?: number;
+};
+
+export type ImageGenerationResult = {
+  mimeType: string;
+  dataBase64: string;
+  tokensIn?: number;
+};
+
 export type ProviderConfig = {
   apiKey: string;
   baseUrl?: string | null;
@@ -39,6 +54,11 @@ export interface AiProviderAdapter {
   chat(config: ProviderConfig, messages: ChatMessage[]): Promise<ChatResult>;
   embed(config: ProviderConfig, text: string): Promise<EmbeddingResult>;
   testConnection(config: ProviderConfig): Promise<{ ok: boolean; message: string }>;
+  /** Optional: raster image generation / editing (e.g. FLUX.1 Kontext). */
+  generateImage?(
+    config: ProviderConfig,
+    input: ImageGenerationInput
+  ): Promise<ImageGenerationResult>;
 }
 
 export const EMBEDDING_DIMS = 768;

@@ -289,6 +289,40 @@ export class AiCreativeService {
     });
     try {
       const language = (input.language || "en").slice(0, 8);
+      const fluxProvider = await AiProviderService.resolveProvider("AI_CREATIVE_IMAGE");
+      if (fluxProvider?.type === "FLUX" && fluxProvider.apiKeyEncrypted) {
+        const educationalPrompt = [
+          "Educational graphic for students.",
+          "Clean, clear, high-contrast illustration suitable for school materials.",
+          "Readable labels when text appears.",
+          `Language for any visible text: ${language}.`,
+          input.mode === "edit"
+            ? "Edit the provided image according to the instructions while keeping educational clarity."
+            : "Create a polished educational drawing / infographic / diagram as requested.",
+          `Request:\n${input.prompt}`,
+        ].join("\n");
+        const fluxInput: {
+          prompt: string;
+          inputImageBase64?: string;
+          mimeType?: string;
+        } = { prompt: educationalPrompt };
+        if (input.mode === "edit" && input.image) {
+          const imgBytes = await resolveFileBytes(input.image);
+          fluxInput.inputImageBase64 = imgBytes.toString("base64");
+          fluxInput.mimeType = input.image.mimeType || "image/jpeg";
+        }
+        const generated = await AiProviderService.generateImage(fluxInput, userId);
+        const saved = await this.finishSuccess({
+          userId,
+          jobId: job.id,
+          entitlementReason: entitlement.reason,
+          fileName: `creative-${input.mode}-${Date.now()}.png`,
+          mime: generated.mimeType || "image/png",
+          content: generated.dataBase64,
+        });
+        return this.toResult(saved);
+      }
+
       const messages: ChatMessage[] = [
         {
           role: "system",

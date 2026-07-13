@@ -57,22 +57,34 @@ export default function StudentAiPage() {
 
   const quickPrompts =
     locale === "ar"
-      ? ["احتاج ملخص عن المادة", "احتاج مرشحات وزارية عن المادة", "اشرح درس اليوم خطوة بخطوة"]
+      ? [
+          "احتاج ملخص عن المادة",
+          "احتاج مرشحات وزارية عن المادة",
+          "أنشئ رسوم تعليمية واضحة عن الدرس",
+          "صمم إنفوجرافيك تعليمي عن الموضوع",
+          "اشرح درس اليوم خطوة بخطوة",
+        ]
       : locale === "ku"
         ? [
             "پێویستم بە پوختەی وانە/ماددەکە هەیە",
             "پێویستم بە فلتەری وەزاری هەیە بۆ ماددەکە",
+            "وێنەی فێرکاری ڕوون بۆ وانەکە دروست بکە",
+            "ئینفۆگرافیکێکی فێرکاری دیزاین بکە",
             "وانەی ئەمڕۆ هەنگاو بە هەنگاو ڕوون بکەرەوە",
           ]
         : locale === "tr"
           ? [
               "Bu ders/materyal için net bir özet istiyorum",
               "Bu ders için bakanlık tarzı sınav filtreleri istiyorum",
+              "Ders için net eğitim çizimleri oluştur",
+              "Konu için eğitim infografiği tasarla",
               "Bugünkü dersi adım adım anlat",
             ]
           : [
               "I need a clear summary of this subject/material",
               "I need ministry-style exam filters for this subject",
+              "Create clear educational drawings for this lesson",
+              "Design an educational infographic on this topic",
               "Explain today's lesson step by step",
             ];
 
@@ -87,8 +99,18 @@ export default function StudentAiPage() {
       ? "صمم عرض PowerPoint من الملفات المرفقة"
       : "Design a PowerPoint presentation from my attached file(s)",
     locale === "ar"
-      ? "صمم صورة تعليمية احترافية من الملفات المرفقة"
-      : "Design a professional educational image from my attached file(s)",
+      ? "صمم صورة تعليمية / إنفوجرافيك من الملفات المرفقة"
+      : "Design an educational image / infographic from my attached file(s)",
+    locale === "ar"
+      ? "أنشئ رسومات هندسية وتوضيحية تُدرج داخل الملف"
+      : "Create engineering/illustrative diagrams to insert into the file",
+    ...(pendingFiles.some((f) => f.type.startsWith("image/"))
+      ? [
+          locale === "ar"
+            ? "عدّل الصورة المرفقة لتكون أوضح تعليمياً"
+            : "Edit the attached image to make it clearer for teaching",
+        ]
+      : []),
     ...(pendingFiles.filter(
       (f) => f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")
     ).length >= 2

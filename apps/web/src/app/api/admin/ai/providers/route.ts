@@ -5,9 +5,9 @@ import { z } from "zod";
 
 function providerCreateError(e: unknown) {
   const msg = e instanceof Error ? e.message : "Create failed";
-  if (/JINA|AiProviderType|enum/i.test(msg)) {
+  if (/JINA|FLUX|AiProviderType|AiModuleKey|enum/i.test(msg)) {
     return error(
-      'Database is missing the JINA provider type. Run in SQL: ALTER TYPE "AiProviderType" ADD VALUE IF NOT EXISTS \'JINA\';',
+      'Database enum missing. Run SQL: ALTER TYPE "AiProviderType" ADD VALUE IF NOT EXISTS \'FLUX\'; ALTER TYPE "AiModuleKey" ADD VALUE IF NOT EXISTS \'AI_CREATIVE_IMAGE\';',
       500,
       "DB_MIGRATION"
     );

@@ -1,8 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import type { AiModuleKey, AiProvider, AiProviderType } from "@prisma/client";
 import { decryptSecret, encryptSecret } from "./crypto";
-import { defaultBaseUrlForType, getAdapter, jinaDefaultBaseUrl, normalizeOpenAiCompatibleBase, providerSupportsChat, providerSupportsEmbeddings } from "./adapters";
-import type { ChatMessage, ProviderConfig } from "./types";
+import { defaultBaseUrlForType, getAdapter, jinaDefaultBaseUrl, normalizeOpenAiCompatibleBase, providerSupportsChat, providerSupportsEmbeddings, providerSupportsImageGeneration } from "./adapters";
+import type { ChatMessage, ImageGenerationInput, ProviderConfig } from "./types";
 
 function toConfig(p: AiProvider, apiKey: string): ProviderConfig {
   const openAiCompat =
@@ -121,9 +121,15 @@ export class AiProviderService {
         `${provider.type} (${provider.name}) cannot run embeddings. Assign EMBEDDING to Gemini, OpenAI, or a Jina embedding model.`
       );
     }
-    if (moduleKey !== "EMBEDDING" && !providerSupportsChat(provider.type, provider.model)) {
+    if (moduleKey === "AI_CREATIVE_IMAGE") {
+      if (!providerSupportsImageGeneration(provider.type)) {
+        throw new Error(
+          `${provider.type} (${provider.name}) cannot generate images. Assign AI_CREATIVE_IMAGE to FLUX.1 Kontext Max (Black Forest Labs).`
+        );
+      }
+    } else if (moduleKey !== "EMBEDDING" && !providerSupportsChat(provider.type, provider.model)) {
       throw new Error(
-        `${provider.type} (${provider.name}) is embedding-only. Use jina-deepsearch-v1 for chat / AI Creative.`
+        `${provider.type} (${provider.name}) cannot run chat. Use a chat provider or jina-deepsearch-v1 for AI Creative text/PPT.`
       );
     }
     return prisma.aiModuleAssignment.upsert({
@@ -218,9 +224,29 @@ export class AiProviderService {
         preferTypes: opts?.preferTypes?.length
           ? opts.preferTypes
           : ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE", "JINA"],
-        skipTypes: [...(opts?.skipTypes || []), "DEEPSEEK", "KIMI", "ANTHROPIC"],
+        skipTypes: [...(opts?.skipTypes || []), "DEEPSEEK", "KIMI", "ANTHROPIC", "FLUX"],
       };
       opts = embedOpts;
+    } else if (moduleKey === "AI_CREATIVE_IMAGE") {
+      opts = {
+        preferTypes: opts?.preferTypes?.length ? opts.preferTypes : ["FLUX"],
+        skipTypes: [
+          ...(opts?.skipTypes || []),
+          "DEEPSEEK",
+          "KIMI",
+          "ANTHROPIC",
+          "JINA",
+          "GEMINI",
+          "OPENAI",
+          "OPENAI_COMPATIBLE",
+        ],
+      };
+    } else if (moduleKey) {
+      // Chat modules: never use FLUX (image-only).
+      opts = {
+        ...opts,
+        skipTypes: [...(opts?.skipTypes || []), "FLUX"],
+      };
     }
     if (opts?.preferTypes?.length) {
       const preferred = chain.filter((p) => opts.preferTypes!.includes(p.type));
@@ -237,7 +263,16 @@ export class AiProviderService {
     let triedEmbedCapable = false;
     for (const provider of chain) {
       if (!provider.apiKeyEncrypted) continue;
-      if (moduleKey !== "EMBEDDING" && !providerSupportsChat(provider.type, provider.model)) {
+      if (
+        moduleKey === "AI_CREATIVE_IMAGE" &&
+        !providerSupportsImageGeneration(provider.type)
+      ) {
+        lastError = new Error(
+          `${provider.type} (${provider.name}) cannot generate images. Assign AI_CREATIVE_IMAGE to FLUX.`
+        );
+        continue;
+      }
+      if (moduleKey !== "EMBEDDING" && moduleKey !== "AI_CREATIVE_IMAGE" && !providerSupportsChat(provider.type, provider.model)) {
         lastError = new Error(
           `${provider.type} (${provider.name}) is embedding-only. Use jina-deepsearch-v1 for chat / AI Creative.`
         );
@@ -348,6 +383,32 @@ export class AiProviderService {
     });
     return result.embedding;
   }
+
+  static async generateImage(input: ImageGenerationInput, userId?: string) {
+    const started = Date.now();
+    const { result, provider } = await this.withFallback(
+      "AI_CREATIVE_IMAGE",
+      async (p, config) => {
+        const adapter = getAdapter(p.type);
+        if (!adapter.generateImage) {
+          throw new Error(`${p.type} does not support image generation`);
+        }
+        return adapter.generateImage(config, input);
+      }
+    );
+    await prisma.aiUsageLog.create({
+      data: {
+        providerId: provider.id,
+        userId,
+        moduleKey: "AI_CREATIVE_IMAGE",
+        success: true,
+        tokensIn: result.tokensIn ?? 0,
+        latencyMs: Date.now() - started,
+        costEstimate: 0.08,
+      },
+    });
+    return { ...result, providerId: provider.id };
+  }
 }
 
 function estimateCost(type: string, tokensIn: number, tokensOut: number): number {
@@ -360,6 +421,7 @@ function estimateCost(type: string, tokensIn: number, tokensOut: number): number
     KIMI: { in: 0.00000012, out: 0.00000012 },
     DEEPSEEK: { in: 0.00000014, out: 0.00000028 },
     JINA: { in: 0.00000002, out: 0 },
+    FLUX: { in: 0.00008, out: 0 },
   };
   const r = rates[type] || rates.GEMINI;
   return tokensIn * r.in + tokensOut * r.out;

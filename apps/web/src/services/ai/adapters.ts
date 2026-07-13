@@ -3,6 +3,8 @@ import type {
   ChatMessage,
   ChatResult,
   EmbeddingResult,
+  ImageGenerationInput,
+  ImageGenerationResult,
   ProviderConfig,
 } from "./types";
 import { EMBEDDING_DIMS } from "./types";
@@ -403,6 +405,167 @@ export class JinaAdapter implements AiProviderAdapter {
   }
 }
 
+export class FluxAdapter implements AiProviderAdapter {
+  readonly type = "FLUX";
+
+  private base(config: ProviderConfig) {
+    return normalizeFluxBase(config.baseUrl);
+  }
+
+  private endpointPath(model: string): string {
+    const m = (model || "").toLowerCase();
+    if (m.includes("kontext-max") || m.includes("kontext_max") || m === "flux-kontext-max") {
+      return "/v1/flux-kontext-max";
+    }
+    if (m.includes("kontext") || m.includes("flux-kontext")) {
+      return "/v1/flux-kontext";
+    }
+    if (m.includes("flux-2-max")) return "/v1/flux-2-max";
+    if (m.includes("flux-2-pro")) return "/v1/flux-2-pro";
+    if (m.includes("pro-1.1") || m.includes("flux-pro")) return "/v1/flux-pro-1.1";
+    return "/v1/flux-kontext-max";
+  }
+
+  async chat(_config: ProviderConfig, _messages: ChatMessage[]): Promise<ChatResult> {
+    throw new Error(
+      "FLUX is image-only. Assign FLUX to AI_CREATIVE_IMAGE for educational drawings, infographics, and image edits."
+    );
+  }
+
+  async embed(_config: ProviderConfig, _text: string): Promise<EmbeddingResult> {
+    throw new Error("FLUX does not provide embeddings — use Gemini, OpenAI, or Jina.");
+  }
+
+  async generateImage(
+    config: ProviderConfig,
+    input: ImageGenerationInput
+  ): Promise<ImageGenerationResult> {
+    const url = `${this.base(config)}${this.endpointPath(config.model)}`;
+    const body: Record<string, unknown> = {
+      prompt: input.prompt.slice(0, 4000),
+      width: input.width ?? 1024,
+      height: input.height ?? 1024,
+      output_format: "png",
+    };
+    if (input.inputImageBase64) {
+      body.input_image = input.inputImageBase64.replace(/^data:[^;]+;base64,/, "");
+    }
+    const res = await fetchJson(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-key": config.apiKey,
+        },
+        body: JSON.stringify(body),
+      },
+      Math.max(config.timeoutMs, 60_000)
+    );
+    const data = await readApiJson(res, "FLUX submit");
+    if (!res.ok) {
+      const detail =
+        (data.detail as string) ||
+        (data.error as { message?: string } | undefined)?.message ||
+        JSON.stringify(data).slice(0, 200);
+      throw new Error(`FLUX submit failed (${res.status}): ${detail}`);
+    }
+    const pollingUrl =
+      (data.polling_url as string) ||
+      (data.id
+        ? `${this.base(config)}/v1/get_result?id=${encodeURIComponent(String(data.id))}`
+        : "");
+    if (!pollingUrl) throw new Error("FLUX did not return a polling URL");
+
+    const sampleUrl = await this.pollResult(pollingUrl, config);
+    const imgRes = await fetchJson(sampleUrl, { method: "GET" }, Math.max(config.timeoutMs, 60_000));
+    if (!imgRes.ok) throw new Error(`FLUX download failed (${imgRes.status})`);
+    const buf = Buffer.from(await imgRes.arrayBuffer());
+    return {
+      mimeType: "image/png",
+      dataBase64: buf.toString("base64"),
+      tokensIn: Math.ceil(input.prompt.length / 4),
+    };
+  }
+
+  private async pollResult(pollingUrl: string, config: ProviderConfig): Promise<string> {
+    const deadline = Date.now() + Math.max(config.timeoutMs, 120_000);
+    let lastStatus = "";
+    while (Date.now() < deadline) {
+      const res = await fetchJson(
+        pollingUrl,
+        { method: "GET", headers: { "x-key": config.apiKey } },
+        30_000
+      );
+      const data = await readApiJson(res, "FLUX poll");
+      if (!res.ok) {
+        throw new Error(
+          `FLUX poll failed (${res.status}): ${JSON.stringify(data).slice(0, 180)}`
+        );
+      }
+      lastStatus = String(data.status || "");
+      if (lastStatus === "Ready") {
+        const result = data.result as { sample?: string } | undefined;
+        const sample = result?.sample || (data.sample as string | undefined);
+        if (!sample) throw new Error("FLUX Ready but missing sample URL");
+        return sample;
+      }
+      if (lastStatus === "Error" || lastStatus === "Failed") {
+        const msg =
+          (data.error as string) ||
+          (data.result as { error?: string } | undefined)?.error ||
+          "FLUX generation failed";
+        throw new Error(msg);
+      }
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+    throw new Error(`FLUX timed out (last status: ${lastStatus || "unknown"})`);
+  }
+
+  async testConnection(config: ProviderConfig) {
+    try {
+      // Lightweight auth check — BFL has no dedicated ping; submit a tiny request and abort on auth errors.
+      const url = `${this.base(config)}${this.endpointPath(config.model)}`;
+      const res = await fetchJson(
+        url,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-key": config.apiKey,
+          },
+          body: JSON.stringify({
+            prompt: "simple green circle on white background educational icon",
+            width: 512,
+            height: 512,
+          }),
+        },
+        45_000
+      );
+      const data = await readApiJson(res, "FLUX test");
+      if (res.status === 401 || res.status === 403) {
+        return { ok: false, message: "Invalid BFL API key (x-key)" };
+      }
+      if (!res.ok) {
+        const detail =
+          (data.detail as string) ||
+          (data.error as { message?: string } | undefined)?.message ||
+          `HTTP ${res.status}`;
+        return { ok: false, message: `FLUX test failed: ${detail}` };
+      }
+      if (!data.polling_url && !data.id) {
+        return { ok: false, message: "FLUX accepted but returned no job id" };
+      }
+      return {
+        ok: true,
+        message: "FLUX.1 Kontext Max API key OK (job accepted)",
+      };
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : "FLUX test failed" };
+    }
+  }
+}
+
 export class AnthropicAdapter implements AiProviderAdapter {
   readonly type = "ANTHROPIC";
 
@@ -482,6 +645,8 @@ export function getAdapter(type: string): AiProviderAdapter {
       return new OpenAiCompatibleAdapter("DEEPSEEK");
     case "JINA":
       return new JinaAdapter();
+    case "FLUX":
+      return new FluxAdapter();
     case "ANTHROPIC":
       return new AnthropicAdapter();
     default:
@@ -505,6 +670,8 @@ export function defaultBaseUrlForType(type: string): string | null {
       return "https://api.deepseek.com/v1";
     case "JINA":
       return "https://api.jina.ai/v1";
+    case "FLUX":
+      return "https://api.bfl.ai";
     default:
       return null;
   }
@@ -529,13 +696,20 @@ export function jinaDefaultBaseUrl(model: string): string {
 /** True when this provider can run the EMBEDDING module. */
 export function providerSupportsEmbeddings(type: string, model?: string): boolean {
   if (type === "JINA") return isJinaEmbeddingModel(model || "jina-embeddings-v4");
+  if (type === "FLUX") return false;
   return type === "GEMINI" || type === "OPENAI" || type === "OPENAI_COMPATIBLE";
 }
 
 /** True when this provider can run chat / completion modules. */
 export function providerSupportsChat(type: string, model?: string): boolean {
+  if (type === "FLUX") return false;
   if (type === "JINA") return isJinaDeepSearchModel(model || "");
   return true;
+}
+
+/** True when this provider can run AI_CREATIVE_IMAGE (raster generate/edit). */
+export function providerSupportsImageGeneration(type: string): boolean {
+  return type === "FLUX";
 }
 
 function defaultChatModel(type: string): string {
@@ -605,5 +779,13 @@ export function normalizeJinaDeepSearchBase(baseUrl?: string | null): string {
     .replace(/\/chat\/completions$/i, "")
     .replace(/\/$/, "");
   if (!base || /api\.jina\.ai/i.test(base)) base = "https://deepsearch.jina.ai/v1";
+  return base;
+}
+
+/** Normalize Black Forest Labs (FLUX) API base. */
+export function normalizeFluxBase(baseUrl?: string | null): string {
+  let base = (baseUrl || "https://api.bfl.ai").trim().replace(/\/$/, "");
+  base = base.replace(/\/v1\/flux.*$/i, "").replace(/\/$/, "");
+  if (!base) base = "https://api.bfl.ai";
   return base;
 }
