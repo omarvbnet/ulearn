@@ -56,6 +56,7 @@ export class AuthService {
     success: boolean;
     expiresIn: number;
     messageId?: string | null;
+    messageStatus?: string | null;
   }> {
     const normalized = phone.replace(/\s+/g, "");
     const { isWhatsAppConfigured } = await import("@/lib/whatsapp");
