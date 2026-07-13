@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  // Native image libs must stay external (Turbopack cannot place their bindings).
+  serverExternalPackages: ["sharp", "@napi-rs/canvas"],
 };
 
 export default nextConfig;
