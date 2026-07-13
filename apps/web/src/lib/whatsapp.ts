@@ -28,21 +28,26 @@ export function getWhatsAppWebhookUrl(): string {
 }
 
 export function getWhatsAppVerifyToken(): string | undefined {
+  // Prefer webhook-prefixed name (May config), then short name.
   return envFirst(
-    "WHATSAPP_VERIFY_TOKEN",
-    "WHATSAPP_WEBHOOK_VERIFY_TOKEN"
+    "WHATSAPP_WEBHOOK_VERIFY_TOKEN",
+    "WHATSAPP_VERIFY_TOKEN"
   );
 }
 
 export function getWhatsAppPhoneNumberId(): string | undefined {
+  // Prefer CLOUD_* (May config) then current name.
   return envFirst(
-    "WHATSAPP_PHONE_NUMBER_ID",
-    "WHATSAPP_CLOUD_PHONE_NUMBER_ID"
+    "WHATSAPP_CLOUD_PHONE_NUMBER_ID",
+    "WHATSAPP_PHONE_NUMBER_ID"
   );
 }
 
 export function getWhatsAppAccessToken(): string | undefined {
-  return envFirst("WHATSAPP_ACCESS_TOKEN", "WHATSAPP_CLOUD_ACCESS_TOKEN");
+  return envFirst(
+    "WHATSAPP_CLOUD_ACCESS_TOKEN",
+    "WHATSAPP_ACCESS_TOKEN"
+  );
 }
 
 export function getWhatsAppOtpTemplateName(): string | undefined {
@@ -50,16 +55,52 @@ export function getWhatsAppOtpTemplateName(): string | undefined {
 }
 
 export function getWhatsAppOtpTemplateLang(): string {
+  // Prefer TEMPLATE_LANGUAGE (May), then LANG. Normalize ar_AR → ar.
   return normalizeWhatsAppTemplateLang(
     envFirst(
-      "WHATSAPP_OTP_TEMPLATE_LANG",
-      "WHATSAPP_OTP_TEMPLATE_LANGUAGE"
+      "WHATSAPP_OTP_TEMPLATE_LANGUAGE",
+      "WHATSAPP_OTP_TEMPLATE_LANG"
     ) || "ar"
   );
 }
 
 export function isWhatsAppConfigured(): boolean {
   return Boolean(getWhatsAppPhoneNumberId() && getWhatsAppAccessToken());
+}
+
+/** Which env keys were resolved (names only — safe to log). */
+export function getWhatsAppEnvResolution(): Record<string, string | null> {
+  return {
+    phoneNumberId: whichEnv(
+      "WHATSAPP_CLOUD_PHONE_NUMBER_ID",
+      "WHATSAPP_PHONE_NUMBER_ID"
+    ),
+    accessToken: whichEnv(
+      "WHATSAPP_CLOUD_ACCESS_TOKEN",
+      "WHATSAPP_ACCESS_TOKEN"
+    ),
+    templateName: whichEnv("WHATSAPP_OTP_TEMPLATE_NAME"),
+    templateLang: whichEnv(
+      "WHATSAPP_OTP_TEMPLATE_LANGUAGE",
+      "WHATSAPP_OTP_TEMPLATE_LANG"
+    ),
+    buttonMode: whichEnv("WHATSAPP_OTP_BUTTON_MODE"),
+    buttonIndex: whichEnv("WHATSAPP_OTP_URL_BUTTON_INDEX"),
+    bodyVars: whichEnv("WHATSAPP_OTP_TEMPLATE_BODY_VARS"),
+    useButton: whichEnv("WHATSAPP_OTP_TEMPLATE_USE_BUTTON"),
+    webhookBase: whichEnv("WHATSAPP_WEBHOOK_BASE_URL", "NEXT_PUBLIC_APP_URL"),
+    verifyToken: whichEnv(
+      "WHATSAPP_WEBHOOK_VERIFY_TOKEN",
+      "WHATSAPP_VERIFY_TOKEN"
+    ),
+  };
+}
+
+function whichEnv(...keys: string[]): string | null {
+  for (const key of keys) {
+    if (process.env[key]?.trim()) return key;
+  }
+  return null;
 }
 
 /** Meta webhook subscription verification (GET). */
@@ -284,10 +325,11 @@ export async function sendWhatsAppOtp(
   const raw = await res.text();
   if (!res.ok) {
     console.error("[WhatsApp] send failed:", res.status, raw);
+    console.error("[WhatsApp] OTP env keys", getWhatsAppEnvResolution());
     let hint = "";
     if (raw.includes("132001") || raw.includes("does not exist in")) {
       hint =
-        ` Template "${templateName}" was not found for language "${templateLang}". Set WHATSAPP_OTP_TEMPLATE_LANG (or WHATSAPP_OTP_TEMPLATE_LANGUAGE) to the exact code in WhatsApp Manager (often "ar").`;
+        ` Template "${templateName}" was not found for language "${templateLang}". Set WHATSAPP_OTP_TEMPLATE_LANGUAGE (or WHATSAPP_OTP_TEMPLATE_LANG) to the exact code in WhatsApp Manager (often "ar").`;
     }
     throw new WhatsAppSendError(
       `WhatsApp API rejected the OTP message.${hint}`,
@@ -312,6 +354,7 @@ export async function sendWhatsAppOtp(
   }
 
   const useButton = shouldIncludeOtpUrlButton();
+  console.info("[WhatsApp] OTP env keys", getWhatsAppEnvResolution());
   console.info("[WhatsApp] OTP accepted by Meta", {
     to: `***${to.slice(-4)}`,
     toLen: to.length,
