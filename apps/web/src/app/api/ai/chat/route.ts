@@ -26,6 +26,10 @@ const schema = z.object({
   lesson: z.string().optional(),
   mode: z.enum(["chat", "practice_quiz", "edit", "explain_observe", "from_materials"]).optional(),
   documentIds: z.array(z.string()).max(20).optional(),
+  /** Chapter/section within the selected material */
+  chapterHeading: z.string().max(200).nullable().optional(),
+  chunkFrom: z.number().int().min(0).nullable().optional(),
+  chunkTo: z.number().int().min(0).nullable().optional(),
   /** Practice exam size: Basic=5, Intermediate=10, Advanced=20 */
   count: z.union([z.literal(5), z.literal(10), z.literal(20)]).optional(),
   attachments: z.array(attachmentSchema).max(8).optional(),

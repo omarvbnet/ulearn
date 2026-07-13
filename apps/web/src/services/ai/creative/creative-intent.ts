@@ -84,13 +84,13 @@ export function detectCreativeChatIntent(
 export function creativeUpgradeMessage(language: string): string {
   switch (language.slice(0, 2)) {
     case "ar":
-      return "انتهت استخدامات الاستوديو الإبداعي المجانية. اشترِ دورة مدفوعة إضافية أو فعّل باقة AI Creative للمتابعة (دمج PDF، تصميم عرض/PDF/Word، الصور).";
+      return "انتهت باقة الذكاء الاصطناعي المجانية أو الاشتراك. اضغط ترقية الخطة للاشتراك الشهري (USD) أو السنوي (IQD)، أو أكمل عدد الدورات المطلوب من الإدارة.";
     case "ku":
-      return "بەکارهێنانی خۆڕایی ستۆدیۆی داهێنەرانە تەواو بوو. کۆرسی پارەدراوی زیاتر بکڕە یان پاکێجی AI Creative چالاک بکە بۆ بەردەوامبوون.";
+      return "پلانی خۆڕایی AI یان بەشدارییەکە تەواو بوو. کرتە لەسەر بەرزکردنەوەی پلان بکە بۆ مانگانە (USD) یان ساڵانە (IQD)، یان ژمارەی کۆرسە پێویستەکان تەواو بکە.";
     case "tr":
-      return "Ücretsiz Yaratıcı Stüdyo hakkınız bitti. Devam etmek için daha fazla ücretli kurs alın veya AI Creative paketini etkinleştirin.";
+      return "Ücretsiz AI planınız veya aboneliğiniz bitti. Aylık (USD) veya yıllık (IQD) yükseltmek için Planı Yükselt’e dokunun, ya da yönetici kurs eşiğini tamamlayın.";
     default:
-      return "You've used your free AI Creative Studio uses. Buy more paid courses or activate an AI Creative plan to continue (PDF merge, PPT/PDF/Word design, images).";
+      return "Your free AI plan or subscription has ended. Tap Upgrade Plan for monthly (USD) or yearly (IQD), or reach the admin course unlock count.";
   }
 }
 
