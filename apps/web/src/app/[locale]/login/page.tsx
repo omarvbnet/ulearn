@@ -1,21 +1,32 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button, Card, Input } from "@/components/ui";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ULearnLogo } from "@/components/ulearn-logo";
 import { useT } from "@/i18n/client";
+import {
+  buildInternationalPhone,
+  getDefaultPhoneCountry,
+  phoneCountriesIraqFirst,
+} from "@/lib/phone-countries";
 
 export default function LoginPage() {
   const t = useT();
   const { locale } = useParams<{ locale: string }>();
   const router = useRouter();
-  const [phone, setPhone] = useState("");
+  const countries = useMemo(() => phoneCountriesIraqFirst(), []);
+  const [countryIso, setCountryIso] = useState(getDefaultPhoneCountry().iso);
+  const [national, setNational] = useState("");
+  const [fullPhone, setFullPhone] = useState("");
   const [code, setCode] = useState("");
   const [step, setStep] = useState<"phone" | "otp">("phone");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const selected =
+    countries.find((c) => c.iso === countryIso) || getDefaultPhoneCountry();
 
   const errorMessages: Record<string, string> = {
     OTP_INVALID: t.auth.otpInvalid,
@@ -32,6 +43,11 @@ export default function LoginPage() {
 
   async function sendOtp(e: React.FormEvent) {
     e.preventDefault();
+    const phone = buildInternationalPhone(selected.dial, national);
+    if (phone.replace(/\D/g, "").length < 10) {
+      setError(t.auth.phonePlaceholder);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -42,6 +58,7 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
+      setFullPhone(phone);
       setStep("otp");
     } catch (err) {
       setError(friendly(err instanceof Error ? err.message : "Failed to send OTP"));
@@ -58,13 +75,13 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/otp/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, code }),
+        body: JSON.stringify({ phone: fullPhone, code }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
 
       if (data.isNewUser) {
-        router.push(`/${locale}/register?phone=${encodeURIComponent(phone)}`);
+        router.push(`/${locale}/register?phone=${encodeURIComponent(fullPhone)}`);
         return;
       }
 
@@ -103,15 +120,37 @@ export default function LoginPage() {
 
         {step === "phone" ? (
           <form onSubmit={sendOtp} className="space-y-4">
-            <Input
-              label={t.auth.phone}
-              type="tel"
-              placeholder={t.auth.phonePlaceholder}
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              required
-              dir="ltr"
-            />
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-muted">{t.auth.phone}</label>
+              <div className="flex gap-2" dir="ltr">
+                <select
+                  className="input w-[10.5rem] shrink-0 px-2 text-sm"
+                  value={countryIso}
+                  onChange={(e) => setCountryIso(e.target.value)}
+                  aria-label="Country code"
+                >
+                  {countries.map((c) => (
+                    <option key={c.iso} value={c.iso}>
+                      {c.flag} +{c.dial} {c.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="tel"
+                  className="input flex-1"
+                  placeholder={
+                    selected.iso === "IQ" ? "7XX XXX XXXX" : "Phone number"
+                  }
+                  value={national}
+                  onChange={(e) => setNational(e.target.value)}
+                  required
+                  dir="ltr"
+                />
+              </div>
+              <p className="text-xs text-muted" dir="ltr">
+                {buildInternationalPhone(selected.dial, national || "…")}
+              </p>
+            </div>
             {error && <p className="text-sm text-danger">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? t.auth.sending : t.auth.sendOtp}
@@ -120,7 +159,10 @@ export default function LoginPage() {
         ) : (
           <form onSubmit={verifyOtp} className="space-y-4">
             <p className="text-sm text-muted">
-              {t.auth.codeSentTo} <span className="text-foreground" dir="ltr">{phone}</span>
+              {t.auth.codeSentTo}{" "}
+              <span className="text-foreground" dir="ltr">
+                {fullPhone}
+              </span>
             </p>
             <Input
               label={t.auth.verificationCode}

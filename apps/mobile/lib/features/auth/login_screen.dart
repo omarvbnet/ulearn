@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
+import 'package:ulearn/core/phone/phone_countries.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/particle_field.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
@@ -29,12 +30,17 @@ class _LoginScreenState extends State<LoginScreen>
   String? _error;
   Timer? _resendTimer;
   int _resendIn = 0;
+  late PhoneCountry _country;
+  late final List<PhoneCountry> _countries;
+  String _fullPhone = '';
 
   late final AnimationController _shake;
 
   @override
   void initState() {
     super.initState();
+    _countries = phoneCountriesIraqFirst();
+    _country = getDefaultPhoneCountry();
     _shake = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 420),
@@ -71,8 +77,8 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _sendOtp() async {
-    final phone = _phoneCtrl.text.trim();
-    if (phone.length < 8) {
+    final phone = buildInternationalPhone(_country.dial, _phoneCtrl.text.trim());
+    if (phone.replaceAll(RegExp(r'\D'), '').length < 10) {
       _showError(context.l10n.loginValidPhone);
       return;
     }
@@ -85,6 +91,7 @@ class _LoginScreenState extends State<LoginScreen>
       if (!mounted) return;
       setState(() {
         _otpStep = true;
+        _fullPhone = phone;
         _otpCtrl.clear();
       });
       _startResendCountdown();
@@ -103,14 +110,21 @@ class _LoginScreenState extends State<LoginScreen>
     });
     try {
       final result = await context.read<AuthProvider>().verifyOtp(
-            _phoneCtrl.text.trim(),
+            _fullPhone.isNotEmpty
+                ? _fullPhone
+                : buildInternationalPhone(_country.dial, _phoneCtrl.text.trim()),
             _otpCtrl.text.trim(),
           );
       if (!mounted) return;
       if (result['isNewUser'] == true) {
         await Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (_) => RegisterScreen(phone: _phoneCtrl.text.trim()),
+            builder: (_) => RegisterScreen(
+              phone: _fullPhone.isNotEmpty
+                  ? _fullPhone
+                  : buildInternationalPhone(
+                      _country.dial, _phoneCtrl.text.trim()),
+            ),
           ),
         );
         if (!mounted) return;
@@ -272,17 +286,72 @@ class _LoginScreenState extends State<LoginScreen>
           style: TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.5),
         ),
         const SizedBox(height: 20),
-        TextField(
-          controller: _phoneCtrl,
-          keyboardType: TextInputType.phone,
+        Row(
+          children: [
+            SizedBox(
+              width: 118,
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<PhoneCountry>(
+                    value: _country,
+                    isExpanded: true,
+                    items: _countries
+                        .map(
+                          (c) => DropdownMenuItem(
+                            value: c,
+                            child: Text(
+                              '${c.flag} +${c.dial}',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    selectedItemBuilder: (context) => _countries
+                        .map(
+                          (c) => Align(
+                            alignment: AlignmentDirectional.centerStart,
+                            child: Text(
+                              '${c.flag} +${c.dial}',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (c) {
+                      if (c == null) return;
+                      setState(() => _country = c);
+                    },
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _phoneCtrl,
+                keyboardType: TextInputType.phone,
+                textDirection: TextDirection.ltr,
+                style: const TextStyle(fontSize: 16, letterSpacing: 0.5),
+                onChanged: (_) => setState(() {}),
+                onSubmitted: (_) => _sendOtp(),
+                decoration: InputDecoration(
+                  labelText: l10n.authPhone,
+                  hintText: _country.iso == 'IQ' ? '7XX XXX XXXX' : l10n.authPhonePlaceholder,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          buildInternationalPhone(_country.dial, _phoneCtrl.text.trim().isEmpty ? '…' : _phoneCtrl.text.trim()),
           textDirection: TextDirection.ltr,
-          style: const TextStyle(fontSize: 16, letterSpacing: 0.5),
-          onSubmitted: (_) => _sendOtp(),
-          decoration: InputDecoration(
-            labelText: l10n.authPhone,
-            hintText: l10n.authPhonePlaceholder,
-            prefixIcon: Icon(Icons.phone_iphone, color: AppTheme.muted),
-          ),
+          style: TextStyle(color: AppTheme.muted, fontSize: 12),
         ),
         const SizedBox(height: 18),
         SizedBox(
@@ -336,7 +405,7 @@ class _LoginScreenState extends State<LoginScreen>
             children: [
               TextSpan(text: l10n.loginCodeSentPrefix),
               TextSpan(
-                text: _phoneCtrl.text.trim(),
+                text: _fullPhone.isNotEmpty ? _fullPhone : _phoneCtrl.text.trim(),
                 style: TextStyle(
                   color: AppTheme.foreground,
                   fontWeight: FontWeight.w600,
