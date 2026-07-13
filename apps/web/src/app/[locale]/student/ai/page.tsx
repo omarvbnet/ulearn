@@ -25,7 +25,11 @@ type PracticeExam = {
   examAttemptId: string;
   title: string;
   timeLimitSec: number;
-  questions: Array<{ text: string; options: Record<string, string> }>;
+  questions: Array<{
+    text: string;
+    options: Record<string, string>;
+    imageBase64?: string;
+  }>;
 };
 
 type ExamResult = {
@@ -50,6 +54,8 @@ export default function StudentAiPage() {
   const [conversations, setConversations] = useState<Conv[]>([]);
   const [docs, setDocs] = useState<KbDoc[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerMode, setPickerMode] = useState<"exam" | "explain_observe">("exam");
+  const [pendingExplainQuestion, setPendingExplainQuestion] = useState("");
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const [examCount, setExamCount] = useState<5 | 10 | 20>(5);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
@@ -98,6 +104,12 @@ export default function StudentAiPage() {
     locale === "ar"
       ? "صمم عرض PowerPoint من الملفات المرفقة"
       : "Design a PowerPoint presentation from my attached file(s)",
+    locale === "ar"
+      ? "صمم ملف PDF من الملفات المرفقة"
+      : "Design a PDF from my attached file(s)",
+    locale === "ar"
+      ? "صمم ملف Word من الملفات المرفقة"
+      : "Design a Word document from my attached file(s)",
     locale === "ar"
       ? "صمم صورة تعليمية / إنفوجرافيك من الملفات المرفقة"
       : "Design an educational image / infographic from my attached file(s)",
@@ -237,6 +249,21 @@ export default function StudentAiPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Chat failed");
+      if (data.needsMaterialSelection) {
+        setMessages((m) => [
+          ...m,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            text: data.answer || "",
+          },
+        ]);
+        setPendingExplainQuestion(
+          String(data.pendingQuestion || q || "").trim() || q
+        );
+        await openMaterialPicker("explain_observe");
+        return;
+      }
       setConversationId(data.conversationId || conversationId);
       const edited = data.editedFile as ChatMsg["file"] | undefined;
       setMessages((m) => [
@@ -322,7 +349,7 @@ export default function StudentAiPage() {
     setInput("");
   }
 
-  async function openExamPicker() {
+  async function openMaterialPicker(mode: "exam" | "explain_observe" = "exam") {
     const res = await fetch("/api/ai/kb-documents");
     const data = await res.json();
     if (!res.ok) {
@@ -353,7 +380,73 @@ export default function StudentAiPage() {
     setDocs(list);
     setSelectedDocs([]);
     setExamCount(5);
+    setPickerMode(mode);
     setPickerOpen(true);
+  }
+
+  async function openExamPicker() {
+    await openMaterialPicker("exam");
+  }
+
+  async function confirmMaterialPicker() {
+    if (!selectedDocs.length) return;
+    if (pickerMode === "exam") {
+      await generateExam();
+      return;
+    }
+    setPickerOpen(false);
+    setSending(true);
+    const prompt =
+      pendingExplainQuestion.trim() ||
+      (locale === "ar"
+        ? "اشرح المادة وساعدني على ملاحظة الأشكال"
+        : "Explain the material and help me observe the shapes");
+    try {
+      const res = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: prompt,
+          language: locale,
+          mode: "explain_observe",
+          documentIds: selectedDocs,
+          conversationId: conversationId || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed");
+      setConversationId(data.conversationId || conversationId);
+      const edited = data.editedFile as ChatMsg["file"] | undefined;
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          text: data.answer || "",
+          file: edited
+            ? {
+                fileName: edited.fileName,
+                mimeType: edited.mimeType,
+                contentBase64: edited.contentBase64,
+                downloadUrl: edited.downloadUrl,
+              }
+            : null,
+        },
+      ]);
+      setPendingExplainQuestion("");
+      void loadHistory();
+    } catch (e) {
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          text: e instanceof Error ? e.message : "Failed",
+        },
+      ]);
+    } finally {
+      setSending(false);
+    }
   }
 
   async function generateExam() {
@@ -636,33 +729,37 @@ export default function StudentAiPage() {
             <div className="border-b border-border p-4">
               <h3 className="font-semibold">{t.student.aiPickMaterials}</h3>
               <p className="mt-1 text-sm text-muted">{t.student.aiPickMaterialsHint}</p>
-              <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted">
-                {t.student.aiExamDifficulty}
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {(
-                  [
-                    { count: 5 as const, label: t.student.aiExamBasic },
-                    { count: 10 as const, label: t.student.aiExamIntermediate },
-                    { count: 20 as const, label: t.student.aiExamAdvanced },
-                  ] as const
-                ).map((opt) => (
-                  <button
-                    key={opt.count}
-                    type="button"
-                    onClick={() => setExamCount(opt.count)}
-                    className={cn(
-                      "rounded-xl border px-3 py-2 text-sm font-medium transition",
-                      examCount === opt.count
-                        ? "border-accent bg-accent/15 text-accent"
-                        : "border-border text-muted hover:border-accent/40"
-                    )}
-                  >
-                    {opt.label}
-                    <span className="ms-1 text-xs opacity-80">({opt.count})</span>
-                  </button>
-                ))}
-              </div>
+              {pickerMode === "exam" && (
+                <>
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted">
+                    {t.student.aiExamDifficulty}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(
+                      [
+                        { count: 5 as const, label: t.student.aiExamBasic },
+                        { count: 10 as const, label: t.student.aiExamIntermediate },
+                        { count: 20 as const, label: t.student.aiExamAdvanced },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.count}
+                        type="button"
+                        onClick={() => setExamCount(opt.count)}
+                        className={cn(
+                          "rounded-xl border px-3 py-2 text-sm font-medium transition",
+                          examCount === opt.count
+                            ? "border-accent bg-accent/15 text-accent"
+                            : "border-border text-muted hover:border-accent/40"
+                        )}
+                      >
+                        {opt.label}
+                        <span className="ms-1 text-xs opacity-80">({opt.count})</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
             <div className="max-h-[50vh] space-y-1 overflow-y-auto p-3">
               {docs.map((d) => {
@@ -693,9 +790,13 @@ export default function StudentAiPage() {
               <Button
                 type="button"
                 disabled={!selectedDocs.length || sending}
-                onClick={() => void generateExam()}
+                onClick={() => void confirmMaterialPicker()}
               >
-                {t.student.aiGenerateExam}
+                {pickerMode === "exam"
+                  ? t.student.aiGenerateExam
+                  : locale === "ar"
+                    ? "شرح مع رسم الأشكال"
+                    : "Explain with shapes"}
               </Button>
             </div>
           </Card>
@@ -845,6 +946,14 @@ function ExamPanel({
             <p className="mb-2 text-sm font-medium">
               {i + 1}. {q.text}
             </p>
+            {q.imageBase64 ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={`data:image/png;base64,${q.imageBase64}`}
+                alt=""
+                className="mb-2 max-h-56 w-full rounded-xl border border-border object-contain bg-black/20"
+              />
+            ) : null}
             <div className="space-y-1">
               {Object.entries(q.options || {}).map(([k, v]) => (
                 <button

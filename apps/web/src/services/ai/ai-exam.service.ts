@@ -8,6 +8,8 @@ export type AiExamQuestion = {
   text: string;
   options: Record<string, string>;
   correctKey: string;
+  /** Optional FLUX diagram for shape-based questions. */
+  imageBase64?: string;
 };
 
 const PASS_PERCENTAGE = 60;
@@ -20,6 +22,7 @@ export function stripCorrectKeys(questions: AiExamQuestion[]) {
   return questions.map((q) => ({
     text: q.text,
     options: q.options,
+    ...(q.imageBase64 ? { imageBase64: q.imageBase64 } : {}),
   }));
 }
 

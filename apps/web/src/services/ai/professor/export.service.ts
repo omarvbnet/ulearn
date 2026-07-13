@@ -3,6 +3,7 @@ import {
   AlignmentType,
   Document,
   HeadingLevel,
+  ImageRun,
   Packer,
   Paragraph,
   TextRun,
@@ -16,6 +17,11 @@ import {
   preparePdfText,
   pptTextOptions,
 } from "../fonts";
+
+export type ExportFigure = {
+  pngBase64: string;
+  caption?: string;
+};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const PptxCtor = (PptxGenJS as any).default ?? PptxGenJS;
@@ -52,7 +58,8 @@ function splitSections(md: string): Array<{ heading: string; body: string }> {
 export async function buildPdf(
   title: string,
   markdown: string,
-  language?: string | null
+  language?: string | null,
+  figures?: ExportFigure[]
 ): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   const sample = `${title}\n${markdown}`;
@@ -66,6 +73,14 @@ export async function buildPdf(
   const margin = 50;
   let y = height - margin;
 
+  const ensureSpace = (needed: number) => {
+    if (y < margin + needed) {
+      page = pdf.addPage();
+      ({ width, height } = page.getSize());
+      y = height - margin;
+    }
+  };
+
   const draw = (raw: string, size: number, isBold = false) => {
     const f = isBold ? bold : font;
     const text = preparePdfText(raw);
@@ -75,11 +90,7 @@ export async function buildPdf(
     const maxW = width - margin * 2;
     const flush = (toDraw: string) => {
       if (!toDraw) return;
-      if (y < margin + 20) {
-        page = pdf.addPage();
-        ({ width, height } = page.getSize());
-        y = height - margin;
-      }
+      ensureSpace(size + 20);
       const tw = f.widthOfTextAtSize(toDraw, size);
       const x = rtl ? Math.max(margin, width - margin - tw) : margin;
       page.drawText(toDraw, { x, y, size, font: f, color: rgb(0.1, 0.1, 0.15) });
@@ -100,6 +111,26 @@ export async function buildPdf(
     }
   };
 
+  const drawFigure = async (fig: ExportFigure) => {
+    try {
+      const bytes = Buffer.from(fig.pngBase64.replace(/^data:[^;]+;base64,/, ""), "base64");
+      const img = await pdf.embedPng(bytes);
+      const maxW = width - margin * 2;
+      const maxH = Math.min(320, height - margin * 2);
+      const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      ensureSpace(h + 36);
+      const x = rtl ? width - margin - w : margin;
+      page.drawImage(img, { x, y: y - h, width: w, height: h });
+      y -= h + 8;
+      if (fig.caption) draw(fig.caption.slice(0, 200), 10);
+      y -= 10;
+    } catch {
+      /* skip broken figure */
+    }
+  };
+
   draw(title.slice(0, 120), 18, true);
   y -= 8;
   const plain = markdown
@@ -110,13 +141,18 @@ export async function buildPdf(
     draw(para.slice(0, 2000), 11);
   }
 
+  for (const fig of figures || []) {
+    await drawFigure(fig);
+  }
+
   // page numbers (Western digits — always Latin-safe)
   const pages = pdf.getPages();
   const pageFont = font;
   pages.forEach((p, i) => {
     const label = `${i + 1} / ${pages.length}`;
+    const { width: pw } = p.getSize();
     p.drawText(label, {
-      x: width / 2 - 20,
+      x: pw / 2 - 20,
       y: 24,
       size: 9,
       font: pageFont,
@@ -127,7 +163,11 @@ export async function buildPdf(
   return pdf.save();
 }
 
-async function buildDocx(title: string, markdown: string): Promise<Buffer> {
+export async function buildDocx(
+  title: string,
+  markdown: string,
+  figures?: ExportFigure[]
+): Promise<Buffer> {
   const children: Paragraph[] = [
     new Paragraph({
       text: title,
@@ -158,6 +198,37 @@ async function buildDocx(title: string, markdown: string): Promise<Buffer> {
       children.push(new Paragraph({ text: "" }));
     }
   }
+
+  for (const fig of figures || []) {
+    try {
+      const bytes = Buffer.from(
+        fig.pngBase64.replace(/^data:[^;]+;base64,/, ""),
+        "base64"
+      );
+      children.push(
+        new Paragraph({
+          children: [
+            // docx ImageRun options vary slightly by version
+            new ImageRun({
+              data: bytes,
+              transformation: { width: 480, height: 360 },
+              type: "png",
+            } as ConstructorParameters<typeof ImageRun>[0]),
+          ],
+        })
+      );
+      if (fig.caption) {
+        children.push(
+          new Paragraph({
+            children: [new TextRun({ text: fig.caption, italics: true, size: 18 })],
+          })
+        );
+      }
+    } catch {
+      /* skip */
+    }
+  }
+
   const doc = new Document({ sections: [{ children }] });
   return Packer.toBuffer(doc);
 }
@@ -165,7 +236,8 @@ async function buildDocx(title: string, markdown: string): Promise<Buffer> {
 export async function buildPptx(
   title: string,
   markdown: string,
-  language?: string | null
+  language?: string | null,
+  figures?: ExportFigure[]
 ): Promise<Buffer> {
   const pptx = new PptxCtor();
   pptx.author = "U Learn AI";
@@ -198,13 +270,17 @@ export async function buildPptx(
     ...pptTextOptions(language),
   });
 
-  for (const section of splitSections(markdown).slice(0, 20)) {
+  const sections = splitSections(markdown).slice(0, 20);
+  const figs = figures || [];
+  for (let si = 0; si < sections.length; si++) {
+    const section = sections[si]!;
     const slide = pptx.addSlide();
+    const hasFig = Boolean(figs[si]);
     slide.addText(section.heading.slice(0, 80), {
       x: 0.5,
-      y: 0.4,
+      y: 0.3,
       w: 9,
-      h: 0.6,
+      h: 0.5,
       fontSize: 22,
       bold: true,
       color: "0F172A",
@@ -214,7 +290,7 @@ export async function buildPptx(
       .split(/\n/)
       .map((l: string) => l.replace(/^[-*]\s+/, "").trim())
       .filter(Boolean)
-      .slice(0, 8);
+      .slice(0, hasFig ? 5 : 8);
     slide.addText(
       bullets.map((b: string) => ({
         text: b.slice(0, 180),
@@ -222,14 +298,52 @@ export async function buildPptx(
       })),
       {
         x: 0.5,
-        y: 1.2,
-        w: 9,
-        h: 4,
+        y: 0.95,
+        w: hasFig ? 4.6 : 9,
+        h: hasFig ? 4.2 : 4.5,
         fontSize: 14,
         color: "334155",
         ...pptTextOptions(language),
       }
     );
+    if (hasFig) {
+      try {
+        slide.addImage({
+          data: figs[si]!.pngBase64.replace(/^data:[^;]+;base64,/, ""),
+          x: 5.3,
+          y: 1.0,
+          w: 4.2,
+          h: 4.0,
+        });
+      } catch {
+        /* skip */
+      }
+    }
+  }
+
+  // Extra figure slides for remaining images
+  for (let i = sections.length; i < figs.length; i++) {
+    const slide = pptx.addSlide();
+    slide.addText(figs[i]!.caption || `Figure ${i + 1}`, {
+      x: 0.5,
+      y: 0.3,
+      w: 9,
+      h: 0.5,
+      fontSize: 18,
+      bold: true,
+      ...pptTextOptions(language),
+    });
+    try {
+      slide.addImage({
+        data: figs[i]!.pngBase64.replace(/^data:[^;]+;base64,/, ""),
+        x: 1.2,
+        y: 1.0,
+        w: 7.5,
+        h: 4.5,
+      });
+    } catch {
+      /* skip */
+    }
   }
 
   const out = (await pptx.write({ outputType: "nodebuffer" })) as Buffer;

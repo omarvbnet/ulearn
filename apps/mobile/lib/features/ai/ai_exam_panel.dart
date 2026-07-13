@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
@@ -8,10 +9,12 @@ class AiExamQuestionView {
   AiExamQuestionView({
     required this.text,
     required this.options,
+    this.imageBase64,
   });
 
   final String text;
   final Map<String, String> options;
+  final String? imageBase64;
 
   factory AiExamQuestionView.fromJson(Map<String, dynamic> json) {
     final opts = <String, String>{};
@@ -19,9 +22,11 @@ class AiExamQuestionView {
     if (raw is Map) {
       raw.forEach((k, v) => opts[k.toString()] = v.toString());
     }
+    final img = json['imageBase64']?.toString();
     return AiExamQuestionView(
       text: json['text']?.toString() ?? '',
       options: opts,
+      imageBase64: (img != null && img.isNotEmpty) ? img : null,
     );
   }
 }
@@ -220,6 +225,19 @@ class _AiExamPanelState extends State<AiExamPanel> {
                       height: 1.35,
                     ),
                   ),
+                  if (q.imageBase64 != null && q.imageBase64!.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.memory(
+                        base64Decode(q.imageBase64!),
+                        fit: BoxFit.contain,
+                        height: 180,
+                        width: double.infinity,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   ...q.options.entries.map((e) {
                     final isSel = selected == e.key;

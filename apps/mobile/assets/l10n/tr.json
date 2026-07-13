@@ -986,7 +986,8 @@
         "statusSub": "Yaratıcı Stüdyo planı aktif",
         "statusCourses": "{count}/{unlock} ücretli kurs ile açıldı",
         "statusLocked": "Ücretsiz kullanım bitti — devam için yükseltin"
-      }
+      },
+      "explainWithShapes": "Şekil çizerek açıkla"
     },
     "error": {
       "generic": "Bir şeyler ters gitti",

@@ -986,7 +986,8 @@
         "statusSub": "خطة الاستوديو الإبداعي نشطة",
         "statusCourses": "مفتوح عبر {count}/{unlock} دورة مدفوعة",
         "statusLocked": "انتهت الاستخدامات المجانية — رقِّ للاستمرار"
-      }
+      },
+      "explainWithShapes": "شرح مع رسم الأشكال"
     },
     "error": {
       "generic": "حدث خطأ",

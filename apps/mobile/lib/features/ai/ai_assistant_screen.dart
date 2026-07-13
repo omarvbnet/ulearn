@@ -383,6 +383,25 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
 
       final data = await api.post('/api/ai/chat', payload);
       if (!mounted) return;
+
+      if (data['needsMaterialSelection'] == true) {
+        setState(() {
+          _conversationId =
+              data['conversationId']?.toString() ?? _conversationId;
+          _messages.add(
+            _ChatBubble(
+              role: 'assistant',
+              text: data['answer']?.toString() ??
+                  context.l10n.t('mobile.ai.pickMaterialsHint'),
+            ),
+          );
+        });
+        final pendingQ =
+            data['pendingQuestion']?.toString() ?? displayText;
+        await _startExplainObserveFlow(pendingQ);
+        return;
+      }
+
       final answer = data['answer']?.toString() ?? unavailable;
       final citations = (data['citations'] as List?) ?? const [];
       final edited = data['editedFile'] as Map<String, dynamic>?;
@@ -524,6 +543,120 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     final count = (selected['count'] as num?)?.toInt() ?? 5;
     if (ids.isEmpty) return;
     await _generateExam(ids, count);
+  }
+
+  Future<void> _startExplainObserveFlow(String pendingQuestion) async {
+    if (_sending) return;
+    final api = context.read<ApiClient>();
+    final l10n = context.l10n;
+    final errGeneric = l10n.t('mobile.ai.errorGeneric');
+    List<Map<String, dynamic>> docs = [];
+    try {
+      final data = await api.get('/api/ai/kb-documents');
+      docs = ((data['documents'] as List?) ?? []).cast<Map<String, dynamic>>();
+    } catch (e) {
+      _toast(e is ApiException ? e.message : errGeneric);
+      return;
+    }
+    if (!mounted) return;
+    if (docs.isEmpty) {
+      _toast(l10n.t('mobile.ai.noMaterialsStage'));
+      return;
+    }
+
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => _MaterialPickerSheet(
+        documents: docs,
+        explainMode: true,
+      ),
+    );
+    if (selected == null || !mounted) return;
+    final ids = ((selected['documentIds'] as List?) ?? [])
+        .map((e) => e.toString())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (ids.isEmpty) return;
+    await _runExplainObserve(pendingQuestion, ids);
+  }
+
+  Future<void> _runExplainObserve(
+    String question,
+    List<String> documentIds,
+  ) async {
+    setState(() => _sending = true);
+    _scrollToEnd();
+    try {
+      final api = context.read<ApiClient>();
+      final auth = context.read<AuthProvider>();
+      final locale = context.read<LocaleProvider>().code.toLowerCase();
+      final payload = <String, dynamic>{
+        'question': question,
+        'language': locale,
+        'mode': 'explain_observe',
+        'documentIds': documentIds,
+        if (_conversationId != null) 'conversationId': _conversationId,
+        ..._stagePayload(auth),
+      };
+      final data = await api.post('/api/ai/chat', payload);
+      if (!mounted) return;
+      final edited = data['editedFile'] as Map<String, dynamic>?;
+      Uint8List? editedPreview;
+      final editedMime = edited?['mimeType']?.toString();
+      final editedName = edited?['fileName']?.toString();
+      final editedB64 = edited?['contentBase64']?.toString();
+      final editedUrl = edited?['downloadUrl']?.toString();
+      final looksImage =
+          (editedMime ?? '').toLowerCase().startsWith('image/');
+      if (looksImage) {
+        try {
+          if (editedB64 != null && editedB64.isNotEmpty) {
+            editedPreview = base64Decode(editedB64);
+          } else if (editedUrl != null && editedUrl.isNotEmpty) {
+            editedPreview = await api.getBytes(editedUrl);
+          }
+        } catch (_) {
+          editedPreview = null;
+        }
+      }
+      setState(() {
+        _conversationId =
+            data['conversationId']?.toString() ?? _conversationId;
+        _messages.add(
+          _ChatBubble(
+            role: 'assistant',
+            text: data['answer']?.toString() ?? '',
+            editedFileName: editedName,
+            editedContentBase64: editedB64,
+            editedDownloadUrl: editedUrl,
+            editedMimeType: editedMime,
+            editedImageBytes: editedPreview,
+          ),
+        );
+      });
+      _loadConversations();
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e is ApiException ? e.message : e.toString();
+      setState(() {
+        _messages.add(
+          _ChatBubble(
+            role: 'assistant',
+            text: msg.trim().isNotEmpty
+                ? msg
+                : context.l10n.t('mobile.ai.errorGeneric'),
+          ),
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _sending = false);
+      _scrollToEnd();
+    }
   }
 
   Future<void> _generateExam(List<String> documentIds, int count) async {
@@ -1470,9 +1603,13 @@ class _HistoryDrawer extends StatelessWidget {
 }
 
 class _MaterialPickerSheet extends StatefulWidget {
-  const _MaterialPickerSheet({required this.documents});
+  const _MaterialPickerSheet({
+    required this.documents,
+    this.explainMode = false,
+  });
 
   final List<Map<String, dynamic>> documents;
+  final bool explainMode;
 
   @override
   State<_MaterialPickerSheet> createState() => _MaterialPickerSheetState();
@@ -1520,40 +1657,42 @@ class _MaterialPickerSheetState extends State<_MaterialPickerSheet> {
                     l10n.t('mobile.ai.pickMaterialsHint'),
                     style: TextStyle(color: AppTheme.muted, fontSize: 13),
                   ),
-                  const SizedBox(height: 14),
-                  Text(
-                    l10n.t('mobile.ai.examDifficulty'),
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppTheme.foreground,
+                  if (!widget.explainMode) ...[
+                    const SizedBox(height: 14),
+                    Text(
+                      l10n.t('mobile.ai.examDifficulty'),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        color: AppTheme.foreground,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _DifficultyChip(
-                        label: l10n.t('mobile.ai.examBasic'),
-                        subtitle: '5',
-                        selected: _count == 5,
-                        onTap: () => setState(() => _count = 5),
-                      ),
-                      _DifficultyChip(
-                        label: l10n.t('mobile.ai.examIntermediate'),
-                        subtitle: '10',
-                        selected: _count == 10,
-                        onTap: () => setState(() => _count = 10),
-                      ),
-                      _DifficultyChip(
-                        label: l10n.t('mobile.ai.examAdvanced'),
-                        subtitle: '20',
-                        selected: _count == 20,
-                        onTap: () => setState(() => _count = 20),
-                      ),
-                    ],
-                  ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _DifficultyChip(
+                          label: l10n.t('mobile.ai.examBasic'),
+                          subtitle: '5',
+                          selected: _count == 5,
+                          onTap: () => setState(() => _count = 5),
+                        ),
+                        _DifficultyChip(
+                          label: l10n.t('mobile.ai.examIntermediate'),
+                          subtitle: '10',
+                          selected: _count == 10,
+                          onTap: () => setState(() => _count = 10),
+                        ),
+                        _DifficultyChip(
+                          label: l10n.t('mobile.ai.examAdvanced'),
+                          subtitle: '20',
+                          selected: _count == 20,
+                          onTap: () => setState(() => _count = 20),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1605,7 +1744,9 @@ class _MaterialPickerSheetState extends State<_MaterialPickerSheet> {
                     minimumSize: const Size.fromHeight(48),
                   ),
                   child: Text(
-                    l10n.t('mobile.ai.generateExam'),
+                    widget.explainMode
+                        ? l10n.t('mobile.ai.explainWithShapes')
+                        : l10n.t('mobile.ai.generateExam'),
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),

@@ -4,6 +4,7 @@ export type CreativeChatIntent =
   | "merge"
   | "design_ppt"
   | "design_pdf"
+  | "design_docx"
   | "image_edit"
   | "image_design";
 
@@ -42,6 +43,8 @@ export function detectCreativeChatIntent(
     /\b(powerpoint|pptx|ppt|presentation|slides?)\b|عرض\s*تقديمي|بوربوينت|بوربوینت|سلايدات?|sunum/i;
   const pdfDocWords =
     /\b(pdf|document|report|handout|essay|article)\b|مذكرة|تقرير|مستند|وثيقة|ڕاپۆرت|belge|rapor|doküman/i;
+  const wordDocWords =
+    /\b(word|docx|doc\b|microsoft\s*word)\b|وورد|ورڈ|ملف\s*وورد|مستند\s*وورد|word\s*belgesi/i;
   const imageEditWords =
     /\b(edit|improve|redesign|fix|retouch|enhance)\b|عدل|عدّل|حسّن|حسن|تعديل\s*الصور|دەستکاری|düzenle|iyileştir/i;
   const imageDesignWords =
@@ -61,13 +64,15 @@ export function detectCreativeChatIntent(
     return "image_design";
   }
 
-  // Prefer PPT when user mentions presentation from attachments / explicit design
   if (
     pptWords.test(ql) &&
     (designWords.test(ql) ||
       /صمم|تصميم|اعمل|سوي|سوی|من الملفات|المرفق/i.test(ql))
   ) {
     return "design_ppt";
+  }
+  if (wordDocWords.test(ql) && designWords.test(ql)) {
+    return "design_docx";
   }
   if (pdfDocWords.test(ql) && designWords.test(ql) && pdfs.length < 2) {
     return "design_pdf";
@@ -79,13 +84,13 @@ export function detectCreativeChatIntent(
 export function creativeUpgradeMessage(language: string): string {
   switch (language.slice(0, 2)) {
     case "ar":
-      return "انتهت استخدامات الاستوديو الإبداعي المجانية. اشترِ دورة مدفوعة إضافية أو فعّل باقة AI Creative للمتابعة (دمج PDF، تصميم عرض/PDF، الصور).";
+      return "انتهت استخدامات الاستوديو الإبداعي المجانية. اشترِ دورة مدفوعة إضافية أو فعّل باقة AI Creative للمتابعة (دمج PDF، تصميم عرض/PDF/Word، الصور).";
     case "ku":
       return "بەکارهێنانی خۆڕایی ستۆدیۆی داهێنەرانە تەواو بوو. کۆرسی پارەدراوی زیاتر بکڕە یان پاکێجی AI Creative چالاک بکە بۆ بەردەوامبوون.";
     case "tr":
       return "Ücretsiz Yaratıcı Stüdyo hakkınız bitti. Devam etmek için daha fazla ücretli kurs alın veya AI Creative paketini etkinleştirin.";
     default:
-      return "You've used your free AI Creative Studio uses. Buy more paid courses or activate an AI Creative plan to continue (PDF merge, PPT/PDF design, images).";
+      return "You've used your free AI Creative Studio uses. Buy more paid courses or activate an AI Creative plan to continue (PDF merge, PPT/PDF/Word design, images).";
   }
 }
 
@@ -95,29 +100,44 @@ export function creativeSuccessMessage(
 ): string {
   const en: Record<CreativeChatIntent, string> = {
     merge: "Merged your PDFs. Tap Download to save the file.",
-    design_ppt: "Created your presentation. Tap Download to save the PPTX.",
-    design_pdf: "Created your PDF. Tap Download to save the file.",
+    design_ppt:
+      "Created your presentation with text and professional images. Tap Download to save the PPTX.",
+    design_pdf:
+      "Created your PDF with text and professional images. Tap Download to save the file.",
+    design_docx:
+      "Created your Word document with text and professional images. Tap Download to save the DOCX.",
     image_edit: "Edited your image. Tap Download to save the PNG.",
     image_design: "Designed your graphic. Tap Download to save the PNG.",
   };
   const ar: Record<CreativeChatIntent, string> = {
     merge: "تم دمج ملفات PDF. اضغط تنزيل لحفظ الملف.",
-    design_ppt: "تم إنشاء العرض. اضغط تنزيل لحفظ ملف PPTX.",
-    design_pdf: "تم إنشاء ملف PDF. اضغط تنزيل لحفظه.",
+    design_ppt:
+      "تم إنشاء العرض بالنصوص والصور الاحترافية. اضغط تنزيل لحفظ PPTX.",
+    design_pdf:
+      "تم إنشاء ملف PDF بالنصوص والصور الاحترافية. اضغط تنزيل لحفظه.",
+    design_docx:
+      "تم إنشاء مستند Word بالنصوص والصور الاحترافية. اضغط تنزيل لحفظ DOCX.",
     image_edit: "تم تعديل الصورة. اضغط تنزيل لحفظ PNG.",
     image_design: "تم تصميم الرسم. اضغط تنزيل لحفظ PNG.",
   };
   const ku: Record<CreativeChatIntent, string> = {
     merge: "PDFەکان تێکەڵ کران. داگرتن دابگرە بۆ پاشەکەوتکردن.",
-    design_ppt: "پێشکەشکردن دروستکرا. داگرتن دابگرە بۆ PPTX.",
-    design_pdf: "PDF دروستکرا. داگرتن دابگرە بۆ پاشەکەوتکردن.",
+    design_ppt:
+      "پێشکەشکردن لەگەڵ دەق و وێنەی پیشەیی دروستکرا. داگرتن دابگرە بۆ PPTX.",
+    design_pdf: "PDF لەگەڵ دەق و وێنەی پیشەیی دروستکرا. داگرتن دابگرە.",
+    design_docx:
+      "بەڵگەنامەی Word لەگەڵ دەق و وێنەی پیشەیی دروستکرا. داگرتن دابگرە بۆ DOCX.",
     image_edit: "وێنەکە دەستکاری کرا. داگرتن دابگرە بۆ PNG.",
     image_design: "گرافیکەکە دیزاین کرا. داگرتن دابگرە بۆ PNG.",
   };
   const tr: Record<CreativeChatIntent, string> = {
     merge: "PDF’ler birleştirildi. Kaydetmek için İndir’e dokunun.",
-    design_ppt: "Sunum oluşturuldu. PPTX kaydetmek için İndir’e dokunun.",
-    design_pdf: "PDF oluşturuldu. Kaydetmek için İndir’e dokunun.",
+    design_ppt:
+      "Metin ve profesyonel görsellerle sunum oluşturuldu. PPTX için İndir’e dokunun.",
+    design_pdf:
+      "Metin ve profesyonel görsellerle PDF oluşturuldu. Kaydetmek için İndir’e dokunun.",
+    design_docx:
+      "Metin ve profesyonel görsellerle Word belgesi oluşturuldu. DOCX için İndir’e dokunun.",
     image_edit: "Görsel düzenlendi. PNG kaydetmek için İndir’e dokunun.",
     image_design: "Grafik tasarlandı. PNG kaydetmek için İndir’e dokunun.",
   };

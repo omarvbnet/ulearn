@@ -100,3 +100,31 @@ export function pptTextOptions(language?: string | null, extra?: Record<string, 
     ...extra,
   };
 }
+
+/**
+ * Prompt rules so FLUX (and similar) render Arabic/Kurdish labels correctly.
+ * Raster models do not embed our Noto fonts — guidance must be in the prompt.
+ */
+export function fluxVisibleTextGuidance(
+  language?: string | null,
+  sampleText?: string
+): string {
+  const lang = (language || "en").toLowerCase().slice(0, 2);
+  const needsArabic =
+    hasArabicScript(sampleText || "") || lang === "ar" || lang === "ku";
+  if (!needsArabic) {
+    return [
+      `Visible labels language: ${language || "en"}.`,
+      "Render text sharp, correctly spelled, high-contrast, never garbled.",
+    ].join(" ");
+  }
+  return [
+    "ARABIC / RTL TEXT (critical):",
+    "- All student-facing labels MUST be correct Modern Standard Arabic (or Kurdish when requested), fully connected letters (no isolated glyphs).",
+    "- Use a clear Naskh-style calligraphic look; never Latin lookalike characters standing in for Arabic.",
+    "- Lay out Arabic right-to-left; keep short labels (2–6 words); large enough to read on a phone.",
+    "- Do not mirror or reverse Arabic letter order; do not mix broken Latin transliteration into Arabic words.",
+    "- Prefer shapes + arrows with Arabic captions over dense paragraphs.",
+    `Language for visible text: ${language || "ar"}.`,
+  ].join("\n");
+}

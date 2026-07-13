@@ -23,6 +23,8 @@ export type PracticeQuizPayload = {
     text: string;
     options: Record<string, string>;
     correctKey: string;
+    /** Optional FLUX-painted diagram matching material shapes. */
+    imageBase64?: string;
   }>;
   citations: Array<{ documentName: string; page: number | null }>;
 };
@@ -307,11 +309,110 @@ export class ExamGeneratorService {
     const titleSuffix = (requestSeed % 900) + 100;
     const baseTitle = generated.title?.trim() || "Practice quiz";
 
+    const questionsWithShapes = await this.paintExamShapeFigures({
+      userId: input.userId,
+      language,
+      materialText: material.text,
+      questions: generated.questions,
+    });
+
     return {
       title: `${baseTitle} · #${titleSuffix}`,
-      questions: generated.questions,
+      questions: questionsWithShapes,
       citations: material.citations,
     };
+  }
+
+  /**
+   * When materials describe shapes/diagrams, ask the model for figure prompts
+   * and paint matching diagrams with FLUX (DeepSeek plans; FLUX paints).
+   */
+  private static async paintExamShapeFigures(input: {
+    userId: string;
+    language: string;
+    materialText: string;
+    questions: PracticeQuestion[];
+  }): Promise<PracticeQuestion[]> {
+    const hasShapes =
+      /(شكل|رسم|مخطط|هندس|دائرة|مثلث|مستطيل|diagram|figure|shape|geometry|triangle|circle|graph)/i.test(
+        input.materialText
+      );
+    if (!hasShapes || !input.questions.length) return input.questions;
+
+    const flux = await AiProviderService.resolveProvider("AI_CREATIVE_IMAGE");
+    if (flux?.type !== "FLUX" || !flux.apiKeyEncrypted) return input.questions;
+
+    const { fluxVisibleTextGuidance } = await import("./fonts");
+    const plan = await AiProviderService.chat(
+      "EXAM_GENERATOR",
+      [
+        {
+          role: "system",
+          content: [
+            "Return compact JSON only.",
+            'Schema: {"figures":[{"questionIndex":0,"prompt":"..."}]}',
+            "For questions that refer to shapes/diagrams in the material, provide a FLUX image prompt that paints the SAME shapes for the student.",
+            "questionIndex is 0-based. Max 3 figures. Skip questions that need no diagram.",
+            fluxVisibleTextGuidance(input.language, input.materialText),
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content: [
+            `Questions:\n${input.questions
+              .map((q, i) => `${i}. ${q.text}`)
+              .join("\n")}`,
+            `\nMaterial excerpt:\n${input.materialText.slice(0, 6000)}`,
+          ].join("\n"),
+        },
+      ],
+      input.userId,
+      { maxTokens: 1200, temperature: 0.3 }
+    );
+
+    let figures: Array<{ questionIndex?: number; prompt?: string }> = [];
+    try {
+      const raw = (plan.text || "").trim();
+      const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      const body = (fenced?.[1] || raw).trim();
+      const start = body.indexOf("{");
+      const end = body.lastIndexOf("}");
+      const parsed = JSON.parse(
+        start >= 0 && end > start ? body.slice(start, end + 1) : body
+      ) as { figures?: Array<{ questionIndex?: number; prompt?: string }> };
+      figures = Array.isArray(parsed.figures) ? parsed.figures.slice(0, 3) : [];
+    } catch {
+      return input.questions;
+    }
+
+    const out = input.questions.map((q) => ({ ...q }));
+    for (const fig of figures) {
+      const idx = Number(fig.questionIndex);
+      const prompt = String(fig.prompt || "").trim();
+      if (!Number.isFinite(idx) || idx < 0 || idx >= out.length || prompt.length < 12) {
+        continue;
+      }
+      try {
+        const generated = await AiProviderService.generateImage(
+          {
+            prompt: [
+              "Educational exam diagram matching the school material shapes exactly.",
+              "Clean textbook style, high contrast.",
+              fluxVisibleTextGuidance(input.language, prompt),
+              prompt,
+            ].join("\n"),
+          },
+          input.userId
+        );
+        out[idx] = { ...out[idx]!, imageBase64: generated.dataBase64 };
+      } catch (e) {
+        console.warn(
+          "[exam] FLUX shape paint failed",
+          e instanceof Error ? e.message : e
+        );
+      }
+    }
+    return out;
   }
 
   private static countOverlap(generated: string[], previous: string[]): number {
@@ -420,6 +521,7 @@ export class ExamGeneratorService {
       `Create exactly ${input.count} multiple-choice questions from the material.`,
       'Schema: {"title":"...","questions":[{"text":"...","options":{"A":"...","B":"...","C":"...","D":"..."},"correctKey":"A"}]}',
       "correctKey must be one of A|B|C|D. Every question must be answerable from the material.",
+      "When the material contains shapes/diagrams/figures, write at least one question that refers to those shapes so they can be painted for the student.",
       "Keep stems and options concise (1–2 short sentences). Close every brace/bracket — incomplete JSON is invalid.",
       `Uniqueness token: exam-${input.requestSeed}-n${input.attemptNumber}.`,
       `Primary focus angle: ${input.angle}.`,
@@ -654,5 +756,23 @@ export class ExamGeneratorService {
     }
 
     return { text: parts.join("\n\n---\n\n"), citations };
+  }
+
+  /** Public loader for chat explain/observe flows. */
+  static async loadMaterialForDocuments(input: {
+    userId: string;
+    documentIds: string[];
+    educationalStageId?: string | null;
+    subjectIds?: string[];
+    question?: string;
+  }) {
+    return this.loadMaterialText({
+      userId: input.userId,
+      question: input.question || "explain selected material",
+      educationalStageId: input.educationalStageId,
+      subjectIds: input.subjectIds,
+      documentIds: input.documentIds,
+      allowRagFallback: false,
+    });
   }
 }

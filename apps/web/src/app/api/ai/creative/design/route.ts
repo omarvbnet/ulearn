@@ -5,7 +5,7 @@ import { z } from "zod";
 const CREATIVE_ROLES = ["STUDENT", "CERTIFICATE_USER"] as const;
 
 const schema = z.object({
-  format: z.enum(["ppt", "pdf"]),
+  format: z.enum(["ppt", "pdf", "docx"]),
   title: z.string().min(1).max(200),
   prompt: z.string().min(1).max(4000),
   language: z.string().max(16).optional(),

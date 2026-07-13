@@ -54,9 +54,9 @@ export class AiChatService {
     language?: string | null;
     lesson?: string | null;
     attachments?: ChatAttachmentInput[];
-    /** chat | practice_quiz | edit (edit also auto-detected from question + attachments). */
-    mode?: "chat" | "practice_quiz" | "edit";
-    /** KB document ids for practice quiz material selection. */
+    /** chat | practice_quiz | edit | explain_observe */
+    mode?: "chat" | "practice_quiz" | "edit" | "explain_observe";
+    /** KB document ids for practice quiz / explain-observe material selection. */
     documentIds?: string[];
     /** Practice exam size: 5 | 10 | 20 */
     count?: 5 | 10 | 20;
@@ -185,6 +185,42 @@ export class AiChatService {
         });
         if (creativeResult) return creativeResult;
       }
+    }
+
+    const {
+      detectExplainObserveIntent,
+      materialSelectMessage,
+    } = await import("./creative/figure-prompts");
+    const explainObserve =
+      input.mode === "explain_observe" ||
+      (learnerCreative &&
+        !attachments.length &&
+        detectExplainObserveIntent(question));
+
+    if (explainObserve && learnerCreative) {
+      const hasDocs = Boolean(input.documentIds?.length);
+      if (!hasDocs) {
+        return {
+          conversationId: input.conversationId || null,
+          messageId: null,
+          answer: materialSelectMessage(language),
+          citations: [],
+          fromCache: false,
+          needsMaterialSelection: true,
+          pendingMode: "explain_observe" as const,
+          pendingQuestion: question,
+        };
+      }
+      return this.runExplainObserveWithMaterials({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        question,
+        language,
+        documentIds: input.documentIds || [],
+        stageId,
+        subjectId,
+        subjectIds,
+      });
     }
 
     const processed = await processAttachments(attachments, input.userId);
@@ -685,7 +721,8 @@ export class AiChatService {
           result = await AiCreativeService.merge(input.userId, pdfs);
           break;
         case "design_ppt":
-        case "design_pdf": {
+        case "design_pdf":
+        case "design_docx": {
           let outline: string | undefined;
           if (input.attachments.length) {
             const processed = await processAttachments(
@@ -698,13 +735,18 @@ export class AiChatService {
             input.question.replace(/^['"\s]+|['"\s]+$/g, "").slice(0, 80) ||
             (input.language === "ar" ? "عرض تعليمي" : "Study presentation");
           result = await AiCreativeService.design(input.userId, {
-            format: input.intent === "design_ppt" ? "ppt" : "pdf",
+            format:
+              input.intent === "design_ppt"
+                ? "ppt"
+                : input.intent === "design_docx"
+                  ? "docx"
+                  : "pdf",
             title,
             prompt: [
               input.question,
               outline
-                ? "Build the presentation/document from the attached source material below."
-                : "",
+                ? "Build the presentation/document from the attached source material below. DeepSeek writes text; FLUX will paint professional figures."
+                : "DeepSeek writes the text; FLUX will paint professional educational figures in the file.",
             ]
               .filter(Boolean)
               .join("\n\n"),
@@ -795,6 +837,126 @@ export class AiChatService {
         downloadUrl: result.downloadUrl,
         jobId: result.jobId,
       },
+    });
+  }
+
+  /** Explain / observe selected KB materials with painted educational shapes (FLUX). */
+  private static async runExplainObserveWithMaterials(input: {
+    userId: string;
+    conversationId?: string;
+    question: string;
+    language: string;
+    documentIds: string[];
+    stageId?: string | null;
+    subjectId?: string | null;
+    subjectIds?: string[];
+  }) {
+    const { AiExamService } = await import("./ai-exam.service");
+    const { ExamGeneratorService } = await import("./exam-generator.service");
+    const { AiCreativeService } = await import("./creative");
+    const { fluxVisibleTextGuidance } = await import("./fonts");
+    const { extractFluxFigurePrompts } = await import("./creative/figure-prompts");
+
+    const documentIds = await AiExamService.assertDocumentsAllowed(
+      input.userId,
+      input.documentIds
+    );
+    const material = await ExamGeneratorService.loadMaterialForDocuments({
+      userId: input.userId,
+      documentIds,
+      educationalStageId: input.stageId,
+      subjectIds: input.subjectId
+        ? [input.subjectId]
+        : input.subjectIds,
+      question: input.question,
+    });
+
+    const system = [
+      "You are a patient teaching assistant for school students.",
+      languageInstruction(input.language),
+      "Explain and help the student observe the selected material clearly.",
+      "When the material describes shapes, diagrams, figures, geometry, maps, or labeled drawings:",
+      "- Describe them accurately in words.",
+      "- Add 1–2 figure blocks so FLUX can paint the SAME shapes for observation:",
+      "[[FLUX]] detailed prompt recreating the material's shapes/diagrams; quote exact Arabic/user-language labels [[/FLUX]]",
+      "If there are no shapes, still explain thoroughly and optionally add one clarifying educational diagram.",
+      "Do not invent facts outside the material.",
+    ].join("\n");
+
+    const chat = await AiProviderService.chat(
+      "TEACHING_ASSISTANT",
+      [
+        { role: "system", content: system },
+        {
+          role: "user",
+          content: [
+            `Student request:\n${input.question}`,
+            `\nSelected material:\n${material.text.slice(0, 14000)}`,
+          ].join("\n"),
+        },
+      ],
+      input.userId,
+      { maxTokens: 3500 }
+    );
+
+    const raw = (chat.text || "").trim();
+    const { cleanMarkdown, prompts } = extractFluxFigurePrompts(raw);
+    let answer = cleanMarkdown || raw;
+    let editedFile:
+      | {
+          fileName: string;
+          mimeType: string;
+          contentBase64: string;
+          downloadUrl?: string;
+          jobId?: string;
+        }
+      | undefined;
+
+    const figurePrompt =
+      prompts[0] ||
+      (/(شكل|رسم|diagram|shape|figure|هندس)/i.test(material.text)
+        ? `Educational diagram matching the shapes described in this material for student observation. ${fluxVisibleTextGuidance(input.language, material.text)} Context: ${material.text.slice(0, 1200)}`
+        : null);
+
+    if (figurePrompt) {
+      try {
+        const img = await AiCreativeService.image(input.userId, {
+          mode: "design",
+          prompt: figurePrompt,
+          language: input.language,
+        });
+        editedFile = {
+          fileName: img.fileName || "observation.png",
+          mimeType: img.mimeType || "image/png",
+          contentBase64: img.dataBase64 || "",
+          downloadUrl: img.downloadUrl,
+          jobId: img.jobId,
+        };
+        if (input.language.startsWith("ar")) {
+          answer += "\n\nرسمت الأشكال من المادة للملاحظة — انظر الصورة المرفقة.";
+        } else {
+          answer +=
+            "\n\nI painted the material shapes for observation — see the attached image.";
+        }
+      } catch (e) {
+        console.warn(
+          "[ai/chat] observe FLUX paint failed",
+          e instanceof Error ? e.message : e
+        );
+      }
+    }
+
+    return this.persistTurn({
+      userId: input.userId,
+      conversationId: input.conversationId,
+      question: input.question,
+      answer: answer || (input.language.startsWith("ar")
+        ? "تم الشرح من المادة المحددة."
+        : "Here is the explanation from your selected material."),
+      citations: material.citations,
+      fromCache: false,
+      attachmentNames: [],
+      editedFile,
     });
   }
 

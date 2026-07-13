@@ -8,7 +8,14 @@ import { r2Client, r2Bucket, isR2Configured } from "@/lib/r2";
 import { AiProviderService } from "../ai-provider.service";
 import { languageInstruction } from "../types";
 import type { ChatMessage } from "../types";
-import { buildPdf, buildPptx } from "../professor/export.service";
+import {
+  buildDocx,
+  buildPdf,
+  buildPptx,
+  type ExportFigure,
+} from "../professor/export.service";
+import { fluxVisibleTextGuidance } from "../fonts";
+import { extractFluxFigurePrompts } from "./figure-prompts";
 import {
   AiCreativeEntitlementService,
   type AiCreativeAccessReason,
@@ -58,25 +65,6 @@ async function resolveFileBytes(file: CreativeFileInput): Promise<Buffer> {
     return Buffer.from(stripDataUrl(file.dataBase64), "base64");
   }
   throw new Error(`Missing file data for ${file.fileName}`);
-}
-
-function extractSvg(text: string): string | null {
-  const fence = text.match(/```(?:svg|xml)?\s*([\s\S]*?)```/i);
-  const raw = (fence?.[1] || text).trim();
-  const start = raw.search(/<svg[\s>]/i);
-  const end = raw.toLowerCase().lastIndexOf("</svg>");
-  if (start >= 0 && end > start) {
-    return raw.slice(start, end + "</svg>".length).trim();
-  }
-  return null;
-}
-
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 async function mergePdfs(files: CreativeFileInput[]): Promise<{
@@ -183,7 +171,7 @@ export class AiCreativeService {
   static async design(
     userId: string,
     input: {
-      format: "ppt" | "pdf";
+      format: "ppt" | "pdf" | "docx";
       title: string;
       prompt: string;
       language?: string;
@@ -191,7 +179,11 @@ export class AiCreativeService {
     }
   ) {
     const tool: AiCreativeTool =
-      input.format === "ppt" ? "DESIGN_PPT" : "DESIGN_PDF";
+      input.format === "ppt"
+        ? "DESIGN_PPT"
+        : input.format === "docx"
+          ? "DESIGN_PDF"
+          : "DESIGN_PDF";
     const { job, entitlement } = await this.startJob(userId, tool, {
       format: input.format,
       title: input.title,
@@ -199,14 +191,23 @@ export class AiCreativeService {
     });
     try {
       const language = (input.language || "en").slice(0, 8);
+      const formatLabel =
+        input.format === "ppt"
+          ? "presentation"
+          : input.format === "docx"
+            ? "Word document"
+            : "PDF document";
       const messages: ChatMessage[] = [
         {
           role: "system",
           content: [
-            "You are AI Creative Studio for students.",
-            `Produce a high-quality ${input.format === "ppt" ? "presentation" : "document"} in Markdown.`,
+            "You are AI Creative Studio for students (text author).",
+            `Produce a high-quality ${formatLabel} in Markdown.`,
             "Include a clear title, short learning objectives, and ## section headings.",
             "For presentations, keep each ## section suitable for one slide with bullet points.",
+            "After each major section that needs a diagram/infographic/shape illustration, add exactly one figure block:",
+            "[[FLUX]] detailed English image prompt: recreate educational shapes/diagrams accurately; list exact Arabic (or user-language) labels in quotes [[/FLUX]]",
+            "Add 2–4 [[FLUX]] blocks total for professional illustrated materials. Do not invent FLUX blocks without educational value.",
             languageInstruction(language),
             "Do not wrap the entire document in a code fence.",
           ].join("\n"),
@@ -215,7 +216,7 @@ export class AiCreativeService {
           role: "user",
           content: [
             `Title: ${input.title}`,
-            input.outline ? `Outline:\n${input.outline}` : "",
+            input.outline ? `Outline / source material:\n${input.outline}` : "",
             `Request:\n${input.prompt}`,
           ]
             .filter(Boolean)
@@ -234,13 +235,23 @@ export class AiCreativeService {
         userId,
         { maxTokens: 4096 }
       );
-      const markdown = (result.text || "").trim();
-      if (!markdown) throw new Error("Empty generation result");
+      const rawMd = (result.text || "").trim();
+      if (!rawMd) throw new Error("Empty generation result");
+
+      const { cleanMarkdown, prompts: figurePrompts } =
+        extractFluxFigurePrompts(rawMd);
+      const markdown = cleanMarkdown || rawMd;
+      const figures = await this.generateDesignFigures(
+        userId,
+        figurePrompts,
+        language,
+        input.prompt
+      );
 
       const safe =
         input.title.replace(/[^\w\-]+/g, "_").slice(0, 40) || "creative";
       if (input.format === "ppt") {
-        const buf = await buildPptx(input.title, markdown, language);
+        const buf = await buildPptx(input.title, markdown, language, figures);
         const saved = await this.finishSuccess({
           userId,
           jobId: job.id,
@@ -251,7 +262,19 @@ export class AiCreativeService {
         });
         return this.toResult(saved);
       }
-      const bytes = await buildPdf(input.title, markdown, language);
+      if (input.format === "docx") {
+        const buf = await buildDocx(input.title, markdown, figures);
+        const saved = await this.finishSuccess({
+          userId,
+          jobId: job.id,
+          entitlementReason: entitlement.reason,
+          fileName: `${safe}.docx`,
+          mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          content: buf.toString("base64"),
+        });
+        return this.toResult(saved);
+      }
+      const bytes = await buildPdf(input.title, markdown, language, figures);
       const saved = await this.finishSuccess({
         userId,
         jobId: job.id,
@@ -266,6 +289,45 @@ export class AiCreativeService {
       await this.finishFail(job.id, msg);
       throw e;
     }
+  }
+
+  /** FLUX figures for designed documents (DeepSeek writes text; FLUX paints). */
+  private static async generateDesignFigures(
+    userId: string,
+    prompts: string[],
+    language: string,
+    contextPrompt: string
+  ): Promise<ExportFigure[]> {
+    if (!prompts.length) return [];
+    const fluxProvider = await AiProviderService.resolveProvider("AI_CREATIVE_IMAGE");
+    if (fluxProvider?.type !== "FLUX" || !fluxProvider.apiKeyEncrypted) {
+      return [];
+    }
+    const figures: ExportFigure[] = [];
+    for (const p of prompts.slice(0, 4)) {
+      try {
+        const educationalPrompt = [
+          "Professional educational illustration for a student study document.",
+          "Clean textbook style, high contrast, accurate shapes/diagrams.",
+          fluxVisibleTextGuidance(language, `${p}\n${contextPrompt}`),
+          `Figure request:\n${p}`,
+        ].join("\n");
+        const generated = await AiProviderService.generateImage(
+          { prompt: educationalPrompt },
+          userId
+        );
+        figures.push({
+          pngBase64: generated.dataBase64,
+          caption: p.slice(0, 120),
+        });
+      } catch (e) {
+        console.warn(
+          "[creative/design] FLUX figure failed",
+          e instanceof Error ? e.message : e
+        );
+      }
+    }
+    return figures;
   }
 
   static async image(
@@ -290,118 +352,40 @@ export class AiCreativeService {
     try {
       const language = (input.language || "en").slice(0, 8);
       const fluxProvider = await AiProviderService.resolveProvider("AI_CREATIVE_IMAGE");
-      if (fluxProvider?.type === "FLUX" && fluxProvider.apiKeyEncrypted) {
-        const educationalPrompt = [
-          "Educational graphic for students.",
-          "Clean, clear, high-contrast illustration suitable for school materials.",
-          "Readable labels when text appears.",
-          `Language for any visible text: ${language}.`,
-          input.mode === "edit"
-            ? "Edit the provided image according to the instructions while keeping educational clarity."
-            : "Create a polished educational drawing / infographic / diagram as requested.",
-          `Request:\n${input.prompt}`,
-        ].join("\n");
-        const fluxInput: {
-          prompt: string;
-          inputImageBase64?: string;
-          mimeType?: string;
-        } = { prompt: educationalPrompt };
-        if (input.mode === "edit" && input.image) {
-          const imgBytes = await resolveFileBytes(input.image);
-          fluxInput.inputImageBase64 = imgBytes.toString("base64");
-          fluxInput.mimeType = input.image.mimeType || "image/jpeg";
-        }
-        const generated = await AiProviderService.generateImage(fluxInput, userId);
-        const saved = await this.finishSuccess({
-          userId,
-          jobId: job.id,
-          entitlementReason: entitlement.reason,
-          fileName: `creative-${input.mode}-${Date.now()}.png`,
-          mime: generated.mimeType || "image/png",
-          content: generated.dataBase64,
-        });
-        return this.toResult(saved);
+      if (fluxProvider?.type !== "FLUX" || !fluxProvider.apiKeyEncrypted) {
+        throw new Error(
+          "Image generation requires FLUX (AI_CREATIVE_IMAGE). Assign FLUX.1 Kontext Max in Admin → AI Providers."
+        );
       }
 
-      const messages: ChatMessage[] = [
-        {
-          role: "system",
-          content: [
-            "You are a professional graphic designer for AI Creative Studio.",
-            "Your ENTIRE reply must be a single valid SVG document (start with <svg and end with </svg>).",
-            "Do not write explanations, greetings, or markdown outside the SVG.",
-            "You may wrap the SVG in a ```svg fence if needed.",
-            "Put any visible labels/titles inside the SVG in the user's language.",
-            `User language for text inside the graphic: ${language}.`,
-            "Use a clean educational look: viewBox=\"0 0 1080 1080\", balanced layout, readable font-family sans-serif.",
-            "Include shapes, colors, and text elements — produce a complete downloadable graphic.",
-          ].join("\n"),
-        },
-      ];
-
+      const educationalPrompt = [
+        "Educational graphic for students — you MUST generate a real raster image (PNG).",
+        "Clean, clear, high-contrast illustration suitable for school materials.",
+        "Recreate geometric shapes, diagrams, and labeled figures accurately when described.",
+        fluxVisibleTextGuidance(language, input.prompt),
+        input.mode === "edit"
+          ? "Edit the provided image according to the instructions while keeping educational clarity and fixing any garbled Arabic text."
+          : "Create a polished educational drawing / infographic / diagram as requested.",
+        `Request:\n${input.prompt}`,
+      ].join("\n");
+      const fluxInput: {
+        prompt: string;
+        inputImageBase64?: string;
+        mimeType?: string;
+      } = { prompt: educationalPrompt };
       if (input.mode === "edit" && input.image) {
         const imgBytes = await resolveFileBytes(input.image);
-        // Cap vision payload size
-        const b64 = imgBytes.toString("base64");
-        messages.push({
-          role: "user",
-          content: `Edit/recreate this image as SVG per these instructions (SVG only):\n${input.prompt}`,
-          parts: [
-            {
-              type: "image",
-              mimeType: input.image.mimeType || "image/jpeg",
-              dataBase64: b64,
-            },
-          ],
-        });
-      } else {
-        messages.push({
-          role: "user",
-          content: `Design this as a complete SVG graphic (SVG markup only):\n${input.prompt}`,
-        });
+        fluxInput.inputImageBase64 = imgBytes.toString("base64");
+        fluxInput.mimeType = input.image.mimeType || "image/jpeg";
       }
-
-      const moduleKey =
-        (await AiProviderService.resolveProvider("AI_CREATIVE")) != null
-          ? "AI_CREATIVE"
-          : (await AiProviderService.resolveProvider("TEACHING_ASSISTANT")) != null
-            ? "TEACHING_ASSISTANT"
-            : undefined;
-      const result = await AiProviderService.chat(
-        moduleKey,
-        messages,
-        userId,
-        { maxTokens: 8192, temperature: 0.4 }
-      );
-      let svg = extractSvg(result.text || "");
-      if (!svg) {
-        // Fallback: wrap model text into a simple branded SVG card
-        const safeText = (result.text || input.prompt || "Design")
-          .replace(/[<>&]/g, "")
-          .slice(0, 400);
-        const lines = safeText.split(/\n/).filter(Boolean).slice(0, 8);
-        const textEls = lines
-          .map(
-            (line, i) =>
-              `<text x="540" y="${280 + i * 48}" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="28" fill="#0f172a">${escapeXml(line.slice(0, 60))}</text>`
-          )
-          .join("\n");
-        svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#e0f2fe"/><stop offset="100%" stop-color="#fae8ff"/></linearGradient></defs>
-  <rect width="1080" height="1080" fill="url(#g)"/>
-  <rect x="80" y="80" width="920" height="920" rx="48" fill="#ffffff" fill-opacity="0.92"/>
-  <text x="540" y="200" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="36" font-weight="700" fill="#7c3aed">U Learn</text>
-  ${textEls}
-</svg>`;
-      }
-
+      const generated = await AiProviderService.generateImage(fluxInput, userId);
       const saved = await this.finishSuccess({
         userId,
         jobId: job.id,
         entitlementReason: entitlement.reason,
-        fileName: `creative-${input.mode}-${Date.now()}.svg`,
-        mime: "image/svg+xml",
-        content: Buffer.from(svg, "utf8").toString("base64"),
+        fileName: `creative-${input.mode}-${Date.now()}.png`,
+        mime: generated.mimeType || "image/png",
+        content: generated.dataBase64,
       });
       return this.toResult(saved);
     } catch (e) {

@@ -24,7 +24,7 @@ const schema = z.object({
   courseId: z.string().optional(),
   language: z.string().max(16).optional(),
   lesson: z.string().optional(),
-  mode: z.enum(["chat", "practice_quiz", "edit"]).optional(),
+  mode: z.enum(["chat", "practice_quiz", "edit", "explain_observe"]).optional(),
   documentIds: z.array(z.string()).max(20).optional(),
   /** Practice exam size: Basic=5, Intermediate=10, Advanced=20 */
   count: z.union([z.literal(5), z.literal(10), z.literal(20)]).optional(),
@@ -40,10 +40,12 @@ export async function POST(request: Request) {
 
   const { question, attachments, ...rest } = parsed.data;
   const isPractice = rest.mode === "practice_quiz";
+  const isExplainObserve = rest.mode === "explain_observe";
   if (
     !question.trim() &&
     !(attachments && attachments.length) &&
-    !(isPractice && rest.documentIds?.length)
+    !(isPractice && rest.documentIds?.length) &&
+    !(isExplainObserve && rest.documentIds?.length)
   ) {
     return error("question or attachments required", 422, "VALIDATION");
   }
@@ -51,7 +53,13 @@ export async function POST(request: Request) {
   try {
     const result = await AiChatService.chat({
       userId: auth.session.userId,
-      question: question || (isPractice ? "Generate a practice exam from my selected materials" : ""),
+      question:
+        question ||
+        (isPractice
+          ? "Generate a practice exam from my selected materials"
+          : isExplainObserve
+            ? "Explain and help me observe the selected material with shapes"
+            : ""),
       attachments,
       ...rest,
     });

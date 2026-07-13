@@ -894,7 +894,7 @@
     "pending": {
       "badge": "Pending Approval"
     },
-      "ai": {
+    "ai": {
       "entryLabel": "u learn",
       "title": "u learn",
       "placeholder": "Ask about your lessons…",
@@ -997,7 +997,8 @@
         "statusSub": "AI Creative plan active",
         "statusCourses": "Unlocked via {count}/{unlock} paid courses",
         "statusLocked": "No free uses left — upgrade to continue"
-      }
+      },
+      "explainWithShapes": "Explain with shapes"
     },
     "error": {
       "generic": "Something went wrong",
