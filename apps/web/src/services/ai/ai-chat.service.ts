@@ -58,8 +58,8 @@ export class AiChatService {
     language?: string | null;
     lesson?: string | null;
     attachments?: ChatAttachmentInput[];
-    /** chat | practice_quiz | edit | explain_observe */
-    mode?: "chat" | "practice_quiz" | "edit" | "explain_observe";
+    /** chat | practice_quiz | edit | explain_observe | from_materials */
+    mode?: "chat" | "practice_quiz" | "edit" | "explain_observe" | "from_materials";
     /** KB document ids for practice quiz / explain-observe material selection. */
     documentIds?: string[];
     /** Practice exam size: 5 | 10 | 20 */
