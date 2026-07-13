@@ -343,6 +343,10 @@ export class ExamGeneratorService {
     if (flux?.type !== "FLUX" || !flux.apiKeyEncrypted) return input.questions;
 
     const { fluxVisibleTextGuidance } = await import("./fonts");
+    const {
+      burnArabicTypographyOntoPng,
+      extractEducationalLabels,
+    } = await import("./arabic-image-text");
     const plan = await AiProviderService.chat(
       "EXAM_GENERATOR",
       [
@@ -350,8 +354,9 @@ export class ExamGeneratorService {
           role: "system",
           content: [
             "Return compact JSON only.",
-            'Schema: {"figures":[{"questionIndex":0,"prompt":"..."}]}',
-            "For questions that refer to shapes/diagrams in the material, provide a FLUX image prompt that paints the SAME shapes for the student.",
+            'Schema: {"figures":[{"questionIndex":0,"prompt":"...","labels":["..."]}]}',
+            "For questions that refer to shapes/diagrams in the material, provide a FLUX image prompt that paints the SAME shapes (NO Arabic letters in the picture).",
+            "Put Arabic labels in the labels array (short phrases) for professional typography overlay.",
             "questionIndex is 0-based. Max 3 figures. Skip questions that need no diagram.",
             fluxVisibleTextGuidance(input.language, input.materialText),
           ].join("\n"),
@@ -370,7 +375,11 @@ export class ExamGeneratorService {
       { maxTokens: 1200, temperature: 0.3 }
     );
 
-    let figures: Array<{ questionIndex?: number; prompt?: string }> = [];
+    let figures: Array<{
+      questionIndex?: number;
+      prompt?: string;
+      labels?: string[];
+    }> = [];
     try {
       const raw = (plan.text || "").trim();
       const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -379,7 +388,13 @@ export class ExamGeneratorService {
       const end = body.lastIndexOf("}");
       const parsed = JSON.parse(
         start >= 0 && end > start ? body.slice(start, end + 1) : body
-      ) as { figures?: Array<{ questionIndex?: number; prompt?: string }> };
+      ) as {
+        figures?: Array<{
+          questionIndex?: number;
+          prompt?: string;
+          labels?: string[];
+        }>;
+      };
       figures = Array.isArray(parsed.figures) ? parsed.figures.slice(0, 3) : [];
     } catch {
       return input.questions;
@@ -404,7 +419,18 @@ export class ExamGeneratorService {
           },
           input.userId
         );
-        out[idx] = { ...out[idx]!, imageBase64: generated.dataBase64 };
+        const labels = Array.isArray(fig.labels)
+          ? fig.labels.map(String).filter(Boolean)
+          : extractEducationalLabels(`${prompt}\n${out[idx]!.text}`);
+        const pngBase64 = await burnArabicTypographyOntoPng(
+          generated.dataBase64,
+          {
+            title: labels[0] || out[idx]!.text.slice(0, 60),
+            labels: labels.slice(0, 6),
+            language: input.language,
+          }
+        );
+        out[idx] = { ...out[idx]!, imageBase64: pngBase64 };
       } catch (e) {
         console.warn(
           "[exam] FLUX shape paint failed",

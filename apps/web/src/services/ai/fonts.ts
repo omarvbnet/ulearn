@@ -92,39 +92,43 @@ export async function embedDocumentFonts(
 
 export function pptTextOptions(language?: string | null, extra?: Record<string, unknown>) {
   const rtl = isRtlLanguage(language);
+  // Arial has reliable Arabic glyphs in PowerPoint/LibreOffice; do NOT pre-reshape
+  // (Office/Keynote apply their own OpenType shaping).
   return {
-    fontFace: rtl ? "Arial" : "Arial",
+    fontFace: "Arial",
     ...(rtl
-      ? { rtlMode: true, lang: language?.startsWith("ku") ? "ar" : "ar", align: "right" as const }
+      ? {
+          rtlMode: true,
+          lang: language?.startsWith("ku") ? "ar" : "ar",
+          align: "right" as const,
+        }
       : { align: "left" as const }),
     ...extra,
   };
 }
 
 /**
- * Prompt rules so FLUX (and similar) render Arabic/Kurdish labels correctly.
- * Raster models do not embed our Noto fonts — guidance must be in the prompt.
+ * FLUX paints pixels — Arabic glyphs usually break.
+ * Instruct shape-only art; burn real Noto labels after (arabic-image-text.ts).
  */
 export function fluxVisibleTextGuidance(
   language?: string | null,
   sampleText?: string
 ): string {
-  const lang = (language || "en").toLowerCase().slice(0, 2);
   const needsArabic =
-    hasArabicScript(sampleText || "") || lang === "ar" || lang === "ku";
+    hasArabicScript(sampleText || "") || isRtlLanguage(language);
   if (!needsArabic) {
     return [
       `Visible labels language: ${language || "en"}.`,
-      "Render text sharp, correctly spelled, high-contrast, never garbled.",
+      "Keep any text short, sharp, and high-contrast.",
     ].join(" ");
   }
   return [
-    "ARABIC / RTL TEXT (critical):",
-    "- All student-facing labels MUST be correct Modern Standard Arabic (or Kurdish when requested), fully connected letters (no isolated glyphs).",
-    "- Use a clear Naskh-style calligraphic look; never Latin lookalike characters standing in for Arabic.",
-    "- Lay out Arabic right-to-left; keep short labels (2–6 words); large enough to read on a phone.",
-    "- Do not mirror or reverse Arabic letter order; do not mix broken Latin transliteration into Arabic words.",
-    "- Prefer shapes + arrows with Arabic captions over dense paragraphs.",
-    `Language for visible text: ${language || "ar"}.`,
+    "CRITICAL — ARABIC TEXT POLICY:",
+    "- Do NOT paint any Arabic, Kurdish, or RTL letters in the image (FLUX corrupts Arabic glyphs).",
+    "- Draw shapes, diagrams, arrows, icons, and color regions only.",
+    "- You may use small Latin letters A/B/C or numbers 1/2/3 as markers if needed.",
+    "- Leave a clean empty margin at the bottom (~15%) for professional typography overlay.",
+    "- High-contrast educational textbook style.",
   ].join("\n");
 }

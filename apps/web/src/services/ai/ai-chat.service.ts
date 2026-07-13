@@ -877,8 +877,11 @@ export class AiChatService {
       "Explain and help the student observe the selected material clearly.",
       "When the material describes shapes, diagrams, figures, geometry, maps, or labeled drawings:",
       "- Describe them accurately in words.",
-      "- Add 1–2 figure blocks so FLUX can paint the SAME shapes for observation:",
-      "[[FLUX]] detailed prompt recreating the material's shapes/diagrams; quote exact Arabic/user-language labels [[/FLUX]]",
+      "- Add 1–2 figure blocks so FLUX can paint shapes (NO Arabic letters inside the picture):",
+      "[[FLUX]]",
+      "English shape-only prompt",
+      "LABELS: Arabic label 1 | Arabic label 2",
+      "[[/FLUX]]",
       "If there are no shapes, still explain thoroughly and optionally add one clarifying educational diagram.",
       "Do not invent facts outside the material.",
     ].join("\n");

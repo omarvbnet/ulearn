@@ -17,6 +17,10 @@ import {
 import { fluxVisibleTextGuidance } from "../fonts";
 import { extractFluxFigurePrompts } from "./figure-prompts";
 import {
+  burnArabicTypographyOntoPng,
+  extractEducationalLabels,
+} from "../arabic-image-text";
+import {
   AiCreativeEntitlementService,
   type AiCreativeAccessReason,
 } from "./entitlement.service";
@@ -206,8 +210,11 @@ export class AiCreativeService {
             "Include a clear title, short learning objectives, and ## section headings.",
             "For presentations, keep each ## section suitable for one slide with bullet points.",
             "After each major section that needs a diagram/infographic/shape illustration, add exactly one figure block:",
-            "[[FLUX]] detailed English image prompt: recreate educational shapes/diagrams accurately; list exact Arabic (or user-language) labels in quotes [[/FLUX]]",
-            "Add 2–4 [[FLUX]] blocks total for professional illustrated materials. Do not invent FLUX blocks without educational value.",
+            "[[FLUX]]",
+            "English shape-only image prompt (NO Arabic letters in the picture).",
+            "LABELS: short Arabic labels separated by | (these are burned with professional fonts after)",
+            "[[/FLUX]]",
+            "Add 2–4 [[FLUX]] blocks total. Do not invent FLUX blocks without educational value.",
             languageInstruction(language),
             "Do not wrap the entire document in a code fence.",
           ].join("\n"),
@@ -238,12 +245,12 @@ export class AiCreativeService {
       const rawMd = (result.text || "").trim();
       if (!rawMd) throw new Error("Empty generation result");
 
-      const { cleanMarkdown, prompts: figurePrompts } =
+      const { cleanMarkdown, figures: figureSpecs } =
         extractFluxFigurePrompts(rawMd);
       const markdown = cleanMarkdown || rawMd;
       const figures = await this.generateDesignFigures(
         userId,
-        figurePrompts,
+        figureSpecs,
         language,
         input.prompt
       );
@@ -263,7 +270,7 @@ export class AiCreativeService {
         return this.toResult(saved);
       }
       if (input.format === "docx") {
-        const buf = await buildDocx(input.title, markdown, figures);
+        const buf = await buildDocx(input.title, markdown, figures, language);
         const saved = await this.finishSuccess({
           userId,
           jobId: job.id,
@@ -291,34 +298,47 @@ export class AiCreativeService {
     }
   }
 
-  /** FLUX figures for designed documents (DeepSeek writes text; FLUX paints). */
+  /** FLUX figures for designed documents (DeepSeek writes text; FLUX paints shapes; Noto burns Arabic). */
   private static async generateDesignFigures(
     userId: string,
-    prompts: string[],
+    specs: Array<{ prompt: string; labels: string[] }>,
     language: string,
     contextPrompt: string
   ): Promise<ExportFigure[]> {
-    if (!prompts.length) return [];
+    if (!specs.length) return [];
     const fluxProvider = await AiProviderService.resolveProvider("AI_CREATIVE_IMAGE");
     if (fluxProvider?.type !== "FLUX" || !fluxProvider.apiKeyEncrypted) {
       return [];
     }
     const figures: ExportFigure[] = [];
-    for (const p of prompts.slice(0, 4)) {
+    for (const spec of specs.slice(0, 4)) {
       try {
         const educationalPrompt = [
           "Professional educational illustration for a student study document.",
           "Clean textbook style, high contrast, accurate shapes/diagrams.",
-          fluxVisibleTextGuidance(language, `${p}\n${contextPrompt}`),
-          `Figure request:\n${p}`,
+          fluxVisibleTextGuidance(language, `${spec.prompt}\n${contextPrompt}`),
+          `Figure request (shapes only):\n${spec.prompt}`,
         ].join("\n");
         const generated = await AiProviderService.generateImage(
           { prompt: educationalPrompt },
           userId
         );
+        const labels =
+          spec.labels.length > 0
+            ? spec.labels
+            : extractEducationalLabels(`${spec.prompt}\n${contextPrompt}`);
+        const caption = labels[0] || spec.prompt.slice(0, 80);
+        const pngBase64 = await burnArabicTypographyOntoPng(
+          generated.dataBase64,
+          {
+            title: caption,
+            labels: labels.slice(0, 6),
+            language,
+          }
+        );
         figures.push({
-          pngBase64: generated.dataBase64,
-          caption: p.slice(0, 120),
+          pngBase64,
+          caption,
         });
       } catch (e) {
         console.warn(
@@ -358,14 +378,15 @@ export class AiCreativeService {
         );
       }
 
+      const labels = extractEducationalLabels(input.prompt);
       const educationalPrompt = [
         "Educational graphic for students — you MUST generate a real raster image (PNG).",
         "Clean, clear, high-contrast illustration suitable for school materials.",
-        "Recreate geometric shapes, diagrams, and labeled figures accurately when described.",
+        "Recreate geometric shapes, diagrams, and figures accurately when described.",
         fluxVisibleTextGuidance(language, input.prompt),
         input.mode === "edit"
-          ? "Edit the provided image according to the instructions while keeping educational clarity and fixing any garbled Arabic text."
-          : "Create a polished educational drawing / infographic / diagram as requested.",
+          ? "Edit the provided image according to the instructions. Remove or avoid any garbled Arabic text; keep shapes clear."
+          : "Create a polished educational drawing / infographic / diagram as requested (shapes only if Arabic).",
         `Request:\n${input.prompt}`,
       ].join("\n");
       const fluxInput: {
@@ -379,13 +400,22 @@ export class AiCreativeService {
         fluxInput.mimeType = input.image.mimeType || "image/jpeg";
       }
       const generated = await AiProviderService.generateImage(fluxInput, userId);
+      const title =
+        labels[0] ||
+        input.prompt.replace(/\s+/g, " ").trim().slice(0, 60) ||
+        (language.startsWith("ar") ? "رسم تعليمي" : "Educational graphic");
+      const pngBase64 = await burnArabicTypographyOntoPng(generated.dataBase64, {
+        title,
+        labels: labels.slice(0, 6),
+        language,
+      });
       const saved = await this.finishSuccess({
         userId,
         jobId: job.id,
         entitlementReason: entitlement.reason,
         fileName: `creative-${input.mode}-${Date.now()}.png`,
         mime: generated.mimeType || "image/png",
-        content: generated.dataBase64,
+        content: pngBase64,
       });
       return this.toResult(saved);
     } catch (e) {

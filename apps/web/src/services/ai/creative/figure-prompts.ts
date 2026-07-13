@@ -1,20 +1,36 @@
+import {
+  extractEducationalLabels,
+  parseFluxBlock,
+} from "../arabic-image-text";
+
 /** Extract [[FLUX]]...[[/FLUX]] figure prompts from DeepSeek markdown. */
 export function extractFluxFigurePrompts(markdown: string): {
   cleanMarkdown: string;
   prompts: string[];
+  figures: Array<{ prompt: string; labels: string[] }>;
 } {
   const prompts: string[] = [];
+  const figures: Array<{ prompt: string; labels: string[] }> = [];
   const cleanMarkdown = markdown.replace(
     /\[\[FLUX\]\]([\s\S]*?)\[\[\/FLUX\]\]/gi,
     (_m, inner: string) => {
-      const p = String(inner || "").trim().replace(/\s+/g, " ");
-      if (p.length >= 12) prompts.push(p.slice(0, 900));
+      const raw = String(inner || "").trim();
+      if (raw.length < 12) return "";
+      const parsed = parseFluxBlock(raw);
+      const prompt = parsed.prompt.slice(0, 900);
+      const labels =
+        parsed.labels.length > 0
+          ? parsed.labels
+          : extractEducationalLabels(raw);
+      prompts.push(prompt);
+      figures.push({ prompt, labels });
       return "";
     }
   );
   return {
     cleanMarkdown: cleanMarkdown.replace(/\n{3,}/g, "\n\n").trim(),
     prompts: prompts.slice(0, 5),
+    figures: figures.slice(0, 5),
   };
 }
 

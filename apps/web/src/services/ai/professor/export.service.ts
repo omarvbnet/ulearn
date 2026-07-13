@@ -14,6 +14,8 @@ import PptxGenJS from "pptxgenjs";
 import type { ProfessorArtifactKind } from "@prisma/client";
 import {
   embedDocumentFonts,
+  hasArabicScript,
+  isRtlLanguage,
   preparePdfText,
   pptTextOptions,
 } from "../fonts";
@@ -166,32 +168,86 @@ export async function buildPdf(
 export async function buildDocx(
   title: string,
   markdown: string,
-  figures?: ExportFigure[]
+  figures?: ExportFigure[],
+  language?: string | null
 ): Promise<Buffer> {
+  const rtl = isRtlLanguage(language) || hasArabicScript(`${title}\n${markdown}`);
   const children: Paragraph[] = [
     new Paragraph({
-      text: title,
-      heading: HeadingLevel.TITLE,
-      alignment: AlignmentType.CENTER,
+      bidirectional: rtl,
+      alignment: rtl ? AlignmentType.RIGHT : AlignmentType.CENTER,
+      children: [
+        new TextRun({
+          text: title,
+          bold: true,
+          size: 36,
+          font: "Arial",
+          rightToLeft: rtl,
+        }),
+      ],
     }),
   ];
   for (const line of markdown.split("\n")) {
     if (line.startsWith("# ")) {
       children.push(
-        new Paragraph({ text: line.replace(/^#\s+/, ""), heading: HeadingLevel.HEADING_1 })
+        new Paragraph({
+          bidirectional: rtl,
+          alignment: rtl ? AlignmentType.RIGHT : AlignmentType.LEFT,
+          heading: HeadingLevel.HEADING_1,
+          children: [
+            new TextRun({
+              text: line.replace(/^#\s+/, ""),
+              bold: true,
+              font: "Arial",
+              rightToLeft: rtl,
+            }),
+          ],
+        })
       );
     } else if (line.startsWith("## ")) {
       children.push(
-        new Paragraph({ text: line.replace(/^##\s+/, ""), heading: HeadingLevel.HEADING_2 })
+        new Paragraph({
+          bidirectional: rtl,
+          alignment: rtl ? AlignmentType.RIGHT : AlignmentType.LEFT,
+          heading: HeadingLevel.HEADING_2,
+          children: [
+            new TextRun({
+              text: line.replace(/^##\s+/, ""),
+              bold: true,
+              font: "Arial",
+              rightToLeft: rtl,
+            }),
+          ],
+        })
       );
     } else if (line.startsWith("### ")) {
       children.push(
-        new Paragraph({ text: line.replace(/^###\s+/, ""), heading: HeadingLevel.HEADING_3 })
+        new Paragraph({
+          bidirectional: rtl,
+          alignment: rtl ? AlignmentType.RIGHT : AlignmentType.LEFT,
+          heading: HeadingLevel.HEADING_3,
+          children: [
+            new TextRun({
+              text: line.replace(/^###\s+/, ""),
+              bold: true,
+              font: "Arial",
+              rightToLeft: rtl,
+            }),
+          ],
+        })
       );
     } else if (line.trim()) {
       children.push(
         new Paragraph({
-          children: [new TextRun(line.replace(/\*\*/g, ""))],
+          bidirectional: rtl,
+          alignment: rtl ? AlignmentType.RIGHT : AlignmentType.LEFT,
+          children: [
+            new TextRun({
+              text: line.replace(/\*\*/g, ""),
+              font: "Arial",
+              rightToLeft: rtl,
+            }),
+          ],
         })
       );
     } else {
@@ -208,7 +264,6 @@ export async function buildDocx(
       children.push(
         new Paragraph({
           children: [
-            // docx ImageRun options vary slightly by version
             new ImageRun({
               data: bytes,
               transformation: { width: 480, height: 360 },
@@ -220,7 +275,17 @@ export async function buildDocx(
       if (fig.caption) {
         children.push(
           new Paragraph({
-            children: [new TextRun({ text: fig.caption, italics: true, size: 18 })],
+            bidirectional: rtl,
+            alignment: rtl ? AlignmentType.RIGHT : AlignmentType.LEFT,
+            children: [
+              new TextRun({
+                text: fig.caption,
+                italics: true,
+                size: 18,
+                font: "Arial",
+                rightToLeft: rtl,
+              }),
+            ],
           })
         );
       }
@@ -402,7 +467,12 @@ export class ProfessorExportService {
           })
         );
       } else if (fmt === "docx") {
-        const buf = await buildDocx(input.title, input.markdown);
+        const buf = await buildDocx(
+          input.title,
+          input.markdown,
+          undefined,
+          input.language
+        );
         artifacts.push(
           await prisma.professorArtifact.create({
             data: {
