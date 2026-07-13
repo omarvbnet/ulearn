@@ -181,8 +181,8 @@ function AiCreativeConfigCard() {
   const [courseUnlockCount, setCourseUnlockCount] = useState("6");
   const [monthlyUsd, setMonthlyUsd] = useState("4.99");
   const [yearlyIqd, setYearlyIqd] = useState("60000");
-  const [appleMonthly, setAppleMonthly] = useState("com.ulearn.ai.monthly");
-  const [appleYearly, setAppleYearly] = useState("com.ulearn.ai.yearly");
+  const [appleMonthly, setAppleMonthly] = useState("com.ulearn.mobile.ai.monthly");
+  const [appleYearly, setAppleYearly] = useState("com.ulearn.mobile.ai.yearly");
   const [googleMonthly, setGoogleMonthly] = useState("ai_monthly");
   const [googleYearly, setGoogleYearly] = useState("ai_yearly");
   const [offersJson, setOffersJson] = useState("[]");

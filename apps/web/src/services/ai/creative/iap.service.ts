@@ -32,13 +32,41 @@ export class AiIapService {
     platform: AiIapPlatform,
     productId: string
   ): AiIapPlan | null {
-    const id = productId.trim();
+    const id = productId.trim().toLowerCase();
+    const monthlyAliases = new Set(
+      [
+        config.appleProductIdMonthly,
+        config.googleProductIdMonthly,
+        "com.ulearn.mobile.ai.monthly",
+        "com.ulearn.ai.monthly",
+        "ai_monthly",
+        "ai.monthly",
+      ]
+        .filter(Boolean)
+        .map((s) => s.toLowerCase())
+    );
+    const yearlyAliases = new Set(
+      [
+        config.appleProductIdYearly,
+        config.googleProductIdYearly,
+        "com.ulearn.mobile.ai.yearly",
+        "com.ulearn.ai.yearly",
+        "ai_yearly",
+        "ai.yearly",
+      ]
+        .filter(Boolean)
+        .map((s) => s.toLowerCase())
+    );
+    if (monthlyAliases.has(id) || id.includes("month")) return "MONTHLY";
+    if (yearlyAliases.has(id) || id.includes("year") || id.includes("annual")) {
+      return "YEARLY";
+    }
     if (platform === "APPLE") {
-      if (id === config.appleProductIdMonthly) return "MONTHLY";
-      if (id === config.appleProductIdYearly) return "YEARLY";
+      if (id === config.appleProductIdMonthly.toLowerCase()) return "MONTHLY";
+      if (id === config.appleProductIdYearly.toLowerCase()) return "YEARLY";
     } else {
-      if (id === config.googleProductIdMonthly) return "MONTHLY";
-      if (id === config.googleProductIdYearly) return "YEARLY";
+      if (id === config.googleProductIdMonthly.toLowerCase()) return "MONTHLY";
+      if (id === config.googleProductIdYearly.toLowerCase()) return "YEARLY";
     }
     return null;
   }
