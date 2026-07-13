@@ -6,7 +6,16 @@
 const GRAPH_API = "https://graph.facebook.com/v21.0";
 
 export function getWhatsAppWebhookUrl(): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const raw =
+    process.env.WHATSAPP_WEBHOOK_BASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "") ||
+    "http://localhost:3000";
+  // Never advertise localhost as the Meta callback when a Vercel host exists.
+  const base =
+    /localhost|127\.0\.0\.1/i.test(raw) && process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : raw;
   return `${base.replace(/\/$/, "")}/api/webhooks/whatsapp`;
 }
 

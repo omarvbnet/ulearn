@@ -8,9 +8,15 @@ const GRAPH_API = "https://graph.facebook.com/v21.0";
  * Admin: diagnose WhatsApp Cloud API setup (no secrets returned).
  * GET /api/admin/whatsapp/status
  */
-export async function GET() {
-  const auth = await requireAuth(ADMIN_ROLES);
-  if (auth.error) return auth.error;
+export async function GET(request: Request) {
+  const cron = request.headers.get("authorization");
+  const cronOk =
+    Boolean(process.env.CRON_SECRET) &&
+    cron === `Bearer ${process.env.CRON_SECRET}`;
+  if (!cronOk) {
+    const auth = await requireAuth(ADMIN_ROLES);
+    if (auth.error) return auth.error;
+  }
 
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() || "";
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN?.trim() || "";
