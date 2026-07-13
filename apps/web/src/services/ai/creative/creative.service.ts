@@ -230,20 +230,46 @@ export class AiCreativeService {
             .join("\n\n"),
         },
       ];
-      const moduleKey =
-        (await AiProviderService.resolveProvider("AI_CREATIVE")) != null
-          ? "AI_CREATIVE"
-          : (await AiProviderService.resolveProvider("TEACHING_ASSISTANT")) != null
-            ? "TEACHING_ASSISTANT"
-            : undefined;
+      const creativeAssigned = await AiProviderService.resolveProvider("AI_CREATIVE");
+      if (!creativeAssigned) {
+        throw new Error(
+          "Assign AI_CREATIVE to DeepSeek in Admin → AI Providers (text for PDF/PPT/Word)."
+        );
+      }
+      if (creativeAssigned.type !== "DEEPSEEK") {
+        console.warn(
+          `[creative/design] AI_CREATIVE is ${creativeAssigned.type} (${creativeAssigned.name}); prefer DeepSeek for Arabic document text.`
+        );
+      }
       const result = await AiProviderService.chat(
-        moduleKey,
+        "AI_CREATIVE",
         messages,
         userId,
-        { maxTokens: 4096 }
+        {
+          maxTokens: 4096,
+          preferTypes: ["DEEPSEEK"],
+          // Document body text must be DeepSeek — never Gemini/OpenAI/Jina/FLUX.
+          skipTypes: [
+            "FLUX",
+            "JINA",
+            "GEMINI",
+            "OPENAI",
+            "OPENAI_COMPATIBLE",
+            "KIMI",
+            "ANTHROPIC",
+          ],
+        }
+      );
+      if (result.providerType !== "DEEPSEEK") {
+        throw new Error(
+          `PDF/PPT text must be written by DeepSeek (got ${result.providerType}). Assign AI_CREATIVE → DeepSeek in Admin.`
+        );
+      }
+      console.info(
+        `[creative/design] text provider=${result.providerType} (${result.providerName})`
       );
       const rawMd = (result.text || "").trim();
-      if (!rawMd) throw new Error("Empty generation result");
+      if (!rawMd) throw new Error("Empty generation result from DeepSeek / AI_CREATIVE");
 
       const { cleanMarkdown, figures: figureSpecs } =
         extractFluxFigurePrompts(rawMd);

@@ -241,6 +241,18 @@ export class AiProviderService {
           "OPENAI_COMPATIBLE",
         ],
       };
+    } else if (moduleKey === "AI_CREATIVE") {
+      // Document text (PDF/PPT/Word) must come from DeepSeek chat — not FLUX/Jina/Gemini.
+      opts = {
+        preferTypes: opts?.preferTypes?.length
+          ? opts.preferTypes
+          : ["DEEPSEEK"],
+        skipTypes: [
+          ...(opts?.skipTypes || []),
+          "FLUX",
+          "JINA",
+        ],
+      };
     } else if (moduleKey) {
       // Chat modules: never use FLUX (image-only).
       opts = {
@@ -321,7 +333,12 @@ export class AiProviderService {
     moduleKey: AiModuleKey | undefined,
     messages: ChatMessage[],
     userId?: string,
-    overrides?: { maxTokens?: number; temperature?: number }
+    overrides?: {
+      maxTokens?: number;
+      temperature?: number;
+      preferTypes?: string[];
+      skipTypes?: string[];
+    }
   ) {
     const started = Date.now();
     const needsVision = messages.some((m) =>
@@ -345,9 +362,12 @@ export class AiProviderService {
       needsVision
         ? {
             preferTypes: ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE"],
-            skipTypes: ["DEEPSEEK", "KIMI"],
+            skipTypes: ["DEEPSEEK", "KIMI", ...(overrides?.skipTypes || [])],
           }
-        : undefined
+        : {
+            preferTypes: overrides?.preferTypes,
+            skipTypes: overrides?.skipTypes,
+          }
     );
     await prisma.aiUsageLog.create({
       data: {
@@ -361,7 +381,7 @@ export class AiProviderService {
         costEstimate: estimateCost(provider.type, result.tokensIn, result.tokensOut),
       },
     });
-    return { ...result, providerId: provider.id };
+    return { ...result, providerId: provider.id, providerType: provider.type, providerName: provider.name };
   }
 
   static async embed(text: string, userId?: string) {
