@@ -992,7 +992,9 @@
       "promptAnalogy": "Bu kavramı günlük hayattan basit bir benzetmeyle anlat",
       "promptStepByStep": "Bu soruyu adım adım birlikte çöz ve anlayışımı kontrol et",
       "promptCheckUnderstanding": "Az önce öğrendiklerimi kısa bir soruyla yokla",
-      "continueLearning": "Öğrenmeye devam et"
+      "continueLearning": "Öğrenmeye devam et",
+      "pickMaterialToAnswer": "Materyal seç",
+      "pickMaterialToAnswerHint": "AI’nin doğru yanıtlaması için kademenden bir materyal seç."
     },
     "error": {
       "generic": "Bir şeyler ters gitti",

@@ -24,7 +24,7 @@ const schema = z.object({
   courseId: z.string().optional(),
   language: z.string().max(16).optional(),
   lesson: z.string().optional(),
-  mode: z.enum(["chat", "practice_quiz", "edit", "explain_observe"]).optional(),
+  mode: z.enum(["chat", "practice_quiz", "edit", "explain_observe", "from_materials"]).optional(),
   documentIds: z.array(z.string()).max(20).optional(),
   /** Practice exam size: Basic=5, Intermediate=10, Advanced=20 */
   count: z.union([z.literal(5), z.literal(10), z.literal(20)]).optional(),

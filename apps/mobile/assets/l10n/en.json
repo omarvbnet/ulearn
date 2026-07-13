@@ -1003,7 +1003,9 @@
       "promptAnalogy": "Explain this concept with a simple everyday analogy",
       "promptStepByStep": "Solve this with me step by step and check my understanding",
       "promptCheckUnderstanding": "Quiz me lightly on what I just learned",
-      "continueLearning": "Continue learning"
+      "continueLearning": "Continue learning",
+      "pickMaterialToAnswer": "Choose a material",
+      "pickMaterialToAnswerHint": "Pick one stage material so the AI can answer from it accurately."
     },
     "error": {
       "generic": "Something went wrong",

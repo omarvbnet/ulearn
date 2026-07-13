@@ -219,7 +219,7 @@ export class AiExamService {
 
   static async assertDocumentsAllowed(userId: string, documentIds: string[]) {
     if (!documentIds.length) {
-      throw new Error("Select at least one knowledge document before generating an exam");
+      throw new Error("Select at least one material from your stage library");
     }
     const allowed = await this.listKbDocumentsForUser(userId);
     const allowedIds = new Set(allowed.map((d) => d.id));

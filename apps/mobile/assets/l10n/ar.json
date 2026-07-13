@@ -992,7 +992,9 @@
       "promptAnalogy": "اشرح لي هذا المفهوم بمثال بسيط من الحياة اليومية",
       "promptStepByStep": "حل معي المسألة خطوة بخطوة وتأكد من فهمي",
       "promptCheckUnderstanding": "اختبر فهمي بسرعة لما تعلمته للتو",
-      "continueLearning": "أكمل التعلم"
+      "continueLearning": "أكمل التعلم",
+      "pickMaterialToAnswer": "اختر مادة",
+      "pickMaterialToAnswerHint": "اختر مادة واحدة من مرحلتك ليجيبك الذكاء الاصطناعي منها بدقة."
     },
     "error": {
       "generic": "حدث خطأ",

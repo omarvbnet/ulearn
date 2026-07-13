@@ -20,6 +20,7 @@ import {
   burnArabicTypographyOntoPng,
   extractEducationalLabels,
 } from "../arabic-image-text";
+import { buildAmazingFluxPaintPrompt } from "./flux-paint";
 import {
   AiCreativeEntitlementService,
   type AiCreativeAccessReason,
@@ -205,18 +206,19 @@ export class AiCreativeService {
         {
           role: "system",
           content: [
-            "You are AI Creative Studio for students (text author).",
+            "You are AI Creative Studio for students (text author = DeepSeek; figures = FLUX).",
             `Produce a high-quality ${formatLabel} in Markdown.`,
             "Include a clear title, short learning objectives, and ## section headings.",
             "For presentations, keep each ## section suitable for one slide with bullet points.",
             "Use real ASCII math in Latin letters, e.g. f(x) = 2x + 3 — never replace formulas with placeholders.",
             "Keep bullets short (one idea each). Prefer ### for sub-topics inside a section.",
-            "After each major section that needs a diagram/infographic/shape illustration, add exactly one figure block:",
+            "After each major section that needs a diagram/infographic/shape illustration, add exactly one figure block with a RICH English paint brief:",
             "[[FLUX]]",
-            "English shape-only image prompt (NO Arabic letters in the picture).",
-            "LABELS: short Arabic labels separated by | (these are burned with professional fonts after)",
+            "Detailed shape-only scene: composition, main geometry, colors, markers A/B/C (NO Arabic letters in the picture).",
+            "LABELS: short Arabic labels separated by | (burned with professional Noto fonts after painting)",
             "[[/FLUX]]",
-            "Add 2–4 [[FLUX]] blocks total. Do not invent FLUX blocks without educational value.",
+            "Add 2–4 [[FLUX]] blocks total. Make each paint brief specific and beautiful enough for a textbook figure.",
+            "DeepSeek owns all document text; FLUX only paints shapes — never put Arabic inside FLUX prompts as drawable glyphs.",
             languageInstruction(language),
             "Do not wrap the entire document in a code fence.",
           ].join("\n"),
@@ -341,12 +343,12 @@ export class AiCreativeService {
     const figures: ExportFigure[] = [];
     for (const spec of specs.slice(0, 4)) {
       try {
-        const educationalPrompt = [
-          "Professional educational illustration for a student study document.",
-          "Clean textbook style, high contrast, accurate shapes/diagrams.",
-          fluxVisibleTextGuidance(language, `${spec.prompt}\n${contextPrompt}`),
-          `Figure request (shapes only):\n${spec.prompt}`,
-        ].join("\n");
+        const educationalPrompt = buildAmazingFluxPaintPrompt({
+          subjectPrompt: spec.prompt,
+          language,
+          context: contextPrompt,
+          purpose: "document_figure",
+        });
         const generated = await AiProviderService.generateImage(
           { prompt: educationalPrompt },
           userId
@@ -407,21 +409,25 @@ export class AiCreativeService {
       }
 
       const labels = extractEducationalLabels(input.prompt);
-      const educationalPrompt = [
-        "Educational graphic for students — you MUST generate a real raster image (PNG).",
-        "Clean, clear, high-contrast illustration suitable for school materials.",
-        "Recreate geometric shapes, diagrams, and figures accurately when described.",
-        fluxVisibleTextGuidance(language, input.prompt),
+      const educationalPrompt = buildAmazingFluxPaintPrompt({
+        subjectPrompt: input.prompt,
+        language,
+        purpose: "standalone",
+      });
+      const finalPrompt = [
+        educationalPrompt,
         input.mode === "edit"
-          ? "Edit the provided image according to the instructions. Remove or avoid any garbled Arabic text; keep shapes clear."
-          : "Create a polished educational drawing / infographic / diagram as requested (shapes only if Arabic).",
-        `Request:\n${input.prompt}`,
-      ].join("\n");
+          ? "Edit the provided image according to the instructions. Remove garbled Arabic text; keep shapes crystal clear."
+          : "",
+        fluxVisibleTextGuidance(language, input.prompt),
+      ]
+        .filter(Boolean)
+        .join("\n");
       const fluxInput: {
         prompt: string;
         inputImageBase64?: string;
         mimeType?: string;
-      } = { prompt: educationalPrompt };
+      } = { prompt: finalPrompt };
       if (input.mode === "edit" && input.image) {
         const imgBytes = await resolveFileBytes(input.image);
         fluxInput.inputImageBase64 = imgBytes.toString("base64");

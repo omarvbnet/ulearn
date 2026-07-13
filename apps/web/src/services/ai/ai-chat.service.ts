@@ -194,33 +194,68 @@ export class AiChatService {
     const {
       detectExplainObserveIntent,
       materialSelectMessage,
+      isChitchatOrMeta,
+      matchMentionedMaterials,
     } = await import("./creative/figure-prompts");
+    const { AiExamService } = await import("./ai-exam.service");
+
     const explainObserve =
       input.mode === "explain_observe" ||
       (learnerCreative &&
         !attachments.length &&
+        input.mode !== "practice_quiz" &&
+        input.mode !== "edit" &&
         detectExplainObserveIntent(question));
 
-    if (explainObserve && learnerCreative) {
-      const hasDocs = Boolean(input.documentIds?.length);
-      if (!hasDocs) {
+    // Grounded curriculum Q&A: learners pick a stage material unless they
+    // already selected docs, attached files, named a material, or are chatting casually.
+    const skipMaterialGate =
+      input.mode === "practice_quiz" ||
+      input.mode === "edit" ||
+      attachments.length > 0;
+
+    const wantsGroundedAnswer =
+      learnerCreative &&
+      !skipMaterialGate &&
+      !input.documentIds?.length &&
+      !isChitchatOrMeta(question) &&
+      (explainObserve ||
+        input.mode === "from_materials" ||
+        Boolean(question.trim()));
+
+    if (learnerCreative && !skipMaterialGate && (explainObserve || wantsGroundedAnswer || input.mode === "from_materials")) {
+      const library = await AiExamService.listKbDocumentsForUser(input.userId);
+      const materials = library.map((d) => ({
+        id: d.id,
+        fileName: d.fileName,
+        pageCount: d.pageCount,
+      }));
+
+      let documentIds = [...(input.documentIds || [])];
+      if (!documentIds.length) {
+        documentIds = matchMentionedMaterials(question, materials);
+      }
+
+      if (!documentIds.length) {
         return {
           conversationId: input.conversationId || null,
           messageId: null,
-          answer: materialSelectMessage(language),
+          answer: materialSelectMessage(language, materials),
           citations: [],
           fromCache: false,
           needsMaterialSelection: true,
           pendingMode: "explain_observe" as const,
           pendingQuestion: question,
+          materials,
         };
       }
+
       return this.runExplainObserveWithMaterials({
         userId: input.userId,
         conversationId: input.conversationId,
         question,
         language,
-        documentIds: input.documentIds || [],
+        documentIds,
         stageId,
         subjectId,
         subjectIds,
@@ -852,7 +887,7 @@ export class AiChatService {
     });
   }
 
-  /** Explain / observe selected KB materials with painted educational shapes (FLUX). */
+  /** Answer from selected KB materials with optional FLUX educational paintings. */
   private static async runExplainObserveWithMaterials(input: {
     userId: string;
     conversationId?: string;
@@ -866,7 +901,6 @@ export class AiChatService {
     const { AiExamService } = await import("./ai-exam.service");
     const { ExamGeneratorService } = await import("./exam-generator.service");
     const { AiCreativeService } = await import("./creative");
-    const { fluxVisibleTextGuidance } = await import("./fonts");
     const { extractFluxFigurePrompts } = await import("./creative/figure-prompts");
 
     const documentIds = await AiExamService.assertDocumentsAllowed(
@@ -888,17 +922,15 @@ export class AiChatService {
         language: input.language,
         audience: "student",
       }),
-      "Mode: explain & observe selected curriculum material.",
-      "Explain and help the student observe the selected material clearly.",
-      "When the material describes shapes, diagrams, figures, geometry, maps, or labeled drawings:",
-      "- Describe them accurately in words.",
-      "- Add 1–2 figure blocks so FLUX can paint shapes (NO Arabic letters inside the picture):",
+      "Mode: answer ONLY from the selected curriculum material(s) the student chose.",
+      "Teach clearly: answer the question, explain concepts step by step, use analogies.",
+      "Cite the material by file name when helpful. Do not invent facts outside it.",
+      "When the topic benefits from a diagram/shape/infographic, add 1–3 figure blocks:",
       "[[FLUX]]",
-      "English shape-only prompt",
-      "LABELS: Arabic label 1 | Arabic label 2",
+      "Detailed English shape-only paint brief (geometry, colors, layout — NO Arabic letters).",
+      "LABELS: short Arabic labels separated by | (burned with professional fonts after)",
       "[[/FLUX]]",
-      "If there are no shapes, still explain thoroughly with the tutoring method and optionally add one clarifying educational diagram.",
-      "Do not invent facts outside the material.",
+      "FLUX briefs must be vivid and specific (composition, main shapes, markers A/B/C).",
     ].join("\n");
 
     const chat = await AiProviderService.chat(
@@ -918,7 +950,8 @@ export class AiChatService {
     );
 
     const raw = (chat.text || "").trim();
-    const { cleanMarkdown, prompts } = extractFluxFigurePrompts(raw);
+    const { cleanMarkdown, figures: figureSpecs, prompts } =
+      extractFluxFigurePrompts(raw);
     const withoutFlux = cleanMarkdown || raw;
     const { cleanText, followUps } = extractFollowUps(withoutFlux);
     let answer = cleanText;
@@ -932,31 +965,55 @@ export class AiChatService {
         }
       | undefined;
 
-    const figurePrompt =
-      prompts[0] ||
-      (/(شكل|رسم|diagram|shape|figure|هندس)/i.test(material.text)
-        ? `Educational diagram matching the shapes described in this material for student observation. ${fluxVisibleTextGuidance(input.language, material.text)} Context: ${material.text.slice(0, 1200)}`
-        : null);
+    const paintBriefs =
+      figureSpecs.length > 0
+        ? figureSpecs
+        : prompts.length
+          ? prompts.map((p) => ({ prompt: p, labels: [] as string[] }))
+          : /(شكل|رسم|diagram|shape|figure|هندس|رسمة)/i.test(
+                `${input.question}\n${material.text}`
+              )
+            ? [
+                {
+                  prompt: `Accurate educational diagram of the key shapes/concepts in this lesson for student observation. Context: ${material.text.slice(0, 800)}`,
+                  labels: [] as string[],
+                },
+              ]
+            : [];
 
-    if (figurePrompt) {
+    for (const spec of paintBriefs.slice(0, 2)) {
       try {
         const img = await AiCreativeService.image(input.userId, {
           mode: "design",
-          prompt: figurePrompt,
+          prompt: [
+            spec.prompt,
+            spec.labels.length
+              ? `LABELS: ${spec.labels.join(" | ")}`
+              : "",
+            material.text
+              ? `Curriculum context (shapes only):\n${material.text.slice(0, 500)}`
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
           language: input.language,
         });
-        editedFile = {
-          fileName: img.fileName || "observation.png",
-          mimeType: img.mimeType || "image/png",
-          contentBase64: img.dataBase64 || "",
-          downloadUrl: img.downloadUrl,
-          jobId: img.jobId,
-        };
-        if (input.language.startsWith("ar")) {
-          answer += "\n\nرسمت الأشكال من المادة للملاحظة — انظر الصورة المرفقة.";
-        } else {
-          answer +=
-            "\n\nI painted the material shapes for observation — see the attached image.";
+        // Keep the first successful painting as the chat attachment preview.
+        if (!editedFile) {
+          editedFile = {
+            fileName: img.fileName || "observation.png",
+            mimeType: img.mimeType || "image/png",
+            contentBase64: img.dataBase64 || "",
+            downloadUrl: img.downloadUrl,
+            jobId: img.jobId,
+          };
+          if (input.language.startsWith("ar")) {
+            answer +=
+              "\n\nرسمت الأشكال من المادة للملاحظة — انظر الصورة المرفقة.";
+          } else {
+            answer +=
+              "\n\nI painted the material shapes for observation — see the attached image.";
+          }
         }
       } catch (e) {
         console.warn(

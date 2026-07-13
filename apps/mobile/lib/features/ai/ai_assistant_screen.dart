@@ -411,7 +411,17 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         });
         final pendingQ =
             data['pendingQuestion']?.toString() ?? displayText;
-        await _startExplainObserveFlow(pendingQ);
+        final materialsRaw = data['materials'];
+        final materials = <Map<String, dynamic>>[];
+        if (materialsRaw is List) {
+          for (final m in materialsRaw) {
+            if (m is Map) materials.add(Map<String, dynamic>.from(m));
+          }
+        }
+        await _startExplainObserveFlow(
+          pendingQ,
+          preloadedDocs: materials.isNotEmpty ? materials : null,
+        );
         return;
       }
 
@@ -571,18 +581,24 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     await _generateExam(ids, count);
   }
 
-  Future<void> _startExplainObserveFlow(String pendingQuestion) async {
+  Future<void> _startExplainObserveFlow(
+    String pendingQuestion, {
+    List<Map<String, dynamic>>? preloadedDocs,
+  }) async {
     if (_sending) return;
     final api = context.read<ApiClient>();
     final l10n = context.l10n;
     final errGeneric = l10n.t('mobile.ai.errorGeneric');
-    List<Map<String, dynamic>> docs = [];
-    try {
-      final data = await api.get('/api/ai/kb-documents');
-      docs = ((data['documents'] as List?) ?? []).cast<Map<String, dynamic>>();
-    } catch (e) {
-      _toast(e is ApiException ? e.message : errGeneric);
-      return;
+    List<Map<String, dynamic>> docs = preloadedDocs ?? [];
+    if (docs.isEmpty) {
+      try {
+        final data = await api.get('/api/ai/kb-documents');
+        docs =
+            ((data['documents'] as List?) ?? []).cast<Map<String, dynamic>>();
+      } catch (e) {
+        _toast(e is ApiException ? e.message : errGeneric);
+        return;
+      }
     }
     if (!mounted) return;
     if (docs.isEmpty) {
@@ -1698,7 +1714,9 @@ class _MaterialPickerSheetState extends State<_MaterialPickerSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    l10n.t('mobile.ai.pickMaterials'),
+                    widget.explainMode
+                        ? l10n.t('mobile.ai.pickMaterialToAnswer')
+                        : l10n.t('mobile.ai.pickMaterials'),
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 17,
@@ -1707,7 +1725,9 @@ class _MaterialPickerSheetState extends State<_MaterialPickerSheet> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    l10n.t('mobile.ai.pickMaterialsHint'),
+                    widget.explainMode
+                        ? l10n.t('mobile.ai.pickMaterialToAnswerHint')
+                        : l10n.t('mobile.ai.pickMaterialsHint'),
                     style: TextStyle(color: AppTheme.muted, fontSize: 13),
                   ),
                   if (!widget.explainMode) ...[
@@ -1764,7 +1784,11 @@ class _MaterialPickerSheetState extends State<_MaterialPickerSheet> {
                         ? null
                         : (v) {
                             setState(() {
-                              if (v == true) {
+                              if (widget.explainMode) {
+                                _selected
+                                  ..clear()
+                                  ..add(id);
+                              } else if (v == true) {
                                 _selected.add(id);
                               } else {
                                 _selected.remove(id);
