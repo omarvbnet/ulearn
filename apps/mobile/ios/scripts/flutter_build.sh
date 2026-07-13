@@ -14,10 +14,10 @@ CACHE="${HOME}/Library/Caches/ulearn-mobile-build"
 strip_xattrs() {
   local path="$1"
   if [ -e "${path}" ]; then
+    # Avoid find|xargs — large trees hit ARG_MAX ("command line cannot be assembled, too long").
+    # xattr -cr already recurses safely.
     dot_clean -m "${path}" 2>/dev/null || true
     xattr -cr "${path}" 2>/dev/null || true
-    find "${path}" \( -name '*.framework' -o -name 'App' -o -name '*.dylib' -o -name 'Flutter' -o -name 'objective_c' \) -print0 2>/dev/null \
-      | xargs -0 -I{} sh -c 'xattr -cr "{}" 2>/dev/null || true; xattr -c "{}" 2>/dev/null || true' || true
   fi
 }
 

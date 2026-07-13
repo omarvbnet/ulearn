@@ -705,8 +705,6 @@ export default function StudentAiPage() {
   );
 }
 
-}
-
 function GeneratedChatImage({
   file,
 }: {
