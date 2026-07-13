@@ -13,6 +13,8 @@ import {
  *
  * Verify token:
  *   WHATSAPP_VERIFY_TOKEN in .env (must match Meta exactly)
+ *
+ * Subscribe to field: messages  (needed for delivery / failed status)
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -54,28 +56,35 @@ export async function POST(request: Request) {
 
       const value = change.value;
       for (const msg of value?.messages ?? []) {
-        if (process.env.NODE_ENV === "development") {
-          console.info("[WhatsApp webhook] message", {
-            from: msg.from,
-            type: msg.type,
-            text: msg.text?.body,
-          });
-        }
+        console.info("[WhatsApp webhook] inbound", {
+          from: msg.from,
+          type: msg.type,
+        });
       }
 
       for (const status of value?.statuses ?? []) {
-        if (process.env.NODE_ENV === "development") {
-          console.info("[WhatsApp webhook] status", {
-            id: status.id,
-            status: status.status,
-            to: status.recipient_id,
-          });
+        const err = status.errors?.[0];
+        const line = {
+          id: status.id,
+          status: status.status,
+          to: status.recipient_id
+            ? `***${String(status.recipient_id).slice(-4)}`
+            : null,
+          errorCode: err?.code ?? null,
+          errorTitle: err?.title ?? null,
+          errorMessage: err?.message ?? null,
+          errorDetails: err?.error_data?.details ?? null,
+        };
+
+        if (status.status === "failed" || status.status === "deleted") {
+          console.error("[WhatsApp] DELIVERY FAILED", line);
+        } else {
+          console.info("[WhatsApp] delivery status", line);
         }
       }
     }
   }
 
-  // Meta expects 200 quickly; process heavy work async if needed later.
   return new Response("OK", { status: 200 });
 }
 

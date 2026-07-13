@@ -50,7 +50,13 @@ export interface RegisterCertificateInput {
 
 export class AuthService {
   /** Send OTP via WhatsApp (provider integration point). */
-  static async sendOtp(phone: string): Promise<{ success: boolean; expiresIn: number }> {
+  static async sendOtp(
+    phone: string
+  ): Promise<{
+    success: boolean;
+    expiresIn: number;
+    messageId?: string | null;
+  }> {
     const normalized = phone.replace(/\s+/g, "");
     const { isWhatsAppConfigured } = await import("@/lib/whatsapp");
     const whatsappConfigured = isWhatsAppConfigured();
@@ -68,15 +74,19 @@ export class AuthService {
       data: { phone: normalized, code, expiresAt },
     });
 
-    await this.dispatchWhatsAppOtp(normalized, code);
+    const sent = await this.dispatchWhatsAppOtp(normalized, code);
 
-    return { success: true, expiresIn: OTP_EXPIRY_MINUTES * 60 };
+    return {
+      success: true,
+      expiresIn: OTP_EXPIRY_MINUTES * 60,
+      messageId: sent?.messageId ?? null,
+    };
   }
 
   private static async dispatchWhatsAppOtp(phone: string, code: string) {
     const { sendWhatsAppOtp, WhatsAppSendError } = await import("@/lib/whatsapp");
     try {
-      await sendWhatsAppOtp(phone, code);
+      return await sendWhatsAppOtp(phone, code);
     } catch (e) {
       console.error("[Auth] WhatsApp OTP dispatch failed:", e);
       if (e instanceof WhatsAppSendError) throw e;

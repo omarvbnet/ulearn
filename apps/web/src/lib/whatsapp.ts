@@ -81,9 +81,22 @@ function timingSafeEqual(a: string, b: string): boolean {
   return result === 0;
 }
 
-/** Normalize to digits only for Meta (no + prefix). */
+/**
+ * Normalize to Meta digits-only format (no +).
+ * Converts common local Iraqi mobiles `07xxxxxxxx` → `9647xxxxxxxx`.
+ */
 export function normalizeWhatsAppPhone(phone: string): string {
-  return phone.replace(/\D/g, "");
+  let digits = phone.replace(/\D/g, "");
+
+  // Strip leading 00 international prefix.
+  if (digits.startsWith("00")) digits = digits.slice(2);
+
+  // Iraq local mobile → E.164 without +
+  if (/^07\d{9}$/.test(digits)) {
+    digits = `964${digits.slice(1)}`;
+  }
+
+  return digits;
 }
 
 export type WhatsAppWebhookPayload = {
@@ -108,6 +121,12 @@ export type WhatsAppWebhookPayload = {
           status: string;
           timestamp: string;
           recipient_id: string;
+          errors?: Array<{
+            code?: number;
+            title?: string;
+            message?: string;
+            error_data?: { details?: string };
+          }>;
         }>;
       };
     }>;
@@ -125,19 +144,28 @@ export class WhatsAppSendError extends Error {
   }
 }
 
+export type WhatsAppSendResult = {
+  messageId: string | null;
+  to: string;
+  template: string | null;
+  lang: string | null;
+};
+
 /**
  * Send OTP via Meta WhatsApp Cloud API.
  * Production requires an approved Authentication template + credentials.
  */
-export async function sendWhatsAppOtp(phone: string, code: string): Promise<void> {
+export async function sendWhatsAppOtp(
+  phone: string,
+  code: string
+): Promise<WhatsAppSendResult> {
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN?.trim();
 
   if (!phoneNumberId || !accessToken) {
-    // Dev-only: print code so local testing works without Meta.
     if (process.env.NODE_ENV !== "production") {
       console.info(`[OTP fallback — WhatsApp not configured] ${phone}: ${code}`);
-      return;
+      return { messageId: null, to: phone, template: null, lang: null };
     }
     throw new WhatsAppSendError(
       "WhatsApp OTP is not configured on the server",
@@ -146,15 +174,24 @@ export async function sendWhatsAppOtp(phone: string, code: string): Promise<void
   }
 
   const to = normalizeWhatsAppPhone(phone);
-  if (to.length < 8) {
-    throw new WhatsAppSendError("Invalid phone number", "INVALID_PHONE");
+  // International WhatsApp numbers are typically 10–15 digits with country code.
+  if (to.length < 10 || to.length > 15) {
+    throw new WhatsAppSendError(
+      "Phone must include country code, e.g. +9647XXXXXXXX",
+      "INVALID_PHONE"
+    );
+  }
+  // Reject bare local numbers that never got a country code (except already mapped 07→964).
+  if (/^0\d+$/.test(to)) {
+    throw new WhatsAppSendError(
+      "Phone must include country code, e.g. +9647XXXXXXXX",
+      "INVALID_PHONE"
+    );
   }
 
   const templateName = process.env.WHATSAPP_OTP_TEMPLATE_NAME?.trim();
-  const templateLang = process.env.WHATSAPP_OTP_TEMPLATE_LANG?.trim() || "en";
+  const templateLang = process.env.WHATSAPP_OTP_TEMPLATE_LANG?.trim() || "ar";
 
-  // Outside the 24h customer-care window Meta rejects free-form text.
-  // OTP must use an approved Authentication / utility template in production.
   if (!templateName && process.env.NODE_ENV === "production") {
     throw new WhatsAppSendError(
       "WHATSAPP_OTP_TEMPLATE_NAME is required in production",
@@ -162,9 +199,12 @@ export async function sendWhatsAppOtp(phone: string, code: string): Promise<void
     );
   }
 
+  // Meta Authentication + Copy code payload.
+  // @see https://developers.facebook.com/docs/whatsapp/business-management-api/authentication-templates/copy-code-button-authentication-templates
   const body = templateName
     ? {
         messaging_product: "whatsapp",
+        recipient_type: "individual",
         to,
         type: "template",
         template: {
@@ -175,6 +215,7 @@ export async function sendWhatsAppOtp(phone: string, code: string): Promise<void
       }
     : {
         messaging_product: "whatsapp",
+        recipient_type: "individual",
         to,
         type: "text",
         text: {
@@ -198,26 +239,39 @@ export async function sendWhatsAppOtp(phone: string, code: string): Promise<void
     throw new WhatsAppSendError(
       "WhatsApp API rejected the OTP message",
       "WHATSAPP_SEND_FAILED",
-      raw.slice(0, 500)
+      raw.slice(0, 800)
     );
   }
 
-  let messageId: string | undefined;
+  let messageId: string | null = null;
+  let waId: string | null = null;
   try {
     const parsed = JSON.parse(raw) as {
       messages?: Array<{ id?: string }>;
+      contacts?: Array<{ wa_id?: string; input?: string }>;
     };
-    messageId = parsed.messages?.[0]?.id;
+    messageId = parsed.messages?.[0]?.id ?? null;
+    waId = parsed.contacts?.[0]?.wa_id ?? null;
   } catch {
     /* ignore */
   }
 
   console.info("[WhatsApp] OTP accepted by Meta", {
     to: `***${to.slice(-4)}`,
+    toLen: to.length,
+    waId: waId ? `***${waId.slice(-4)}` : null,
     template: templateName || null,
     lang: templateName ? templateLang : null,
-    messageId: messageId ?? null,
+    useButton: process.env.WHATSAPP_OTP_TEMPLATE_USE_BUTTON !== "false",
+    messageId,
   });
+
+  return {
+    messageId,
+    to: `***${to.slice(-4)}`,
+    template: templateName || null,
+    lang: templateName ? templateLang : null,
+  };
 }
 
 function buildTemplateComponents(code: string) {
@@ -228,8 +282,8 @@ function buildTemplateComponents(code: string) {
     },
   ];
 
-  // Authentication templates with Copy Code / URL button need the code again.
-  // Set WHATSAPP_OTP_TEMPLATE_USE_BUTTON=false for body-only templates.
+  // Copy-code Authentication templates require the OTP again on the URL button.
+  // Set WHATSAPP_OTP_TEMPLATE_USE_BUTTON=false only for body-only templates.
   if (process.env.WHATSAPP_OTP_TEMPLATE_USE_BUTTON !== "false") {
     components.push({
       type: "button",
