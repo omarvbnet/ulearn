@@ -1,6 +1,6 @@
-import { error, json, requireAuth } from "@/lib/api";
+import { json, requireAuth } from "@/lib/api";
 import { ADMIN_ROLES } from "@/lib/auth/session";
-import { isWhatsAppConfigured } from "@/lib/whatsapp";
+import { getWhatsAppWebhookUrl, isWhatsAppConfigured } from "@/lib/whatsapp";
 
 const GRAPH_API = "https://graph.facebook.com/v21.0";
 
@@ -20,25 +20,24 @@ export async function GET(request: Request) {
 
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() || "";
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN?.trim() || "";
+  const wabaIdEnv = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID?.trim() || "";
   const templateName = process.env.WHATSAPP_OTP_TEMPLATE_NAME?.trim() || "";
   const templateLang = process.env.WHATSAPP_OTP_TEMPLATE_LANG?.trim() || "ar";
   const useButton = process.env.WHATSAPP_OTP_TEMPLATE_USE_BUTTON !== "false";
   const verifyTokenSet = Boolean(process.env.WHATSAPP_VERIFY_TOKEN?.trim());
   const appSecretSet = Boolean(process.env.WHATSAPP_APP_SECRET?.trim());
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim() || "";
 
   const env = {
     configured: isWhatsAppConfigured(),
     phoneNumberIdSet: Boolean(phoneNumberId),
     accessTokenSet: Boolean(accessToken),
+    wabaIdSet: Boolean(wabaIdEnv),
     templateName: templateName || null,
     templateLang,
     useButton,
     verifyTokenSet,
     appSecretSet,
-    webhookUrl: appUrl
-      ? `${appUrl.replace(/\/$/, "")}/api/webhooks/whatsapp`
-      : null,
+    webhookUrl: getWhatsAppWebhookUrl(),
   };
 
   if (!phoneNumberId || !accessToken) {
@@ -53,37 +52,67 @@ export async function GET(request: Request) {
     });
   }
 
+  const headers = { Authorization: `Bearer ${accessToken}` };
+
   const phoneRes = await fetch(
-    `${GRAPH_API}/${phoneNumberId}?fields=display_phone_number,verified_name,quality_rating,code_verification_status,is_official_business_account,account_mode,name_status,new_name_status,messaging_limit_tier`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
+    `${GRAPH_API}/${phoneNumberId}?fields=display_phone_number,verified_name,quality_rating,code_verification_status,is_official_business_account,account_mode,name_status,messaging_limit_tier,throughput`,
+    { headers }
   );
   const phoneJson = (await phoneRes.json().catch(() => ({}))) as Record<
     string,
     unknown
   >;
 
-  const wabaRes = await fetch(
-    `${GRAPH_API}/${phoneNumberId}?fields=whatsapp_business_account{id,name,account_review_status,business_verification_status}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  const wabaJson = (await wabaRes.json().catch(() => ({}))) as {
-    whatsapp_business_account?: {
-      id?: string;
-      name?: string;
-      account_review_status?: string;
-      business_verification_status?: string;
-    };
-    error?: { message?: string; code?: number };
-  };
+  // Prefer explicit WABA id (token often cannot expand whatsapp_business_account).
+  let wabaId = wabaIdEnv || null;
+  let wabaMeta: Record<string, unknown> | null = null;
+  let wabaError: { message?: string; code?: number } | null = null;
 
-  const wabaId = wabaJson.whatsapp_business_account?.id;
+  if (!wabaId) {
+    const wabaRes = await fetch(
+      `${GRAPH_API}/${phoneNumberId}?fields=whatsapp_business_account{id,name,account_review_status,business_verification_status}`,
+      { headers }
+    );
+    const wabaJson = (await wabaRes.json().catch(() => ({}))) as {
+      whatsapp_business_account?: {
+        id?: string;
+        name?: string;
+        account_review_status?: string;
+        business_verification_status?: string;
+      };
+      error?: { message?: string; code?: number };
+    };
+    if (wabaJson.error) {
+      wabaError = wabaJson.error;
+    } else if (wabaJson.whatsapp_business_account?.id) {
+      wabaId = wabaJson.whatsapp_business_account.id;
+      wabaMeta = wabaJson.whatsapp_business_account as Record<string, unknown>;
+    }
+  }
+
+  if (wabaId && !wabaMeta) {
+    const detailRes = await fetch(
+      `${GRAPH_API}/${wabaId}?fields=id,name,account_review_status,business_verification_status`,
+      { headers }
+    );
+    const detail = (await detailRes.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    if (!detail.error) wabaMeta = detail;
+    else
+      wabaError =
+        (detail.error as { message?: string; code?: number }) || wabaError;
+  }
+
   let template: Record<string, unknown> | null = null;
   let templatesError: string | null = null;
+  let matchingLanguages: string[] = [];
 
   if (wabaId && templateName) {
     const tplRes = await fetch(
-      `${GRAPH_API}/${wabaId}/message_templates?name=${encodeURIComponent(templateName)}&limit=10`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+      `${GRAPH_API}/${wabaId}/message_templates?name=${encodeURIComponent(templateName)}&limit=20`,
+      { headers }
     );
     const tplJson = (await tplRes.json().catch(() => ({}))) as {
       data?: Array<Record<string, unknown>>;
@@ -92,7 +121,8 @@ export async function GET(request: Request) {
     if (tplJson.error) {
       templatesError = tplJson.error.message || "template_fetch_failed";
     } else {
-      const match =
+      matchingLanguages = (tplJson.data || []).map((t) => String(t.language));
+      template =
         tplJson.data?.find(
           (t) =>
             String(t.name) === templateName &&
@@ -100,46 +130,85 @@ export async function GET(request: Request) {
         ) ||
         tplJson.data?.find((t) => String(t.name) === templateName) ||
         null;
-      template = match;
     }
+  } else if (!wabaId) {
+    templatesError =
+      "Set WHATSAPP_BUSINESS_ACCOUNT_ID in Vercel (WhatsApp Manager → account ID)";
   }
 
   const checklist: string[] = [];
-  const phoneError = phoneJson.error as { message?: string; code?: number } | undefined;
+  const phoneError = phoneJson.error as
+    | { message?: string; code?: number }
+    | undefined;
+
   if (phoneError) {
-    checklist.push(`Phone number API error: ${phoneError.message || phoneError.code}`);
+    checklist.push(
+      `Phone number API error: ${phoneError.message || phoneError.code}`
+    );
   }
-  if (String(phoneJson.account_mode || "").toUpperCase() === "SANDBOX") {
-    checklist.push("Phone is in SANDBOX — only allow-listed numbers receive messages");
+
+  const accountMode = String(phoneJson.account_mode || "").toUpperCase();
+  if (accountMode === "SANDBOX") {
+    checklist.push(
+      "Phone is in SANDBOX — only allow-listed numbers receive messages"
+    );
   }
+
+  if (!wabaId) {
+    checklist.push(
+      "Add WHATSAPP_BUSINESS_ACCOUNT_ID so we can verify the otp template"
+    );
+  }
+
   if (!template) {
     checklist.push(
-      `Template "${templateName}" / lang "${templateLang}" not found or not readable`
+      `Template "${templateName}" / lang "${templateLang}" not readable via API` +
+        (matchingLanguages.length
+          ? ` (found languages: ${matchingLanguages.join(", ")})`
+          : "")
     );
-  } else if (String(template.status) !== "APPROVED") {
-    checklist.push(`Template status is ${String(template.status)} (need APPROVED)`);
-  } else if (String(template.category).toUpperCase() !== "AUTHENTICATION") {
-    checklist.push(
-      `Template category is ${String(template.category)} — OTP should be AUTHENTICATION`
-    );
+  } else {
+    if (String(template.language) !== templateLang) {
+      checklist.push(
+        `Language mismatch: env=${templateLang}, template=${String(template.language)} — set WHATSAPP_OTP_TEMPLATE_LANG exactly`
+      );
+    }
+    if (String(template.status) !== "APPROVED") {
+      checklist.push(
+        `Template status is ${String(template.status)} (need APPROVED)`
+      );
+    }
+    if (String(template.category).toUpperCase() !== "AUTHENTICATION") {
+      checklist.push(
+        `Template category is ${String(template.category)} — OTP must be AUTHENTICATION`
+      );
+    }
   }
-  if (!verifyTokenSet || !appUrl) {
-    checklist.push(
-      "Configure webhook + WHATSAPP_VERIFY_TOKEN to see DELIVERY FAILED reasons"
-    );
-  }
+
   checklist.push(
-    "Meta Developer App must be Live (not Development) or recipient must be a tester/allow-listed"
+    "WhatsApp Manager → Overview/Billing: add a payment method (131042 = accepted but never delivered)"
   );
   checklist.push(
-    "WhatsApp Manager → add a valid payment method (error 131042 blocks delivery after accept)"
+    "Meta webhook must subscribe to messages on https://ulearn.usmart-iot.com/api/webhooks/whatsapp"
   );
   checklist.push(
-    "Open WhatsApp on the primary phone for +964… (Auth OTP is hidden on linked devices)"
+    "After OTP accepted, check Vercel for [WhatsApp] DELIVERY FAILED — that code is the real reason"
+  );
+  checklist.push(
+    "Recipient +9647702073749 must open WhatsApp on the primary phone (not linked Web/Desktop)"
   );
 
+  const ok =
+    !phoneError &&
+    accountMode === "LIVE" &&
+    Boolean(template) &&
+    String(template?.status) === "APPROVED";
+
   return json({
-    ok: checklist.length <= 3 && Boolean(template),
+    ok,
+    diagnosis: ok
+      ? "API + template look healthy. If OTP still missing, check payment method and DELIVERY FAILED webhook logs."
+      : "Sender number is configured, but template/WABA could not be fully verified — or delivery is blocked after accept (usually payment / webhook).",
     env,
     phone: phoneError
       ? { error: phoneError }
@@ -150,18 +219,18 @@ export async function GET(request: Request) {
           codeVerificationStatus: phoneJson.code_verification_status ?? null,
           accountMode: phoneJson.account_mode ?? null,
           messagingLimitTier: phoneJson.messaging_limit_tier ?? null,
+          throughput: phoneJson.throughput ?? null,
         },
-    waba: wabaJson.whatsapp_business_account
+    waba: wabaId
       ? {
-          id: wabaJson.whatsapp_business_account.id ?? null,
-          name: wabaJson.whatsapp_business_account.name ?? null,
-          accountReviewStatus:
-            wabaJson.whatsapp_business_account.account_review_status ?? null,
+          id: wabaId,
+          name: wabaMeta?.name ?? null,
+          accountReviewStatus: wabaMeta?.account_review_status ?? null,
           businessVerificationStatus:
-            wabaJson.whatsapp_business_account.business_verification_status ??
-            null,
+            wabaMeta?.business_verification_status ?? null,
+          error: wabaError,
         }
-      : { error: wabaJson.error ?? null },
+      : { error: wabaError },
     template: template
       ? {
           name: template.name,
@@ -171,6 +240,7 @@ export async function GET(request: Request) {
           components: template.components,
         }
       : null,
+    matchingLanguages,
     templatesError,
     checklist,
   });
