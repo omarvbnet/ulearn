@@ -24,6 +24,12 @@ export async function POST(request: Request) {
     return json(result);
   } catch (e) {
     console.error(e);
+    const { WhatsAppSendError } = await import("@/lib/whatsapp");
+    if (e instanceof WhatsAppSendError) {
+      return error(e.message, 502, e.code, {
+        details: process.env.NODE_ENV === "production" ? undefined : e.details,
+      });
+    }
     return error("Internal server error", 500);
   }
 }

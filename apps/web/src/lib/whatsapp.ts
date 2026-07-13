@@ -1,6 +1,6 @@
 /**
  * Meta WhatsApp Cloud API integration.
- * @see https://developers.facebook.com/docs/graph-api/webhooks/getting-started
+ * @see https://developers.facebook.com/docs/whatsapp/cloud-api/guides/send-message-templates/auth-otp-template-messages
  */
 
 const GRAPH_API = "https://graph.facebook.com/v21.0";
@@ -12,6 +12,13 @@ export function getWhatsAppWebhookUrl(): string {
 
 export function getWhatsAppVerifyToken(): string | undefined {
   return process.env.WHATSAPP_VERIFY_TOKEN;
+}
+
+export function isWhatsAppConfigured(): boolean {
+  return Boolean(
+    process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() &&
+      process.env.WHATSAPP_ACCESS_TOKEN?.trim()
+  );
 }
 
 /** Meta webhook subscription verification (GET). */
@@ -107,18 +114,53 @@ export type WhatsAppWebhookPayload = {
   }>;
 };
 
+export class WhatsAppSendError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+    public readonly details?: string
+  ) {
+    super(message);
+    this.name = "WhatsAppSendError";
+  }
+}
+
+/**
+ * Send OTP via Meta WhatsApp Cloud API.
+ * Production requires an approved Authentication template + credentials.
+ */
 export async function sendWhatsAppOtp(phone: string, code: string): Promise<void> {
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN?.trim();
 
   if (!phoneNumberId || !accessToken) {
-    // No WhatsApp credentials — log the code so testing is still possible.
-    console.info(`[OTP fallback — WhatsApp not configured] ${phone}: ${code}`);
-    return;
+    // Dev-only: print code so local testing works without Meta.
+    if (process.env.NODE_ENV !== "production") {
+      console.info(`[OTP fallback — WhatsApp not configured] ${phone}: ${code}`);
+      return;
+    }
+    throw new WhatsAppSendError(
+      "WhatsApp OTP is not configured on the server",
+      "WHATSAPP_NOT_CONFIGURED"
+    );
   }
 
   const to = normalizeWhatsAppPhone(phone);
-  const templateName = process.env.WHATSAPP_OTP_TEMPLATE_NAME;
+  if (to.length < 8) {
+    throw new WhatsAppSendError("Invalid phone number", "INVALID_PHONE");
+  }
+
+  const templateName = process.env.WHATSAPP_OTP_TEMPLATE_NAME?.trim();
+  const templateLang = process.env.WHATSAPP_OTP_TEMPLATE_LANG?.trim() || "en";
+
+  // Outside the 24h customer-care window Meta rejects free-form text.
+  // OTP must use an approved Authentication / utility template in production.
+  if (!templateName && process.env.NODE_ENV === "production") {
+    throw new WhatsAppSendError(
+      "WHATSAPP_OTP_TEMPLATE_NAME is required in production",
+      "WHATSAPP_TEMPLATE_MISSING"
+    );
+  }
 
   const body = templateName
     ? {
@@ -127,9 +169,7 @@ export async function sendWhatsAppOtp(phone: string, code: string): Promise<void
         type: "template",
         template: {
           name: templateName,
-          language: {
-            code: process.env.WHATSAPP_OTP_TEMPLATE_LANG || "en",
-          },
+          language: { code: templateLang },
           components: buildTemplateComponents(code),
         },
       }
@@ -152,11 +192,32 @@ export async function sendWhatsAppOtp(phone: string, code: string): Promise<void
     body: JSON.stringify(body),
   });
 
+  const raw = await res.text();
   if (!res.ok) {
-    const err = await res.text();
-    console.error("[WhatsApp] send failed:", res.status, err);
-    throw new Error("WHATSAPP_SEND_FAILED");
+    console.error("[WhatsApp] send failed:", res.status, raw);
+    throw new WhatsAppSendError(
+      "WhatsApp API rejected the OTP message",
+      "WHATSAPP_SEND_FAILED",
+      raw.slice(0, 500)
+    );
   }
+
+  let messageId: string | undefined;
+  try {
+    const parsed = JSON.parse(raw) as {
+      messages?: Array<{ id?: string }>;
+    };
+    messageId = parsed.messages?.[0]?.id;
+  } catch {
+    /* ignore */
+  }
+
+  console.info("[WhatsApp] OTP accepted by Meta", {
+    to: `***${to.slice(-4)}`,
+    template: templateName || null,
+    lang: templateName ? templateLang : null,
+    messageId: messageId ?? null,
+  });
 }
 
 function buildTemplateComponents(code: string) {
@@ -167,6 +228,8 @@ function buildTemplateComponents(code: string) {
     },
   ];
 
+  // Authentication templates with Copy Code / URL button need the code again.
+  // Set WHATSAPP_OTP_TEMPLATE_USE_BUTTON=false for body-only templates.
   if (process.env.WHATSAPP_OTP_TEMPLATE_USE_BUTTON !== "false") {
     components.push({
       type: "button",

@@ -52,13 +52,14 @@ export class AuthService {
   /** Send OTP via WhatsApp (provider integration point). */
   static async sendOtp(phone: string): Promise<{ success: boolean; expiresIn: number }> {
     const normalized = phone.replace(/\s+/g, "");
-    // Use the fixed DEV_OTP whenever WhatsApp delivery is not configured —
-    // otherwise a random code would be generated that nobody ever receives.
-    const whatsappConfigured = Boolean(
-      process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN
-    );
+    const { isWhatsAppConfigured } = await import("@/lib/whatsapp");
+    const whatsappConfigured = isWhatsAppConfigured();
+
+    // Fixed DEV_OTP only when WhatsApp is not configured (local/dev fallback).
     const code =
-      !whatsappConfigured && process.env.DEV_OTP ? process.env.DEV_OTP : generateOtp(6);
+      !whatsappConfigured && process.env.DEV_OTP
+        ? process.env.DEV_OTP
+        : generateOtp(6);
 
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + OTP_EXPIRY_MINUTES);
@@ -73,14 +74,13 @@ export class AuthService {
   }
 
   private static async dispatchWhatsAppOtp(phone: string, code: string) {
-    const { sendWhatsAppOtp } = await import("@/lib/whatsapp");
+    const { sendWhatsAppOtp, WhatsAppSendError } = await import("@/lib/whatsapp");
     try {
       await sendWhatsAppOtp(phone, code);
     } catch (e) {
       console.error("[Auth] WhatsApp OTP dispatch failed:", e);
-      if (process.env.NODE_ENV !== "development") {
-        throw e;
-      }
+      if (e instanceof WhatsAppSendError) throw e;
+      throw e;
     }
   }
 
