@@ -155,6 +155,7 @@ export class WhatsAppSendError extends Error {
 
 export type WhatsAppSendResult = {
   messageId: string | null;
+  messageStatus: string | null;
   to: string;
   template: string | null;
   lang: string | null;
@@ -174,7 +175,13 @@ export async function sendWhatsAppOtp(
   if (!phoneNumberId || !accessToken) {
     if (process.env.NODE_ENV !== "production") {
       console.info(`[OTP fallback — WhatsApp not configured] ${phone}: ${code}`);
-      return { messageId: null, to: phone, template: null, lang: null };
+      return {
+        messageId: null,
+        messageStatus: null,
+        to: phone,
+        template: null,
+        lang: null,
+      };
     }
     throw new WhatsAppSendError(
       "WhatsApp OTP is not configured on the server",
@@ -253,13 +260,15 @@ export async function sendWhatsAppOtp(
   }
 
   let messageId: string | null = null;
+  let messageStatus: string | null = null;
   let waId: string | null = null;
   try {
     const parsed = JSON.parse(raw) as {
-      messages?: Array<{ id?: string }>;
+      messages?: Array<{ id?: string; message_status?: string }>;
       contacts?: Array<{ wa_id?: string; input?: string }>;
     };
     messageId = parsed.messages?.[0]?.id ?? null;
+    messageStatus = parsed.messages?.[0]?.message_status ?? null;
     waId = parsed.contacts?.[0]?.wa_id ?? null;
   } catch {
     /* ignore */
@@ -273,10 +282,19 @@ export async function sendWhatsAppOtp(
     lang: templateName ? templateLang : null,
     useButton: process.env.WHATSAPP_OTP_TEMPLATE_USE_BUTTON !== "false",
     messageId,
+    messageStatus,
+    raw: raw.slice(0, 500),
   });
+
+  if (messageStatus === "held_for_quality_assessment") {
+    console.warn(
+      "[WhatsApp] Message HELD for template quality assessment — may never reach the phone until Meta releases it"
+    );
+  }
 
   return {
     messageId,
+    messageStatus,
     to: `***${to.slice(-4)}`,
     template: templateName || null,
     lang: templateName ? templateLang : null,

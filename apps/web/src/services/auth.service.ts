@@ -80,6 +80,7 @@ export class AuthService {
       success: true,
       expiresIn: OTP_EXPIRY_MINUTES * 60,
       messageId: sent?.messageId ?? null,
+      messageStatus: sent?.messageStatus ?? null,
     };
   }
 
