@@ -5,10 +5,18 @@
 
 const GRAPH_API = "https://graph.facebook.com/v23.0";
 
+/** First non-empty env value among aliases (supports legacy May 2026 names). */
+function envFirst(...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const v = process.env[key]?.trim();
+    if (v) return v;
+  }
+  return undefined;
+}
+
 export function getWhatsAppWebhookUrl(): string {
   const raw =
-    process.env.WHATSAPP_WEBHOOK_BASE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    envFirst("WHATSAPP_WEBHOOK_BASE_URL", "NEXT_PUBLIC_APP_URL") ||
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "") ||
     "http://localhost:3000";
   // Never advertise localhost as the Meta callback when a Vercel host exists.
@@ -20,14 +28,38 @@ export function getWhatsAppWebhookUrl(): string {
 }
 
 export function getWhatsAppVerifyToken(): string | undefined {
-  return process.env.WHATSAPP_VERIFY_TOKEN;
+  return envFirst(
+    "WHATSAPP_VERIFY_TOKEN",
+    "WHATSAPP_WEBHOOK_VERIFY_TOKEN"
+  );
+}
+
+export function getWhatsAppPhoneNumberId(): string | undefined {
+  return envFirst(
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "WHATSAPP_CLOUD_PHONE_NUMBER_ID"
+  );
+}
+
+export function getWhatsAppAccessToken(): string | undefined {
+  return envFirst("WHATSAPP_ACCESS_TOKEN", "WHATSAPP_CLOUD_ACCESS_TOKEN");
+}
+
+export function getWhatsAppOtpTemplateName(): string | undefined {
+  return envFirst("WHATSAPP_OTP_TEMPLATE_NAME");
+}
+
+export function getWhatsAppOtpTemplateLang(): string {
+  return normalizeWhatsAppTemplateLang(
+    envFirst(
+      "WHATSAPP_OTP_TEMPLATE_LANG",
+      "WHATSAPP_OTP_TEMPLATE_LANGUAGE"
+    ) || "ar"
+  );
 }
 
 export function isWhatsAppConfigured(): boolean {
-  return Boolean(
-    process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() &&
-      process.env.WHATSAPP_ACCESS_TOKEN?.trim()
-  );
+  return Boolean(getWhatsAppPhoneNumberId() && getWhatsAppAccessToken());
 }
 
 /** Meta webhook subscription verification (GET). */
@@ -169,8 +201,8 @@ export async function sendWhatsAppOtp(
   phone: string,
   code: string
 ): Promise<WhatsAppSendResult> {
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
-  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN?.trim();
+  const phoneNumberId = getWhatsAppPhoneNumberId();
+  const accessToken = getWhatsAppAccessToken();
 
   if (!phoneNumberId || !accessToken) {
     if (process.env.NODE_ENV !== "production") {
@@ -205,11 +237,8 @@ export async function sendWhatsAppOtp(
     );
   }
 
-  const templateName = process.env.WHATSAPP_OTP_TEMPLATE_NAME?.trim();
-  // Must match Meta template language exactly (Manager → template → language code).
-  // Arabic OTP templates are usually "ar" — not "ar_AR" / "ar_SA" / "Arabic".
-  const rawLang = process.env.WHATSAPP_OTP_TEMPLATE_LANG?.trim() || "ar";
-  const templateLang = normalizeWhatsAppTemplateLang(rawLang);
+  const templateName = getWhatsAppOtpTemplateName();
+  const templateLang = getWhatsAppOtpTemplateLang();
 
   if (!templateName && process.env.NODE_ENV === "production") {
     throw new WhatsAppSendError(
@@ -258,7 +287,7 @@ export async function sendWhatsAppOtp(
     let hint = "";
     if (raw.includes("132001") || raw.includes("does not exist in")) {
       hint =
-        ` Template "${templateName}" was not found for language "${templateLang}". Set WHATSAPP_OTP_TEMPLATE_LANG to the exact code in WhatsApp Manager (often "ar").`;
+        ` Template "${templateName}" was not found for language "${templateLang}". Set WHATSAPP_OTP_TEMPLATE_LANG (or WHATSAPP_OTP_TEMPLATE_LANGUAGE) to the exact code in WhatsApp Manager (often "ar").`;
     }
     throw new WhatsAppSendError(
       `WhatsApp API rejected the OTP message.${hint}`,
@@ -282,13 +311,16 @@ export async function sendWhatsAppOtp(
     /* ignore */
   }
 
+  const useButton = shouldIncludeOtpUrlButton();
   console.info("[WhatsApp] OTP accepted by Meta", {
     to: `***${to.slice(-4)}`,
     toLen: to.length,
     waId: waId ? `***${waId.slice(-4)}` : null,
     template: templateName || null,
     lang: templateName ? templateLang : null,
-    useButton: process.env.WHATSAPP_OTP_TEMPLATE_USE_BUTTON !== "false",
+    useButton,
+    buttonIndex: getOtpUrlButtonIndex(),
+    bodyVars: getOtpBodyVarCount(),
     messageId,
     messageStatus,
     raw: raw.slice(0, 500),
@@ -309,21 +341,47 @@ export async function sendWhatsAppOtp(
   };
 }
 
+function getOtpBodyVarCount(): number {
+  const raw = envFirst("WHATSAPP_OTP_TEMPLATE_BODY_VARS") || "1";
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 3) : 1;
+}
+
+function getOtpUrlButtonIndex(): string {
+  return envFirst("WHATSAPP_OTP_URL_BUTTON_INDEX") || "0";
+}
+
+function shouldIncludeOtpUrlButton(): boolean {
+  // Legacy: WHATSAPP_OTP_BUTTON_MODE=auth|url|copy → include button
+  // Legacy/new: WHATSAPP_OTP_TEMPLATE_USE_BUTTON=false → skip
+  const useButton = envFirst("WHATSAPP_OTP_TEMPLATE_USE_BUTTON");
+  if (useButton === "false") return false;
+  if (useButton === "true") return true;
+  const mode = (envFirst("WHATSAPP_OTP_BUTTON_MODE") || "auth").toLowerCase();
+  if (mode === "none" || mode === "off" || mode === "body") return false;
+  return true; // auth | url | copy | default
+}
+
 function buildTemplateComponents(code: string) {
+  const bodyVars = getOtpBodyVarCount();
+  const bodyParams = Array.from({ length: bodyVars }, () => ({
+    type: "text",
+    text: code,
+  }));
+
   const components: Array<Record<string, unknown>> = [
     {
       type: "body",
-      parameters: [{ type: "text", text: code }],
+      parameters: bodyParams,
     },
   ];
 
-  // Copy-code Authentication templates require the OTP again on the URL button.
-  // Set WHATSAPP_OTP_TEMPLATE_USE_BUTTON=false only for body-only templates.
-  if (process.env.WHATSAPP_OTP_TEMPLATE_USE_BUTTON !== "false") {
+  // Copy-code / auth URL button — OTP must be passed again.
+  if (shouldIncludeOtpUrlButton()) {
     components.push({
       type: "button",
       sub_type: "url",
-      index: "0",
+      index: getOtpUrlButtonIndex(),
       parameters: [{ type: "text", text: code }],
     });
   }

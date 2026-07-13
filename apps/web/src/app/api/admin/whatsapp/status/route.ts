@@ -18,13 +18,19 @@ export async function GET(request: Request) {
     if (auth.error) return auth.error;
   }
 
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() || "";
-  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN?.trim() || "";
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() || process.env.WHATSAPP_CLOUD_PHONE_NUMBER_ID?.trim() || "";
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN?.trim() || process.env.WHATSAPP_CLOUD_ACCESS_TOKEN?.trim() || "";
   const wabaIdEnv = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID?.trim() || "";
   const templateName = process.env.WHATSAPP_OTP_TEMPLATE_NAME?.trim() || "";
-  const templateLang = process.env.WHATSAPP_OTP_TEMPLATE_LANG?.trim() || "ar";
+  const templateLang =
+    process.env.WHATSAPP_OTP_TEMPLATE_LANG?.trim() ||
+    process.env.WHATSAPP_OTP_TEMPLATE_LANGUAGE?.trim() ||
+    "ar";
   const useButton = process.env.WHATSAPP_OTP_TEMPLATE_USE_BUTTON !== "false";
-  const verifyTokenSet = Boolean(process.env.WHATSAPP_VERIFY_TOKEN?.trim());
+  const verifyTokenSet = Boolean(
+    process.env.WHATSAPP_VERIFY_TOKEN?.trim() ||
+      process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim()
+  );
   const appSecretSet = Boolean(process.env.WHATSAPP_APP_SECRET?.trim());
 
   const env = {
