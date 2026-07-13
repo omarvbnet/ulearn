@@ -313,9 +313,28 @@ export function AiProvidersClient() {
         body: JSON.stringify({
           assignments: MODULES.map((moduleKey) => {
             const existing = assignments.find((a) => a.moduleKey === moduleKey);
-            const defaultId = providers.find((p) => p.isDefault)?.id || providers[0]?.id;
-            return { moduleKey, providerId: existing?.providerId || defaultId };
-          }).filter((a) => a.providerId),
+            if (existing?.providerId) {
+              return { moduleKey, providerId: existing.providerId };
+            }
+            if (moduleKey === "AI_CREATIVE_IMAGE") {
+              const flux = providers.find((p) => providerSupportsImageGeneration(p.type));
+              return flux ? { moduleKey, providerId: flux.id } : null;
+            }
+            if (moduleKey === "EMBEDDING") {
+              const emb = providers.find((p) =>
+                providerSupportsEmbeddings(p.type, p.model)
+              );
+              return emb ? { moduleKey, providerId: emb.id } : null;
+            }
+            const defaultId =
+              providers.find((p) => p.isDefault && providerSupportsChat(p.type, p.model))
+                ?.id ||
+              providers.find((p) => providerSupportsChat(p.type, p.model))?.id;
+            return defaultId ? { moduleKey, providerId: defaultId } : null;
+          }).filter(
+            (a): a is { moduleKey: (typeof MODULES)[number]; providerId: string } =>
+              Boolean(a?.providerId)
+          ),
         }),
       });
       if (!res.ok) throw new Error(data.error || `Save assignments failed (HTTP ${res.status})`);

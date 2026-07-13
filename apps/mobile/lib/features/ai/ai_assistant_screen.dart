@@ -1119,6 +1119,8 @@ class _EmptyState extends StatelessWidget {
     final prompts = [
       l10n.t('mobile.ai.promptSummary'),
       l10n.t('mobile.ai.promptMinistry'),
+      l10n.t('mobile.ai.promptEducationalDrawing'),
+      l10n.t('mobile.ai.promptInfographic'),
       l10n.t('mobile.ai.promptExplain'),
       l10n.t('mobile.ai.promptPractice'),
       l10n.t('mobile.ai.promptWeak'),
@@ -1230,6 +1232,8 @@ class _AttachmentPromptBar extends StatelessWidget {
       l10n.t('mobile.ai.promptMinistryAttached'),
       if (hasPdf || !hasImage) l10n.t('mobile.ai.promptDesignPptAttached'),
       if (hasImage || hasPdf) l10n.t('mobile.ai.promptDesignImageAttached'),
+      if (hasPdf) l10n.t('mobile.ai.promptDiagramAttached'),
+      if (hasImage) l10n.t('mobile.ai.promptEditImageAttached'),
       if (pdfCount >= 2) l10n.t('mobile.ai.promptMergeAttached'),
     ];
     return Column(
