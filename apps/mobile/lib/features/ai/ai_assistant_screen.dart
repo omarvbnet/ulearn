@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:gal/gal.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
@@ -271,15 +272,59 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     };
   }
 
+  Future<Uint8List?> _editedFileBytes(_ChatBubble m) async {
+    if (m.editedContentBase64 != null && m.editedContentBase64!.isNotEmpty) {
+      return base64Decode(m.editedContentBase64!);
+    }
+    if (m.editedDownloadUrl != null && m.editedDownloadUrl!.isNotEmpty) {
+      return context.read<ApiClient>().getBytes(m.editedDownloadUrl!);
+    }
+    return null;
+  }
+
+  bool _isEditedImage(_ChatBubble m) {
+    final mime = (m.editedMimeType ?? '').toLowerCase();
+    final name = (m.editedFileName ?? '').toLowerCase();
+    return mime.startsWith('image/') ||
+        name.endsWith('.png') ||
+        name.endsWith('.jpg') ||
+        name.endsWith('.jpeg') ||
+        name.endsWith('.webp') ||
+        name.endsWith('.gif') ||
+        name.endsWith('.svg');
+  }
+
+  bool _canSaveToPhotos(_ChatBubble m) {
+    final mime = (m.editedMimeType ?? '').toLowerCase();
+    final name = (m.editedFileName ?? '').toLowerCase();
+    if (mime.contains('svg') || name.endsWith('.svg')) return false;
+    return mime.startsWith('image/') ||
+        name.endsWith('.png') ||
+        name.endsWith('.jpg') ||
+        name.endsWith('.jpeg') ||
+        name.endsWith('.webp') ||
+        name.endsWith('.gif');
+  }
+
   Future<void> _downloadEdited(_ChatBubble m) async {
     final name = m.editedFileName ?? 'download.bin';
     try {
-      late final Uint8List bytes;
-      if (m.editedContentBase64 != null && m.editedContentBase64!.isNotEmpty) {
-        bytes = base64Decode(m.editedContentBase64!);
-      } else if (m.editedDownloadUrl != null && m.editedDownloadUrl!.isNotEmpty) {
-        bytes = await context.read<ApiClient>().getBytes(m.editedDownloadUrl!);
-      } else {
+      final bytes = await _editedFileBytes(m);
+      if (bytes == null) return;
+      if (_canSaveToPhotos(m)) {
+        final hasAccess = await Gal.requestAccess();
+        if (!hasAccess) {
+          if (!mounted) return;
+          _toast(context.l10n.t('mobile.ai.creative.photosPermissionDenied'));
+          return;
+        }
+        await Gal.putImageBytes(
+          bytes,
+          name: name.replaceAll(RegExp(r'\.[^.]+$'), ''),
+          album: 'U Learn',
+        );
+        if (!mounted) return;
+        _toast(context.l10n.t('mobile.ai.creative.savedToPhotos'));
         return;
       }
       final path = await FilePicker.saveFile(fileName: name, bytes: bytes);
@@ -348,6 +393,30 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           if (s is Map) suggestions.add(Map<String, dynamic>.from(s));
         }
       }
+
+      Uint8List? editedPreview;
+      final editedMime = edited?['mimeType']?.toString();
+      final editedName = edited?['fileName']?.toString();
+      final editedB64 = edited?['contentBase64']?.toString();
+      final editedUrl = edited?['downloadUrl']?.toString();
+      final looksImage = (editedMime ?? '').toLowerCase().startsWith('image/') ||
+          (editedName ?? '').toLowerCase().endsWith('.png') ||
+          (editedName ?? '').toLowerCase().endsWith('.jpg') ||
+          (editedName ?? '').toLowerCase().endsWith('.jpeg') ||
+          (editedName ?? '').toLowerCase().endsWith('.webp') ||
+          (editedName ?? '').toLowerCase().endsWith('.gif');
+      if (looksImage) {
+        try {
+          if (editedB64 != null && editedB64.isNotEmpty) {
+            editedPreview = base64Decode(editedB64);
+          } else if (editedUrl != null && editedUrl.isNotEmpty) {
+            editedPreview = await api.getBytes(editedUrl);
+          }
+        } catch (_) {
+          editedPreview = null;
+        }
+      }
+
       setState(() {
         _conversationId = data['conversationId']?.toString() ?? _conversationId;
         _messages.add(
@@ -364,10 +433,11 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                 })
                 .whereType<String>()
                 .toList(),
-            editedFileName: edited?['fileName']?.toString(),
-            editedContentBase64: edited?['contentBase64']?.toString(),
-            editedDownloadUrl: edited?['downloadUrl']?.toString(),
-            editedMimeType: edited?['mimeType']?.toString(),
+            editedFileName: editedName,
+            editedContentBase64: editedB64,
+            editedDownloadUrl: editedUrl,
+            editedMimeType: editedMime,
+            editedImageBytes: editedPreview,
             courseSuggestions: suggestions,
           ),
         );
@@ -819,19 +889,40 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                               height: 1.45,
                                             ),
                                           ),
+                                        if (m.editedImageBytes != null) ...[
+                                          const SizedBox(height: 10),
+                                          ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                            child: Image.memory(
+                                              m.editedImageBytes!,
+                                              fit: BoxFit.cover,
+                                              width: double.infinity,
+                                            ),
+                                          ),
+                                        ],
                                         if (m.editedFileName != null) ...[
                                           const SizedBox(height: 10),
                                           OutlinedButton.icon(
                                             onPressed: () => _downloadEdited(m),
-                                            icon: const Icon(
-                                              Icons.download_rounded,
+                                            icon: Icon(
+                                              _canSaveToPhotos(m)
+                                                  ? Icons.photo_library_outlined
+                                                  : Icons.download_rounded,
                                               size: 18,
                                             ),
                                             label: Text(
-                                              context.l10n.t(
-                                                'mobile.ai.downloadFile',
-                                                {'name': m.editedFileName!},
-                                              ),
+                                              _canSaveToPhotos(m)
+                                                  ? context.l10n.t(
+                                                      'mobile.ai.creative.saveToPhotos',
+                                                    )
+                                                  : context.l10n.t(
+                                                      'mobile.ai.downloadFile',
+                                                      {
+                                                        'name':
+                                                            m.editedFileName!
+                                                      },
+                                                    ),
                                             ),
                                           ),
                                         ],
@@ -1596,6 +1687,7 @@ class _ChatBubble {
     this.editedContentBase64,
     this.editedDownloadUrl,
     this.editedMimeType,
+    this.editedImageBytes,
     this.exam,
     this.examCompleted = false,
     this.examResult,
@@ -1611,6 +1703,7 @@ class _ChatBubble {
   final String? editedContentBase64;
   final String? editedDownloadUrl;
   final String? editedMimeType;
+  final Uint8List? editedImageBytes;
   final AiPracticeExamData? exam;
   final bool examCompleted;
   final Map<String, dynamic>? examResult;

@@ -426,8 +426,11 @@ export class AiCreativeService {
     createdAt: Date;
   }) {
     // Prefer download URL for large artifacts (avoids proxy body limits on base64 JSON).
+    // Keep images inline more often so chat can preview without a second fetch.
+    const isImage = (job.resultMime || "").startsWith("image/");
+    const inlineLimit = isImage ? 2_500_000 : 400_000;
     const includeInline =
-      !job.resultContent || job.resultContent.length < 400_000;
+      !job.resultContent || job.resultContent.length < inlineLimit;
     return {
       jobId: job.id,
       tool: job.tool,

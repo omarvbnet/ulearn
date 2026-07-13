@@ -31,6 +31,10 @@
 			<key>NSAllowsLocalNetworking</key>
 			<true/>
 		</dict>
+		<key>NSPhotoLibraryAddUsageDescription</key>
+		<string>U Learn needs permission to save generated educational images to your Photos.</string>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>U Learn needs permission to save generated educational images to your Photos.</string>
 		<key>UIApplicationSceneManifest</key>
 		<dict>
 			<key>UIApplicationSupportsMultipleScenes</key>

@@ -514,13 +514,19 @@ export default function StudentAiPage() {
                   </div>
                 ) : null}
                 {m.file ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void downloadChatFile(m.file!)}
-                  >
-                    Download {m.file.fileName}
-                  </Button>
+                  <div className="space-y-2">
+                    {(m.file.mimeType || "").startsWith("image/") ||
+                    /\.(png|jpe?g|gif|webp|svg)$/i.test(m.file.fileName) ? (
+                      <GeneratedChatImage file={m.file} />
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void downloadChatFile(m.file!)}
+                    >
+                      Download {m.file.fileName}
+                    </Button>
+                  </div>
                 ) : null}
                 {m.exam ? (
                   <ExamPanel
@@ -696,6 +702,69 @@ export default function StudentAiPage() {
         </div>
       )}
     </div>
+  );
+}
+
+}
+
+function GeneratedChatImage({
+  file,
+}: {
+  file: NonNullable<ChatMsg["file"]>;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+
+    async function load() {
+      try {
+        if (file.contentBase64) {
+          const bin = atob(file.contentBase64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const blob = new Blob([bytes], {
+            type: file.mimeType || "image/png",
+          });
+          objectUrl = URL.createObjectURL(blob);
+          if (!cancelled) setSrc(objectUrl);
+          return;
+        }
+        if (file.downloadUrl) {
+          const res = await fetch(file.downloadUrl);
+          if (!res.ok) return;
+          const blob = await res.blob();
+          objectUrl = URL.createObjectURL(blob);
+          if (!cancelled) setSrc(objectUrl);
+        }
+      } catch {
+        /* preview is best-effort */
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [file.contentBase64, file.downloadUrl, file.mimeType]);
+
+  if (!src) {
+    return (
+      <div className="rounded-xl border border-border bg-white/5 px-3 py-8 text-center text-xs text-muted">
+        Loading image preview…
+      </div>
+    );
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={file.fileName}
+      className="max-h-80 w-full rounded-xl border border-border object-contain bg-black/20"
+    />
   );
 }
 
