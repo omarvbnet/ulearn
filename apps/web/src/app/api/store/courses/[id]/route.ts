@@ -219,6 +219,13 @@ export async function GET(
     passedByMe: passedQuizIds.has(q.id),
   }));
 
+  const purchaseRow = userId
+    ? await prisma.coursePurchase.findUnique({
+        where: { courseId_userId: { courseId: id, userId } },
+        select: { status: true, expiresAt: true },
+      })
+    : null;
+
   return json({
     course: {
       ...course,
@@ -229,10 +236,14 @@ export async function GET(
       subscribersCount,
       courseRating: completion?.courseRating ?? null,
       courseRatingCount: completion?.courseRatingCount ?? 0,
+      accessMonths: course.accessMonths,
+      appleProductId: course.appleProductId,
+      googleProductId: course.googleProductId,
     },
     quizzes: quizzesWithStatus,
     completion,
     purchased,
+    purchaseExpiresAt: purchased ? purchaseRow?.expiresAt ?? null : null,
     isOwnCourse,
     favorites: favoriteCount,
     favoritedByMe: Boolean(myFavorite),

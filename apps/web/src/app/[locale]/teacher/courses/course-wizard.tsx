@@ -66,6 +66,7 @@ export function CourseWizard({
   const [subjectId, setSubjectId] = useState(meta.subjects[0]?.id ?? "");
   const [stageId, setStageId] = useState(meta.stages[0]?.id ?? "");
   const [price, setPrice] = useState("0");
+  const [accessMonths, setAccessMonths] = useState("10");
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
 
@@ -98,6 +99,7 @@ export function CourseWizard({
       setSubjectId(course.subjectId ?? course.subject?.id ?? subjectId);
       setStageId(course.stageId ?? course.stage?.id ?? stageId);
       setPrice(String(course.price ?? 0));
+      setAccessMonths(String(course.accessMonths ?? 10));
       setCoverUrl(course.thumbnail ?? null);
       setLessons(course.lessons ?? []);
       setQuizzes(course.quizzes ?? []);
@@ -157,6 +159,7 @@ export function CourseWizard({
         subjectId,
         stageId,
         price: Number(price) || 0,
+        accessMonths: Number(accessMonths) || 10,
         thumbnail,
       };
       if (!courseId) {
@@ -418,6 +421,17 @@ export function CourseWizard({
                 </Select>
               </div>
               <Input label="Price (IQD)" type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} />
+              <Input
+                label="Access length (months)"
+                type="number"
+                min="1"
+                max="120"
+                value={accessMonths}
+                onChange={(e) => setAccessMonths(e.target.value)}
+              />
+              <p className="text-xs text-muted">
+                After purchase, students keep access for this many months (admin can override on review).
+              </p>
               <div>
                 <p className="mb-2 text-sm text-muted">Course cover</p>
                 <input

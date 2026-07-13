@@ -205,6 +205,7 @@ export class TeacherCourseService {
       thumbnail?: string;
       price: number;
       currency?: string;
+      accessMonths?: number;
     }
   ) {
     const teacher = await prisma.teacherProfile.findFirst({
@@ -223,6 +224,11 @@ export class TeacherCourseService {
 
     if (!(input.price >= 0)) return { success: false as const, error: "INVALID_PRICE" };
 
+    const months =
+      input.accessMonths != null && input.accessMonths > 0
+        ? Math.min(120, Math.floor(input.accessMonths))
+        : 10;
+
     const course = await prisma.course.create({
       data: {
         teacherId,
@@ -236,6 +242,7 @@ export class TeacherCourseService {
         thumbnail: input.thumbnail,
         price: input.price,
         currency: input.currency || "IQD",
+        accessMonths: months,
         status: "DRAFT",
       },
     });
@@ -264,6 +271,9 @@ export class TeacherCourseService {
       price: number;
       stageId: string;
       subjectId: string;
+      accessMonths: number;
+      appleProductId: string | null;
+      googleProductId: string | null;
     }>
   ) {
     const course = await prisma.course.findFirst({
@@ -715,7 +725,12 @@ export class TeacherCourseService {
     courseId: string,
     actorId: string,
     decision: "APPROVED" | "REJECTED",
-    notes?: string
+    notes?: string,
+    options?: {
+      accessMonths?: number;
+      appleProductId?: string | null;
+      googleProductId?: string | null;
+    }
   ) {
     const course = await prisma.course.findFirst({
       where: { id: courseId, deletedAt: null },
@@ -745,6 +760,19 @@ export class TeacherCourseService {
       }
     }
 
+    const accessMonths =
+      options?.accessMonths != null && options.accessMonths > 0
+        ? Math.min(120, Math.floor(options.accessMonths))
+        : undefined;
+    const appleProductId =
+      options?.appleProductId !== undefined
+        ? options.appleProductId?.trim() || null
+        : undefined;
+    const googleProductId =
+      options?.googleProductId !== undefined
+        ? options.googleProductId?.trim() || null
+        : undefined;
+
     const updated = await prisma.course.update({
       where: { id: courseId },
       data: {
@@ -753,6 +781,9 @@ export class TeacherCourseService {
         reviewNotes: notes || null,
         reviewedById: actorId,
         reviewedAt: new Date(),
+        ...(accessMonths !== undefined ? { accessMonths } : {}),
+        ...(appleProductId !== undefined ? { appleProductId } : {}),
+        ...(googleProductId !== undefined ? { googleProductId } : {}),
       },
     });
 
@@ -1192,6 +1223,11 @@ export class TeacherCourseService {
     const platformAmount = Math.round(purchase.price * deductionPct) / 100;
     const teacherAmount = Math.round(purchase.price * (100 - deductionPct)) / 100;
 
+    const months =
+      purchase.course.accessMonths > 0 ? purchase.course.accessMonths : 10;
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + months);
+
     const updated = await prisma.coursePurchase.update({
       where: { id: purchaseId },
       data: {
@@ -1202,6 +1238,8 @@ export class TeacherCourseService {
         teacherAmount,
         approvedById: actorId,
         approvedAt: new Date(),
+        expiresAt,
+        source: "ADMIN",
       },
     });
 
@@ -1210,10 +1248,12 @@ export class TeacherCourseService {
       action: "APPROVE_COURSE_PURCHASE",
       entityType: "CoursePurchase",
       entityId: purchaseId,
-      newValue: { level, deductionPct, platformAmount, teacherAmount },
+      newValue: { level, deductionPct, platformAmount, teacherAmount, expiresAt },
     });
 
-    await NotificationService.notifyUser(purchase.userId, {
+    await NotificationService.notifyUser(
+      purchase.userId,
+      {
       titleEn: "Course Unlocked",
       titleAr: "تم فتح الدورة",
       titleKu: "کۆرسەکە کرایەوە",
@@ -1222,7 +1262,13 @@ export class TeacherCourseService {
       bodyAr: `تم تأكيد الدفع. "${purchase.course.titleEn}" متاحة الآن.`,
       bodyKu: `پارەدانەکەت پشتڕاست کرایەوە. "${purchase.course.titleEn}" ئێستا بەردەستە.`,
       bodyTr: `Ödemeniz onaylandı. "${purchase.course.titleEn}" artık kullanılabilir.`,
-    }).catch(() => {});
+      },
+      {
+        type: "course",
+        courseId: purchase.courseId,
+        screen: "course",
+      }
+    ).catch(() => {});
 
     return { success: true as const, purchase: updated };
   }
@@ -1243,6 +1289,8 @@ export class TeacherCourseService {
     const p = await prisma.coursePurchase.findUnique({
       where: { courseId_userId: { courseId, userId } },
     });
-    return p?.status === "PAID";
+    if (!p || p.status !== "PAID") return false;
+    if (p.expiresAt && p.expiresAt.getTime() <= Date.now()) return false;
+    return true;
   }
 }

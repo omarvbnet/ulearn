@@ -51,6 +51,14 @@ export async function POST(request: Request) {
     provinceId,
     userIds,
     createdById: auth.session.userId,
+    data: body.data && typeof body.data === "object"
+      ? body.data
+      : {
+          type: body.linkType || "admin",
+          screen: body.screen || "ads",
+          adId: body.adId,
+          courseId: body.courseId,
+        },
   });
 
   return json({ notification }, 201);

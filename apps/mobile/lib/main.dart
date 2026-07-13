@@ -8,12 +8,15 @@ import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/l10n/locale_provider.dart';
+import 'package:ulearn/core/notifications/push_notification_service.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/theme/theme_mode_provider.dart';
 import 'package:ulearn/core/video/media_cache_budget.dart';
 import 'package:ulearn/features/auth/pending_screen.dart';
 import 'package:ulearn/features/home/home_screen.dart';
 import 'package:ulearn/features/splash/splash_screen.dart';
+
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -82,6 +85,15 @@ class _LocalizedAppState extends State<_LocalizedApp> {
     if (auth.user?.locale != null) {
       await locale.syncFromUser(auth.user!.locale);
     }
+
+    final api = context.read<ApiClient>();
+    await PushNotificationService.instance.init(
+      api: api,
+      navigatorKey: appNavigatorKey,
+    );
+    if (auth.isAuthenticated) {
+      await PushNotificationService.instance.onUserLoggedIn();
+    }
   }
 
   @override
@@ -92,6 +104,7 @@ class _LocalizedAppState extends State<_LocalizedApp> {
     if (!locale.ready || !themeMode.ready) {
       return MaterialApp(
         debugShowCheckedModeBanner: false,
+        navigatorKey: appNavigatorKey,
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,
         themeMode: themeMode.ready ? themeMode.mode : ThemeMode.system,
@@ -102,6 +115,7 @@ class _LocalizedAppState extends State<_LocalizedApp> {
     return MaterialApp(
       title: locale.l10n.brand,
       debugShowCheckedModeBanner: false,
+      navigatorKey: appNavigatorKey,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: themeMode.mode,

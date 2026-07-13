@@ -53,6 +53,7 @@ const createSchema = z.object({
   thumbnail: z.string().optional(),
   price: z.number().min(0),
   currency: z.string().optional(),
+  accessMonths: z.number().int().min(1).max(120).optional(),
 });
 
 /** Teacher: create a course (goes to admin review before publishing). */

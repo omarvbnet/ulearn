@@ -21,10 +21,14 @@ class ReelsScreen extends StatefulWidget {
     super.key,
     this.isTabActive = true,
     this.refreshTrigger,
+    this.initialVideoId,
+    this.openCommentsOnStart = false,
   });
 
   final bool isTabActive;
   final ValueNotifier<int>? refreshTrigger;
+  final String? initialVideoId;
+  final bool openCommentsOnStart;
 
   @override
   State<ReelsScreen> createState() => ReelsScreenState();
@@ -132,8 +136,27 @@ class ReelsScreenState extends State<ReelsScreen> {
       if (videos.isNotEmpty) {
         _ReelFeedMemoryCache.save(videos, _nextCursor);
       }
-      _activeIndex.value = 0;
-      _prefetchAround(0);
+      var start = 0;
+      final wantId = widget.initialVideoId;
+      if (wantId != null && wantId.isNotEmpty) {
+        final idx = videos.indexWhere((v) => v['id']?.toString() == wantId);
+        if (idx >= 0) start = idx;
+      }
+      _activeIndex.value = start;
+      _currentIndex = start;
+      _prefetchAround(start);
+      if (start > 0) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_pageCtrl.hasClients) _pageCtrl.jumpToPage(start);
+          if (widget.openCommentsOnStart && mounted) {
+            _openComments(start);
+          }
+        });
+      } else if (widget.openCommentsOnStart && videos.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _openComments(0);
+        });
+      }
       if (refresh && mounted) {
         final l10n = context.l10n;
         ScaffoldMessenger.of(context).showSnackBar(

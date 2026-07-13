@@ -465,7 +465,9 @@
       "lessonMaterials": "Lesson materials",
       "documentsAfterLesson": "Review these documents before continuing",
       "viewDocument": "View",
-      "continueLesson": "Continue"
+      "continueLesson": "Continue",
+      "subscribedOk": "Course unlocked via in-app purchase.",
+      "subscribedUntil": "Course unlocked until {date}."
     },
     "products": {
       "title": "Store",
@@ -1040,6 +1042,14 @@
     "error": {
       "generic": "Something went wrong",
       "retry": "Retry"
+    },
+    "adsOffers": {
+      "title": "Offers & announcements",
+      "offersHeading": "Advertisements",
+      "adminNotes": "Admin announcements",
+      "emptyAds": "No active ads right now.",
+      "emptyNotes": "No admin offers in your inbox yet.",
+      "offer": "Offer"
     }
   }
 }

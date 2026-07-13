@@ -38,6 +38,9 @@ export function NotificationsClient() {
     countryId: "",
     provinceId: "",
     channels: ["IN_APP", "PUSH"] as string[],
+    linkType: "admin",
+    courseId: "",
+    adId: "",
   });
 
   useEffect(() => {
@@ -78,6 +81,18 @@ export function NotificationsClient() {
         ...form,
         countryId: form.target === "COUNTRY" || form.target === "PROVINCE" ? form.countryId || undefined : undefined,
         provinceId: form.target === "PROVINCE" ? form.provinceId || undefined : undefined,
+        linkType: form.linkType,
+        screen:
+          form.linkType === "course"
+            ? "course"
+            : form.linkType === "comment"
+              ? "comments"
+              : "ads",
+        courseId: form.linkType === "course" ? form.courseId || undefined : undefined,
+        adId:
+          form.linkType === "admin" || form.linkType === "ads"
+            ? form.adId || undefined
+            : undefined,
       }),
     });
     setSending(false);
@@ -164,6 +179,39 @@ export function NotificationsClient() {
                   </button>
                 ))}
               </div>
+            </Card>
+
+            <Card className="space-y-3">
+              <h3 className="font-semibold">Tap opens</h3>
+              <Select
+                label="Deep link"
+                value={form.linkType}
+                onChange={(e) => setForm({ ...form, linkType: e.target.value })}
+              >
+                <option value="admin">Ads / offers board</option>
+                <option value="ads">Highlight an ad</option>
+                <option value="course">Course detail</option>
+                <option value="comment">Reel comments</option>
+              </Select>
+              {form.linkType === "course" && (
+                <Input
+                  label="Course ID"
+                  value={form.courseId}
+                  onChange={(e) => setForm({ ...form, courseId: e.target.value })}
+                  placeholder="Course UUID"
+                />
+              )}
+              {(form.linkType === "admin" || form.linkType === "ads") && (
+                <Input
+                  label="Ad ID (optional)"
+                  value={form.adId}
+                  onChange={(e) => setForm({ ...form, adId: e.target.value })}
+                  placeholder="Highlight a specific ad"
+                />
+              )}
+              <p className="text-xs text-muted">
+                Push + in-app taps open the matching screen on mobile.
+              </p>
             </Card>
 
             <Button type="submit" disabled={sending} className="w-full">

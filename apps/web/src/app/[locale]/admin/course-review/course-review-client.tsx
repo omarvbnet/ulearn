@@ -1,6 +1,6 @@
 "use client";
 
-import { Badge, Button, Card, PageHeader, Textarea } from "@/components/ui";
+import { Badge, Button, Card, Input, PageHeader, Textarea } from "@/components/ui";
 import { EmptyState, Modal, SkeletonRows, Tabs, useToast } from "@/components/overlay";
 import { CourseVideosPanel } from "./course-videos-panel";
 import { useCallback, useEffect, useState } from "react";
@@ -29,6 +29,9 @@ type Course = {
 
 type CourseDetail = Omit<Course, "lessons" | "thumbnail"> & {
   thumbnail: string | null;
+  accessMonths?: number;
+  appleProductId?: string | null;
+  googleProductId?: string | null;
   lessons: {
     id: string;
     title: string;
@@ -140,6 +143,9 @@ export function CourseReviewClient() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedUpdate, setSelectedUpdate] = useState<LessonUpdate | null>(null);
   const [notes, setNotes] = useState("");
+  const [accessMonths, setAccessMonths] = useState("10");
+  const [appleProductId, setAppleProductId] = useState("");
+  const [googleProductId, setGoogleProductId] = useState("");
   const [busy, setBusy] = useState(false);
 
   const loadCourses = useCallback(() => {
@@ -182,6 +188,9 @@ export function CourseReviewClient() {
         if (cancelled || !d) return;
         setDetail(d.course);
         setReadiness(d.readiness);
+        setAccessMonths(String(d.course?.accessMonths ?? 10));
+        setAppleProductId(d.course?.appleProductId ?? "");
+        setGoogleProductId(d.course?.googleProductId ?? "");
       })
       .finally(() => {
         if (!cancelled) setDetailLoading(false);
@@ -197,7 +206,13 @@ export function CourseReviewClient() {
     const res = await fetch(`/api/admin/teacher-courses/${selected.id}/review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decision, notes: notes || undefined }),
+      body: JSON.stringify({
+        decision,
+        notes: notes || undefined,
+        accessMonths: Number(accessMonths) || 10,
+        appleProductId: appleProductId.trim() || null,
+        googleProductId: googleProductId.trim() || null,
+      }),
     });
     setBusy(false);
     if (res.ok) {
@@ -208,6 +223,9 @@ export function CourseReviewClient() {
       );
       setSelected(null);
       setNotes("");
+      setAccessMonths("10");
+      setAppleProductId("");
+      setGoogleProductId("");
       loadCourses();
     } else {
       const d = await res.json().catch(() => ({}));
@@ -717,6 +735,36 @@ export function CourseReviewClient() {
                 </div>
               </>
             )}
+
+            <div className="space-y-3 rounded-xl border border-card-border p-3">
+              <h3 className="text-sm font-semibold">Subscription / IAP</h3>
+              <p className="text-xs text-muted">
+                Access length after purchase (months). Set App Store / Play product IDs
+                so Subscribe uses in-app purchase on iPhone and Android.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Input
+                  label="Access months"
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={accessMonths}
+                  onChange={(e) => setAccessMonths(e.target.value)}
+                />
+                <Input
+                  label="Apple product ID"
+                  placeholder={`com.ulearn.mobile.course.${selected.id}`}
+                  value={appleProductId}
+                  onChange={(e) => setAppleProductId(e.target.value)}
+                />
+                <Input
+                  label="Google product ID"
+                  placeholder={`course_${selected.id}`}
+                  value={googleProductId}
+                  onChange={(e) => setGoogleProductId(e.target.value)}
+                />
+              </div>
+            </div>
 
             <Textarea
               label="Review notes (sent to the teacher on rejection)"

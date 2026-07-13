@@ -74,6 +74,8 @@ export async function POST(
       userIds: subscriberIds,
       courseTitle: req.lesson.course.titleEn,
       lessonTitle: req.title ?? req.lesson.title,
+      courseId: req.lesson.courseId,
+      lessonId: req.lessonId,
     });
   }
 

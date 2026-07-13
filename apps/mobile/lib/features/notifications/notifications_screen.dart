@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
+import 'package:ulearn/core/notifications/notification_router.dart';
+import 'package:ulearn/core/notifications/push_notification_service.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
@@ -46,6 +48,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         if (idx >= 0) _items[idx]['isRead'] = true;
       });
     } catch (_) {}
+  }
+
+  Future<void> _open(Map<String, dynamic> n) async {
+    final id = n['id']?.toString();
+    if (id != null && n['isRead'] != true) {
+      await _markRead(id);
+    }
+    if (!mounted) return;
+    final data = PushNotificationService.parseData(n['data']);
+    NotificationRouter.open(context, data);
   }
 
   @override
@@ -95,21 +107,21 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 ),
               ),
               child: ListTile(
-                onTap: isRead ? null : () => _markRead(n['id'] as String),
+                onTap: () => _open(n),
                 leading: Icon(
-                  isRead ? Icons.drafts_outlined : Icons.mark_email_unread_outlined,
+                  isRead
+                      ? Icons.drafts_outlined
+                      : Icons.mark_email_unread_outlined,
                   color: isRead ? AppTheme.muted : AppTheme.accent,
                 ),
                 title: Text(
                   n['title']?.toString() ?? '',
                   style: TextStyle(
-                    fontWeight: isRead ? FontWeight.normal : FontWeight.bold,
+                    fontWeight: isRead ? FontWeight.w500 : FontWeight.w800,
                   ),
                 ),
-                subtitle: Text(
-                  n['body']?.toString() ?? '',
-                  style: TextStyle(color: AppTheme.muted, fontSize: 13),
-                ),
+                subtitle: Text(n['body']?.toString() ?? ''),
+                trailing: const Icon(Icons.chevron_right_rounded),
               ),
             ),
           );

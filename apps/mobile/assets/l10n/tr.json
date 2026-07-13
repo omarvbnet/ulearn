@@ -465,7 +465,9 @@
       "lessonMaterials": "Ders materyalleri",
       "documentsAfterLesson": "Devam etmeden önce bu belgeleri inceleyin",
       "viewDocument": "Görüntüle",
-      "continueLesson": "Devam et"
+      "continueLesson": "Devam et",
+      "subscribedOk": "Kurs uygulama içi satın alma ile açıldı.",
+      "subscribedUntil": "Kurs {date} tarihine kadar açık."
     },
     "products": {
       "title": "Mağaza",
@@ -1040,6 +1042,14 @@
       "notAvailable": "Video not available",
       "takeQuiz": "Take quiz",
       "playFailed": "Could not play this video"
+    },
+    "adsOffers": {
+      "title": "Teklifler ve duyurular",
+      "offersHeading": "Reklamlar",
+      "adminNotes": "Yönetici duyuruları",
+      "emptyAds": "Şu an aktif reklam yok.",
+      "emptyNotes": "Gelen kutunuzda henüz yönetici teklifi yok.",
+      "offer": "Teklif"
     }
   }
 }

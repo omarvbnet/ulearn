@@ -466,7 +466,9 @@
       "lessonMaterials": "کەرەستەی وانە",
       "documentsAfterLesson": "پێش بەردەوامبوون ئەم بەڵگەنامانە ببینە",
       "viewDocument": "بینین",
-      "continueLesson": "بەردەوامبوون"
+      "continueLesson": "بەردەوامبوون",
+      "subscribedOk": "کۆرس لە ڕێگەی کڕینی ناو ئەپ کرایەوە.",
+      "subscribedUntil": "کۆرس تا {date} کراوەیە."
     },
     "products": {
       "title": "فرۆشگا",
@@ -1041,6 +1043,14 @@
       "notAvailable": "Video not available",
       "takeQuiz": "Take quiz",
       "playFailed": "Could not play this video"
+    },
+    "adsOffers": {
+      "title": "ئۆفەر و ڕاگەیاندن",
+      "offersHeading": "ڕیکلامەکان",
+      "adminNotes": "ڕاگەیاندنی بەڕێوەبەر",
+      "emptyAds": "هیچ ڕیکلامێکی چالاک نییە.",
+      "emptyNotes": "هێشتا هیچ ئۆفەرێکی بەڕێوەبەر نییە.",
+      "offer": "ئۆفەر"
     }
   }
 }

@@ -465,7 +465,9 @@
       "lessonMaterials": "مواد الدرس",
       "documentsAfterLesson": "راجع هذه المستندات قبل المتابعة",
       "viewDocument": "عرض",
-      "continueLesson": "متابعة"
+      "continueLesson": "متابعة",
+      "subscribedOk": "تم فتح الدورة عبر الشراء داخل التطبيق.",
+      "subscribedUntil": "الدورة مفتوحة حتى {date}."
     },
     "products": {
       "title": "المتجر",
@@ -1040,6 +1042,14 @@
       "notAvailable": "Video not available",
       "takeQuiz": "Take quiz",
       "playFailed": "Could not play this video"
+    },
+    "adsOffers": {
+      "title": "العروض والإعلانات",
+      "offersHeading": "الإعلانات",
+      "adminNotes": "إعلانات الإدارة",
+      "emptyAds": "لا توجد إعلانات حالياً.",
+      "emptyNotes": "لا توجد عروض إدارية في صندوق الوارد بعد.",
+      "offer": "عرض"
     }
   }
 }

@@ -18,6 +18,7 @@ export async function POST(
     select: {
       id: true,
       title: true,
+      courseId: true,
       course: {
         select: { teacher: { select: { userId: true } } },
       },
@@ -41,6 +42,8 @@ export async function POST(
         teacherUserId,
         lessonTitle: lesson.title,
         likerName: liker?.fullLegalName ?? "Someone",
+        courseId: lesson.courseId,
+        lessonId: id,
       });
     }
   }

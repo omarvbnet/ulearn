@@ -10,6 +10,7 @@ async function findLesson(id: string) {
     select: {
       id: true,
       title: true,
+      courseId: true,
       course: { select: { teacher: { select: { userId: true } } } },
     },
   });
@@ -82,6 +83,8 @@ export async function POST(
       lessonTitle: lesson.title,
       studentName: asker?.fullLegalName ?? "A student",
       question: parsed.data.body,
+      courseId: lesson.courseId,
+      lessonId: id,
     });
   }
 

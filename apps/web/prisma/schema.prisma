@@ -353,6 +353,12 @@ model Course {
   thumbnail     String?
   price         Float
   currency      String       @default("IQD")
+  /// How many months the student keeps access after purchase (admin/teacher set).
+  accessMonths  Int          @default(10)
+  /// Apple IAP product id for this course (optional until configured in App Store).
+  appleProductId String?
+  /// Google Play product id for this course.
+  googleProductId String?
   status        CourseStatus @default(DRAFT)
   reviewNotes   String?
   reviewedById  String?
@@ -690,6 +696,11 @@ model CoursePurchase {
   status         PurchaseStatus @default(PENDING)
   approvedById   String?
   approvedAt     DateTime?
+  /// Access ends after this date (from course.accessMonths). Null = no expiry (legacy).
+  expiresAt      DateTime?
+  /// APPLE | GOOGLE | ADMIN | REQUEST
+  source         String?
+  iapTransactionId String?      @unique
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
@@ -699,6 +710,7 @@ model CoursePurchase {
   @@unique([courseId, userId])
   @@index([userId])
   @@index([status])
+  @@index([expiresAt])
 }
 
 // ─────────────────────────────────────────────

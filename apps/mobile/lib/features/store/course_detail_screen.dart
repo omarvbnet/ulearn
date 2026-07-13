@@ -14,6 +14,7 @@ import 'package:ulearn/features/quiz/quiz_screen.dart';
 import 'package:ulearn/features/reels/teacher_profile_screen.dart';
 import 'package:ulearn/features/report/report_content_sheet.dart';
 import 'package:ulearn/features/store/course_evaluation_sheet.dart';
+import 'package:ulearn/features/store/course_iap.dart';
 import 'package:ulearn/features/store/course_inline_player.dart';
 import 'package:ulearn/features/store/course_material_pdf_screen.dart';
 import 'package:ulearn/features/store/lesson_qa_section.dart';
@@ -272,6 +273,57 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     if (!mounted) return;
     setState(() => _buying = true);
     try {
+      final course = _course;
+      if (shouldUseCourseIap(course)) {
+        try {
+          final iap = CourseIapPurchase(context.read<ApiClient>());
+          final result = await iap.buy(
+            courseId: widget.courseId,
+            appleProductId: course?['appleProductId']?.toString(),
+            googleProductId: course?['googleProductId']?.toString(),
+          );
+          iap.dispose();
+          if (!mounted) return;
+          setState(() {
+            _course?['purchaseStatus'] = 'PAID';
+            _purchased = true;
+          });
+          final expires = result['expiresAt']?.toString();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                expires != null && expires.isNotEmpty
+                    ? context.l10n.t('mobile.store.subscribedUntil', {
+                        'date': expires.split('T').first,
+                      })
+                    : context.l10n.t('mobile.store.subscribedOk'),
+              ),
+            ),
+          );
+          await _load();
+          return;
+        } catch (e) {
+          final msg = e.toString();
+          if (msg.contains('product_missing') ||
+              msg.contains('store_unavailable')) {
+            // Fall through to activation request.
+          } else if (msg.contains('purchase_canceled')) {
+            if (!mounted) return;
+            return;
+          } else {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  msg.replaceFirst('Exception: ', ''),
+                ),
+              ),
+            );
+            return;
+          }
+        }
+      }
+
       await context
           .read<ApiClient>()
           .post('/api/store/courses/${widget.courseId}/purchase', {});

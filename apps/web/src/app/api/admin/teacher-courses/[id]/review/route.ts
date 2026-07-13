@@ -12,10 +12,14 @@ export async function POST(
   if (auth.error) return auth.error;
 
   const { id } = await params;
-  const { decision, notes } = (await request.json()) as {
-    decision?: "APPROVED" | "REJECTED";
-    notes?: string;
-  };
+  const { decision, notes, accessMonths, appleProductId, googleProductId } =
+    (await request.json()) as {
+      decision?: "APPROVED" | "REJECTED";
+      notes?: string;
+      accessMonths?: number;
+      appleProductId?: string | null;
+      googleProductId?: string | null;
+    };
 
   if (decision !== "APPROVED" && decision !== "REJECTED") {
     return error("decision must be APPROVED or REJECTED", 422, "VALIDATION");
@@ -25,7 +29,8 @@ export async function POST(
     id,
     auth.session.userId,
     decision,
-    notes
+    notes,
+    { accessMonths, appleProductId, googleProductId }
   );
   if (!result.success) {
     if (result.error === "NOT_READY" && "readiness" in result) {

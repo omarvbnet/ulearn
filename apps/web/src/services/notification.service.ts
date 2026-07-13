@@ -64,6 +64,8 @@ export class NotificationService {
     provinceId?: string;
     userIds?: string[];
     createdById?: string;
+    /** Deep-link payload for mobile (ads, course, etc.). */
+    data?: Record<string, unknown>;
   }) {
     const notification = await prisma.notification.create({
       data: {
@@ -79,6 +81,10 @@ export class NotificationService {
     });
 
     const users = await this.resolveTargets(params);
+    const linkData = params.data ?? {
+      type: "admin",
+      screen: "ads",
+    };
 
     for (const user of users) {
       const { title, body } = pickLocale(params.message, user.locale);
@@ -90,12 +96,13 @@ export class NotificationService {
             notificationId: notification.id,
             title,
             body,
+            data: linkData as Prisma.InputJsonValue,
           },
         });
       }
 
       if (params.channels.includes("PUSH") && user.fcmTokens.length > 0) {
-        await this.sendPush(user.fcmTokens, title, body);
+        await this.sendPush(user.fcmTokens, title, body, linkData);
       }
 
       if (params.channels.includes("EMAIL") && user.email) {

@@ -50,6 +50,7 @@ export async function POST(
         teacherUserId: course.teacher.userId,
         courseTitle: course.titleEn,
         likerName: liker?.fullLegalName ?? "Someone",
+        courseId: id,
       });
     }
   }
