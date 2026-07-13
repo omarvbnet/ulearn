@@ -2,7 +2,7 @@ import { json, requireAuth } from "@/lib/api";
 import { ADMIN_ROLES } from "@/lib/auth/session";
 import { getWhatsAppWebhookUrl, isWhatsAppConfigured } from "@/lib/whatsapp";
 
-const GRAPH_API = "https://graph.facebook.com/v21.0";
+const GRAPH_API = "https://graph.facebook.com/v23.0";
 
 /**
  * Admin: diagnose WhatsApp Cloud API setup (no secrets returned).

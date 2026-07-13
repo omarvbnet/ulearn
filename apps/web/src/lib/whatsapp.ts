@@ -3,7 +3,7 @@
  * @see https://developers.facebook.com/docs/whatsapp/cloud-api/guides/send-message-templates/auth-otp-template-messages
  */
 
-const GRAPH_API = "https://graph.facebook.com/v21.0";
+const GRAPH_API = "https://graph.facebook.com/v23.0";
 
 export function getWhatsAppWebhookUrl(): string {
   const raw =
