@@ -136,6 +136,14 @@ export async function GET(request: Request) {
       "Set WHATSAPP_BUSINESS_ACCOUNT_ID in Vercel (WhatsApp Manager → account ID)";
   }
 
+  let subscribedApps: unknown = null;
+  if (wabaId) {
+    const subRes = await fetch(`${GRAPH_API}/${wabaId}/subscribed_apps`, {
+      headers,
+    });
+    subscribedApps = await subRes.json().catch(() => null);
+  }
+
   const checklist: string[] = [];
   const phoneError = phoneJson.error as
     | { message?: string; code?: number }
@@ -192,10 +200,16 @@ export async function GET(request: Request) {
     "Meta webhook must subscribe to messages on https://ulearn.usmart-iot.com/api/webhooks/whatsapp"
   );
   checklist.push(
+    "WABA must have your app subscribed (POST /{WABA_ID}/subscribed_apps) or delivery status webhooks never arrive"
+  );
+  checklist.push(
+    "WHATSAPP_APP_SECRET must match Meta App → Settings → Basic → App Secret (wrong secret = webhook 401, no delivery logs)"
+  );
+  checklist.push(
     "After OTP accepted, check Vercel for [WhatsApp] DELIVERY FAILED — that code is the real reason"
   );
   checklist.push(
-    "Recipient +9647702073749 must open WhatsApp on the primary phone (not linked Web/Desktop)"
+    "Open WhatsApp on the recipient primary phone (Auth OTP hidden on linked Web/Desktop)"
   );
 
   const ok =
@@ -242,6 +256,7 @@ export async function GET(request: Request) {
       : null,
     matchingLanguages,
     templatesError,
+    subscribedApps,
     checklist,
   });
 }

@@ -36,6 +36,10 @@ export async function POST(request: Request) {
 
   const valid = await verifyWebhookSignature(rawBody, signature);
   if (!valid) {
+    console.error("[WhatsApp webhook] Invalid signature — check WHATSAPP_APP_SECRET matches Meta App Secret", {
+      hasSignature: Boolean(signature),
+      bodyLen: rawBody.length,
+    });
     return new Response("Invalid signature", { status: 401 });
   }
 
@@ -43,8 +47,14 @@ export async function POST(request: Request) {
   try {
     payload = JSON.parse(rawBody) as WhatsAppWebhookPayload;
   } catch {
+    console.error("[WhatsApp webhook] Bad JSON body");
     return new Response("Bad request", { status: 400 });
   }
+
+  console.info("[WhatsApp webhook] received", {
+    object: payload.object,
+    entries: payload.entry?.length ?? 0,
+  });
 
   if (payload.object !== "whatsapp_business_account") {
     return new Response("OK", { status: 200 });
@@ -52,7 +62,10 @@ export async function POST(request: Request) {
 
   for (const entry of payload.entry ?? []) {
     for (const change of entry.changes ?? []) {
-      if (change.field !== "messages") continue;
+      if (change.field !== "messages") {
+        console.info("[WhatsApp webhook] ignored field", { field: change.field });
+        continue;
+      }
 
       const value = change.value;
       for (const msg of value?.messages ?? []) {
@@ -62,7 +75,12 @@ export async function POST(request: Request) {
         });
       }
 
-      for (const status of value?.statuses ?? []) {
+      const statuses = value?.statuses ?? [];
+      if (statuses.length === 0 && !(value?.messages?.length)) {
+        console.info("[WhatsApp webhook] messages field with no statuses/messages");
+      }
+
+      for (const status of statuses) {
         const err = status.errors?.[0];
         const line = {
           id: status.id,
