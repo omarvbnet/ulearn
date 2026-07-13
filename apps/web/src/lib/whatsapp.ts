@@ -206,7 +206,10 @@ export async function sendWhatsAppOtp(
   }
 
   const templateName = process.env.WHATSAPP_OTP_TEMPLATE_NAME?.trim();
-  const templateLang = process.env.WHATSAPP_OTP_TEMPLATE_LANG?.trim() || "ar";
+  // Must match Meta template language exactly (Manager → template → language code).
+  // Arabic OTP templates are usually "ar" — not "ar_AR" / "ar_SA" / "Arabic".
+  const rawLang = process.env.WHATSAPP_OTP_TEMPLATE_LANG?.trim() || "ar";
+  const templateLang = normalizeWhatsAppTemplateLang(rawLang);
 
   if (!templateName && process.env.NODE_ENV === "production") {
     throw new WhatsAppSendError(
@@ -252,8 +255,13 @@ export async function sendWhatsAppOtp(
   const raw = await res.text();
   if (!res.ok) {
     console.error("[WhatsApp] send failed:", res.status, raw);
+    let hint = "";
+    if (raw.includes("132001") || raw.includes("does not exist in")) {
+      hint =
+        ` Template "${templateName}" was not found for language "${templateLang}". Set WHATSAPP_OTP_TEMPLATE_LANG to the exact code in WhatsApp Manager (often "ar").`;
+    }
     throw new WhatsAppSendError(
-      "WhatsApp API rejected the OTP message",
+      `WhatsApp API rejected the OTP message.${hint}`,
       "WHATSAPP_SEND_FAILED",
       raw.slice(0, 800)
     );
@@ -321,4 +329,12 @@ function buildTemplateComponents(code: string) {
   }
 
   return components;
+}
+
+/** Normalize env language to Meta template language codes. */
+function normalizeWhatsAppTemplateLang(lang: string): string {
+  const v = lang.trim();
+  const lower = v.toLowerCase();
+  if (lower === "arabic" || lower === "ar_ar" || lower === "ar-ar") return "ar";
+  return v;
 }
