@@ -20,7 +20,10 @@ export function isRtlLanguage(language?: string | null): boolean {
   return lang === "ar" || lang === "ku";
 }
 
-/** Shape + reorder Arabic/Kurdish for pdf-lib left-to-right glyph drawing. */
+/**
+ * Shape + reorder Arabic/Kurdish for pdf-lib (draws glyphs LTR).
+ * Call this on each *logical* line AFTER wrapping — never wrap the visual string.
+ */
 export function preparePdfText(text: string): string {
   if (!hasArabicScript(text)) return text;
   try {
@@ -30,6 +33,57 @@ export function preparePdfText(text: string): string {
   } catch {
     return text;
   }
+}
+
+/**
+ * Wrap logical text to fit maxWidth, then return visual lines for pdf-lib.
+ * Wrapping the already-reordered string reverses Arabic word order (broken PDFs).
+ */
+export function wrapPdfLines(
+  logicalText: string,
+  font: PDFFont,
+  size: number,
+  maxWidth: number
+): string[] {
+  const raw = logicalText.replace(/\s+/g, " ").trim();
+  if (!raw) return [];
+
+  if (!hasArabicScript(raw)) {
+    const words = raw.split(" ");
+    const lines: string[] = [];
+    let line = "";
+    for (const w of words) {
+      const test = line ? `${line} ${w}` : w;
+      if (font.widthOfTextAtSize(test, size) > maxWidth && line) {
+        lines.push(line);
+        line = w;
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  const words = raw.split(" ");
+  const logicalLines: string[] = [];
+  let current: string[] = [];
+  for (const w of words) {
+    const candidate = [...current, w];
+    const visual = preparePdfText(candidate.join(" "));
+    if (
+      current.length > 0 &&
+      font.widthOfTextAtSize(visual, size) > maxWidth
+    ) {
+      logicalLines.push(current.join(" "));
+      current = [w];
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.length) logicalLines.push(current.join(" "));
+
+  return logicalLines.map((line) => preparePdfText(line));
 }
 
 async function loadFontBytes(fileName: string): Promise<Uint8Array | null> {
@@ -55,6 +109,7 @@ export type EmbeddedFonts = {
 
 /**
  * Embed Unicode fonts when the document needs Arabic/Kurdish; otherwise Helvetica.
+ * Arabic must use subset:false — fontkit subsetting drops presentation-form glyphs.
  */
 export async function embedDocumentFonts(
   pdf: PDFDocument,
@@ -77,29 +132,26 @@ export async function embedDocumentFonts(
   const latinBytes = await loadFontBytes("NotoSans-Regular.ttf");
   const bytes = arabicBytes || latinBytes;
   if (!bytes) {
-    // Last resort — will still fail on Arabic glyphs, but avoid crash if fonts missing.
     return {
       regular: await pdf.embedFont(StandardFonts.Helvetica),
       bold: await pdf.embedFont(StandardFonts.HelveticaBold),
       rtl: true,
     };
   }
-  const regular = await pdf.embedFont(bytes, { subset: true });
-  // Same file as bold fallback (no separate bold file shipped).
+  const regular = await pdf.embedFont(bytes, { subset: false });
   const bold = regular;
   return { regular, bold, rtl: true };
 }
 
 export function pptTextOptions(language?: string | null, extra?: Record<string, unknown>) {
   const rtl = isRtlLanguage(language);
-  // Arial has reliable Arabic glyphs in PowerPoint/LibreOffice; do NOT pre-reshape
-  // (Office/Keynote apply their own OpenType shaping).
+  // Never pre-reshape for PPT — PowerPoint/Keynote apply OpenType shaping.
   return {
     fontFace: "Arial",
     ...(rtl
       ? {
           rtlMode: true,
-          lang: language?.startsWith("ku") ? "ar" : "ar",
+          lang: "ar",
           align: "right" as const,
         }
       : { align: "left" as const }),

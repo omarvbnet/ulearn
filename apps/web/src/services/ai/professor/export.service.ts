@@ -18,6 +18,7 @@ import {
   isRtlLanguage,
   preparePdfText,
   pptTextOptions,
+  wrapPdfLines,
 } from "../fonts";
 
 export type ExportFigure = {
@@ -85,32 +86,24 @@ export async function buildPdf(
 
   const draw = (raw: string, size: number, isBold = false) => {
     const f = isBold ? bold : font;
-    const text = preparePdfText(raw);
-    // Arabic: split by spaces still works after reshape for wrapping approx.
-    const words = text.split(/\s+/);
-    let line = "";
     const maxW = width - margin * 2;
-    const flush = (toDraw: string) => {
-      if (!toDraw) return;
+    // Wrap on logical text, then shape each line (never wrap the visual string).
+    const lines = wrapPdfLines(raw, f, size, maxW);
+    for (const visual of lines) {
+      if (!visual) continue;
       ensureSpace(size + 20);
-      const tw = f.widthOfTextAtSize(toDraw, size);
+      const tw = f.widthOfTextAtSize(visual, size);
       const x = rtl ? Math.max(margin, width - margin - tw) : margin;
-      page.drawText(toDraw, { x, y, size, font: f, color: rgb(0.1, 0.1, 0.15) });
+      page.drawText(visual, {
+        x,
+        y,
+        size,
+        font: f,
+        color: rgb(0.1, 0.1, 0.15),
+      });
       y -= size + 6;
-    };
-    for (const w of words) {
-      const test = line ? `${line} ${w}` : w;
-      if (f.widthOfTextAtSize(test, size) > maxW) {
-        flush(line);
-        line = w;
-      } else {
-        line = test;
-      }
     }
-    if (line) {
-      flush(line);
-      y -= 4;
-    }
+    y -= 4;
   };
 
   const drawFigure = async (fig: ExportFigure) => {
@@ -307,8 +300,10 @@ export async function buildPptx(
   const pptx = new PptxCtor();
   pptx.author = "U Learn AI";
   pptx.title = title;
-  const rtl = (language || "").toLowerCase().startsWith("ar") ||
-    (language || "").toLowerCase().startsWith("ku");
+  const rtl =
+    isRtlLanguage(language) || hasArabicScript(`${title}\n${markdown}`);
+  // Effective lang for ppt options — force ar when content is Arabic even if UI locale is en
+  const pptLang = rtl ? language || "ar" : language;
   if (rtl) {
     pptx.rtlMode = true;
     pptx.theme = { lang: "ar", headFontFace: "Arial", bodyFontFace: "Arial" };
@@ -323,7 +318,7 @@ export async function buildPptx(
     fontSize: 28,
     bold: true,
     color: "0F172A",
-    ...pptTextOptions(language),
+    ...pptTextOptions(pptLang),
   });
   cover.addText("U Learn AI", {
     x: 0.5,
@@ -332,7 +327,7 @@ export async function buildPptx(
     h: 0.4,
     fontSize: 14,
     color: "64748B",
-    ...pptTextOptions(language),
+    ...pptTextOptions(pptLang),
   });
 
   const sections = splitSections(markdown).slice(0, 20);
@@ -349,7 +344,7 @@ export async function buildPptx(
       fontSize: 22,
       bold: true,
       color: "0F172A",
-      ...pptTextOptions(language),
+      ...pptTextOptions(pptLang),
     });
     const bullets = section.body
       .split(/\n/)
@@ -359,7 +354,7 @@ export async function buildPptx(
     slide.addText(
       bullets.map((b: string) => ({
         text: b.slice(0, 180),
-        options: { bullet: true, ...pptTextOptions(language) },
+        options: { bullet: true, ...pptTextOptions(pptLang) },
       })),
       {
         x: 0.5,
@@ -368,7 +363,7 @@ export async function buildPptx(
         h: hasFig ? 4.2 : 4.5,
         fontSize: 14,
         color: "334155",
-        ...pptTextOptions(language),
+        ...pptTextOptions(pptLang),
       }
     );
     if (hasFig) {
@@ -396,7 +391,7 @@ export async function buildPptx(
       h: 0.5,
       fontSize: 18,
       bold: true,
-      ...pptTextOptions(language),
+      ...pptTextOptions(pptLang),
     });
     try {
       slide.addImage({
