@@ -162,9 +162,15 @@ export async function GET(request: Request) {
   }
 
   const accountMode = String(phoneJson.account_mode || "").toUpperCase();
+  const nameStatus = String(phoneJson.name_status || "").toUpperCase();
   if (accountMode === "SANDBOX") {
     checklist.push(
       "Phone is in SANDBOX — only allow-listed numbers receive messages"
+    );
+  }
+  if (nameStatus && nameStatus !== "APPROVED") {
+    checklist.push(
+      `CRITICAL: Display name status is ${String(phoneJson.name_status)} (need APPROVED). Meta accepts OTPs then drops them — Insights stay at 0 until name is approved.`
     );
   }
 
