@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
@@ -45,10 +46,34 @@ class _LoginScreenState extends State<LoginScreen>
       vsync: this,
       duration: const Duration(milliseconds: 420),
     );
-    _otpCtrl.addListener(() {
-      setState(() {});
-      if (_otpCtrl.text.length == 6 && !_loading) _verify();
-    });
+    _otpCtrl.addListener(_onOtpChanged);
+  }
+
+  void _onOtpChanged() {
+    final raw = _otpCtrl.text;
+    final digits = raw.replaceAll(RegExp(r'\D'), '');
+    final clipped = digits.length > 6 ? digits.substring(0, 6) : digits;
+    if (clipped != raw) {
+      _otpCtrl.value = TextEditingValue(
+        text: clipped,
+        selection: TextSelection.collapsed(offset: clipped.length),
+      );
+      return;
+    }
+    setState(() {});
+    if (clipped.length == 6 && !_loading) _verify();
+  }
+
+  Future<void> _pasteOtp() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final pasted = data?.text?.replaceAll(RegExp(r'\D'), '') ?? '';
+    if (pasted.isEmpty || !mounted) return;
+    final code = pasted.length > 6 ? pasted.substring(0, 6) : pasted;
+    _otpCtrl.value = TextEditingValue(
+      text: code,
+      selection: TextSelection.collapsed(offset: code.length),
+    );
+    _otpFocus.requestFocus();
   }
 
   @override
@@ -286,66 +311,74 @@ class _LoginScreenState extends State<LoginScreen>
           style: TextStyle(color: AppTheme.muted, fontSize: 13, height: 1.5),
         ),
         const SizedBox(height: 20),
-        Row(
-          children: [
-            SizedBox(
-              width: 118,
-              child: InputDecorator(
-                decoration: const InputDecoration(
-                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<PhoneCountry>(
-                    value: _country,
-                    isExpanded: true,
-                    items: _countries
-                        .map(
-                          (c) => DropdownMenuItem(
-                            value: c,
-                            child: Text(
-                              '${c.flag} +${c.dial}',
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13),
+        // Keep country code on the left and national number on the right
+        // even when the app locale is RTL (Arabic / Kurdish).
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Row(
+            children: [
+              SizedBox(
+                width: 118,
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<PhoneCountry>(
+                      value: _country,
+                      isExpanded: true,
+                      items: _countries
+                          .map(
+                            (c) => DropdownMenuItem(
+                              value: c,
+                              child: Text(
+                                '${c.flag} +${c.dial}',
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 13),
+                              ),
                             ),
-                          ),
-                        )
-                        .toList(),
-                    selectedItemBuilder: (context) => _countries
-                        .map(
-                          (c) => Align(
-                            alignment: AlignmentDirectional.centerStart,
-                            child: Text(
-                              '${c.flag} +${c.dial}',
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13),
+                          )
+                          .toList(),
+                      selectedItemBuilder: (context) => _countries
+                          .map(
+                            (c) => Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                '${c.flag} +${c.dial}',
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 13),
+                              ),
                             ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (c) {
-                      if (c == null) return;
-                      setState(() => _country = c);
-                    },
+                          )
+                          .toList(),
+                      onChanged: (c) {
+                        if (c == null) return;
+                        setState(() => _country = c);
+                      },
+                    ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _phoneCtrl,
-                keyboardType: TextInputType.phone,
-                textDirection: TextDirection.ltr,
-                style: const TextStyle(fontSize: 16, letterSpacing: 0.5),
-                onChanged: (_) => setState(() {}),
-                onSubmitted: (_) => _sendOtp(),
-                decoration: InputDecoration(
-                  labelText: l10n.authPhone,
-                  hintText: _country.iso == 'IQ' ? '7XX XXX XXXX' : l10n.authPhonePlaceholder,
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  textDirection: TextDirection.ltr,
+                  style: const TextStyle(fontSize: 16, letterSpacing: 0.5),
+                  onChanged: (_) => setState(() {}),
+                  onSubmitted: (_) => _sendOtp(),
+                  decoration: InputDecoration(
+                    labelText: l10n.authPhone,
+                    hintText: _country.iso == 'IQ'
+                        ? '7XX XXX XXXX'
+                        : l10n.authPhonePlaceholder,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         const SizedBox(height: 8),
         Text(
@@ -416,80 +449,117 @@ class _LoginScreenState extends State<LoginScreen>
           ),
         ),
         const SizedBox(height: 20),
-        Stack(
-          children: [
-            Opacity(
-              opacity: 0,
-              child: TextField(
-                controller: _otpCtrl,
-                focusNode: _otpFocus,
-                keyboardType: TextInputType.number,
-                maxLength: 6,
-                autofocus: true,
-                enableSuggestions: false,
-              ),
-            ),
-            GestureDetector(
-              onTap: () => _otpFocus.requestFocus(),
-              child: Directionality(
-                textDirection: TextDirection.ltr,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: List.generate(6, (i) {
-                    final filled = i < code.length;
-                    final isCurrent = i == code.length;
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeOut,
-                      width: 44,
-                      height: 54,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0A0A16),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isCurrent && _otpFocus.hasFocus
-                              ? AppTheme.accent
-                              : filled
-                                  ? AppTheme.primary.withValues(alpha: 0.7)
-                                  : AppTheme.cardBorder,
-                          width: isCurrent && _otpFocus.hasFocus ? 1.8 : 1,
-                        ),
-                        boxShadow: isCurrent && _otpFocus.hasFocus
-                            ? [
-                                BoxShadow(
-                                  color:
-                                      AppTheme.accent.withValues(alpha: 0.25),
-                                  blurRadius: 10,
-                                ),
-                              ]
-                            : null,
-                      ),
-                      child: Center(
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 150),
-                          transitionBuilder: (child, anim) => ScaleTransition(
-                            scale: anim,
-                            child: child,
+        AutofillGroup(
+          child: SizedBox(
+            height: 54,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Directionality(
+                  textDirection: TextDirection.ltr,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: List.generate(6, (i) {
+                      final filled = i < code.length;
+                      final isCurrent = i == code.length;
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOut,
+                        width: 44,
+                        height: 54,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0A0A16),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isCurrent && _otpFocus.hasFocus
+                                ? AppTheme.accent
+                                : filled
+                                    ? AppTheme.primary.withValues(alpha: 0.7)
+                                    : AppTheme.cardBorder,
+                            width: isCurrent && _otpFocus.hasFocus ? 1.8 : 1,
                           ),
-                          child: Text(
-                            filled ? code[i] : '',
-                            key: ValueKey(filled ? code[i] : 'empty$i'),
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.foreground,
+                          boxShadow: isCurrent && _otpFocus.hasFocus
+                              ? [
+                                  BoxShadow(
+                                    color:
+                                        AppTheme.accent.withValues(alpha: 0.25),
+                                    blurRadius: 10,
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: Center(
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 150),
+                            transitionBuilder: (child, anim) => ScaleTransition(
+                              scale: anim,
+                              child: child,
+                            ),
+                            child: Text(
+                              filled ? code[i] : '',
+                              key: ValueKey(filled ? code[i] : 'empty$i'),
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.foreground,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    );
-                  }),
+                      );
+                    }),
+                  ),
                 ),
-              ),
+                // Transparent field on top so keyboard paste / SMS autofill work.
+                Positioned.fill(
+                  child: TextField(
+                    controller: _otpCtrl,
+                    focusNode: _otpFocus,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.done,
+                    autofocus: true,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    showCursor: false,
+                    maxLength: 6,
+                    autofillHints: const [AutofillHints.oneTimeCode],
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(6),
+                    ],
+                    style: const TextStyle(
+                      color: Colors.transparent,
+                      fontSize: 1,
+                      letterSpacing: 40,
+                    ),
+                    cursorColor: Colors.transparent,
+                    decoration: const InputDecoration(
+                      counterText: '',
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    onTap: () => _otpFocus.requestFocus(),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
-        const SizedBox(height: 20),
+        Align(
+          alignment: AlignmentDirectional.centerEnd,
+          child: TextButton.icon(
+            onPressed: _loading ? null : _pasteOtp,
+            icon: Icon(Icons.content_paste_rounded,
+                size: 16, color: AppTheme.accent),
+            label: Text(
+              l10n.t('mobile.login.pasteCode'),
+              style: TextStyle(color: AppTheme.accent, fontSize: 13),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
         SizedBox(
           width: double.infinity,
           height: 52,

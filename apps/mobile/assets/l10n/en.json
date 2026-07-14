@@ -99,7 +99,8 @@
     "pending": "Pending",
     "active": "Active",
     "expired": "Expired",
-    "refresh": "Refresh"
+    "refresh": "Refresh",
+    "ok": "OK"
   },
   "student": {
     "welcome": "Welcome",
@@ -240,7 +241,8 @@
       "codeSentPrefix": "We sent a 6-digit code to ",
       "codeSentSuffix": " on WhatsApp.",
       "verifyContinue": "Verify & Continue",
-      "resendIn": "Resend in {seconds}s"
+      "resendIn": "Resend in {seconds}s",
+      "pasteCode": "Paste code"
     },
     "auth": {
       "loginRequiredTitle": "Sign in to continue",
@@ -339,7 +341,15 @@
       "storageCacheHint": "Videos & images · max 2.5 GB · {size} used",
       "storageCacheClear": "Clear cache",
       "storageCacheClearConfirm": "Clear cached videos and images? Recently watched content may need to download again.",
-      "storageCacheCleared": "Cache cleared"
+      "storageCacheCleared": "Cache cleared",
+      "deleteAccount": "Delete account",
+      "deleteAccountHint": "Schedule removal of your personal data",
+      "deleteAccountMessage": "If you confirm, your account will be scheduled for deletion. If you do not log in for 7 days, all of your personal data will be permanently deleted or anonymized (except limited records we must keep for payments and legal compliance).\n\nLog in again within 7 days to cancel this request.",
+      "deleteAccountTeacherMessage": "Teacher accounts are linked to published courses and learner content. Deleting a teacher account requires admin approval.\n\nIf you confirm, we will submit a deletion request for an administrator to review. Your account stays active until an admin approves.",
+      "deleteAccountConfirm": "Delete my account",
+      "deleteAccountScheduled": "Your account is scheduled for deletion. If you do not log in for 7 days, your personal data will be permanently removed. Log in within 7 days to cancel.",
+      "deleteAccountTeacherSubmitted": "Your deletion request was submitted. A U Learn administrator must approve teacher account deletion. You will keep access until then.",
+      "deleteAccountFailed": "Could not submit deletion request. Please try again."
     },
     "roles": {
       "student": "Student",
@@ -1050,6 +1060,30 @@
       "emptyAds": "No active ads right now.",
       "emptyNotes": "No admin offers in your inbox yet.",
       "offer": "Offer"
+    },
+    "privacy": {
+      "title": "Privacy Policy",
+      "profileHint": "How we collect, use, and delete your data",
+      "updated": "Last updated: July 14, 2026",
+      "intro": "U Learn (“we”, “us”) operates an educational platform for students, certificate learners, and teachers. This Privacy Policy explains what personal data we collect, how we use it for teaching and payments, how long we keep it, and how you can delete your account. It is intended to meet Apple App Store and Google Play requirements for education apps that process payments and user accounts.",
+      "whoWeAreTitle": "1. Who we are",
+      "whoWeAreBody": "U Learn provides online courses, short videos, quizzes, subscriptions, and related learning tools. Contact details for privacy requests are listed at the end of this policy.",
+      "dataWeCollectTitle": "2. Data we collect",
+      "dataWeCollectBody": "Depending on your role, we may collect: phone number (for WhatsApp OTP sign-in), full name, national ID and ID image, parent contact details (for students), email, gender, country/province, educational stage or certificate interests, profile photo, device identifiers for device limits, app language, learning progress, quiz results, favorites, purchase and subscription records, support messages, and approximate location if you choose to share it during registration.",
+      "teachingTitle": "3. Teaching & learning use",
+      "teachingBody": "We use your data to create and manage your account, deliver courses and reels, track progress, personalize recommendations, run quizzes and rankings, enable teacher content tools, provide customer support, and send service notifications related to your learning.",
+      "paymentsTitle": "4. Payments & subscriptions",
+      "paymentsBody": "Payment-related data (activation codes, subscription status, course purchases, and in-app purchase receipts where applicable) is used to unlock paid content, prevent fraud, fulfill purchases, and keep legally required financial records. Payment processors may process card or store billing details under their own policies; U Learn stores only what is needed to confirm entitlements and invoices.",
+      "retentionTitle": "5. Retention & inactivity",
+      "retentionBody": "We keep account and learning data while your account is active. If you request deletion and then do not log in for 7 days, we delete or anonymize personal account data for students and certificate users. Payment and audit records that we must keep by law may be retained in a limited, non-identifying form. Inactive accounts may also be marked inactive based on platform settings.",
+      "deletionTitle": "6. Account deletion",
+      "deletionBody": "You can request account deletion from Profile → Delete account. For students and certificate users: after you confirm, your account is scheduled for deletion; if you do not log in within 7 days, we permanently delete or anonymize your personal data. Logging in again within that period cancels the request. For teachers: deletion requires admin approval because teacher accounts are linked to published courses and student content. After approval, personal teacher profile data is removed or anonymized; course assets may be retained or reassigned as required for other learners.",
+      "sharingTitle": "7. Sharing",
+      "sharingBody": "We do not sell your personal data. We share data only with service providers that help us operate the platform (hosting, messaging/OTP, analytics, payment processors, push notifications) under contractual safeguards, or when required by law.",
+      "childrenTitle": "8. Children & students",
+      "childrenBody": "U Learn is used in educational contexts and may collect parent contact information for student accounts. Guardians should supervise registration where required by local law. Contact us to update or remove a minor’s data when appropriate.",
+      "contactTitle": "9. Contact",
+      "contactBody": "For privacy questions, data access, or deletion help, use in-app support or contact the U Learn administrator for your country. You may also use Profile → Delete account to start deletion yourself."
     }
   }
 }

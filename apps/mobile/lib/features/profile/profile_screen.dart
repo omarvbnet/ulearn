@@ -24,6 +24,7 @@ import 'package:ulearn/features/rankings/rankings_screen.dart';
 import 'package:ulearn/features/report/my_reports_screen.dart';
 import 'package:ulearn/core/widgets/teacher_cover_presets.dart';
 import 'package:ulearn/features/profile/teacher_specialties_section.dart';
+import 'package:ulearn/features/profile/privacy_policy_screen.dart';
 import 'package:ulearn/features/store/teacher_studio_screen.dart';
 import 'package:ulearn/features/subscriptions/subscriptions_screen.dart';
 import 'package:ulearn/core/widgets/glass.dart';
@@ -617,6 +618,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
           index: user.role == 'TEACHER' || user.role == 'STUDENT' ? 6 : 5,
           child: Card(
             child: ListTile(
+              leading: Icon(Icons.privacy_tip_outlined, color: AppTheme.accent),
+              title: Text(l10n.t('mobile.privacy.title')),
+              subtitle: Text(
+                l10n.t('mobile.privacy.profileHint'),
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
+              ),
+              trailing: Icon(Icons.chevron_right, color: AppTheme.muted),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen()),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        StaggeredItem(
+          index: user.role == 'TEACHER' || user.role == 'STUDENT' ? 7 : 6,
+          child: Card(
+            child: ListTile(
+              leading: const Icon(Icons.delete_forever_outlined, color: Colors.redAccent),
+              title: Text(
+                l10n.t('mobile.profile.deleteAccount'),
+                style: const TextStyle(color: Colors.redAccent),
+              ),
+              subtitle: Text(
+                l10n.t('mobile.profile.deleteAccountHint'),
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
+              ),
+              onTap: () => _confirmDeleteAccount(context, user.role),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        StaggeredItem(
+          index: user.role == 'TEACHER' || user.role == 'STUDENT' ? 8 : 7,
+          child: Card(
+            child: ListTile(
               leading: const Icon(Icons.logout, color: Colors.redAccent),
               title: Text(l10n.navLogout, style: const TextStyle(color: Colors.redAccent)),
               onTap: () async {
@@ -650,6 +687,75 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       ],
     );
+  }
+
+  Future<void> _confirmDeleteAccount(BuildContext context, String role) async {
+    final l10n = context.l10n;
+    final isTeacher = role == 'TEACHER';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.card,
+        title: Text(l10n.t('mobile.profile.deleteAccount')),
+        content: SingleChildScrollView(
+          child: Text(
+            isTeacher
+                ? l10n.t('mobile.profile.deleteAccountTeacherMessage')
+                : l10n.t('mobile.profile.deleteAccountMessage'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l10n.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              l10n.t('mobile.profile.deleteAccountConfirm'),
+              style: const TextStyle(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      final result =
+          await context.read<AuthProvider>().requestAccountDeletion();
+      if (!context.mounted) return;
+      final requiresAdmin = result['requiresAdminApproval'] == true;
+      final message = requiresAdmin
+          ? l10n.t('mobile.profile.deleteAccountTeacherSubmitted')
+          : l10n.t('mobile.profile.deleteAccountScheduled');
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppTheme.card,
+          title: Text(l10n.t('mobile.profile.deleteAccount')),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(l10n.t('common.ok')),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.toString().isNotEmpty
+                ? e.toString()
+                : l10n.t('mobile.profile.deleteAccountFailed'),
+          ),
+        ),
+      );
+    }
   }
 }
 

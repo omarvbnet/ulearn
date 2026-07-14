@@ -221,6 +221,19 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Requests account deletion. Students/cert users are scheduled for purge
+  /// after 7 days without login; teachers require admin approval.
+  Future<Map<String, dynamic>> requestAccountDeletion() async {
+    final data = await _api.post('/api/auth/delete-account', {});
+    final requiresAdmin = data['requiresAdminApproval'] == true;
+    if (!requiresAdmin) {
+      await _api.setToken(null);
+      user = null;
+      notifyListeners();
+    }
+    return data;
+  }
+
   void applyUser(Map<String, dynamic> json) {
     user = UserModel.fromJson(json);
     _locale?.syncFromUser(user?.locale);

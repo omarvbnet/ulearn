@@ -13,5 +13,6 @@ export async function GET(request: Request) {
   });
   const days = typeof setting?.value === "number" ? setting.value : 30;
   const count = await AuthService.markInactiveUsers(days);
-  return json({ markedInactive: count, days });
+  const purged = await AuthService.purgeScheduledDeletions(7);
+  return json({ markedInactive: count, days, purgedScheduledDeletions: purged });
 }

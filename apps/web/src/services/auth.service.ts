@@ -167,6 +167,14 @@ export class AuthService {
     }
 
     if (user.status === "PENDING") {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          lastLoginAt: new Date(),
+          lastActivityAt: new Date(),
+          deletionRequestedAt: null,
+        },
+      });
       const token = await createSession(user.id, user.role, user.status, meta);
       return {
         success: true as const,
@@ -190,7 +198,12 @@ export class AuthService {
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { lastLoginAt: new Date(), lastActivityAt: new Date() },
+      data: {
+        lastLoginAt: new Date(),
+        lastActivityAt: new Date(),
+        // Logging in within the grace period cancels a pending deletion.
+        deletionRequestedAt: null,
+      },
     });
 
     const token = await createSession(user.id, user.role, user.status, meta);
@@ -211,6 +224,146 @@ export class AuthService {
       user,
       token,
     };
+  }
+
+  /**
+   * User-initiated account deletion (App Store / Play requirement).
+   * - STUDENT / CERTIFICATE_USER: schedule purge after 7 days without login.
+   * - TEACHER: queue for admin approval (no auto-delete).
+   */
+  static async requestAccountDeletion(userId: string) {
+    const user = await prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+    });
+    if (!user) {
+      return { success: false as const, error: "USER_NOT_FOUND" };
+    }
+
+    if (user.role === "SUPER_ADMIN" || user.role === "COUNTRY_ADMIN") {
+      return { success: false as const, error: "ADMIN_CANNOT_SELF_DELETE" };
+    }
+
+    const now = new Date();
+    await prisma.user.update({
+      where: { id: userId },
+      data: { deletionRequestedAt: now },
+    });
+
+    await LoggingService.log({
+      actorId: userId,
+      action: "REQUEST_ACCOUNT_DELETION",
+      entityType: "User",
+      entityId: userId,
+      newValue: {
+        role: user.role,
+        requiresAdminApproval: user.role === "TEACHER",
+      },
+    });
+
+    if (user.role === "TEACHER") {
+      return {
+        success: true as const,
+        requiresAdminApproval: true as const,
+        deletionRequestedAt: now.toISOString(),
+      };
+    }
+
+    // End sessions immediately so the grace period is measured from logout.
+    await prisma.session.deleteMany({ where: { userId } });
+    await destroySession().catch(() => {});
+
+    return {
+      success: true as const,
+      requiresAdminApproval: false as const,
+      gracePeriodDays: 7,
+      deletionRequestedAt: now.toISOString(),
+    };
+  }
+
+  /** Admin approves a teacher (or any) account deletion and anonymizes now. */
+  static async approveAccountDeletion(userId: string, actorId: string) {
+    const user = await prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+    });
+    if (!user) {
+      return { success: false as const, error: "USER_NOT_FOUND" };
+    }
+    if (!user.deletionRequestedAt && user.role === "TEACHER") {
+      return { success: false as const, error: "NO_DELETION_REQUEST" };
+    }
+
+    await AuthService.purgeUserData(userId, actorId);
+    return { success: true as const };
+  }
+
+  /**
+   * Permanently anonymize + soft-delete a user. Keeps non-identifying
+   * financial / audit rows via cascade rules and anonymized placeholders.
+   */
+  static async purgeUserData(userId: string, actorId?: string) {
+    const user = await prisma.user.findFirst({ where: { id: userId } });
+    if (!user || user.deletedAt) return false;
+
+    await prisma.session.deleteMany({ where: { userId } });
+    await prisma.otpCode.deleteMany({ where: { userId } });
+    await prisma.device.deleteMany({ where: { userId } });
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        phone: `deleted_${userId}`,
+        email: null,
+        fullLegalName: null,
+        profilePhotoKey: null,
+        profilePhotoUrl: null,
+        nationalId: null,
+        nationalIdImage: null,
+        parentPhone: null,
+        parentEmail: null,
+        latitude: null,
+        longitude: null,
+        locationLabel: null,
+        fcmTokens: [],
+        status: "INACTIVE",
+        deletionRequestedAt: null,
+        deletedAt: new Date(),
+      },
+    });
+
+    await LoggingService.log({
+      actorId: actorId ?? userId,
+      action: "PURGE_ACCOUNT_DATA",
+      entityType: "User",
+      entityId: userId,
+      previousValue: { role: user.role, phone: user.phone },
+    });
+
+    return true;
+  }
+
+  /**
+   * Purge non-teacher accounts that requested deletion at least `graceDays`
+   * ago without logging in again (login clears deletionRequestedAt).
+   */
+  static async purgeScheduledDeletions(graceDays = 7) {
+    const threshold = new Date();
+    threshold.setDate(threshold.getDate() - graceDays);
+
+    const users = await prisma.user.findMany({
+      where: {
+        deletedAt: null,
+        deletionRequestedAt: { not: null, lte: threshold },
+        role: { in: ["STUDENT", "CERTIFICATE_USER"] },
+      },
+      select: { id: true },
+    });
+
+    let purged = 0;
+    for (const { id } of users) {
+      const ok = await AuthService.purgeUserData(id);
+      if (ok) purged += 1;
+    }
+    return purged;
   }
 
   static async registerStudent(input: RegisterStudentInput, meta?: { ipAddress?: string }) {

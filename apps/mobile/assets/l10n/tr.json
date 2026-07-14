@@ -98,7 +98,8 @@
     "pending": "Beklemede",
     "active": "Aktif",
     "expired": "Süresi Doldu",
-    "refresh": "Yenile"
+    "refresh": "Yenile",
+    "ok": "Tamam"
   },
   "student": {
     "welcome": "Hoş geldin",
@@ -239,7 +240,8 @@
       "codeSentPrefix": "6 haneli kod gönderildi: ",
       "codeSentSuffix": " (WhatsApp).",
       "verifyContinue": "Doğrula ve devam et",
-      "resendIn": "{seconds}s içinde tekrar gönder"
+      "resendIn": "{seconds}s içinde tekrar gönder",
+      "pasteCode": "Kodu yapıştır"
     },
     "auth": {
       "loginRequiredTitle": "Devam etmek için giriş yapın",
@@ -338,7 +340,15 @@
       "storageCacheHint": "Videolar ve görseller · en fazla 2.5 GB · {size} kullanılıyor",
       "storageCacheClear": "Önbelleği temizle",
       "storageCacheClearConfirm": "Önbelleğe alınan video ve görseller silinsin mi? Son izlenen içerikler yeniden indirilebilir.",
-      "storageCacheCleared": "Önbellek temizlendi"
+      "storageCacheCleared": "Önbellek temizlendi",
+      "deleteAccount": "Hesabı sil",
+      "deleteAccountHint": "Kişisel verilerinizin kaldırılmasını planlayın",
+      "deleteAccountMessage": "Onaylarsanız hesabınız silinmek üzere planlanır. 7 gün giriş yapmazsanız tüm kişisel verileriniz kalıcı olarak silinir veya anonimleştirilir (ödeme ve yasal uyumluluk için saklamamız gereken sınırlı kayıtlar hariç).\n\nTalebi iptal etmek için 7 gün içinde tekrar giriş yapın.",
+      "deleteAccountTeacherMessage": "Öğretmen hesapları yayımlanan kurslara ve öğrenen içeriğine bağlıdır. Öğretmen hesabını silmek yönetici onayı gerektirir.\n\nOnaylarsanız yönetici incelemesi için bir silme talebi göndeririz. Onaylanana kadar hesabınız aktif kalır.",
+      "deleteAccountConfirm": "Hesabımı sil",
+      "deleteAccountScheduled": "Hesabınız silinmek üzere planlandı. 7 gün giriş yapmazsanız kişisel verileriniz kalıcı olarak kaldırılır. İptal için 7 gün içinde giriş yapın.",
+      "deleteAccountTeacherSubmitted": "Silme talebiniz gönderildi. Öğretmen hesabı silme için bir U Learn yöneticisinin onayı gerekir. O zamana kadar erişiminiz devam eder.",
+      "deleteAccountFailed": "Silme talebi gönderilemedi. Lütfen tekrar deneyin."
     },
     "roles": {
       "student": "Öğrenci",
@@ -1050,6 +1060,30 @@
       "emptyAds": "Şu an aktif reklam yok.",
       "emptyNotes": "Gelen kutunuzda henüz yönetici teklifi yok.",
       "offer": "Teklif"
+    },
+    "privacy": {
+      "title": "Gizlilik Politikası",
+      "profileHint": "Verilerinizi nasıl toplar, kullanır ve sileriz",
+      "updated": "Son güncelleme: 14 Temmuz 2026",
+      "intro": "U Learn (“biz”) öğrenciler, sertifika kullanıcıları ve öğretmenler için bir eğitim platformu işletir. Bu Gizlilik Politikası hangi kişisel verileri topladığımızı, öğretim ve ödemeler için nasıl kullandığımızı, ne kadar süre sakladığımızı ve hesabınızı nasıl silebileceğinizi açıklar. Ödeme ve hesap işleyen eğitim uygulamaları için Apple App Store ve Google Play gereksinimlerini karşılamak üzere hazırlanmıştır.",
+      "whoWeAreTitle": "1. Biz kimiz",
+      "whoWeAreBody": "U Learn çevrimiçi kurslar, kısa videolar, sınavlar, abonelikler ve ilgili öğrenme araçları sunar. Gizlilik talepleri için iletişim bilgileri bu politikanın sonunda yer alır.",
+      "dataWeCollectTitle": "2. Topladığımız veriler",
+      "dataWeCollectBody": "Rolünüze göre şunları toplayabiliriz: telefon numarası (WhatsApp OTP giriş), ad soyad, ulusal kimlik ve kimlik görseli, veli iletişim bilgileri (öğrenciler için), e-posta, cinsiyet, ülke/il, eğitim aşaması veya sertifika ilgi alanları, profil fotoğrafı, cihaz limitleri için cihaz tanımlayıcıları, uygulama dili, öğrenme ilerlemesi, sınav sonuçları, favoriler, satın alma ve abonelik kayıtları, destek mesajları ve kayıt sırasında paylaşmayı seçerseniz yaklaşık konum.",
+      "teachingTitle": "3. Öğretim ve öğrenme kullanımı",
+      "teachingBody": "Verilerinizi hesabınızı oluşturmak ve yönetmek, kursları ve reels’leri sunmak, ilerlemeyi izlemek, önerileri kişiselleştirmek, sınav ve sıralamaları çalıştırmak, öğretmen içerik araçlarını etkinleştirmek, destek sağlamak ve öğrenmenizle ilgili hizmet bildirimleri göndermek için kullanırız.",
+      "paymentsTitle": "4. Ödeme ve abonelikler",
+      "paymentsBody": "Ödeme verileri (aktivasyon kodları, abonelik durumu, kurs satın alımları ve varsa uygulama içi satın alma makbuzları) ücretli içeriğin açılması, dolandırıcılığın önlenmesi, satın alımların yerine getirilmesi ve yasal mali kayıtların tutulması için kullanılır. Ödeme sağlayıcıları kart veya mağaza faturalama bilgilerini kendi politikalarına göre işleyebilir; U Learn yalnızca haklar ve faturalar için gerekenleri saklar.",
+      "retentionTitle": "5. Saklama ve hareketsizlik",
+      "retentionBody": "Hesabınız aktifken hesap ve öğrenme verilerini tutarız. Silme talebinden sonra 7 gün giriş yapmazsanız, öğrenci ve sertifika kullanıcılarının kişisel hesap verilerini siler veya anonimleştiririz. Yasalarca tutulması gereken ödeme ve denetim kayıtları sınırlı, kimlik içermeyen biçimde saklanabilir.",
+      "deletionTitle": "6. Hesap silme",
+      "deletionBody": "Hesap silmeyi Profil → Hesabı sil üzerinden isteyebilirsiniz. Öğrenci ve sertifika kullanıcıları için: onaydan sonra hesabınız silinmek üzere planlanır; 7 gün içinde giriş yapmazsanız kişisel verileriniz kalıcı olarak silinir veya anonimleştirilir. Bu süre içinde tekrar giriş talebi iptal eder. Öğretmenler için: silme, yayımlanan kurslara ve öğrenci içeriğine bağlı olduğu için yönetici onayı gerektirir.",
+      "sharingTitle": "7. Paylaşım",
+      "sharingBody": "Kişisel verilerinizi satmayız. Verileri yalnızca platformu işletmemize yardımcı olan hizmet sağlayıcılarla (barındırma, mesajlaşma/OTP, analitik, ödemeler, bildirimler) sözleşmeli güvencelerle veya yasa gereği paylaşırız.",
+      "childrenTitle": "8. Çocuklar ve öğrenciler",
+      "childrenBody": "U Learn eğitim bağlamlarında kullanılır ve öğrenci hesapları için veli iletişim bilgisi toplayabilir. Yerel hukuk gerektiriyorsa veliler kaydı denetlemelidir. Bir çocuğun verisini güncellemek veya kaldırmak için bizimle iletişime geçin.",
+      "contactTitle": "9. İletişim",
+      "contactBody": "Gizlilik soruları, veri erişimi veya silme yardımı için uygulama içi desteği veya ülkenizdeki U Learn yöneticisini kullanın. Silmeye kendiniz başlamak için Profil → Hesabı sil seçeneğini de kullanabilirsiniz."
     }
   }
 }
