@@ -26,8 +26,14 @@ export async function POST(request: Request) {
     console.error(e);
     const { WhatsAppSendError } = await import("@/lib/whatsapp");
     if (e instanceof WhatsAppSendError) {
+      // Surface actionable Meta blockers to the client (display name, template lang).
+      const exposeDetails =
+        e.code === "WHATSAPP_DISPLAY_NAME_NOT_APPROVED" ||
+        e.code === "WHATSAPP_SEND_FAILED" ||
+        e.code === "WHATSAPP_ACCOUNT_NOT_LIVE" ||
+        process.env.NODE_ENV !== "production";
       return error(e.message, 502, e.code, {
-        details: process.env.NODE_ENV === "production" ? undefined : e.details,
+        details: exposeDetails ? e.details : undefined,
       });
     }
     return error("Internal server error", 500);

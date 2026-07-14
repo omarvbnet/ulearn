@@ -64,6 +64,95 @@ export function getWhatsAppOtpTemplateLang(): string {
   );
 }
 
+export type WhatsAppSenderStatus = {
+  id: string;
+  displayPhoneNumber: string | null;
+  verifiedName: string | null;
+  accountMode: string | null;
+  nameStatus: string | null;
+  newNameStatus: string | null;
+  codeVerificationStatus: string | null;
+  qualityRating: string | null;
+  status: string | null;
+};
+
+/**
+ * Fetch Cloud API phone readiness. Display name must be APPROVED or Meta
+ * often accepts the request then drops it (Insights stays at 0 sends).
+ */
+export async function fetchWhatsAppSenderStatus(): Promise<WhatsAppSenderStatus> {
+  const phoneNumberId = getWhatsAppPhoneNumberId();
+  const accessToken = getWhatsAppAccessToken();
+  if (!phoneNumberId || !accessToken) {
+    throw new WhatsAppSendError(
+      "WhatsApp OTP is not configured on the server",
+      "WHATSAPP_NOT_CONFIGURED"
+    );
+  }
+
+  const res = await fetch(
+    `${GRAPH_API}/${phoneNumberId}?fields=id,display_phone_number,verified_name,account_mode,name_status,new_name_status,code_verification_status,quality_rating,status`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const raw = await res.text();
+  if (!res.ok) {
+    throw new WhatsAppSendError(
+      "Could not read WhatsApp phone number status from Meta",
+      "WHATSAPP_SENDER_STATUS_FAILED",
+      raw.slice(0, 500)
+    );
+  }
+
+  const data = JSON.parse(raw) as Record<string, unknown>;
+  return {
+    id: String(data.id ?? phoneNumberId),
+    displayPhoneNumber: (data.display_phone_number as string) ?? null,
+    verifiedName: (data.verified_name as string) ?? null,
+    accountMode: (data.account_mode as string) ?? null,
+    nameStatus: (data.name_status as string) ?? null,
+    newNameStatus: (data.new_name_status as string) ?? null,
+    codeVerificationStatus: (data.code_verification_status as string) ?? null,
+    qualityRating: (data.quality_rating as string) ?? null,
+    status: (data.status as string) ?? null,
+  };
+}
+
+export async function assertWhatsAppSenderReady(): Promise<WhatsAppSenderStatus> {
+  const sender = await fetchWhatsAppSenderStatus();
+  console.info("[WhatsApp] sender status", {
+    display: sender.displayPhoneNumber,
+    mode: sender.accountMode,
+    nameStatus: sender.nameStatus,
+    newNameStatus: sender.newNameStatus,
+    connected: sender.status,
+  });
+
+  const name = (sender.nameStatus || "").toUpperCase();
+  if (name && name !== "APPROVED") {
+    throw new WhatsAppSendError(
+      `WhatsApp display name is ${sender.nameStatus} (need APPROVED). Meta accepts OTP requests then drops them — Insights stay at 0. Fix display name in WhatsApp Manager for ${sender.displayPhoneNumber || "this number"}.`,
+      "WHATSAPP_DISPLAY_NAME_NOT_APPROVED",
+      JSON.stringify({
+        nameStatus: sender.nameStatus,
+        newNameStatus: sender.newNameStatus,
+        displayPhoneNumber: sender.displayPhoneNumber,
+      })
+    );
+  }
+
+  if (
+    sender.accountMode &&
+    sender.accountMode.toUpperCase() !== "LIVE"
+  ) {
+    throw new WhatsAppSendError(
+      `WhatsApp phone account_mode is ${sender.accountMode} (need LIVE)`,
+      "WHATSAPP_ACCOUNT_NOT_LIVE"
+    );
+  }
+
+  return sender;
+}
+
 export function isWhatsAppConfigured(): boolean {
   return Boolean(getWhatsAppPhoneNumberId() && getWhatsAppAccessToken());
 }
@@ -287,6 +376,17 @@ export async function sendWhatsAppOtp(
       "WHATSAPP_TEMPLATE_MISSING"
     );
   }
+
+  // Fail fast when Meta will accept-but-drop (display name not approved).
+  await assertWhatsAppSenderReady();
+
+  console.info("[WhatsApp] OTP env keys", getWhatsAppEnvResolution());
+  console.info("[WhatsApp] sending template", {
+    template: templateName,
+    lang: templateLang,
+    to: `***${to.slice(-4)}`,
+    useButton: shouldIncludeOtpUrlButton(),
+  });
 
   // Meta Authentication + Copy code payload.
   // @see https://developers.facebook.com/docs/whatsapp/business-management-api/authentication-templates/copy-code-button-authentication-templates

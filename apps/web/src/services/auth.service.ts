@@ -59,7 +59,10 @@ export class AuthService {
     messageStatus?: string | null;
   }> {
     const normalized = phone.replace(/\s+/g, "");
-    const { isWhatsAppConfigured } = await import("@/lib/whatsapp");
+    const {
+      isWhatsAppConfigured,
+      assertWhatsAppSenderReady,
+    } = await import("@/lib/whatsapp");
     const whatsappConfigured = isWhatsAppConfigured();
 
     // Fixed DEV_OTP only when WhatsApp is not configured (local/dev fallback).
@@ -68,14 +71,20 @@ export class AuthService {
         ? process.env.DEV_OTP
         : generateOtp(6);
 
+    // Block early when Meta will accept-then-drop (e.g. display name DECLINED).
+    if (whatsappConfigured) {
+      await assertWhatsAppSenderReady();
+    }
+
+    // Send first so a Meta rejection does not leave a usable OTP in the DB.
+    const sent = await this.dispatchWhatsAppOtp(normalized, code);
+
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + OTP_EXPIRY_MINUTES);
 
     await prisma.otpCode.create({
       data: { phone: normalized, code, expiresAt },
     });
-
-    const sent = await this.dispatchWhatsAppOtp(normalized, code);
 
     return {
       success: true,
