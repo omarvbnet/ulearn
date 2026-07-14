@@ -435,7 +435,14 @@ function buildTemplateComponents(code: string) {
 /** Normalize env language to Meta template language codes. */
 function normalizeWhatsAppTemplateLang(lang: string): string {
   const v = lang.trim();
-  const lower = v.toLowerCase();
-  if (lower === "arabic" || lower === "ar_ar" || lower === "ar-ar") return "ar";
+  const lower = v.toLowerCase().replace(/-/g, "_");
+  // Meta UI "Arabic" => API code "ar" (NOT ar_AR / ar_EG / …).
+  if (
+    lower === "arabic" ||
+    lower === "ar" ||
+    lower.startsWith("ar_")
+  ) {
+    return "ar";
+  }
   return v;
 }
