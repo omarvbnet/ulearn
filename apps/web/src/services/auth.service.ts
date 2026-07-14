@@ -57,6 +57,8 @@ export class AuthService {
     expiresIn: number;
     messageId?: string | null;
     messageStatus?: string | null;
+    displayNameStatus?: string | null;
+    warning?: string | null;
   }> {
     const normalized = phone.replace(/\s+/g, "");
     const {
@@ -91,6 +93,8 @@ export class AuthService {
       expiresIn: OTP_EXPIRY_MINUTES * 60,
       messageId: sent?.messageId ?? null,
       messageStatus: sent?.messageStatus ?? null,
+      displayNameStatus: sent?.displayNameStatus ?? null,
+      warning: sent?.warning ?? null,
     };
   }
 

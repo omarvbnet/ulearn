@@ -170,7 +170,13 @@ export async function GET(request: Request) {
   }
   if (nameStatus && nameStatus !== "APPROVED") {
     checklist.push(
-      `CRITICAL: Display name status is ${String(phoneJson.name_status)} (need APPROVED). Meta accepts OTPs then drops them — Insights stay at 0 until name is approved.`
+      `Display name is ${String(phoneJson.name_status)} (APPROVED recommended). Real +964 numbers can still send; Meta 131037 mainly blocks 555 test numbers. Set WHATSAPP_REQUIRE_APPROVED_DISPLAY_NAME=true to hard-block.`
+    );
+  }
+  const phoneConn = String(phoneJson.status || "").toUpperCase();
+  if (phoneConn && phoneConn !== "CONNECTED") {
+    checklist.push(
+      `CRITICAL: Phone status is ${String(phoneJson.status)} (need CONNECTED)`
     );
   }
 

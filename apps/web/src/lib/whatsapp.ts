@@ -128,16 +128,27 @@ export async function assertWhatsAppSenderReady(): Promise<WhatsAppSenderStatus>
   });
 
   const name = (sender.nameStatus || "").toUpperCase();
+  const requireApproved =
+    envFirst("WHATSAPP_REQUIRE_APPROVED_DISPLAY_NAME") === "true";
+  // Error 131037 is for WhatsApp-provided 555 numbers only.
+  // Real business numbers (e.g. +964) can still API-accept OTPs while name is DECLINED.
+  const is555 = (sender.displayPhoneNumber || "").includes("555");
+
   if (name && name !== "APPROVED") {
-    throw new WhatsAppSendError(
-      `WhatsApp display name is ${sender.nameStatus} (need APPROVED). Meta accepts OTP requests then drops them — Insights stay at 0. Fix display name in WhatsApp Manager for ${sender.displayPhoneNumber || "this number"}.`,
-      "WHATSAPP_DISPLAY_NAME_NOT_APPROVED",
-      JSON.stringify({
-        nameStatus: sender.nameStatus,
-        newNameStatus: sender.newNameStatus,
-        displayPhoneNumber: sender.displayPhoneNumber,
-      })
+    console.warn(
+      `[WhatsApp] display name is ${sender.nameStatus} (APPROVED recommended). Continuing send unless WHATSAPP_REQUIRE_APPROVED_DISPLAY_NAME=true.`
     );
+    if (requireApproved || is555) {
+      throw new WhatsAppSendError(
+        `WhatsApp display name is ${sender.nameStatus} (need APPROVED) for ${sender.displayPhoneNumber || "this number"}.`,
+        "WHATSAPP_DISPLAY_NAME_NOT_APPROVED",
+        JSON.stringify({
+          nameStatus: sender.nameStatus,
+          newNameStatus: sender.newNameStatus,
+          displayPhoneNumber: sender.displayPhoneNumber,
+        })
+      );
+    }
   }
 
   if (
@@ -147,6 +158,16 @@ export async function assertWhatsAppSenderReady(): Promise<WhatsAppSenderStatus>
     throw new WhatsAppSendError(
       `WhatsApp phone account_mode is ${sender.accountMode} (need LIVE)`,
       "WHATSAPP_ACCOUNT_NOT_LIVE"
+    );
+  }
+
+  if (
+    sender.status &&
+    sender.status.toUpperCase() !== "CONNECTED"
+  ) {
+    throw new WhatsAppSendError(
+      `WhatsApp phone status is ${sender.status} (need CONNECTED)`,
+      "WHATSAPP_PHONE_NOT_CONNECTED"
     );
   }
 
@@ -321,6 +342,8 @@ export type WhatsAppSendResult = {
   to: string;
   template: string | null;
   lang: string | null;
+  displayNameStatus?: string | null;
+  warning?: string | null;
 };
 
 /**
@@ -377,8 +400,13 @@ export async function sendWhatsAppOtp(
     );
   }
 
-  // Fail fast when Meta will accept-but-drop (display name not approved).
-  await assertWhatsAppSenderReady();
+  // Soft-check sender (warn on DECLINED display name; hard-fail only for 555 / forced).
+  const sender = await assertWhatsAppSenderReady();
+  const displayWarning =
+    sender.nameStatus &&
+    sender.nameStatus.toUpperCase() !== "APPROVED"
+      ? `Display name is ${sender.nameStatus} (APPROVED recommended)`
+      : null;
 
   console.info("[WhatsApp] OTP env keys", getWhatsAppEnvResolution());
   console.info("[WhatsApp] sending template", {
@@ -386,6 +414,7 @@ export async function sendWhatsAppOtp(
     lang: templateLang,
     to: `***${to.slice(-4)}`,
     useButton: shouldIncludeOtpUrlButton(),
+    displayNameStatus: sender.nameStatus,
   });
 
   // Meta Authentication + Copy code payload.
@@ -429,7 +458,19 @@ export async function sendWhatsAppOtp(
     let hint = "";
     if (raw.includes("132001") || raw.includes("does not exist in")) {
       hint =
-        ` Template "${templateName}" was not found for language "${templateLang}". Set WHATSAPP_OTP_TEMPLATE_LANGUAGE (or WHATSAPP_OTP_TEMPLATE_LANG) to the exact code in WhatsApp Manager (often "ar").`;
+        ` Template "${templateName}" was not found for language "${templateLang}". Set WHATSAPP_OTP_TEMPLATE_LANGUAGE to "ar".`;
+    } else if (raw.includes("131042")) {
+      hint =
+        " Meta billing/payment method missing or invalid (error 131042). Add a payment method in WhatsApp Manager.";
+    } else if (raw.includes("131026")) {
+      hint =
+        " Message undeliverable (131026). Recipient may not have WhatsApp or blocked the business.";
+    } else if (raw.includes("131047")) {
+      hint =
+        " Re-engagement required (131047). User must message the business first, or use an approved template.";
+    } else if (raw.includes("131037") || raw.includes("2388103")) {
+      hint =
+        " Display name must be APPROVED before this number can send.";
     }
     throw new WhatsAppSendError(
       `WhatsApp API rejected the OTP message.${hint}`,
@@ -475,12 +516,18 @@ export async function sendWhatsAppOtp(
     );
   }
 
+  console.info(
+    "[WhatsApp] If phone does not receive OTP, check Vercel for [WhatsApp] DELIVERY FAILED within a few seconds (payment 131042, undeliverable 131026, etc.)"
+  );
+
   return {
     messageId,
     messageStatus,
     to: `***${to.slice(-4)}`,
     template: templateName || null,
     lang: templateName ? templateLang : null,
+    displayNameStatus: sender.nameStatus,
+    warning: displayWarning,
   };
 }
 

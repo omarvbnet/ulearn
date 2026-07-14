@@ -31,6 +31,7 @@ export async function POST(request: Request) {
         e.code === "WHATSAPP_DISPLAY_NAME_NOT_APPROVED" ||
         e.code === "WHATSAPP_SEND_FAILED" ||
         e.code === "WHATSAPP_ACCOUNT_NOT_LIVE" ||
+        e.code === "WHATSAPP_PHONE_NOT_CONNECTED" ||
         process.env.NODE_ENV !== "production";
       return error(e.message, 502, e.code, {
         details: exposeDetails ? e.details : undefined,
