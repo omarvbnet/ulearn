@@ -105,6 +105,9 @@ export function NotificationsClient() {
             tokenCount?: number;
             usersWithTokens?: number;
             recipients?: number;
+            sent?: number;
+            failed?: number;
+            lastError?: string;
           }
         | undefined;
       if (push?.requested && !push.fcmConfigured) {
@@ -114,10 +117,20 @@ export function NotificationsClient() {
           `Saved in-app for ${push.recipients ?? 0} users, but none have an FCM token yet (open the app while logged in)`,
           "error"
         );
+      } else if (push?.requested && (push.failed ?? 0) > 0) {
+        const err = push.lastError ?? "unknown";
+        const hint =
+          err.includes("THIRD_PARTY_AUTH") || err.includes("InvalidProviderToken")
+            ? " — upload APNs Auth Key (.p8) in Firebase → Cloud Messaging"
+            : "";
+        toast(
+          `FCM failed ${push.failed}/${push.tokenCount} (${err})${hint}`,
+          "error"
+        );
       } else {
         toast(
           push?.requested
-            ? `Notification sent (push tokens: ${push.tokenCount ?? 0})`
+            ? `Push delivered to FCM: ${push.sent ?? 0}/${push.tokenCount ?? 0}`
             : "Notification sent"
         );
       }

@@ -138,13 +138,25 @@ export class NotificationService {
       }
     }
 
+    let pushSent = 0;
+    let pushFailed = 0;
+    let pushLastError: string | undefined;
+
     for (const user of users) {
       const { title, body } = pickLocale(params.message, user.locale);
 
       if (params.channels.includes("PUSH") && user.fcmTokens.length > 0) {
-        await this.sendPush(user.fcmTokens, title, body, linkData).catch((err) => {
+        try {
+          const result = await this.sendPush(user.fcmTokens, title, body, linkData);
+          pushSent += result.sent;
+          pushFailed += result.failed;
+          if (result.lastError) pushLastError = result.lastError;
+        } catch (err) {
           console.error("[NotificationService] push failed", user.id, err);
-        });
+          pushFailed += user.fcmTokens.length;
+          pushLastError =
+            err instanceof Error ? err.message : "PUSH_EXCEPTION";
+        }
       }
 
       if (params.channels.includes("EMAIL") && user.email) {
@@ -167,12 +179,19 @@ export class NotificationService {
       recipients: users.length,
       usersWithTokens,
       tokenCount,
+      sent: pushSent,
+      failed: pushFailed,
+      lastError: pushLastError,
     };
     if (pushEnabled && !push.fcmConfigured) {
       console.error("[NotificationService] PUSH selected but Firebase service account is not configured");
     } else if (pushEnabled && tokenCount === 0) {
       console.warn(
         `[NotificationService] PUSH selected but no fcmTokens on ${users.length} recipient(s)`
+      );
+    } else if (pushEnabled && pushFailed > 0) {
+      console.error(
+        `[NotificationService] FCM delivery failed for ${pushFailed}/${tokenCount} token(s)${pushLastError ? `: ${pushLastError}` : ""}`
       );
     }
 
@@ -214,11 +233,11 @@ export class NotificationService {
     body: string,
     data?: Record<string, unknown>
   ) {
-    const { invalidTokens } = await sendFcmPush(tokens, title, body, data);
-    if (invalidTokens.length === 0) return;
+    const result = await sendFcmPush(tokens, title, body, data);
+    if (result.invalidTokens.length === 0) return result;
 
     // Drop dead FCM tokens so future broadcasts skip them.
-    for (const bad of invalidTokens) {
+    for (const bad of result.invalidTokens) {
       try {
         const users = await prisma.user.findMany({
           where: { fcmTokens: { has: bad } },
@@ -234,6 +253,7 @@ export class NotificationService {
         console.error("[FCM] prune token failed", err);
       }
     }
+    return result;
   }
 
   private static async sendEmail(to: string, subject: string, html: string) {

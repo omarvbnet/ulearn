@@ -81,6 +81,28 @@ export function isFcmConfigured(): boolean {
   return loadCredentials() !== null;
 }
 
+function parseFcmError(status: number, text: string): string {
+  try {
+    const parsed = JSON.parse(text) as {
+      error?: {
+        status?: string;
+        message?: string;
+        details?: Array<{ errorCode?: string; reason?: string }>;
+      };
+    };
+    const detail = parsed.error?.details?.find((d) => d.errorCode || d.reason);
+    return (
+      detail?.errorCode ||
+      detail?.reason ||
+      parsed.error?.status ||
+      parsed.error?.message ||
+      `HTTP_${status}`
+    );
+  } catch {
+    return text ? text.slice(0, 180) : `HTTP_${status}`;
+  }
+}
+
 /** Send one FCM HTTP v1 message. */
 async function sendToToken(
   accessToken: string,
@@ -89,7 +111,7 @@ async function sendToToken(
   title: string,
   body: string,
   data: Record<string, string>
-): Promise<"ok" | "invalid" | "error"> {
+): Promise<{ status: "ok" | "invalid" | "error"; error?: string }> {
   const res = await fetch(
     `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
     {
@@ -128,20 +150,19 @@ async function sendToToken(
     }
   );
 
-  if (res.ok) return "ok";
+  if (res.ok) return { status: "ok" };
 
   const text = await res.text().catch(() => "");
   console.error(`[FCM] v1 send failed ${res.status}: ${text}`);
+  const error = parseFcmError(res.status, text);
 
-  // Only prune clearly dead device tokens — not generic INVALID_ARGUMENT
-  // (payload/config errors would wipe good tokens).
   const deadToken =
     text.includes('"errorCode": "UNREGISTERED"') ||
     text.includes('"status": "UNREGISTERED"') ||
     text.includes("Requested entity was not found") ||
     (res.status === 404 && text.includes("NOT_FOUND"));
 
-  return deadToken ? "invalid" : "error";
+  return { status: deadToken ? "invalid" : "error", error };
 }
 
 /**
@@ -153,7 +174,13 @@ export async function sendFcmPush(
   title: string,
   body: string,
   data?: Record<string, unknown>
-): Promise<{ sent: number; failed: number; invalidTokens: string[]; configured: boolean }> {
+): Promise<{
+  sent: number;
+  failed: number;
+  invalidTokens: string[];
+  configured: boolean;
+  lastError?: string;
+}> {
   const unique = [...new Set(tokens.filter(Boolean))];
   if (unique.length === 0) {
     return { sent: 0, failed: 0, invalidTokens: [], configured: isFcmConfigured() };
@@ -164,7 +191,13 @@ export async function sendFcmPush(
     console.error(
       "[FCM] Missing Firebase service account credentials — push skipped. Set FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY."
     );
-    return { sent: 0, failed: unique.length, invalidTokens: [], configured: false };
+    return {
+      sent: 0,
+      failed: unique.length,
+      invalidTokens: [],
+      configured: false,
+      lastError: "MISSING_SERVICE_ACCOUNT",
+    };
   }
 
   const stringData: Record<string, string> = {};
@@ -178,30 +211,54 @@ export async function sendFcmPush(
   let sent = 0;
   let failed = 0;
   const invalidTokens: string[] = [];
+  let lastError: string | undefined;
 
   const concurrency = 8;
   for (let i = 0; i < unique.length; i += concurrency) {
     const chunk = unique.slice(i, i + concurrency);
     const results = await Promise.all(
-      chunk.map((token) =>
-        sendToToken(auth.token, auth.projectId, token, title, body, stringData)
-          .then((status) => ({ token, status }))
-          .catch((err) => {
-            console.error("[FCM] send error:", err);
-            return { token, status: "error" as const };
-          })
-      )
+      chunk.map(async (token) => {
+        try {
+          const result = await sendToToken(
+            auth.token,
+            auth.projectId,
+            token,
+            title,
+            body,
+            stringData
+          );
+          return { token, ...result };
+        } catch (err) {
+          console.error("[FCM] send error:", err);
+          return {
+            token,
+            status: "error" as const,
+            error: err instanceof Error ? err.message : "SEND_EXCEPTION",
+          };
+        }
+      })
     );
+
     for (const r of results) {
-      if (r.status === "ok") sent += 1;
-      else failed += 1;
-      if (r.status === "invalid") invalidTokens.push(r.token);
+      if (r.status === "ok") {
+        sent += 1;
+      } else {
+        failed += 1;
+        if (r.error) lastError = r.error;
+        if (r.status === "invalid") invalidTokens.push(r.token);
+      }
     }
   }
 
   console.info(
-    `[FCM] v1 sent ${sent}/${unique.length} (failed ${failed}, invalid ${invalidTokens.length}) project=${auth.projectId}`
+    `[FCM] v1 sent ${sent}/${unique.length} (failed ${failed}, invalid ${invalidTokens.length}) project=${auth.projectId}${lastError ? ` lastError=${lastError}` : ""}`
   );
 
-  return { sent, failed, invalidTokens, configured: true };
+  return {
+    sent,
+    failed,
+    invalidTokens,
+    configured: true,
+    lastError,
+  };
 }
