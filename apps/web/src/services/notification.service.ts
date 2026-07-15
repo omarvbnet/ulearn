@@ -27,6 +27,16 @@ function pickLocale(msg: LocalizedMessage, locale: Locale) {
   return map[locale] ?? map.EN;
 }
 
+/** Drop undefined/null so Prisma JSON / Accelerate don't reject the payload. */
+function sanitizeLinkData(data: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined || value === null || value === "") continue;
+    out[key] = typeof value === "string" ? value : String(value);
+  }
+  return out;
+}
+
 export class NotificationService {
   static async notifyUser(userId: string, message: LocalizedMessage, data?: Record<string, unknown>) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -72,37 +82,49 @@ export class NotificationService {
         ...params.message,
         channels: params.channels,
         target: params.target,
-        countryId: params.countryId,
-        provinceId: params.provinceId,
+        ...(params.countryId ? { countryId: params.countryId } : {}),
+        ...(params.provinceId ? { provinceId: params.provinceId } : {}),
         userIds: params.userIds ?? [],
-        createdById: params.createdById,
+        ...(params.createdById ? { createdById: params.createdById } : {}),
         sentAt: new Date(),
       },
     });
 
     const users = await this.resolveTargets(params);
-    const linkData = params.data ?? {
-      type: "admin",
-      screen: "ads",
-    };
+    const linkData = sanitizeLinkData(
+      params.data ?? {
+        type: "admin",
+        screen: "ads",
+      }
+    );
+
+    // Batch in-app rows to avoid long request times / Accelerate round-trips.
+    if (params.channels.includes("IN_APP") && users.length > 0) {
+      const rows = users.map((user) => {
+        const { title, body } = pickLocale(params.message, user.locale);
+        return {
+          userId: user.id,
+          notificationId: notification.id,
+          title,
+          body,
+          data: linkData as Prisma.InputJsonValue,
+        };
+      });
+      const chunkSize = 200;
+      for (let i = 0; i < rows.length; i += chunkSize) {
+        await prisma.userNotification.createMany({
+          data: rows.slice(i, i + chunkSize),
+        });
+      }
+    }
 
     for (const user of users) {
       const { title, body } = pickLocale(params.message, user.locale);
 
-      if (params.channels.includes("IN_APP")) {
-        await prisma.userNotification.create({
-          data: {
-            userId: user.id,
-            notificationId: notification.id,
-            title,
-            body,
-            data: linkData as Prisma.InputJsonValue,
-          },
-        });
-      }
-
       if (params.channels.includes("PUSH") && user.fcmTokens.length > 0) {
-        await this.sendPush(user.fcmTokens, title, body, linkData);
+        await this.sendPush(user.fcmTokens, title, body, linkData).catch((err) => {
+          console.error("[NotificationService] push failed", user.id, err);
+        });
       }
 
       if (params.channels.includes("EMAIL") && user.email) {
@@ -110,7 +132,9 @@ export class NotificationService {
           user.email,
           title,
           `<div style="font-family:sans-serif;padding:24px"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p></div>`
-        );
+        ).catch((err) => {
+          console.error("[NotificationService] email failed", user.id, err);
+        });
       }
     }
 
