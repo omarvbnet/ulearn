@@ -50,6 +50,7 @@ class CourseInlinePlayer extends StatefulWidget {
     this.playlist = const [],
     this.onSelectPlaylistItem,
     this.borderRadius = 14,
+    this.expand = false,
   });
 
   final String url;
@@ -68,6 +69,9 @@ class CourseInlinePlayer extends StatefulWidget {
   final ValueChanged<String>? onSelectPlaylistItem;
   /// Corner radius for the inline player frame (0 = edge-to-edge YouTube style).
   final double borderRadius;
+  /// Fill parent bounds instead of forcing an inner 16:9 AspectRatio
+  /// (needed in landscape when the parent already sized the stage).
+  final bool expand;
 
   @override
   State<CourseInlinePlayer> createState() => _CourseInlinePlayerState();
@@ -318,167 +322,184 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     }
   }
 
+  Widget _frame({required Widget child}) {
+    final clipped = ClipRRect(
+      borderRadius: BorderRadius.circular(widget.borderRadius),
+      child: child,
+    );
+    if (widget.expand) {
+      return SizedBox.expand(child: clipped);
+    }
+    return AspectRatio(aspectRatio: 16 / 9, child: clipped);
+  }
+
+  /// Texture/platform views often collapse to zero size under loose
+  /// constraints (especially after rotate) — pin intrinsic video size then fit.
+  Widget _videoSurface() {
+    final c = _controller!;
+    return ValueListenableBuilder<VideoPlayerValue>(
+      valueListenable: c,
+      builder: (context, value, _) {
+        final ar = value.aspectRatio <= 0 ? 16 / 9 : value.aspectRatio;
+        return ColoredBox(
+          color: Colors.black,
+          child: FittedBox(
+            fit: BoxFit.contain,
+            child: SizedBox(
+              width: ar * 1000,
+              height: 1000,
+              child: VideoPlayer(c),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return AspectRatio(
-        aspectRatio: 16 / 9,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(widget.borderRadius),
-          child: const SkeletonVideoPlayer(),
-        ),
-      );
+      return _frame(child: const SkeletonVideoPlayer());
     }
     if (_error != null) {
-      return AspectRatio(
-        aspectRatio: 16 / 9,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(widget.borderRadius),
-          child: Container(
-            color: AppTheme.card,
-            child: Center(
-              child: Text(_error!, style: TextStyle(color: AppTheme.muted)),
-            ),
+      return _frame(
+        child: Container(
+          color: AppTheme.card,
+          child: Center(
+            child: Text(_error!, style: TextStyle(color: AppTheme.muted)),
           ),
         ),
       );
     }
 
-    final radius = widget.borderRadius;
-    return AspectRatio(
-      aspectRatio: 16 / 9,
+    return _frame(
       child: GestureDetector(
         onTap: () => setState(() => _showControls = !_showControls),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(radius),
-          child: ColoredBox(
-            color: Colors.black,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                RepaintBoundary(
-                  child: Center(child: VideoPlayer(_controller!)),
-                ),
-                if (_protection != null) const VideoBrandLogo(markSize: 24),
-                if (_protection != null) DynamicWatermark(controller: _protection!),
-                if (_protection != null) CastingIdentityBanner(controller: _protection!),
-                if (_protection != null)
-                  ScreenshotBlockOverlay(visible: _protection!.screenshotBlocked),
-                AnimatedOpacity(
-                  opacity: _showControls ? 1 : 0,
-                  duration: const Duration(milliseconds: 220),
-                  child: ValueListenableBuilder<VideoPlayerValue>(
-                    valueListenable: _controller!,
-                    builder: (context, _, child) => _ControlsOverlay(
-                      controller: _controller!,
-                      protection: _protection,
-                      speed: _speed,
-                      onSpeed: (s) {
-                        setState(() => _speed = s);
-                        _controller!.setPlaybackSpeed(s);
-                      },
-                      onFullscreen: _enterFullscreen,
-                      onCast: _openCast,
-                    ),
+        child: ColoredBox(
+          color: Colors.black,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              RepaintBoundary(child: _videoSurface()),
+              if (_protection != null) const VideoBrandLogo(markSize: 24),
+              if (_protection != null) DynamicWatermark(controller: _protection!),
+              if (_protection != null) CastingIdentityBanner(controller: _protection!),
+              if (_protection != null)
+                ScreenshotBlockOverlay(visible: _protection!.screenshotBlocked),
+              AnimatedOpacity(
+                opacity: _showControls ? 1 : 0,
+                duration: const Duration(milliseconds: 220),
+                child: ValueListenableBuilder<VideoPlayerValue>(
+                  valueListenable: _controller!,
+                  builder: (context, _, child) => _ControlsOverlay(
+                    controller: _controller!,
+                    protection: _protection,
+                    speed: _speed,
+                    onSpeed: (s) {
+                      setState(() => _speed = s);
+                      _controller!.setPlaybackSpeed(s);
+                    },
+                    onFullscreen: _enterFullscreen,
+                    onCast: _openCast,
                   ),
                 ),
-                AnimatedOpacity(
-                  opacity: _showCompleteFlash ? 1 : 0,
-                  duration: const Duration(milliseconds: 280),
-                  child: IgnorePointer(
-                    child: Container(
-                      color: Colors.black54,
-                      alignment: Alignment.center,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                        decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.6)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.check_circle_rounded, color: Colors.greenAccent),
-                            const SizedBox(width: 10),
-                            Text(
-                              context.l10n.storeVideoCompleted,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                if (_previewLimitHit)
-                  Container(
-                    color: Colors.black.withValues(alpha: 0.72),
+              ),
+              AnimatedOpacity(
+                opacity: _showCompleteFlash ? 1 : 0,
+                duration: const Duration(milliseconds: 280),
+                child: IgnorePointer(
+                  child: Container(
+                    color: Colors.black54,
                     alignment: Alignment.center,
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.lock_clock_rounded, color: AppTheme.accent, size: 40),
-                        const SizedBox(height: 12),
-                        Text(
-                          context.l10n.t('mobile.store.previewEnded'),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          context.l10n.t('mobile.store.previewEndedHint'),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white70, height: 1.35),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (_showResumeChip)
-                  Positioned(
-                    top: 12,
-                    left: 12,
-                    child: AnimatedOpacity(
-                      opacity: _showResumeChip ? 1 : 0,
-                      duration: const Duration(milliseconds: 250),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.65),
-                          borderRadius: BorderRadius.circular(99),
-                          border: Border.all(color: AppTheme.accent.withValues(alpha: 0.5)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.history_rounded, size: 14, color: AppTheme.accent),
-                            const SizedBox(width: 6),
-                            Text(
-                              context.l10n.t('mobile.store.resumeFrom', {
-                                'time': _formatResumeTime(widget.initialPositionSec ?? 0),
-                              }),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.6)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.check_circle_rounded, color: Colors.greenAccent),
+                          const SizedBox(width: 10),
+                          Text(
+                            context.l10n.storeVideoCompleted,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-              ],
-            ),
+                ),
+              ),
+              if (_previewLimitHit)
+                Container(
+                  color: Colors.black.withValues(alpha: 0.72),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.lock_clock_rounded, color: AppTheme.accent, size: 40),
+                      const SizedBox(height: 12),
+                      Text(
+                        context.l10n.t('mobile.store.previewEnded'),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        context.l10n.t('mobile.store.previewEndedHint'),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white70, height: 1.35),
+                      ),
+                    ],
+                  ),
+                ),
+              if (_showResumeChip)
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  child: AnimatedOpacity(
+                    opacity: _showResumeChip ? 1 : 0,
+                    duration: const Duration(milliseconds: 250),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(99),
+                        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.5)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.history_rounded, size: 14, color: AppTheme.accent),
+                          const SizedBox(width: 6),
+                          Text(
+                            context.l10n.t('mobile.store.resumeFrom', {
+                              'time': _formatResumeTime(widget.initialPositionSec ?? 0),
+                            }),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),

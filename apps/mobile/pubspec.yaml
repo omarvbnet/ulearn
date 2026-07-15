@@ -38,6 +38,7 @@ dependencies:
   gal: ^2.3.1
   flutter_markdown: ^0.7.7+1
   in_app_purchase: ^3.2.1
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:

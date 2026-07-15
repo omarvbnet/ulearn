@@ -119,12 +119,13 @@ class PushNotificationService {
     final body = message.notification?.body ??
         message.data['body']?.toString() ??
         '';
+    final payload = parseData(message.data);
     ScaffoldMessenger.of(ctx).showSnackBar(
       SnackBar(
         content: Text('$title\n$body'),
         action: SnackBarAction(
           label: 'Open',
-          onPressed: () => NotificationRouter.open(ctx, message.data),
+          onPressed: () => NotificationRouter.open(ctx, payload),
         ),
         duration: const Duration(seconds: 5),
       ),
@@ -134,16 +135,24 @@ class PushNotificationService {
   void _onOpened(RemoteMessage message) {
     final ctx = _navigatorKey?.currentState?.context;
     if (ctx == null || !ctx.mounted) return;
-    NotificationRouter.open(ctx, message.data);
+    NotificationRouter.open(ctx, parseData(message.data));
   }
 
-  /// Parse `data` JSON from in-app UserNotification row.
+  /// Parse `data` JSON from in-app UserNotification row or FCM map.
   static Map<String, dynamic> parseData(dynamic raw) {
-    if (raw is Map) return Map<String, dynamic>.from(raw);
+    if (raw is Map) {
+      return {
+        for (final e in raw.entries) e.key.toString(): e.value,
+      };
+    }
     if (raw is String && raw.trim().isNotEmpty) {
       try {
         final decoded = jsonDecode(raw);
-        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+        if (decoded is Map) {
+          return {
+            for (final e in decoded.entries) e.key.toString(): e.value,
+          };
+        }
       } catch (_) {}
     }
     return {};

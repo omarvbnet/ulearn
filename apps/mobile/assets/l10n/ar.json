@@ -354,7 +354,10 @@
       "deleteAccountConfirm": "احذف حسابي",
       "deleteAccountScheduled": "تم جدولة حذف حسابك. إذا لم تسجّل الدخول لمدة 7 أيام، ستُزال بياناتك الشخصية نهائياً. سجّل الدخول خلال 7 أيام للإلغاء.",
       "deleteAccountTeacherSubmitted": "تم إرسال طلب الحذف. يجب أن يوافق مسؤول U Learn على حذف حساب المعلّم. ستبقى لديك صلاحية الوصول حتى ذلك الحين.",
-      "deleteAccountFailed": "تعذّر إرسال طلب الحذف. حاول مرة أخرى."
+      "deleteAccountFailed": "تعذّر إرسال طلب الحذف. حاول مرة أخرى.",
+      "contactSupport": "تواصل مع الدعم",
+      "contactSupportHint": "محادثة عبر واتساب",
+      "contactSupportUnavailable": "رقم الدعم غير متاح حالياً. حاول مرة أخرى لاحقاً."
     },
     "roles": {
       "student": "طالب",

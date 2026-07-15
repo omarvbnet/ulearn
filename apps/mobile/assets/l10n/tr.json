@@ -354,7 +354,10 @@
       "deleteAccountConfirm": "Hesabımı sil",
       "deleteAccountScheduled": "Hesabınız silinmek üzere planlandı. 7 gün giriş yapmazsanız kişisel verileriniz kalıcı olarak kaldırılır. İptal için 7 gün içinde giriş yapın.",
       "deleteAccountTeacherSubmitted": "Silme talebiniz gönderildi. Öğretmen hesabı silme için bir U Learn yöneticisinin onayı gerekir. O zamana kadar erişiminiz devam eder.",
-      "deleteAccountFailed": "Silme talebi gönderilemedi. Lütfen tekrar deneyin."
+      "deleteAccountFailed": "Silme talebi gönderilemedi. Lütfen tekrar deneyin.",
+      "contactSupport": "Destek ile iletişime geç",
+      "contactSupportHint": "WhatsApp üzerinden yazın",
+      "contactSupportUnavailable": "Destek iletişimi şu an kullanılamıyor. Lütfen daha sonra tekrar deneyin."
     },
     "roles": {
       "student": "Öğrenci",

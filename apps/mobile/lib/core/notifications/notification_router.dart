@@ -6,23 +6,29 @@ import 'package:ulearn/features/store/course_detail_screen.dart';
 
 /// Routes notification payloads (push + in-app list) to the correct screen.
 ///
-/// Supported `type` values (also accepts aliases via `screen`):
-/// - admin / ads / advertisement / offer → [AdsOffersScreen]
-/// - comment → reel + comments sheet (reply)
-/// - reel / like / save → reel video
-/// - question / answer → course video + Q&A (question/answer ids)
-/// - course / subscription / lesson → course (optional lesson)
+/// Routing priority:
+/// 1. Explicit types (comment → reel+comments, question/answer → course Q&A, …)
+/// 2. Payload IDs (shortVideoId / courseId / adId) when type is missing/ambiguous
+/// 3. Ads board only for explicit admin/ads types — never as a blind default
 class NotificationRouter {
   static String? _str(Map<String, dynamic> data, String key) {
     final v = data[key];
     if (v == null) return null;
     final s = v.toString().trim();
-    return s.isEmpty ? null : s;
+    return s.isEmpty || s == 'null' || s == 'undefined' ? null : s;
   }
 
-  static void open(BuildContext context, Map<String, dynamic> data) {
-    final type =
-        (_str(data, 'type') ?? _str(data, 'screen') ?? '').toLowerCase();
+  static void open(BuildContext context, Map<String, dynamic> raw) {
+    // Normalize FCM / JSON maps (values may be non-String).
+    final data = <String, dynamic>{
+      for (final e in raw.entries) e.key.toString(): e.value,
+    };
+
+    final typeRaw = (_str(data, 'type') ?? '').toLowerCase();
+    final screenRaw = (_str(data, 'screen') ?? '').toLowerCase();
+    // Prefer explicit type; use screen only as a hint when type is empty.
+    final type = typeRaw.isNotEmpty ? typeRaw : screenRaw;
+
     final courseId = _str(data, 'courseId');
     final lessonId = _str(data, 'lessonId');
     final questionId = _str(data, 'questionId');
@@ -31,14 +37,9 @@ class NotificationRouter {
     final commentId = _str(data, 'commentId');
     final adId = _str(data, 'adId');
 
-    // ── Admin advertisements / offers ─────────────────────────────
-    if (_isAdsType(type)) {
-      _openAds(context, adId);
-      return;
-    }
-
-    // ── Reel comment → open video + comments (reply) ──────────────
-    if (type == 'comment' || type == 'comments') {
+    // ── Reel comments / reply ─────────────────────────────────────
+    if (_isCommentType(type) ||
+        (commentId != null && shortVideoId != null)) {
       _openReel(
         context,
         shortVideoId: shortVideoId,
@@ -48,26 +49,8 @@ class NotificationRouter {
       return;
     }
 
-    // ── Reel like / save / generic reel ───────────────────────────
-    if (type == 'reel' ||
-        type == 'reels' ||
-        type == 'like' ||
-        type == 'save' ||
-        type == 'favorite') {
-      if (courseId != null && shortVideoId == null) {
-        _openCourse(context, courseId: courseId, lessonId: lessonId);
-        return;
-      }
-      _openReel(
-        context,
-        shortVideoId: shortVideoId,
-        openComments: false,
-      );
-      return;
-    }
-
-    // ── Lesson Q&A: question / answer ─────────────────────────────
-    if (type == 'question' || type == 'answer' || type == 'qa') {
+    // ── Lesson Q&A ────────────────────────────────────────────────
+    if (_isQaType(type) || questionId != null || answerId != null) {
       if (courseId != null) {
         _openCourse(
           context,
@@ -81,19 +64,15 @@ class NotificationRouter {
       }
     }
 
-    // ── Subscription (teacher notified of student purchase) ───────
-    if (type == 'subscription' || type == 'purchase' || type == 'subscriber') {
-      if (courseId != null) {
-        _openCourse(context, courseId: courseId, lessonId: lessonId);
-        return;
-      }
+    // ── Subscription / course purchase unlock ─────────────────────
+    if (_isSubscriptionType(type) && courseId != null) {
+      _openCourse(context, courseId: courseId, lessonId: lessonId);
+      return;
     }
 
-    // ── Course / lesson update / course like ──────────────────────
-    if (type == 'course' ||
-        type == 'lesson' ||
-        type == 'video' ||
-        (courseId != null)) {
+    // ── Course / lesson (explicit or ID present) ──────────────────
+    if (_isCourseType(type) ||
+        (courseId != null && shortVideoId == null && !_isReelEngagement(type))) {
       if (courseId != null) {
         _openCourse(
           context,
@@ -107,8 +86,31 @@ class NotificationRouter {
       }
     }
 
-    // Fallback: ads / offers board
-    _openAds(context, adId);
+    // ── Reel like / save / generic reel ───────────────────────────
+    if (_isReelEngagement(type) || shortVideoId != null) {
+      // Course-video like: type=like + courseId, no shortVideoId
+      if (courseId != null && shortVideoId == null && type == 'like') {
+        _openCourse(context, courseId: courseId, lessonId: lessonId);
+        return;
+      }
+      _openReel(
+        context,
+        shortVideoId: shortVideoId,
+        openComments: false,
+      );
+      return;
+    }
+
+    // ── Ads / offers (explicit only) ──────────────────────────────
+    if (_isAdsType(type) || adId != null) {
+      _openAds(context, adId);
+      return;
+    }
+
+    // Unknown / empty payload — do not dump users on the ads board.
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(content: Text('Notification opened')),
+    );
   }
 
   static bool _isAdsType(String type) =>
@@ -118,6 +120,25 @@ class NotificationRouter {
       type == 'advertisements' ||
       type == 'offer' ||
       type == 'offers';
+
+  static bool _isCommentType(String type) =>
+      type == 'comment' || type == 'comments';
+
+  static bool _isQaType(String type) =>
+      type == 'question' || type == 'answer' || type == 'qa';
+
+  static bool _isSubscriptionType(String type) =>
+      type == 'subscription' || type == 'purchase' || type == 'subscriber';
+
+  static bool _isCourseType(String type) =>
+      type == 'course' || type == 'lesson' || type == 'video';
+
+  static bool _isReelEngagement(String type) =>
+      type == 'reel' ||
+      type == 'reels' ||
+      type == 'like' ||
+      type == 'save' ||
+      type == 'favorite';
 
   static void _openAds(BuildContext context, String? adId) {
     Navigator.of(context).push(

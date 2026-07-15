@@ -355,7 +355,10 @@
       "deleteAccountConfirm": "Delete my account",
       "deleteAccountScheduled": "Your account is scheduled for deletion. If you do not log in for 7 days, your personal data will be permanently removed. Log in within 7 days to cancel.",
       "deleteAccountTeacherSubmitted": "Your deletion request was submitted. A U Learn administrator must approve teacher account deletion. You will keep access until then.",
-      "deleteAccountFailed": "Could not submit deletion request. Please try again."
+      "deleteAccountFailed": "Could not submit deletion request. Please try again.",
+      "contactSupport": "Contact support",
+      "contactSupportHint": "Chat with us on WhatsApp",
+      "contactSupportUnavailable": "Support contact is not available right now. Please try again later."
     },
     "roles": {
       "student": "Student",

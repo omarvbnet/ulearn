@@ -28,6 +28,7 @@ import 'package:ulearn/features/profile/privacy_policy_screen.dart';
 import 'package:ulearn/features/store/teacher_studio_screen.dart';
 import 'package:ulearn/features/subscriptions/subscriptions_screen.dart';
 import 'package:ulearn/core/widgets/glass.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -618,6 +619,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
           index: user.role == 'TEACHER' || user.role == 'STUDENT' ? 6 : 5,
           child: Card(
             child: ListTile(
+              leading: Icon(Icons.chat_outlined, color: AppTheme.accent),
+              title: Text(l10n.t('mobile.profile.contactSupport')),
+              subtitle: Text(
+                l10n.t('mobile.profile.contactSupportHint'),
+                style: TextStyle(color: AppTheme.muted, fontSize: 12),
+              ),
+              trailing: Icon(Icons.chevron_right, color: AppTheme.muted),
+              onTap: () => _openWhatsAppSupport(context),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        StaggeredItem(
+          index: user.role == 'TEACHER' || user.role == 'STUDENT' ? 7 : 6,
+          child: Card(
+            child: ListTile(
               leading: Icon(Icons.privacy_tip_outlined, color: AppTheme.accent),
               title: Text(l10n.t('mobile.privacy.title')),
               subtitle: Text(
@@ -633,7 +650,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         const SizedBox(height: 16),
         StaggeredItem(
-          index: user.role == 'TEACHER' || user.role == 'STUDENT' ? 7 : 6,
+          index: user.role == 'TEACHER' || user.role == 'STUDENT' ? 8 : 7,
           child: Card(
             child: ListTile(
               leading: const Icon(Icons.delete_forever_outlined, color: Colors.redAccent),
@@ -651,7 +668,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         const SizedBox(height: 16),
         StaggeredItem(
-          index: user.role == 'TEACHER' || user.role == 'STUDENT' ? 8 : 7,
+          index: user.role == 'TEACHER' || user.role == 'STUDENT' ? 9 : 8,
           child: Card(
             child: ListTile(
               leading: const Icon(Icons.logout, color: Colors.redAccent),
@@ -687,6 +704,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       ],
     );
+  }
+
+  Future<void> _openWhatsAppSupport(BuildContext context) async {
+    final l10n = context.l10n;
+    try {
+      final data = await context.read<ApiClient>().get('/api/support/contact');
+      final urlStr = data['whatsappUrl'] as String?;
+      if (urlStr == null || urlStr.isEmpty) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.t('mobile.profile.contactSupportUnavailable'))),
+        );
+        return;
+      }
+      final uri = Uri.parse(urlStr);
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.t('mobile.profile.contactSupportUnavailable'))),
+        );
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.t('mobile.profile.contactSupportUnavailable'))),
+      );
+    }
   }
 
   Future<void> _confirmDeleteAccount(BuildContext context, String role) async {

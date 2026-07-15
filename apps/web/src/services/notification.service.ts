@@ -43,18 +43,21 @@ export class NotificationService {
     if (!user) return;
 
     const { title, body } = pickLocale(message, user.locale);
+    const linkData = data ? sanitizeLinkData(data) : undefined;
 
     await prisma.userNotification.create({
       data: {
         userId,
         title,
         body,
-        data: (data as Prisma.InputJsonValue) ?? undefined,
+        ...(linkData && Object.keys(linkData).length
+          ? { data: linkData as Prisma.InputJsonValue }
+          : {}),
       },
     });
 
     if (user.fcmTokens.length > 0) {
-      await this.sendPush(user.fcmTokens, title, body, data);
+      await this.sendPush(user.fcmTokens, title, body, linkData);
     }
 
     if (user.email) {

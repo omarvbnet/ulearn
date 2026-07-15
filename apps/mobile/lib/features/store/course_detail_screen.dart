@@ -702,7 +702,10 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     );
   }
 
-  /// Fixed 16:9 YouTube-style stage shared by video, quiz, and documents.
+  /// Fixed stage shared by video, quiz, and documents.
+  /// Portrait uses a slightly taller-than-16:9 frame for easier watching.
+  static const double _portraitStageAspect = 16 / 10;
+
   Widget _buildPlayerStage({
     required List<Map<String, dynamic>> lessons,
     required bool unlocked,
@@ -729,6 +732,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           activeId: activeId,
           l10n: l10n,
           edgeToEdge: edgeToEdge,
+          expandPlayer: true,
         ),
       ),
     );
@@ -742,7 +746,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         child: ColoredBox(
           color: Colors.black,
           child: AspectRatio(
-            aspectRatio: 16 / 9,
+            aspectRatio: _portraitStageAspect,
             child: stageBody,
           ),
         ),
@@ -758,6 +762,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     required String? activeId,
     required dynamic l10n,
     required bool edgeToEdge,
+    bool expandPlayer = false,
   }) {
     if (_playerStage == _PlayerStage.quiz && _stageQuiz != null) {
       return QuizInlinePanel(
@@ -806,6 +811,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         title: active?['title']?.toString() ?? l10n.t('student.videos'),
         lessonId: activeId,
         borderRadius: edgeToEdge ? 0 : 14,
+        expand: expandPlayer,
         initiallyCompleted: active != null && _isLessonCompleted(active),
         initialPositionSec: active != null && !_isLessonCompleted(active)
             ? (active['watchPositionSec'] as num?)?.toInt()
@@ -993,34 +999,24 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           child: Column(
             children: [
               Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final maxW = constraints.maxWidth;
-                    final maxH = constraints.maxHeight;
-                    final heightIfFullWidth = maxW * 9 / 16;
-                    final width = heightIfFullWidth <= maxH
-                        ? maxW
-                        : maxH * 16 / 9;
-                    final height = width * 9 / 16;
-                    return Center(
-                      child: SizedBox(
-                        width: width,
-                        height: height,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: _buildStageContent(
-                            lessons: lessons,
-                            unlocked: unlocked,
-                            active: active,
-                            activeUrl: activeUrl,
-                            activeId: activeId,
-                            l10n: l10n,
-                            edgeToEdge: true,
-                          ),
-                        ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: ColoredBox(
+                      color: Colors.black,
+                      child: _buildStageContent(
+                        lessons: lessons,
+                        unlocked: unlocked,
+                        active: active,
+                        activeUrl: activeUrl,
+                        activeId: activeId,
+                        l10n: l10n,
+                        edgeToEdge: true,
+                        expandPlayer: true,
                       ),
-                    );
-                  },
+                    ),
+                  ),
                 ),
               ),
               _buildNowPlayingStrip(

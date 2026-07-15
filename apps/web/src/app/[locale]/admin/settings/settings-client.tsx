@@ -35,6 +35,7 @@ export function SettingsClient() {
   const [excludeCertUsers, setExcludeCertUsers] = useState(true);
   const [inactivityDays, setInactivityDays] = useState("30");
   const [otpExpiryMin, setOtpExpiryMin] = useState("5");
+  const [supportWhatsApp, setSupportWhatsApp] = useState("");
 
   useEffect(() => {
     fetch("/api/admin/settings").then(async (r) => {
@@ -54,6 +55,16 @@ export function SettingsClient() {
           setExcludeCertUsers(Boolean(map.exclude_certificate_from_global_expiry));
         if (map.inactivity_days) setInactivityDays(String(map.inactivity_days));
         if (map.otp_expiry_minutes) setOtpExpiryMin(String(map.otp_expiry_minutes));
+        if (map.support_whatsapp_phone !== undefined && map.support_whatsapp_phone !== null) {
+          const v = map.support_whatsapp_phone;
+          setSupportWhatsApp(
+            typeof v === "string"
+              ? v
+              : typeof v === "object" && v !== null && "phone" in (v as object)
+                ? String((v as { phone?: unknown }).phone ?? "")
+                : String(v)
+          );
+        }
       }
       setLoading(false);
     });
@@ -159,6 +170,35 @@ export function SettingsClient() {
           onClick={() => save("otp_expiry_minutes", Number(otpExpiryMin), "OTP expiry")}
         >
           Save
+        </Button>
+      </Card>
+
+      <Card className="space-y-4">
+        <div>
+          <h3 className="font-semibold">Contact support (WhatsApp)</h3>
+          <p className="mt-1 text-sm text-muted">
+            Phone shown in the mobile Profile → Contact support. Use full international format
+            (e.g. +9647701234567). Opens WhatsApp chat for the user.
+          </p>
+        </div>
+        <Input
+          label="WhatsApp number"
+          value={supportWhatsApp}
+          onChange={(e) => setSupportWhatsApp(e.target.value)}
+          placeholder="+9647701234567"
+          dir="ltr"
+        />
+        <Button
+          disabled={saving === "support_whatsapp_phone"}
+          onClick={() =>
+            save(
+              "support_whatsapp_phone",
+              supportWhatsApp.trim(),
+              "Support WhatsApp number"
+            )
+          }
+        >
+          Save Support Number
         </Button>
       </Card>
 
