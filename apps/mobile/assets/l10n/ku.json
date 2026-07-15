@@ -273,7 +273,13 @@
       "awaitingPayment": "چاوەڕێی پشتڕاستکردنەوەی پارەدان",
       "continueWatching": "بەردەوامبوون لە بینین",
       "resumeCourse": "لەو شوێنەوە دەستپێبکەوە کە وەستایت",
-      "allInsights": "هەموو تێڕوانینەکانم"
+      "allInsights": "هەموو تێڕوانینەکانم",
+      "courseGroups": "کۆمەڵەکانی کۆرس",
+      "groupCourseCount": "{count} کۆرس",
+      "groupIncludes": "کۆرسەکانی ناوەوە",
+      "groupTotal": "کۆی پاکێج",
+      "groupUnlocked": "هەموو کۆرسەکانی ئەم کۆمەڵەیە کراونەتەوە",
+      "groupAlreadyOwned": "تۆ پێشتر خاوەنی ئەم کۆمەڵەیەیت"
     },
     "profile": {
       "tapChangePhoto": "بۆ گۆڕینی وێنە دەست لێبدە",

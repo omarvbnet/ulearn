@@ -15,7 +15,10 @@ export function error(
   return NextResponse.json({ error: message, code, ...extra }, { status });
 }
 
-export async function requireAuth(roles?: UserRole[]): Promise<
+export async function requireAuth(
+  roles?: UserRole[],
+  options?: { requireApproved?: boolean }
+): Promise<
   | { session: SessionPayload; error?: never }
   | { session?: never; error: NextResponse }
 > {
@@ -25,6 +28,11 @@ export async function requireAuth(roles?: UserRole[]): Promise<
   }
   if (roles && !roles.includes(session.role)) {
     return { error: error("Forbidden", 403, "FORBIDDEN") };
+  }
+  if (options?.requireApproved && session.status !== "APPROVED") {
+    return {
+      error: error("Account pending approval", 403, "ACCOUNT_PENDING"),
+    };
   }
   return { session };
 }

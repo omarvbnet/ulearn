@@ -50,6 +50,8 @@ export async function POST(
       answererName: answerer?.fullLegalName ?? "Someone",
       courseId: question.lesson.courseId,
       lessonId: question.lesson.id,
+      questionId: id,
+      answerId: answer.id,
     });
   }
 

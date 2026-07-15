@@ -47,6 +47,9 @@ class _LoginScreenState extends State<LoginScreen>
       duration: const Duration(milliseconds: 420),
     );
     _otpCtrl.addListener(_onOtpChanged);
+    _otpFocus.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   void _onOtpChanged() {
@@ -449,110 +452,132 @@ class _LoginScreenState extends State<LoginScreen>
           ),
         ),
         const SizedBox(height: 20),
-        AutofillGroup(
-          child: SizedBox(
-            height: 54,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Directionality(
-                  textDirection: TextDirection.ltr,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: List.generate(6, (i) {
-                      final filled = i < code.length;
-                      final isCurrent = i == code.length;
-                      return AnimatedContainer(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Stack(
+            children: [
+              Row(
+                children: List.generate(6, (i) {
+                  final filled = i < code.length;
+                  final isCurrent = i == code.length && _otpFocus.hasFocus;
+                  return Expanded(
+                    child: Padding(
+                      padding: EdgeInsetsDirectional.only(
+                        end: i == 5 ? 0 : 8,
+                      ),
+                      child: AnimatedContainer(
                         duration: const Duration(milliseconds: 200),
                         curve: Curves.easeOut,
-                        width: 44,
-                        height: 54,
+                        height: 52,
                         decoration: BoxDecoration(
-                          color: const Color(0xFF0A0A16),
+                          color: Colors.white.withValues(alpha: 0.04),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: isCurrent && _otpFocus.hasFocus
+                            color: isCurrent
                                 ? AppTheme.accent
                                 : filled
-                                    ? AppTheme.primary.withValues(alpha: 0.7)
+                                    ? AppTheme.primary.withValues(alpha: 0.75)
                                     : AppTheme.cardBorder,
-                            width: isCurrent && _otpFocus.hasFocus ? 1.8 : 1,
+                            width: isCurrent ? 1.8 : 1,
                           ),
-                          boxShadow: isCurrent && _otpFocus.hasFocus
+                          boxShadow: isCurrent
                               ? [
                                   BoxShadow(
-                                    color:
-                                        AppTheme.accent.withValues(alpha: 0.25),
+                                    color: AppTheme.accent
+                                        .withValues(alpha: 0.22),
                                     blurRadius: 10,
                                   ),
                                 ]
                               : null,
                         ),
                         child: Center(
-                          child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 150),
-                            transitionBuilder: (child, anim) => ScaleTransition(
-                              scale: anim,
-                              child: child,
-                            ),
-                            child: Text(
-                              filled ? code[i] : '',
-                              key: ValueKey(filled ? code[i] : 'empty$i'),
-                              style: TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.foreground,
-                              ),
+                          child: Text(
+                            filled ? code[i] : '',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w700,
+                              height: 1,
+                              color: AppTheme.foreground,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ],
                             ),
                           ),
                         ),
-                      );
-                    }),
-                  ),
-                ),
-                // Transparent field on top so keyboard paste / SMS autofill work.
-                Positioned.fill(
-                  child: TextField(
-                    controller: _otpCtrl,
-                    focusNode: _otpFocus,
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.done,
-                    autofocus: true,
-                    enableSuggestions: false,
-                    autocorrect: false,
-                    showCursor: false,
-                    maxLength: 6,
-                    autofillHints: const [AutofillHints.oneTimeCode],
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
-                      LengthLimitingTextInputFormatter(6),
-                    ],
-                    style: const TextStyle(
-                      color: Colors.transparent,
-                      fontSize: 1,
-                      letterSpacing: 40,
+                      ),
                     ),
-                    cursorColor: Colors.transparent,
-                    decoration: const InputDecoration(
-                      counterText: '',
+                  );
+                }),
+              ),
+              // Invisible input — filled:false so theme never paints a black box.
+              Positioned.fill(
+                child: Theme(
+                  data: Theme.of(context).copyWith(
+                    inputDecorationTheme: const InputDecorationTheme(
+                      filled: false,
                       border: InputBorder.none,
                       enabledBorder: InputBorder.none,
                       focusedBorder: InputBorder.none,
                       contentPadding: EdgeInsets.zero,
+                      isDense: true,
                     ),
-                    onTap: () => _otpFocus.requestFocus(),
+                    textSelectionTheme: const TextSelectionThemeData(
+                      cursorColor: Colors.transparent,
+                      selectionColor: Colors.transparent,
+                      selectionHandleColor: Colors.transparent,
+                    ),
+                  ),
+                  child: AutofillGroup(
+                    child: TextField(
+                      controller: _otpCtrl,
+                      focusNode: _otpFocus,
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.done,
+                      autofocus: true,
+                      enableSuggestions: false,
+                      autocorrect: false,
+                      showCursor: false,
+                      cursorWidth: 0,
+                      maxLength: 6,
+                      autofillHints: const [AutofillHints.oneTimeCode],
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(6),
+                      ],
+                      style: const TextStyle(
+                        color: Colors.transparent,
+                        fontSize: 1,
+                        height: 0.01,
+                      ),
+                      decoration: const InputDecoration(
+                        counterText: '',
+                        filled: false,
+                        fillColor: Colors.transparent,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding: EdgeInsets.zero,
+                        isCollapsed: true,
+                      ),
+                      onTap: () => _otpFocus.requestFocus(),
+                    ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
+        const SizedBox(height: 4),
         Align(
           alignment: AlignmentDirectional.centerEnd,
           child: TextButton.icon(
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+            ),
             onPressed: _loading ? null : _pasteOtp,
             icon: Icon(Icons.content_paste_rounded,
-                size: 16, color: AppTheme.accent),
+                size: 15, color: AppTheme.accent),
             label: Text(
               l10n.t('mobile.login.pasteCode'),
               style: TextStyle(color: AppTheme.accent, fontSize: 13),

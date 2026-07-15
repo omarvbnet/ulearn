@@ -131,6 +131,7 @@ model Country {
   settings           SystemSetting[]
   advertisements     Advertisement[]
   products           Product[]
+  courseGroups       CourseGroup[]
 
   @@index([deletedAt])
 }
@@ -213,6 +214,7 @@ model User {
   complaints           Complaint[]           @relation("StudentComplaints")
   complaintsHandled    Complaint[]           @relation("HandledComplaints")
   coursePurchases      CoursePurchase[]
+  courseGroupPurchases CourseGroupPurchase[]
   productPurchases     ProductPurchase[]
   courseReactions      CourseReaction[]
   courseFavorites      CourseFavorite[]
@@ -298,6 +300,11 @@ enum TeacherLevel {
   MASTER
 }
 
+enum TeachingTrack {
+  SCHOOL
+  CERTIFICATE
+}
+
 model TeacherProfile {
   id             String    @id @default(cuid())
   userId         String    @unique
@@ -305,6 +312,8 @@ model TeacherProfile {
   provinceId     String?
   bio            String?
   specializations String[] @default([])
+  /// SCHOOL = curriculum specialties; CERTIFICATE = insights (same as cert users)
+  teachingTrack  TeachingTrack @default(SCHOOL)
   isActive       Boolean   @default(true)
   level          TeacherLevel @default(GOOD)
   levelSetByAdmin Boolean  @default(false)
@@ -325,6 +334,7 @@ model TeacherProfile {
   @@index([countryId])
   @@index([deletedAt])
   @@index([level])
+  @@index([teachingTrack])
 }
 
 enum CourseStatus {
@@ -368,6 +378,10 @@ model Course {
   reviewedAt    DateTime?
   closedByLevel Boolean      @default(false)
   viewCount     Int          @default(0)
+  /// Snapshot of course structure at last admin APPROVED (for change diffs).
+  lastApprovedSnapshot Json?
+  /// Diff vs lastApprovedSnapshot while status is PENDING_REVIEW.
+  pendingChangeSummary Json?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
   deletedAt     DateTime?
@@ -382,6 +396,7 @@ model Course {
   ratings   CourseRating[]
   quizzes   Quiz[]
   materials CourseMaterial[]
+  groupItems CourseGroupItem[]
 
   @@index([teacherId])
   @@index([stageId])
@@ -547,6 +562,15 @@ model CourseLessonUpdateRequest {
   thumbnailKey String?
   thumbnailUrl String?
   durationSec  Int?
+  /// Snapshot of the live lesson before this proposed change.
+  previousTitle        String?
+  previousFileKey      String?
+  previousFileUrl      String?
+  previousThumbnailKey String?
+  previousThumbnailUrl String?
+  previousDurationSec  Int?
+  /// Comma-separated change tags, e.g. "title,video,thumbnail".
+  changeSummary String?
   status       LessonUpdateStatus @default(PENDING)
   reviewNotes  String?
   reviewedById String?
@@ -557,6 +581,70 @@ model CourseLessonUpdateRequest {
   lesson CourseLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
 
   @@index([lessonId])
+  @@index([status])
+}
+
+/// Admin-curated bundle of courses for one educational stage (Home cards).
+model CourseGroup {
+  id          String   @id @default(cuid())
+  titleEn     String
+  titleAr     String?
+  titleKu     String?
+  titleTr     String?
+  description String?
+  coverKey    String?
+  coverUrl    String?
+  stageId     String
+  countryId   String?
+  currency    String   @default("IQD")
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  stage     EducationalStage     @relation(fields: [stageId], references: [id])
+  country   Country?             @relation(fields: [countryId], references: [id])
+  items     CourseGroupItem[]
+  purchases CourseGroupPurchase[]
+
+  @@index([stageId])
+  @@index([isActive])
+  @@index([deletedAt])
+}
+
+model CourseGroupItem {
+  id        String @id @default(cuid())
+  groupId   String
+  courseId  String
+  sortOrder Int    @default(0)
+
+  group  CourseGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  course Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, courseId])
+  @@index([courseId])
+}
+
+model CourseGroupPurchase {
+  id           String         @id @default(cuid())
+  groupId      String
+  userId       String
+  price        Float
+  currency     String         @default("IQD")
+  status       PurchaseStatus @default(PENDING)
+  approvedById String?
+  approvedAt   DateTime?
+  expiresAt    DateTime?
+  source       String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  group CourseGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId])
   @@index([status])
 }
 
@@ -855,13 +943,18 @@ model CourseLessonFavorite {
 }
 
 /// Promotional banner shown on the mobile home screen.
+/// Each ad targets one app language (`locale`); users only see ads for their language.
 model Advertisement {
   id        String    @id @default(cuid())
   countryId String?
+  /// App language this banner is shown for (AR / KU / TR / EN).
+  locale    Locale    @default(AR)
   titleEn   String?
   titleAr   String?
   titleKu   String?
   titleTr   String?
+  /// Display title for the target locale (preferred over multilingual fields).
+  title     String?
   imageKey  String?
   imageUrl  String
   linkUrl   String?
@@ -877,6 +970,7 @@ model Advertisement {
   likes   AdLike[]
 
   @@index([isActive, sortOrder])
+  @@index([locale, isActive, sortOrder])
   @@index([deletedAt])
 }
 
@@ -1063,6 +1157,7 @@ model EducationalStage {
   packages         SubscriptionPackage[]
   studentProfiles  StudentProfile[]
   courses          Course[]
+  courseGroups     CourseGroup[]
   stageRequestsFrom StageChangeRequest[] @relation("StageRequestCurrent")
   stageRequestsTo   StageChangeRequest[] @relation("StageRequestRequested")
 

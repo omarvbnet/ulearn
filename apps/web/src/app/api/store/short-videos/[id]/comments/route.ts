@@ -56,6 +56,7 @@ export async function POST(
       commenterName: user?.fullLegalName ?? "Someone",
       comment: parsed.data.body,
       shortVideoId: id,
+      commentId: result.comment.id,
     });
   }
 

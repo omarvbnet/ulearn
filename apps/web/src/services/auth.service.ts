@@ -48,6 +48,28 @@ export interface RegisterCertificateInput {
   locale?: Locale;
 }
 
+export interface RegisterTeacherInput {
+  phone: string;
+  fullLegalName: string;
+  gender: Gender;
+  countryId: string;
+  provinceId: string;
+  email?: string;
+  nationalId: string;
+  nationalIdImage: string;
+  latitude?: number;
+  longitude?: number;
+  locationLabel?: string;
+  bio?: string;
+  locale?: Locale;
+  /**
+   * SCHOOL → specialty subjects (1–3, stage-agnostic).
+   * CERTIFICATE → insights (1–5, same catalog as certificate users).
+   */
+  teachingTrack: "SCHOOL" | "CERTIFICATE";
+  subjectIds: string[];
+}
+
 export class AuthService {
   /** Send OTP via WhatsApp (provider integration point). */
   static async sendOtp(
@@ -506,6 +528,127 @@ export class AuthService {
     return { success: true as const, user, token };
   }
 
+  /** Public teacher application — admin must approve before app login unlocks teaching. */
+  static async registerTeacher(
+    input: RegisterTeacherInput,
+    meta?: { ipAddress?: string }
+  ) {
+    const phone = input.phone.replace(/\s+/g, "");
+    const subjectIds = [...new Set(input.subjectIds.filter(Boolean))];
+    const track = input.teachingTrack;
+
+    if (track === "SCHOOL") {
+      if (subjectIds.length < 1 || subjectIds.length > 3) {
+        return { success: false as const, error: "SPECIALTIES_REQUIRED" };
+      }
+      const subjects = await prisma.subject.findMany({
+        where: {
+          id: { in: subjectIds },
+          deletedAt: null,
+          isActive: true,
+          isCertificateProgram: false,
+          stageId: null,
+          ...(input.countryId ? { countryId: input.countryId } : {}),
+        },
+        select: { id: true, nameEn: true },
+      });
+      if (subjects.length !== subjectIds.length) {
+        return { success: false as const, error: "INVALID_SPECIALTIES" };
+      }
+    } else {
+      if (subjectIds.length < 1 || subjectIds.length > 5) {
+        return { success: false as const, error: "INTERESTS_REQUIRED" };
+      }
+      const subjects = await prisma.subject.findMany({
+        where: {
+          id: { in: subjectIds },
+          deletedAt: null,
+          isActive: true,
+          stage: { isCertificateTrack: true, deletedAt: null },
+        },
+        select: { id: true, nameEn: true },
+      });
+      if (subjects.length !== subjectIds.length) {
+        return { success: false as const, error: "INVALID_INTERESTS" };
+      }
+    }
+
+    const existing = await prisma.user.findFirst({
+      where: { phone, deletedAt: null },
+    });
+    if (existing) {
+      return { success: false as const, error: "PHONE_EXISTS" };
+    }
+
+    const subjectsForNames = await prisma.subject.findMany({
+      where: { id: { in: subjectIds } },
+      select: { id: true, nameEn: true },
+    });
+
+    const user = await prisma.user.create({
+      data: {
+        phone,
+        email: input.email,
+        fullLegalName: input.fullLegalName,
+        gender: input.gender,
+        countryId: input.countryId,
+        provinceId: input.provinceId,
+        nationalId: input.nationalId,
+        nationalIdImage: input.nationalIdImage,
+        latitude: input.latitude,
+        longitude: input.longitude,
+        locationLabel: input.locationLabel,
+        role: "TEACHER",
+        status: "PENDING",
+        locale: input.locale ?? "AR",
+        teacherProfile: {
+          create: {
+            countryId: input.countryId,
+            provinceId: input.provinceId,
+            bio: input.bio,
+            teachingTrack: track,
+            specializations: subjectsForNames.map((s) => s.nameEn),
+            subjects: {
+              create: subjectIds.map((subjectId) => ({ subjectId })),
+            },
+          },
+        },
+      },
+      include: {
+        teacherProfile: {
+          include: {
+            subjects: {
+              include: {
+                subject: {
+                  select: {
+                    id: true,
+                    nameEn: true,
+                    nameAr: true,
+                    nameKu: true,
+                    nameTr: true,
+                    stageId: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    await LoggingService.log({
+      actorId: user.id,
+      action: "REGISTER",
+      entityType: "User",
+      entityId: user.id,
+      newValue: { role: "TEACHER", teachingTrack: track, phone, subjectIds },
+      ipAddress: meta?.ipAddress,
+    });
+
+    const token = await createSession(user.id, user.role, user.status);
+    return { success: true as const, user, token };
+  }
+
   static async approveUser(userId: string, actorId: string) {
     const previous = await prisma.user.findUnique({ where: { id: userId } });
     if (!previous) return { success: false as const, error: "NOT_FOUND" };
@@ -525,14 +668,38 @@ export class AuthService {
     });
 
     await NotificationService.notifyUser(userId, {
-      titleEn: "Account Approved",
-      titleAr: "تمت الموافقة على حسابك",
-      titleKu: "هەژمارەکەت پەسەند کرا",
-      titleTr: "Hesabınız Onaylandı",
-      bodyEn: "Your account has been approved. You can now access free lessons.",
-      bodyAr: "تمت الموافقة على حسابك. يمكنك الآن الوصول إلى الدروس المجانية.",
-      bodyKu: "هەژمارەکەت پەسەند کرا. ئێستا دەتوانیت وانە بەخۆڕاییەکان ببینیت.",
-      bodyTr: "Hesabınız onaylandı. Artık ücretsiz derslere erişebilirsiniz.",
+      titleEn:
+        previous.role === "TEACHER"
+          ? "Teacher account approved"
+          : "Account Approved",
+      titleAr:
+        previous.role === "TEACHER"
+          ? "تمت الموافقة على حساب المعلّم"
+          : "تمت الموافقة على حسابك",
+      titleKu:
+        previous.role === "TEACHER"
+          ? "هەژماری مامۆستا پەسەند کرا"
+          : "هەژمارەکەت پەسەند کرا",
+      titleTr:
+        previous.role === "TEACHER"
+          ? "Öğretmen hesabınız onaylandı"
+          : "Hesabınız Onaylandı",
+      bodyEn:
+        previous.role === "TEACHER"
+          ? "You can now sign in with your phone number and publish courses."
+          : "Your account has been approved. You can now access free lessons.",
+      bodyAr:
+        previous.role === "TEACHER"
+          ? "يمكنك الآن تسجيل الدخول برقم هاتفك ونشر الدورات."
+          : "تمت الموافقة على حسابك. يمكنك الآن الوصول إلى الدروس المجانية.",
+      bodyKu:
+        previous.role === "TEACHER"
+          ? "ئێستا دەتوانیت بە ژمارەی مۆبایل بچیتە ژوورەوە و کۆرس بڵاوبکەیتەوە."
+          : "هەژمارەکەت پەسەند کرا. ئێستا دەتوانیت وانە بەخۆڕاییەکان ببینیت.",
+      bodyTr:
+        previous.role === "TEACHER"
+          ? "Artık telefon numaranızla giriş yapıp kurs yayınlayabilirsiniz."
+          : "Hesabınız onaylandı. Artık ücretsiz derslere erişebilirsiniz.",
     });
 
     return { success: true as const, user };
@@ -660,6 +827,7 @@ export class AuthService {
     email?: string;
     specializations?: string[];
     subjectIds?: string[];
+    teachingTrack?: "SCHOOL" | "CERTIFICATE";
     actorId: string;
   }) {
     const phone = params.phone.replace(/\s+/g, "");
@@ -680,6 +848,7 @@ export class AuthService {
                   countryId: params.countryId,
                   provinceId: params.provinceId,
                   specializations: params.specializations ?? [],
+                  teachingTrack: params.teachingTrack ?? "SCHOOL",
                   subjects: params.subjectIds
                     ? {
                         create: params.subjectIds.map((subjectId) => ({ subjectId })),

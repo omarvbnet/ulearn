@@ -160,6 +160,15 @@ export class NotificationService {
       return;
     }
 
+    // FCM data payloads must be string key/values.
+    const stringData: Record<string, string> = {};
+    if (data) {
+      for (const [key, value] of Object.entries(data)) {
+        if (value === undefined || value === null) continue;
+        stringData[key] = typeof value === "string" ? value : String(value);
+      }
+    }
+
     await fetch("https://fcm.googleapis.com/fcm/send", {
       method: "POST",
       headers: {
@@ -169,7 +178,7 @@ export class NotificationService {
       body: JSON.stringify({
         registration_ids: tokens,
         notification: { title, body },
-        data: data ?? {},
+        data: stringData,
       }),
     });
   }

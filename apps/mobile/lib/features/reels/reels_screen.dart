@@ -23,12 +23,16 @@ class ReelsScreen extends StatefulWidget {
     this.refreshTrigger,
     this.initialVideoId,
     this.openCommentsOnStart = false,
+    this.highlightCommentId,
   });
 
   final bool isTabActive;
   final ValueNotifier<int>? refreshTrigger;
   final String? initialVideoId;
   final bool openCommentsOnStart;
+
+  /// Optional comment to focus when [openCommentsOnStart] is true.
+  final String? highlightCommentId;
 
   @override
   State<ReelsScreen> createState() => ReelsScreenState();
@@ -257,6 +261,7 @@ class ReelsScreenState extends State<ReelsScreen> {
             videoId: video['id'].toString(),
             videoTitle: video['title']?.toString() ?? context.l10n.reelsTitle,
             initialCount: (video['commentCount'] as num?)?.toInt() ?? 0,
+            highlightCommentId: widget.highlightCommentId,
             onCountChanged: (count) {
               if (mounted) setState(() => video['commentCount'] = count);
             },

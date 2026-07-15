@@ -241,6 +241,11 @@ export class ShortVideoService {
   static async toggleSave(videoId: string, userId: string) {
     const video = await prisma.teacherShortVideo.findFirst({
       where: { id: videoId, ...PUBLIC_SHORT_VIDEO_WHERE },
+      select: {
+        id: true,
+        title: true,
+        teacher: { select: { userId: true } },
+      },
     });
     if (!video) return { success: false as const, error: "NOT_FOUND" as const };
 
@@ -259,6 +264,8 @@ export class ShortVideoService {
       success: true as const,
       savedByMe: !existing,
       saves,
+      teacherUserId: video.teacher.userId,
+      videoTitle: video.title,
     };
   }
 

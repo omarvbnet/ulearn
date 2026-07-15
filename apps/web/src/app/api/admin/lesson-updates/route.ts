@@ -20,6 +20,8 @@ export async function GET(request: Request) {
           id: true,
           title: true,
           fileUrl: true,
+          thumbnailUrl: true,
+          durationSec: true,
           course: {
             select: {
               id: true,
@@ -36,5 +38,22 @@ export async function GET(request: Request) {
     },
   });
 
-  return json({ requests });
+  return json({
+    requests: requests.map((r) => ({
+      ...r,
+      // Prefer snapshotted previous media (survives after approve).
+      currentTitle: r.previousTitle ?? r.lesson.title,
+      currentFileUrl: r.previousFileUrl ?? r.lesson.fileUrl,
+      currentThumbnailUrl: r.previousThumbnailUrl ?? r.lesson.thumbnailUrl,
+      currentDurationSec: r.previousDurationSec ?? r.lesson.durationSec,
+      newTitle: r.title ?? r.lesson.title,
+      newFileUrl: r.fileUrl,
+      newThumbnailUrl: r.thumbnailUrl,
+      newDurationSec: r.durationSec,
+      changeTags: (r.changeSummary ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    })),
+  });
 }

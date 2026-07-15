@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 
 type PendingCountsRow = {
   users: bigint;
+  teachers: bigint;
   courses: bigint;
   lesson_updates: bigint;
   purchases: bigint;
@@ -22,7 +23,9 @@ export class AdminPendingCountsService {
     const [row] = await prisma.$queryRaw<PendingCountsRow[]>`
       SELECT
         (SELECT COUNT(*)::bigint FROM "User"
-          WHERE status = 'PENDING' AND "deletedAt" IS NULL) AS users,
+          WHERE status = 'PENDING' AND role <> 'TEACHER' AND "deletedAt" IS NULL) AS users,
+        (SELECT COUNT(*)::bigint FROM "User"
+          WHERE status = 'PENDING' AND role = 'TEACHER' AND "deletedAt" IS NULL) AS teachers,
         (SELECT COUNT(*)::bigint FROM "Course"
           WHERE status = 'PENDING_REVIEW' AND "deletedAt" IS NULL) AS courses,
         (SELECT COUNT(*)::bigint FROM "CourseLessonUpdateRequest"
@@ -46,6 +49,7 @@ export class AdminPendingCountsService {
     if (!row) {
       return {
         users: 0,
+        teacherRequests: 0,
         courseReview: 0,
         shortVideos: 0,
         stageRequests: 0,
@@ -58,6 +62,7 @@ export class AdminPendingCountsService {
     }
 
     const users = n(row.users);
+    const teacherRequests = n(row.teachers);
     const courseReview = n(row.courses) + n(row.lesson_updates) + n(row.purchases);
     const shortVideos = n(row.short_videos);
     const stageRequests = n(row.stage_requests);
@@ -68,6 +73,7 @@ export class AdminPendingCountsService {
 
     return {
       users,
+      teacherRequests,
       courseReview,
       shortVideos,
       stageRequests,
@@ -77,6 +83,7 @@ export class AdminPendingCountsService {
       contentReports,
       total:
         users +
+        teacherRequests +
         courseReview +
         shortVideos +
         stageRequests +

@@ -18,6 +18,8 @@ export async function GET() {
   const profile = await getTeacherProfile(auth.session.userId);
   if (!profile) return error("Teacher profile not found", 404, "NOT_FOUND");
 
+  const isCert = profile.teachingTrack === "CERTIFICATE";
+
   const [courses, earnings, stages] = await Promise.all([
     TeacherCourseService.listTeacherCourses(profile.id),
     TeacherCourseService.teacherEarnings(profile.id),
@@ -25,10 +27,18 @@ export async function GET() {
       where: {
         isActive: true,
         deletedAt: null,
+        isCertificateTrack: isCert,
         ...(profile.countryId ? { countryId: profile.countryId } : {}),
       },
       orderBy: { sortOrder: "asc" },
-      select: { id: true, nameEn: true, nameAr: true, nameKu: true, nameTr: true },
+      select: {
+        id: true,
+        nameEn: true,
+        nameAr: true,
+        nameKu: true,
+        nameTr: true,
+        isCertificateTrack: true,
+      },
     }),
   ]);
 
@@ -37,6 +47,7 @@ export async function GET() {
     earnings,
     level: profile.level,
     isActive: profile.isActive,
+    teachingTrack: profile.teachingTrack,
     subjects: profile.subjects.map((s) => s.subject),
     stages,
   });
@@ -58,13 +69,19 @@ const createSchema = z.object({
 
 /** Teacher: create a course (goes to admin review before publishing). */
 export async function POST(request: Request) {
-  const auth = await requireAuth(["TEACHER"]);
+  const auth = await requireAuth(["TEACHER"], { requireApproved: true });
   if (auth.error) return auth.error;
 
   const profile = await getTeacherProfile(auth.session.userId);
   if (!profile) return error("Teacher profile not found", 404, "NOT_FOUND");
   if (profile.subjects.length === 0) {
-    return error("Set your teaching specialties on your profile first", 400, "NO_SPECIALTIES_SET");
+    return error(
+      profile.teachingTrack === "CERTIFICATE"
+        ? "Set your teaching insights on your profile first"
+        : "Set your teaching specialties on your profile first",
+      400,
+      "NO_SPECIALTIES_SET"
+    );
   }
 
   const parsed = createSchema.safeParse(await request.json());

@@ -272,7 +272,13 @@
       "awaitingPayment": "بانتظار تأكيد الدفع",
       "continueWatching": "متابعة المشاهدة",
       "resumeCourse": "أكمل من حيث توقفت",
-      "allInsights": "كل اهتماماتي"
+      "allInsights": "كل اهتماماتي",
+      "courseGroups": "مجموعات الدورات",
+      "groupCourseCount": "{count} دورات",
+      "groupIncludes": "الدورات المشمولة",
+      "groupTotal": "إجمالي الباقة",
+      "groupUnlocked": "تم فتح جميع دورات هذه المجموعة",
+      "groupAlreadyOwned": "أنت تملك هذه المجموعة بالفعل"
     },
     "profile": {
       "tapChangePhoto": "اضغط لتغيير الصورة",

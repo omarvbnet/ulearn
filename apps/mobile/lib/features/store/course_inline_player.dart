@@ -49,6 +49,7 @@ class CourseInlinePlayer extends StatefulWidget {
     this.initialPositionSec,
     this.playlist = const [],
     this.onSelectPlaylistItem,
+    this.borderRadius = 14,
   });
 
   final String url;
@@ -65,6 +66,8 @@ class CourseInlinePlayer extends StatefulWidget {
   /// Optional lesson rail shown beside the video in fullscreen (YouTube-style).
   final List<CoursePlaylistItem> playlist;
   final ValueChanged<String>? onSelectPlaylistItem;
+  /// Corner radius for the inline player frame (0 = edge-to-edge YouTube style).
+  final double borderRadius;
 
   @override
   State<CourseInlinePlayer> createState() => _CourseInlinePlayerState();
@@ -318,26 +321,36 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const AspectRatio(aspectRatio: 16 / 9, child: SkeletonVideoPlayer());
+      return AspectRatio(
+        aspectRatio: 16 / 9,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(widget.borderRadius),
+          child: const SkeletonVideoPlayer(),
+        ),
+      );
     }
     if (_error != null) {
       return AspectRatio(
         aspectRatio: 16 / 9,
-        child: Container(
-          color: AppTheme.card,
-          child: Center(
-            child: Text(_error!, style: TextStyle(color: AppTheme.muted)),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(widget.borderRadius),
+          child: Container(
+            color: AppTheme.card,
+            child: Center(
+              child: Text(_error!, style: TextStyle(color: AppTheme.muted)),
+            ),
           ),
         ),
       );
     }
 
+    final radius = widget.borderRadius;
     return AspectRatio(
-      aspectRatio: _controller!.value.aspectRatio.clamp(1.0, 16 / 9),
+      aspectRatio: 16 / 9,
       child: GestureDetector(
         onTap: () => setState(() => _showControls = !_showControls),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(radius),
           child: ColoredBox(
             color: Colors.black,
             child: Stack(

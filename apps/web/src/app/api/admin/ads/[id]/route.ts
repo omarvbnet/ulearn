@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
 const updateSchema = z.object({
+  locale: z.enum(["AR", "KU", "TR", "EN"]).optional(),
+  title: z.string().nullish(),
   titleEn: z.string().nullish(),
   titleAr: z.string().nullish(),
   titleKu: z.string().nullish(),

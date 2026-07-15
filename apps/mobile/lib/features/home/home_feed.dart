@@ -11,6 +11,7 @@ import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
+import 'package:ulearn/features/store/course_group_detail_screen.dart';
 
 /// Locale-aware course/ad title.
 String localizedText(Map<String, dynamic> item, String locale, {String prefix = 'title'}) {
@@ -55,6 +56,7 @@ class HomeFeedState extends State<HomeFeed> {
   List<Map<String, dynamic>> _interests = [];
   List<Map<String, dynamic>> _ads = [];
   List<Map<String, dynamic>> _courses = [];
+  List<Map<String, dynamic>> _groups = [];
   List<Map<String, dynamic>> _continueWatching = [];
   Map<String, dynamic>? _aiExamStats;
   bool _loading = true;
@@ -98,6 +100,7 @@ class HomeFeedState extends State<HomeFeed> {
           'subjectIds': _interestFilters.join(','),
         'level': ?_levelFilter,
         if (_search.text.trim().isNotEmpty) 'q': _search.text.trim(),
+        'locale': context.localeCode,
       };
       final query = params.isEmpty
           ? ''
@@ -145,6 +148,8 @@ class HomeFeedState extends State<HomeFeed> {
         _interests =
             ((data['interests'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
         _ads = ((data['ads'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+        _groups =
+            ((data['groups'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
         _courses = homeCourses;
         _continueWatching = continueItems;
         final stats = data['aiExamStats'];
@@ -423,6 +428,18 @@ class HomeFeedState extends State<HomeFeed> {
     if (mounted) _load();
   }
 
+  Future<void> _openGroup(Map<String, dynamic> group) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CourseGroupDetailScreen(
+          groupId: group['id'].toString(),
+          summary: group,
+        ),
+      ),
+    );
+    if (mounted) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -506,6 +523,17 @@ class HomeFeedState extends State<HomeFeed> {
               ),
             ),
           ],
+          if (_groups.isNotEmpty && !_hasActiveFilters) ...[
+            const SizedBox(height: 8),
+            StaggeredItem(
+              index: 4,
+              child: _CourseGroupsRail(
+                groups: _groups,
+                locale: locale,
+                onOpen: _openGroup,
+              ),
+            ),
+          ],
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
             child: Row(
@@ -579,7 +607,7 @@ class HomeFeedState extends State<HomeFeed> {
             ),
           ..._courses.asMap().entries.map(
                 (e) => StaggeredItem(
-                  index: e.key + 4,
+                  index: e.key + 5,
                   child: CourseCard(
                     course: e.value,
                     locale: locale,
@@ -591,6 +619,158 @@ class HomeFeedState extends State<HomeFeed> {
               ),
         ],
       ),
+    );
+  }
+}
+
+// ── Course groups ──────────────────────────────────────────────
+
+class _CourseGroupsRail extends StatelessWidget {
+  const _CourseGroupsRail({
+    required this.groups,
+    required this.locale,
+    required this.onOpen,
+  });
+
+  final List<Map<String, dynamic>> groups;
+  final String locale;
+  final ValueChanged<Map<String, dynamic>> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
+          child: Row(
+            children: [
+              Container(
+                width: 4,
+                height: 18,
+                decoration: BoxDecoration(
+                  gradient: AppTheme.gradient,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                l10n.t('mobile.home.courseGroups'),
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 196,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: groups.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemBuilder: (context, i) {
+              final g = groups[i];
+              final title = localizedText(g, locale);
+              final cover = g['coverUrl']?.toString();
+              final count = (g['courseCount'] as num?)?.toInt() ?? 0;
+              final price = (g['totalPrice'] as num?)?.toDouble() ?? 0;
+              final currency = g['currency']?.toString() ?? 'IQD';
+              return InkWell(
+                onTap: () => onOpen(g),
+                borderRadius: BorderRadius.circular(16),
+                child: SizedBox(
+                  width: 200,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              if (cover != null && cover.isNotEmpty)
+                                Positioned.fill(
+                                  child: CachedImage(
+                                    url: cover,
+                                    fit: BoxFit.cover,
+                                  ),
+                                )
+                              else
+                                Positioned.fill(
+                                  child: Container(
+                                    color: AppTheme.primary.withValues(alpha: 0.2),
+                                    child: Icon(
+                                      Icons.collections_bookmark_outlined,
+                                      size: 40,
+                                      color: AppTheme.muted,
+                                    ),
+                                  ),
+                                ),
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.transparent,
+                                      Colors.black.withValues(alpha: 0.75),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                left: 10,
+                                right: 10,
+                                bottom: 10,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      title,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      l10n.t(
+                                        'mobile.home.groupCourseCount',
+                                        {'count': '$count'},
+                                      ),
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(alpha: 0.85),
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    Text(
+                                      '${price.toStringAsFixed(0)} $currency',
+                                      style: const TextStyle(
+                                        color: AppTheme.accent,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1070,7 +1250,10 @@ class _AdsCarouselState extends State<_AdsCarousel> {
             onPageChanged: (i) => setState(() => _page = i),
             itemBuilder: (context, i) {
               final ad = widget.ads[i];
-              final title = localizedText(ad, widget.locale);
+              final rawTitle = ad['title']?.toString();
+              final title = (rawTitle != null && rawTitle.isNotEmpty)
+                  ? rawTitle
+                  : localizedText(ad, widget.locale);
               final imageUrl = ad['imageUrl']?.toString() ?? '';
               return Padding(
                 padding: EdgeInsets.only(

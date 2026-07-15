@@ -237,6 +237,23 @@ function RegisterForm() {
           ))}
         </div>
 
+        <p className="mb-6 text-center text-xs text-muted">
+          Teachers apply separately:{" "}
+          <a
+            href={`/${locale}/register/teacher?phone=${encodeURIComponent(phone)}`}
+            className="text-accent hover:underline"
+          >
+            School
+          </a>
+          {" · "}
+          <a
+            href={`/${locale}/register/teacher/certificate?phone=${encodeURIComponent(phone)}`}
+            className="text-accent hover:underline"
+          >
+            Certificate courses
+          </a>
+        </p>
+
         <form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <Input

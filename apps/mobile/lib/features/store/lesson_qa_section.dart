@@ -12,10 +12,18 @@ class LessonQASection extends StatefulWidget {
     super.key,
     required this.lessonId,
     this.onComposerFocusChanged,
+    this.highlightQuestionId,
+    this.autoFocusAnswer = false,
   });
 
   final String lessonId;
   final ValueChanged<bool>? onComposerFocusChanged;
+
+  /// Scroll to + highlight this question (notification deep link).
+  final String? highlightQuestionId;
+
+  /// Focus the answer composer on [highlightQuestionId] so the teacher can reply.
+  final bool autoFocusAnswer;
 
   @override
   State<LessonQASection> createState() => _LessonQASectionState();
@@ -28,7 +36,9 @@ class _LessonQASectionState extends State<LessonQASection> {
   final _answerCtrls = <String, TextEditingController>{};
   final _askFocus = FocusNode();
   final _answerFocusNodes = <String, FocusNode>{};
+  final _questionKeys = <String, GlobalKey>{};
   bool _posting = false;
+  bool _didDeepLink = false;
 
   @override
   void initState() {
@@ -113,9 +123,37 @@ class _LessonQASectionState extends State<LessonQASection> {
             .cast<Map<String, dynamic>>();
         _loading = false;
       });
+      _applyDeepLink();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _applyDeepLink() {
+    if (_didDeepLink) return;
+    final qid = widget.highlightQuestionId;
+    if (qid == null || qid.isEmpty) return;
+    if (!_questions.any((q) => q['id']?.toString() == qid)) return;
+    _didDeepLink = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final key = _questionKeys.putIfAbsent(qid, GlobalKey.new);
+      final ctx = key.currentContext;
+      if (ctx != null && ctx.mounted) {
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.15,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+        );
+      }
+      if (widget.autoFocusAnswer) {
+        Future.delayed(const Duration(milliseconds: 350), () {
+          if (!mounted) return;
+          _answerFocusFor(qid).requestFocus();
+        });
+      }
+    });
   }
 
   Future<void> _ask() async {
@@ -242,16 +280,22 @@ class _LessonQASectionState extends State<LessonQASection> {
             final answerCtrl =
                 _answerCtrls.putIfAbsent(qid, TextEditingController.new);
             final answerFocus = _answerFocusFor(qid);
+            final highlighted = widget.highlightQuestionId == qid;
+            final qKey = _questionKeys.putIfAbsent(qid, GlobalKey.new);
 
             return StaggeredItem(
               index: e.key,
               child: Container(
+                key: qKey,
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: AppTheme.card,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppTheme.cardBorder),
+                  border: Border.all(
+                    color: highlighted ? AppTheme.accent : AppTheme.cardBorder,
+                    width: highlighted ? 1.6 : 1,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

@@ -12,10 +12,14 @@ export async function GET(request: Request) {
   const page = Math.max(1, Number(searchParams.get("page") || 1));
   const limit = Math.min(100, Number(searchParams.get("limit") || 20));
 
+  const includeTeacher = searchParams.get("includeTeacher") === "1";
+
   const where = {
     deletedAt: null,
     ...(status ? { status: status as never } : {}),
     ...(role ? { role: role as never } : {}),
+    // Default users list: students / cert users only (teachers have their own queue)
+    ...(!role ? { role: { not: "TEACHER" as const } } : {}),
     ...(q
       ? {
           OR: [
@@ -46,6 +50,27 @@ export async function GET(request: Request) {
         province: true,
         studentProfile: true,
         certificateProfile: true,
+        ...(includeTeacher
+          ? {
+              teacherProfile: {
+                include: {
+                  subjects: {
+                    include: {
+                      subject: {
+                        select: {
+                          id: true,
+                          nameEn: true,
+                          nameAr: true,
+                          nameKu: true,
+                          nameTr: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            }
+          : {}),
       },
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * limit,

@@ -196,6 +196,25 @@ export default function LoginPage() {
             Dev OTP: set DEV_OTP in .env (default logs to console)
           </p>
         )}
+
+        <div className="mt-8 space-y-2 border-t border-border pt-6 text-center text-sm text-muted">
+          <p>Apply as a teacher</p>
+          <div className="flex flex-wrap justify-center gap-3">
+            <a
+              href={`/${locale}/register/teacher${fullPhone ? `?phone=${encodeURIComponent(fullPhone)}` : ""}`}
+              className="text-accent hover:underline"
+            >
+              School courses
+            </a>
+            <span>·</span>
+            <a
+              href={`/${locale}/register/teacher/certificate${fullPhone ? `?phone=${encodeURIComponent(fullPhone)}` : ""}`}
+              className="text-accent hover:underline"
+            >
+              Certificate courses
+            </a>
+          </div>
+        </div>
       </Card>
     </div>
   );

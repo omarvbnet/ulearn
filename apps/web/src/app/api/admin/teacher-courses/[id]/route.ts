@@ -26,6 +26,7 @@ export async function GET(
       },
       stage: { select: { nameEn: true, nameAr: true } },
       subject: { select: { nameEn: true, nameAr: true } },
+      // pendingChangeSummary / lastApprovedSnapshot are scalar fields on Course
       lessons: {
         where: { deletedAt: null },
         orderBy: { sortOrder: "asc" },

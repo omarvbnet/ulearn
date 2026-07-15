@@ -39,6 +39,7 @@ export async function POST(
         teacherUserId,
         videoTitle: video.title,
         likerName: liker?.fullLegalName ?? "Someone",
+        shortVideoId: id,
       });
     }
   }

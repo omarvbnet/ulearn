@@ -28,6 +28,8 @@ export async function GET() {
 }
 
 const createSchema = z.object({
+  locale: z.enum(["AR", "KU", "TR", "EN"]),
+  title: z.string().optional(),
   titleEn: z.string().optional(),
   titleAr: z.string().optional(),
   titleKu: z.string().optional(),

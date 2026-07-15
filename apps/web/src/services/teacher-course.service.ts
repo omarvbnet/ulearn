@@ -3,7 +3,7 @@ import { PUBLIC_LESSON_WHERE, PUBLIC_SHORT_VIDEO_WHERE } from "@/lib/video-visib
 import { getDownloadUrl, resolvePublicMediaUrl } from "@/lib/r2";
 import { LoggingService } from "@/services/logging.service";
 import { NotificationService } from "@/services/notification.service";
-import type { CourseStatus, TeacherLevel } from "@prisma/client";
+import { Prisma, type CourseStatus, type TeacherLevel } from "@prisma/client";
 
 /** Minimum student ratings before the level changes automatically. */
 const MIN_RATINGS_FOR_AUTO_LEVEL = 5;
@@ -210,7 +210,13 @@ export class TeacherCourseService {
   ) {
     const teacher = await prisma.teacherProfile.findFirst({
       where: { id: teacherId, deletedAt: null },
-      include: { subjects: true },
+      include: {
+        subjects: {
+          include: {
+            subject: { select: { id: true, stageId: true } },
+          },
+        },
+      },
     });
     if (!teacher) return { success: false as const, error: "TEACHER_NOT_FOUND" };
     if (!teacher.isActive) return { success: false as const, error: "TEACHER_BLOCKED" };
@@ -218,9 +224,28 @@ export class TeacherCourseService {
       return { success: false as const, error: "NO_SPECIALTIES_SET" };
     }
 
-    // Courses must match the teacher's assigned specialization subjects.
+    // Courses must match the teacher's assigned subjects / insights.
     const allowed = teacher.subjects.some((s) => s.subjectId === input.subjectId);
     if (!allowed) return { success: false as const, error: "SUBJECT_NOT_ASSIGNED" };
+
+    const stage = await prisma.educationalStage.findFirst({
+      where: { id: input.stageId, deletedAt: null, isActive: true },
+      select: { id: true, isCertificateTrack: true },
+    });
+    if (!stage) return { success: false as const, error: "STAGE_NOT_FOUND" };
+
+    if (teacher.teachingTrack === "CERTIFICATE") {
+      if (!stage.isCertificateTrack) {
+        return { success: false as const, error: "STAGE_TRACK_MISMATCH" };
+      }
+      // Insight subjects belong to the cert stage — enforce that pairing.
+      const insight = teacher.subjects.find((s) => s.subjectId === input.subjectId);
+      if (insight?.subject.stageId && insight.subject.stageId !== input.stageId) {
+        return { success: false as const, error: "SUBJECT_STAGE_MISMATCH" };
+      }
+    } else if (stage.isCertificateTrack) {
+      return { success: false as const, error: "STAGE_TRACK_MISMATCH" };
+    }
 
     if (!(input.price >= 0)) return { success: false as const, error: "INVALID_PRICE" };
 
@@ -281,14 +306,37 @@ export class TeacherCourseService {
     });
     if (!course) return { success: false as const, error: "NOT_FOUND" };
 
-    if (input.subjectId) {
+    if (input.subjectId || input.stageId) {
       const teacher = await prisma.teacherProfile.findFirst({
         where: { id: teacherId, deletedAt: null },
-        include: { subjects: true },
+        include: {
+          subjects: {
+            include: { subject: { select: { id: true, stageId: true } } },
+          },
+        },
       });
       if (!teacher) return { success: false as const, error: "TEACHER_NOT_FOUND" };
-      const allowed = teacher.subjects.some((s) => s.subjectId === input.subjectId);
+      const nextSubjectId = input.subjectId ?? course.subjectId;
+      const nextStageId = input.stageId ?? course.stageId;
+      const allowed = teacher.subjects.some((s) => s.subjectId === nextSubjectId);
       if (!allowed) return { success: false as const, error: "SUBJECT_NOT_ASSIGNED" };
+
+      const stage = await prisma.educationalStage.findFirst({
+        where: { id: nextStageId, deletedAt: null },
+        select: { isCertificateTrack: true },
+      });
+      if (!stage) return { success: false as const, error: "STAGE_NOT_FOUND" };
+      if (teacher.teachingTrack === "CERTIFICATE") {
+        if (!stage.isCertificateTrack) {
+          return { success: false as const, error: "STAGE_TRACK_MISMATCH" };
+        }
+        const insight = teacher.subjects.find((s) => s.subjectId === nextSubjectId);
+        if (insight?.subject.stageId && insight.subject.stageId !== nextStageId) {
+          return { success: false as const, error: "SUBJECT_STAGE_MISMATCH" };
+        }
+      } else if (stage.isCertificateTrack) {
+        return { success: false as const, error: "STAGE_TRACK_MISMATCH" };
+      }
     }
 
     // Cosmetic-only edits (cover, titles, description) stay live on APPROVED courses.
@@ -637,6 +685,7 @@ export class TeacherCourseService {
   }
 
   static async markCoursePendingReview(courseId: string) {
+    const summary = await this.computePendingChangeSummary(courseId);
     await prisma.course.updateMany({
       where: { id: courseId, status: "APPROVED", deletedAt: null },
       data: {
@@ -644,8 +693,167 @@ export class TeacherCourseService {
         reviewedAt: null,
         reviewNotes: null,
         reviewedById: null,
+        pendingChangeSummary: summary ?? undefined,
       },
     });
+  }
+
+  /** Build a structural snapshot used for admin change diffs. */
+  static async buildApprovedSnapshot(courseId: string) {
+    const course = await prisma.course.findFirst({
+      where: { id: courseId, deletedAt: null },
+      select: {
+        titleEn: true,
+        price: true,
+        stageId: true,
+        subjectId: true,
+        thumbnail: true,
+        lessons: {
+          where: { deletedAt: null },
+          select: {
+            id: true,
+            title: true,
+            fileUrl: true,
+            durationSec: true,
+            sortOrder: true,
+          },
+          orderBy: { sortOrder: "asc" },
+        },
+        quizzes: {
+          where: { deletedAt: null },
+          select: { id: true, titleEn: true },
+        },
+        materials: {
+          where: { deletedAt: null },
+          select: { id: true, title: true, type: true },
+        },
+      },
+    });
+    if (!course) return null;
+    return {
+      titleEn: course.titleEn,
+      price: course.price,
+      stageId: course.stageId,
+      subjectId: course.subjectId,
+      thumbnail: course.thumbnail,
+      lessonIds: course.lessons.map((l) => l.id),
+      lessonMeta: Object.fromEntries(
+        course.lessons.map((l) => [
+          l.id,
+          {
+            title: l.title,
+            fileUrl: l.fileUrl,
+            durationSec: l.durationSec,
+            sortOrder: l.sortOrder,
+          },
+        ])
+      ),
+      quizIds: course.quizzes.map((q) => q.id),
+      quizMeta: Object.fromEntries(
+        course.quizzes.map((q) => [q.id, { titleEn: q.titleEn }])
+      ),
+      materialIds: course.materials.map((m) => m.id),
+      materialMeta: Object.fromEntries(
+        course.materials.map((m) => [m.id, { title: m.title, type: m.type }])
+      ),
+    };
+  }
+
+  static async computePendingChangeSummary(courseId: string) {
+    const course = await prisma.course.findFirst({
+      where: { id: courseId, deletedAt: null },
+      select: { lastApprovedSnapshot: true },
+    });
+    const snap = course?.lastApprovedSnapshot as {
+      titleEn?: string;
+      price?: number;
+      stageId?: string;
+      subjectId?: string;
+      thumbnail?: string | null;
+      lessonIds?: string[];
+      lessonMeta?: Record<string, { title?: string; fileUrl?: string | null }>;
+      quizIds?: string[];
+      quizMeta?: Record<string, { titleEn?: string }>;
+      materialIds?: string[];
+      materialMeta?: Record<string, { title?: string }>;
+    } | null;
+
+    if (!snap) {
+      return {
+        firstReview: true,
+        note: "No prior approved snapshot — full course is new or never snapshotted.",
+      };
+    }
+
+    const current = await this.buildApprovedSnapshot(courseId);
+    if (!current) return null;
+
+    const prevLessons = new Set(snap.lessonIds ?? []);
+    const nextLessons = new Set(current.lessonIds);
+    const addedLessons = current.lessonIds
+      .filter((id) => !prevLessons.has(id))
+      .map((id) => ({
+        id,
+        title: current.lessonMeta[id]?.title,
+      }));
+    const removedLessons = (snap.lessonIds ?? [])
+      .filter((id) => !nextLessons.has(id))
+      .map((id) => ({
+        id,
+        title: snap.lessonMeta?.[id]?.title,
+      }));
+    const changedLessons = current.lessonIds
+      .filter((id) => prevLessons.has(id))
+      .filter((id) => {
+        const a = snap.lessonMeta?.[id];
+        const b = current.lessonMeta[id];
+        return a?.title !== b?.title || a?.fileUrl !== b?.fileUrl;
+      })
+      .map((id) => ({
+        id,
+        previousTitle: snap.lessonMeta?.[id]?.title,
+        title: current.lessonMeta[id]?.title,
+        videoChanged:
+          snap.lessonMeta?.[id]?.fileUrl !== current.lessonMeta[id]?.fileUrl,
+      }));
+
+    const prevQuizzes = new Set(snap.quizIds ?? []);
+    const nextQuizzes = new Set(current.quizIds);
+    const addedQuizzes = current.quizIds
+      .filter((id) => !prevQuizzes.has(id))
+      .map((id) => ({ id, titleEn: current.quizMeta[id]?.titleEn }));
+    const removedQuizzes = (snap.quizIds ?? [])
+      .filter((id) => !nextQuizzes.has(id))
+      .map((id) => ({ id, titleEn: snap.quizMeta?.[id]?.titleEn }));
+
+    const prevMats = new Set(snap.materialIds ?? []);
+    const nextMats = new Set(current.materialIds);
+    const addedMaterials = current.materialIds
+      .filter((id) => !prevMats.has(id))
+      .map((id) => ({ id, title: current.materialMeta[id]?.title }));
+    const removedMaterials = (snap.materialIds ?? [])
+      .filter((id) => !nextMats.has(id))
+      .map((id) => ({ id, title: snap.materialMeta?.[id]?.title }));
+
+    return {
+      firstReview: false,
+      titleChanged: snap.titleEn !== current.titleEn,
+      previousTitle: snap.titleEn,
+      titleEn: current.titleEn,
+      priceChanged: snap.price !== current.price,
+      previousPrice: snap.price,
+      price: current.price,
+      stageChanged: snap.stageId !== current.stageId,
+      subjectChanged: snap.subjectId !== current.subjectId,
+      thumbnailChanged: snap.thumbnail !== current.thumbnail,
+      addedLessons,
+      removedLessons,
+      changedLessons,
+      addedQuizzes,
+      removedQuizzes,
+      addedMaterials,
+      removedMaterials,
+    };
   }
 
   static async attachLessonPdf(
@@ -773,6 +981,11 @@ export class TeacherCourseService {
         ? options.googleProductId?.trim() || null
         : undefined;
 
+    const snapshot =
+      decision === "APPROVED" && status === "APPROVED"
+        ? await this.buildApprovedSnapshot(courseId)
+        : null;
+
     const updated = await prisma.course.update({
       where: { id: courseId },
       data: {
@@ -784,6 +997,14 @@ export class TeacherCourseService {
         ...(accessMonths !== undefined ? { accessMonths } : {}),
         ...(appleProductId !== undefined ? { appleProductId } : {}),
         ...(googleProductId !== undefined ? { googleProductId } : {}),
+        ...(snapshot
+          ? {
+              lastApprovedSnapshot: snapshot,
+              pendingChangeSummary: Prisma.DbNull,
+            }
+          : decision === "REJECTED"
+            ? { pendingChangeSummary: Prisma.DbNull }
+            : {}),
       },
     });
 
@@ -1269,6 +1490,23 @@ export class TeacherCourseService {
         screen: "course",
       }
     ).catch(() => {});
+
+    // Notify the teacher that a student subscribed / purchased this course.
+    if (purchase.course.teacher.userId !== purchase.userId) {
+      const { notifyTeacherNewSubscription } = await import(
+        "@/services/engagement-notifications.service"
+      );
+      const student = await prisma.user.findUnique({
+        where: { id: purchase.userId },
+        select: { fullLegalName: true },
+      });
+      await notifyTeacherNewSubscription({
+        teacherUserId: purchase.course.teacher.userId,
+        studentName: student?.fullLegalName ?? "A student",
+        courseTitle: purchase.course.titleEn,
+        courseId: purchase.courseId,
+      });
+    }
 
     return { success: true as const, purchase: updated };
   }

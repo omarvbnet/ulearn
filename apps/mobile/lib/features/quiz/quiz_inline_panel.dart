@@ -16,11 +16,15 @@ class QuizInlinePanel extends StatefulWidget {
     required this.quizId,
     required this.title,
     required this.onFinished,
+    this.embedded = false,
   });
 
   final String quizId;
   final String title;
   final VoidCallback onFinished;
+
+  /// When true, fills a fixed player stage (no outer border / min height).
+  final bool embedded;
 
   @override
   State<QuizInlinePanel> createState() => _QuizInlinePanelState();
@@ -163,6 +167,46 @@ class _QuizInlinePanelState extends State<QuizInlinePanel> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final body = _error != null
+        ? Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_error!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppTheme.muted)),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                    onPressed: widget.onFinished, child: Text(l10n.next)),
+              ],
+            ),
+          )
+        : _quiz == null
+            ? const Padding(
+                padding: EdgeInsets.all(24),
+                child: SkeletonBox(height: 160, radius: 12),
+              )
+            : _result != null
+                ? _InlineResult(
+                    result: _result!,
+                    onContinue: widget.onFinished,
+                  )
+                : !_started
+                    ? _InlineIntro(
+                        quiz: _quiz!,
+                        title: widget.title,
+                        onStart: _start,
+                      )
+                    : _questionBody(l10n);
+
+    if (widget.embedded) {
+      return ColoredBox(
+        color: AppTheme.card,
+        child: SingleChildScrollView(child: body),
+      );
+    }
+
     return Container(
       constraints: const BoxConstraints(minHeight: 220),
       decoration: BoxDecoration(
@@ -170,35 +214,7 @@ class _QuizInlinePanelState extends State<QuizInlinePanel> {
         color: AppTheme.card,
         border: Border.all(color: AppTheme.cardBorder),
       ),
-      child: _error != null
-          ? Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: AppTheme.muted)),
-                  const SizedBox(height: 12),
-                  OutlinedButton(onPressed: widget.onFinished, child: Text(l10n.next)),
-                ],
-              ),
-            )
-          : _quiz == null
-              ? const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: SkeletonBox(height: 160, radius: 12),
-                )
-              : _result != null
-                  ? _InlineResult(
-                      result: _result!,
-                      onContinue: widget.onFinished,
-                    )
-                  : !_started
-                      ? _InlineIntro(
-                          quiz: _quiz!,
-                          title: widget.title,
-                          onStart: _start,
-                        )
-                      : _questionBody(l10n),
+      child: body,
     );
   }
 

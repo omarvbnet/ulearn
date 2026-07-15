@@ -27,11 +27,38 @@ type Course = {
   _count: { purchases: number; quizzes: number };
 };
 
+type ChangeSummary = {
+  firstReview?: boolean;
+  note?: string;
+  titleChanged?: boolean;
+  previousTitle?: string;
+  titleEn?: string;
+  priceChanged?: boolean;
+  previousPrice?: number;
+  price?: number;
+  stageChanged?: boolean;
+  subjectChanged?: boolean;
+  thumbnailChanged?: boolean;
+  addedLessons?: { id: string; title?: string }[];
+  removedLessons?: { id: string; title?: string }[];
+  changedLessons?: {
+    id: string;
+    previousTitle?: string;
+    title?: string;
+    videoChanged?: boolean;
+  }[];
+  addedQuizzes?: { id: string; titleEn?: string }[];
+  removedQuizzes?: { id: string; titleEn?: string }[];
+  addedMaterials?: { id: string; title?: string }[];
+  removedMaterials?: { id: string; title?: string }[];
+};
+
 type CourseDetail = Omit<Course, "lessons" | "thumbnail"> & {
   thumbnail: string | null;
   accessMonths?: number;
   appleProductId?: string | null;
   googleProductId?: string | null;
+  pendingChangeSummary?: ChangeSummary | null;
   lessons: {
     id: string;
     title: string;
@@ -91,10 +118,16 @@ type Purchase = {
   currency: string;
   status: string;
   createdAt: string;
+  kind?: "course" | "group";
   user: { fullLegalName: string | null; phone: string };
-  course: {
+  course?: {
     titleEn: string;
     teacher: { level: string; user: { fullLegalName: string | null } };
+  };
+  group?: {
+    titleEn: string;
+    stage?: { nameEn?: string | null } | null;
+    items?: { courseId: string }[];
   };
 };
 
@@ -103,8 +136,18 @@ type LessonUpdate = {
   title: string | null;
   fileUrl: string | null;
   thumbnailUrl: string | null;
+  durationSec?: number | null;
   status: string;
   createdAt: string;
+  currentTitle?: string | null;
+  currentFileUrl?: string | null;
+  currentThumbnailUrl?: string | null;
+  currentDurationSec?: number | null;
+  newTitle?: string | null;
+  newFileUrl?: string | null;
+  newThumbnailUrl?: string | null;
+  newDurationSec?: number | null;
+  changeTags?: string[];
   lesson: {
     id: string;
     title: string;
@@ -164,9 +207,44 @@ export function CourseReviewClient() {
         .then((r) => (r.ok ? r.json() : { courses: [] }))
         .then((d) => setCourses(d.courses || []));
     } else {
-      fetch("/api/admin/course-purchases?status=PENDING")
-        .then((r) => (r.ok ? r.json() : { purchases: [] }))
-        .then((d) => setPurchases(d.purchases || []));
+      Promise.all([
+        fetch("/api/admin/course-purchases?status=PENDING").then((r) =>
+          r.ok ? r.json() : { purchases: [] }
+        ),
+        fetch("/api/admin/course-group-purchases").then((r) =>
+          r.ok ? r.json() : { purchases: [] }
+        ),
+      ]).then(([courseData, groupData]) => {
+        const coursePurchases: Purchase[] = (courseData.purchases || []).map(
+          (p: Purchase) => ({ ...p, kind: "course" as const })
+        );
+        const groupPurchases: Purchase[] = (groupData.purchases || []).map(
+          (p: {
+            id: string;
+            price: number;
+            currency: string;
+            status: string;
+            createdAt: string;
+            user: Purchase["user"];
+            group: Purchase["group"];
+          }) => ({
+            id: p.id,
+            price: p.price,
+            currency: p.currency,
+            status: p.status,
+            createdAt: p.createdAt,
+            user: p.user,
+            group: p.group,
+            kind: "group" as const,
+          })
+        );
+        setPurchases(
+          [...groupPurchases, ...coursePurchases].sort(
+            (a, b) =>
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          )
+        );
+      });
     }
   }, [tab]);
 
@@ -265,14 +343,28 @@ export function CourseReviewClient() {
     }
   }
 
-  async function handlePurchase(purchaseId: string, action: "approve" | "reject") {
-    const res = await fetch("/api/admin/course-purchases", {
+  async function handlePurchase(
+    purchaseId: string,
+    action: "approve" | "reject",
+    kind: "course" | "group" = "course"
+  ) {
+    const endpoint =
+      kind === "group"
+        ? "/api/admin/course-group-purchases"
+        : "/api/admin/course-purchases";
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ purchaseId, action }),
     });
     if (res.ok) {
-      toast(action === "approve" ? "Payment confirmed — course unlocked" : "Purchase rejected");
+      toast(
+        action === "approve"
+          ? kind === "group"
+            ? "Group payment confirmed — all courses unlocked"
+            : "Payment confirmed — course unlocked"
+          : "Purchase rejected"
+      );
       loadCourses();
     } else {
       toast("Failed", "error");
@@ -347,28 +439,58 @@ export function CourseReviewClient() {
           ) : (
             <div className="stagger space-y-3">
               {purchases.map((p) => (
-                <Card key={p.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
+                <Card
+                  key={`${p.kind}-${p.id}`}
+                  className="flex flex-wrap items-center justify-between gap-3 p-4"
+                >
                   <div>
                     <p className="font-semibold">{p.user.fullLegalName}</p>
                     <p className="text-sm text-muted" dir="ltr">{p.user.phone}</p>
                   </div>
                   <div className="text-sm">
-                    <p className="font-medium">{p.course.titleEn}</p>
-                    <p className="text-muted">
-                      by {p.course.teacher.user.fullLegalName} ·{" "}
-                      <Badge status={LEVEL_BADGE[p.course.teacher.level]}>
-                        {p.course.teacher.level.replace(/_/g, " ")}
-                      </Badge>
-                    </p>
+                    {p.kind === "group" ? (
+                      <>
+                        <p className="font-medium">
+                          Group: {p.group?.titleEn ?? "Course group"}
+                        </p>
+                        <p className="text-muted">
+                          {p.group?.stage?.nameEn ?? "—"} ·{" "}
+                          {p.group?.items?.length ?? 0} courses
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-medium">{p.course?.titleEn}</p>
+                        <p className="text-muted">
+                          by {p.course?.teacher.user.fullLegalName} ·{" "}
+                          <Badge
+                            status={
+                              LEVEL_BADGE[p.course?.teacher.level ?? ""] ?? "PENDING"
+                            }
+                          >
+                            {(p.course?.teacher.level ?? "").replace(/_/g, " ")}
+                          </Badge>
+                        </p>
+                      </>
+                    )}
                   </div>
                   <p className="font-semibold text-accent">
                     {p.price} {p.currency}
                   </p>
                   <div className="flex gap-2">
-                    <Button onClick={() => handlePurchase(p.id, "approve")}>
+                    <Button
+                      onClick={() =>
+                        handlePurchase(p.id, "approve", p.kind ?? "course")
+                      }
+                    >
                       Confirm Payment
                     </Button>
-                    <Button variant="danger" onClick={() => handlePurchase(p.id, "reject")}>
+                    <Button
+                      variant="danger"
+                      onClick={() =>
+                        handlePurchase(p.id, "reject", p.kind ?? "course")
+                      }
+                    >
                       Reject
                     </Button>
                   </div>
@@ -464,7 +586,7 @@ export function CourseReviewClient() {
         <Modal
           open
           onClose={() => setSelectedUpdate(null)}
-          title={selectedUpdate.title ?? selectedUpdate.lesson.title}
+          title={selectedUpdate.newTitle ?? selectedUpdate.title ?? selectedUpdate.lesson.title}
           wide
         >
           <div className="space-y-4">
@@ -473,16 +595,118 @@ export function CourseReviewClient() {
               <p>
                 Teacher: {selectedUpdate.lesson.course.teacher.user.fullLegalName}
               </p>
-              <p>Current title: {selectedUpdate.lesson.title}</p>
-              {selectedUpdate.title && (
-                <p>New title: {selectedUpdate.title}</p>
-              )}
             </div>
-            {(selectedUpdate.fileUrl || selectedUpdate.lesson.fileUrl) && (
-              <p className="text-sm">
-                {selectedUpdate.fileUrl ? "New video uploaded" : "No media change"}
-              </p>
+
+            {(selectedUpdate.changeTags?.length ?? 0) > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {selectedUpdate.changeTags!.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
             )}
+
+            <div className="grid gap-3 text-sm sm:grid-cols-2">
+              <div className="rounded-xl border border-card-border p-3">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">
+                  Current
+                </p>
+                <p className="font-medium">
+                  {selectedUpdate.currentTitle ?? selectedUpdate.lesson.title}
+                </p>
+                {selectedUpdate.currentDurationSec != null && (
+                  <p className="text-xs text-muted">
+                    Duration: {formatDuration(selectedUpdate.currentDurationSec)}
+                  </p>
+                )}
+              </div>
+              <div className="rounded-xl border border-accent/30 bg-accent/5 p-3">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-accent">
+                  Proposed
+                </p>
+                <p className="font-medium">
+                  {selectedUpdate.newTitle ??
+                    selectedUpdate.title ??
+                    selectedUpdate.lesson.title}
+                </p>
+                {(selectedUpdate.newDurationSec ?? selectedUpdate.durationSec) !=
+                  null && (
+                  <p className="text-xs text-muted">
+                    Duration:{" "}
+                    {formatDuration(
+                      selectedUpdate.newDurationSec ??
+                        selectedUpdate.durationSec ??
+                        null
+                    )}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <p className="mb-2 text-xs font-semibold text-muted">Current video</p>
+                {(selectedUpdate.currentFileUrl || selectedUpdate.lesson.fileUrl) ? (
+                  <video
+                    key={selectedUpdate.currentFileUrl || selectedUpdate.lesson.fileUrl || "cur"}
+                    controls
+                    playsInline
+                    className="aspect-video w-full rounded-xl bg-black"
+                    src={
+                      (selectedUpdate.currentFileUrl ||
+                        selectedUpdate.lesson.fileUrl)!
+                    }
+                  />
+                ) : (
+                  <div className="flex aspect-video items-center justify-center rounded-xl border border-card-border text-sm text-muted">
+                    No current video
+                  </div>
+                )}
+                {(selectedUpdate.currentThumbnailUrl ||
+                  selectedUpdate.lesson.fileUrl) &&
+                  selectedUpdate.currentThumbnailUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={selectedUpdate.currentThumbnailUrl}
+                      alt=""
+                      className="mt-2 h-16 w-28 rounded-lg object-cover"
+                    />
+                  )}
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-semibold text-accent">New video</p>
+                {(selectedUpdate.newFileUrl || selectedUpdate.fileUrl) ? (
+                  <video
+                    key={selectedUpdate.newFileUrl || selectedUpdate.fileUrl || "new"}
+                    controls
+                    playsInline
+                    className="aspect-video w-full rounded-xl bg-black ring-1 ring-accent/40"
+                    src={(selectedUpdate.newFileUrl || selectedUpdate.fileUrl)!}
+                  />
+                ) : (
+                  <div className="flex aspect-video items-center justify-center rounded-xl border border-card-border text-sm text-muted">
+                    No new video uploaded
+                  </div>
+                )}
+                {(selectedUpdate.newThumbnailUrl ||
+                  selectedUpdate.thumbnailUrl) && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={
+                      (selectedUpdate.newThumbnailUrl ||
+                        selectedUpdate.thumbnailUrl)!
+                    }
+                    alt=""
+                    className="mt-2 h-16 w-28 rounded-lg object-cover ring-1 ring-accent/30"
+                  />
+                )}
+              </div>
+            </div>
+
             <Textarea
               label="Review notes (optional)"
               value={notes}
@@ -521,6 +745,101 @@ export function CourseReviewClient() {
 
             {(detail?.description || selected.description) && (
               <p className="text-sm">{detail?.description || selected.description}</p>
+            )}
+
+            {detail?.pendingChangeSummary && (
+              <div className="rounded-xl border border-accent/35 bg-accent/5 p-3">
+                <p className="mb-2 text-sm font-semibold text-accent">
+                  What changed
+                </p>
+                {detail.pendingChangeSummary.firstReview ? (
+                  <p className="text-sm text-muted">
+                    {detail.pendingChangeSummary.note ||
+                      "First review — no prior approved snapshot."}
+                  </p>
+                ) : (
+                  <ul className="space-y-1 text-sm">
+                    {detail.pendingChangeSummary.titleChanged && (
+                      <li>
+                        Title:{" "}
+                        <span className="text-muted">
+                          {detail.pendingChangeSummary.previousTitle}
+                        </span>{" "}
+                        → {detail.pendingChangeSummary.titleEn}
+                      </li>
+                    )}
+                    {detail.pendingChangeSummary.priceChanged && (
+                      <li>
+                        Price: {detail.pendingChangeSummary.previousPrice} →{" "}
+                        {detail.pendingChangeSummary.price}
+                      </li>
+                    )}
+                    {detail.pendingChangeSummary.stageChanged && (
+                      <li>Stage changed</li>
+                    )}
+                    {detail.pendingChangeSummary.subjectChanged && (
+                      <li>Subject changed</li>
+                    )}
+                    {detail.pendingChangeSummary.thumbnailChanged && (
+                      <li>Cover / thumbnail updated</li>
+                    )}
+                    {(detail.pendingChangeSummary.addedLessons?.length ?? 0) >
+                      0 && (
+                      <li>
+                        Added lessons:{" "}
+                        {detail.pendingChangeSummary.addedLessons!.map((l) => l.title || l.id).join(", ")}
+                      </li>
+                    )}
+                    {(detail.pendingChangeSummary.removedLessons?.length ?? 0) >
+                      0 && (
+                      <li>
+                        Removed lessons:{" "}
+                        {detail.pendingChangeSummary.removedLessons!.map((l) => l.title || l.id).join(", ")}
+                      </li>
+                    )}
+                    {(detail.pendingChangeSummary.changedLessons?.length ?? 0) >
+                      0 && (
+                      <li>
+                        Updated lessons:{" "}
+                        {detail.pendingChangeSummary.changedLessons!
+                          .map(
+                            (l) =>
+                              `${l.title || l.id}${l.videoChanged ? " (video)" : ""}`
+                          )
+                          .join(", ")}
+                      </li>
+                    )}
+                    {(detail.pendingChangeSummary.addedQuizzes?.length ?? 0) >
+                      0 && (
+                      <li>
+                        Added quizzes:{" "}
+                        {detail.pendingChangeSummary.addedQuizzes!.map((q) => q.titleEn || q.id).join(", ")}
+                      </li>
+                    )}
+                    {(detail.pendingChangeSummary.removedQuizzes?.length ?? 0) >
+                      0 && (
+                      <li>
+                        Removed quizzes:{" "}
+                        {detail.pendingChangeSummary.removedQuizzes!.map((q) => q.titleEn || q.id).join(", ")}
+                      </li>
+                    )}
+                    {(detail.pendingChangeSummary.addedMaterials?.length ?? 0) >
+                      0 && (
+                      <li>
+                        Added documents:{" "}
+                        {detail.pendingChangeSummary.addedMaterials!.map((m) => m.title || m.id).join(", ")}
+                      </li>
+                    )}
+                    {(detail.pendingChangeSummary.removedMaterials?.length ?? 0) >
+                      0 && (
+                      <li>
+                        Removed documents:{" "}
+                        {detail.pendingChangeSummary.removedMaterials!.map((m) => m.title || m.id).join(", ")}
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
             )}
 
             <div className="grid gap-2 text-sm text-muted sm:grid-cols-2">

@@ -85,6 +85,7 @@ export async function POST(
       question: parsed.data.body,
       courseId: lesson.courseId,
       lessonId: id,
+      questionId: question.id,
     });
   }
 

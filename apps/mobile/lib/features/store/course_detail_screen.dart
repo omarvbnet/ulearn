@@ -5,7 +5,6 @@ import 'package:ulearn/core/auth/require_auth.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/course_video_cache.dart';
-import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/lesson_cover.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/home/home_feed.dart';
@@ -30,10 +29,26 @@ class CourseDetailScreen extends StatefulWidget {
     super.key,
     required this.courseId,
     this.summary,
+    this.initialLessonId,
+    this.initialQuestionId,
+    this.initialAnswerId,
+    this.openQa = false,
   });
 
   final String courseId;
   final Map<String, dynamic>? summary;
+
+  /// Deep-link: select this lesson when the course loads.
+  final String? initialLessonId;
+
+  /// Deep-link: open Q&A tab and highlight this question.
+  final String? initialQuestionId;
+
+  /// Deep-link: open Q&A with this answer context (scrolls to question).
+  final String? initialAnswerId;
+
+  /// Deep-link: jump to the Ask & Answer tab.
+  final bool openQa;
 
   @override
   State<CourseDetailScreen> createState() => _CourseDetailScreenState();
@@ -136,6 +151,19 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         _completion = data['completion'] as Map<String, dynamic>?;
         _error = null;
         _selectInitialLesson(lessons, unlocked);
+        final deepLessonId = widget.initialLessonId;
+        if (deepLessonId != null && deepLessonId.isNotEmpty) {
+          final match = lessons.cast<Map<String, dynamic>?>().firstWhere(
+                (l) => l?['id']?.toString() == deepLessonId,
+                orElse: () => null,
+              );
+          if (match != null) _activeLesson = match;
+        }
+        if (widget.openQa ||
+            (widget.initialQuestionId?.isNotEmpty == true) ||
+            (widget.initialAnswerId?.isNotEmpty == true)) {
+          _selectedTab = 2;
+        }
       });
       final activeId = _activeLesson?['id']?.toString();
       for (var i = 0; i < lessons.length; i++) {
@@ -661,6 +689,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         onSelectLesson: (l) => _selectLesson(l, unlocked),
         lessonTitle: (l, i) => _lessonTitle(context, l, i),
         onComposerFocusChanged: _onQaComposerFocusChanged,
+        highlightQuestionId: widget.initialQuestionId,
+        autoFocusAnswer: widget.openQa &&
+            (widget.initialQuestionId?.isNotEmpty == true),
       );
     }
     return _CourseMaterialsTab(
@@ -671,236 +702,352 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     );
   }
 
-  Widget _buildCourseHeader({
+  /// Fixed 16:9 YouTube-style stage shared by video, quiz, and documents.
+  Widget _buildPlayerStage({
+    required List<Map<String, dynamic>> lessons,
+    required bool unlocked,
+    required Map<String, dynamic>? active,
+    required String? activeUrl,
+    required String? activeId,
+    required dynamic l10n,
+    required bool collapse,
+    required bool edgeToEdge,
+  }) {
+    final stageBody = AnimatedSwitcher(
+      duration: const Duration(milliseconds: 280),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      child: KeyedSubtree(
+        key: ValueKey(
+          '${_playerStage.name}-${_stageQuiz?['id']}-${activeId ?? 'none'}',
+        ),
+        child: _buildStageContent(
+          lessons: lessons,
+          unlocked: unlocked,
+          active: active,
+          activeUrl: activeUrl,
+          activeId: activeId,
+          l10n: l10n,
+          edgeToEdge: edgeToEdge,
+        ),
+      ),
+    );
+
+    return ClipRect(
+      child: AnimatedAlign(
+        alignment: Alignment.topCenter,
+        heightFactor: collapse ? 0.0 : 1.0,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeInOutCubic,
+        child: ColoredBox(
+          color: Colors.black,
+          child: AspectRatio(
+            aspectRatio: 16 / 9,
+            child: stageBody,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStageContent({
+    required List<Map<String, dynamic>> lessons,
+    required bool unlocked,
+    required Map<String, dynamic>? active,
+    required String? activeUrl,
+    required String? activeId,
+    required dynamic l10n,
+    required bool edgeToEdge,
+  }) {
+    if (_playerStage == _PlayerStage.quiz && _stageQuiz != null) {
+      return QuizInlinePanel(
+        key: ValueKey('quiz-panel-${_stageQuiz!['id']}'),
+        quizId: _stageQuiz!['id'].toString(),
+        title: localizedText(_stageQuiz!, context.localeCode),
+        embedded: true,
+        onFinished: () {
+          final lesson = _activeLesson;
+          if (lesson == null) return;
+          setState(() => _stageQuiz!['passedByMe'] = true);
+          _enterDocumentsOrAdvance(lesson);
+        },
+      );
+    }
+
+    if (_playerStage == _PlayerStage.documents && _stageDocs.isNotEmpty) {
+      return _LessonDocumentsPanel(
+        materials: _stageDocs,
+        embedded: true,
+        onView: (m) {
+          final url = m['fileUrl']?.toString();
+          if (url == null || url.isEmpty) return;
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => CourseMaterialPdfScreen(
+                title: m['title']?.toString() ??
+                    l10n.t('mobile.teacher.documentFallback'),
+                url: ApiClient.absoluteUrl(url),
+              ),
+            ),
+          );
+        },
+        onNext: () {
+          final lesson = _activeLesson;
+          if (lesson == null) return;
+          _advanceAfterLesson(lesson);
+        },
+      );
+    }
+
+    if (activeUrl != null && activeUrl.isNotEmpty) {
+      return CourseInlinePlayer(
+        key: ValueKey('${activeUrl}_${active?['watchPositionSec']}'),
+        url: ApiClient.absoluteUrl(activeUrl),
+        title: active?['title']?.toString() ?? l10n.t('student.videos'),
+        lessonId: activeId,
+        borderRadius: edgeToEdge ? 0 : 14,
+        initiallyCompleted: active != null && _isLessonCompleted(active),
+        initialPositionSec: active != null && !_isLessonCompleted(active)
+            ? (active['watchPositionSec'] as num?)?.toInt()
+            : null,
+        onCompleted: active != null ? () => _onLessonCompleted(active) : null,
+        playlist: [
+          for (var i = 0; i < lessons.length; i++)
+            CoursePlaylistItem(
+              id: lessons[i]['id']?.toString() ?? '$i',
+              title: _lessonTitle(context, lessons[i], i),
+              canWatch: _canWatch(lessons[i], unlocked),
+              completed: _isLessonCompleted(lessons[i]),
+              durationLabel: formatDuration(
+                (lessons[i]['durationSec'] as num?)?.toInt() ?? 0,
+              ),
+            ),
+        ],
+        onSelectPlaylistItem: (id) {
+          Map<String, dynamic>? lesson;
+          for (final l in lessons) {
+            if (l['id']?.toString() == id) {
+              lesson = l;
+              break;
+            }
+          }
+          if (lesson != null) _selectLesson(lesson, unlocked);
+        },
+        freePreviewLimitSec: !unlocked &&
+                active?['previewOnly'] == true &&
+                (active?['freePreviewSec'] as num?) != null
+            ? (active!['freePreviewSec'] as num).toInt()
+            : null,
+        onPreviewLimitReached: !unlocked
+            ? () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(l10n.t('mobile.store.previewEndedHint')),
+                  ),
+                );
+              }
+            : null,
+      );
+    }
+
+    if (!unlocked) {
+      return DecoratedBox(
+        decoration: const BoxDecoration(gradient: AppTheme.gradient),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.lock_outline, color: Colors.white70, size: 40),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  l10n.storeSubscribeUnlock,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ColoredBox(
+      color: AppTheme.card,
+      child: Center(
+        child: Text(
+          l10n.t('mobile.store.selectLessonHint'),
+          style: TextStyle(color: AppTheme.muted),
+        ),
+      ),
+    );
+  }
+
+  String _stageLabel(dynamic l10n) {
+    return switch (_playerStage) {
+      _PlayerStage.quiz => l10n.t('mobile.store.quizStep'),
+      _PlayerStage.documents => l10n.t('mobile.store.documentsStep'),
+      _PlayerStage.playing => l10n.t('mobile.store.currentVideo'),
+    };
+  }
+
+  Widget _buildNowPlayingStrip({
+    required Map<String, dynamic>? active,
+    required String courseTitle,
+    required dynamic l10n,
+  }) {
+    final title = active != null
+        ? _lessonTitle(
+            context,
+            active,
+            () {
+              final lessons = ((_course?['lessons'] as List<dynamic>?) ?? [])
+                  .cast<Map<String, dynamic>>();
+              final i = lessons.indexWhere(
+                (l) => l['id']?.toString() == active['id']?.toString(),
+              );
+              return i >= 0 ? i : 0;
+            }(),
+          )
+        : courseTitle;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      decoration: BoxDecoration(
+        color: AppTheme.card.withValues(alpha: 0.55),
+        border: Border(
+          bottom: BorderSide(color: AppTheme.cardBorder.withValues(alpha: 0.7)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppTheme.accent.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Text(
+              _stageLabel(l10n),
+              style: const TextStyle(
+                color: AppTheme.accent,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabsBar({
+    required List<Map<String, dynamic>> lessons,
+    required bool unlocked,
+    required dynamic l10n,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+      child: _CourseDetailTabs(
+        selected: _selectedTab,
+        onSelected: (i) {
+          setState(() {
+            _selectedTab = i;
+            if (i != 2) _qaComposerFocused = false;
+          });
+        },
+        lessonsCount: lessons.length,
+        quizzesCount: unlocked ? _quizzes.length : 0,
+        materialsCount: unlocked ? _materials.length : 0,
+        l10n: l10n,
+      ),
+    );
+  }
+
+  /// Landscape: left = fixed stage (video/quiz/docs), right = tabs + content.
+  Widget _buildLandscapeBody({
     required Map<String, dynamic> course,
     required List<Map<String, dynamic>> lessons,
     required bool unlocked,
     required Map<String, dynamic>? active,
     required String? activeUrl,
     required String? activeId,
-    required int views,
-    required int subscribers,
+    required String courseTitle,
     required dynamic l10n,
-    required bool collapseVideo,
+    required Widget tabContent,
   }) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (_isOwnCourse) ...[
-            StaggeredItem(
-              index: 0,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 6, bottom: 10),
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    _MetaTag(
-                      icon: Icons.verified_outlined,
-                      label: l10n.storeYourCourse,
-                      accent: true,
-                    ),
-                    _MetaTag(
-                      label: (course['status']?.toString() ?? 'APPROVED')
-                          .replaceAll('_', ' '),
-                    ),
-                    _MetaTag(label: l10n.homeViews(views)),
-                    if (subscribers > 0)
-                      _MetaTag(label: l10n.homeSubscribers(subscribers)),
-                    ActionChip(
-                      visualDensity: VisualDensity.compact,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      avatar: const Icon(Icons.video_call_outlined, size: 16),
-                      label: Text(
-                        l10n.storeManageInStudio,
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                      ),
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const TeacherStudioScreen(),
+    return Row(
+      children: [
+        Expanded(
+          flex: 5,
+          child: Column(
+            children: [
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final maxW = constraints.maxWidth;
+                    final maxH = constraints.maxHeight;
+                    final heightIfFullWidth = maxW * 9 / 16;
+                    final width = heightIfFullWidth <= maxH
+                        ? maxW
+                        : maxH * 16 / 9;
+                    final height = width * 9 / 16;
+                    return Center(
+                      child: SizedBox(
+                        width: width,
+                        height: height,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: _buildStageContent(
+                            lessons: lessons,
+                            unlocked: unlocked,
+                            active: active,
+                            activeUrl: activeUrl,
+                            activeId: activeId,
+                            l10n: l10n,
+                            edgeToEdge: true,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    );
+                  },
                 ),
               ),
-            ),
-          ],
-          if (_playerStage == _PlayerStage.quiz && _stageQuiz != null)
-            ClipRect(
-              child: AnimatedAlign(
-                alignment: Alignment.topCenter,
-                heightFactor: collapseVideo ? 0.0 : 1.0,
-                duration: const Duration(milliseconds: 280),
-                curve: Curves.easeInOutCubic,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 320),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
-                      child: QuizInlinePanel(
-                        key: ValueKey('quiz-panel-${_stageQuiz!['id']}'),
-                        quizId: _stageQuiz!['id'].toString(),
-                        title: localizedText(_stageQuiz!, context.localeCode),
-                        onFinished: () {
-                          final lesson = _activeLesson;
-                          if (lesson == null) return;
-                          setState(() {
-                            _stageQuiz!['passedByMe'] = true;
-                          });
-                          _enterDocumentsOrAdvance(lesson);
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                ),
+              _buildNowPlayingStrip(
+                active: active,
+                courseTitle: courseTitle,
+                l10n: l10n,
               ),
-            )
-          else if (_playerStage == _PlayerStage.documents && _stageDocs.isNotEmpty)
-            ClipRect(
-              child: AnimatedAlign(
-                alignment: Alignment.topCenter,
-                heightFactor: collapseVideo ? 0.0 : 1.0,
-                duration: const Duration(milliseconds: 280),
-                curve: Curves.easeInOutCubic,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _LessonDocumentsPanel(
-                      materials: _stageDocs,
-                      onView: (m) {
-                        final url = m['fileUrl']?.toString();
-                        if (url == null || url.isEmpty) return;
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => CourseMaterialPdfScreen(
-                              title: m['title']?.toString() ?? l10n.t('mobile.teacher.documentFallback'),
-                              url: ApiClient.absoluteUrl(url),
-                            ),
-                          ),
-                        );
-                      },
-                      onNext: () {
-                        final lesson = _activeLesson;
-                        if (lesson == null) return;
-                        _advanceAfterLesson(lesson);
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                ),
-              ),
-            )
-          else if (activeUrl != null && activeUrl.isNotEmpty)
-            ClipRect(
-              child: AnimatedAlign(
-                alignment: Alignment.topCenter,
-                heightFactor: collapseVideo ? 0.0 : 1.0,
-                duration: const Duration(milliseconds: 280),
-                curve: Curves.easeInOutCubic,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CourseInlinePlayer(
-                      key: ValueKey('${activeUrl}_${active?['watchPositionSec']}'),
-                      url: ApiClient.absoluteUrl(activeUrl),
-                      title: active?['title']?.toString() ?? l10n.t('student.videos'),
-                      lessonId: activeId,
-                      initiallyCompleted: active != null && _isLessonCompleted(active),
-                      initialPositionSec: active != null && !_isLessonCompleted(active)
-                          ? (active['watchPositionSec'] as num?)?.toInt()
-                          : null,
-                      onCompleted: active != null ? () => _onLessonCompleted(active) : null,
-                      playlist: [
-                        for (var i = 0; i < lessons.length; i++)
-                          CoursePlaylistItem(
-                            id: lessons[i]['id']?.toString() ?? '$i',
-                            title: _lessonTitle(context, lessons[i], i),
-                            canWatch: _canWatch(lessons[i], unlocked),
-                            completed: _isLessonCompleted(lessons[i]),
-                            durationLabel: formatDuration(
-                              (lessons[i]['durationSec'] as num?)?.toInt() ?? 0,
-                            ),
-                          ),
-                      ],
-                      onSelectPlaylistItem: (id) {
-                        Map<String, dynamic>? lesson;
-                        for (final l in lessons) {
-                          if (l['id']?.toString() == id) {
-                            lesson = l;
-                            break;
-                          }
-                        }
-                        if (lesson != null) _selectLesson(lesson, unlocked);
-                      },
-                      freePreviewLimitSec: !unlocked &&
-                              active?['previewOnly'] == true &&
-                              (active?['freePreviewSec'] as num?) != null
-                          ? (active!['freePreviewSec'] as num).toInt()
-                          : null,
-                      onPreviewLimitReached: !unlocked
-                          ? () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(l10n.t('mobile.store.previewEndedHint')),
-                                ),
-                              );
-                            }
-                          : null,
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                ),
-              ),
-            )
-          else if (!unlocked) ...[
-            Container(
-              height: 180,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                gradient: AppTheme.gradient,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.lock_outline, color: Colors.white70, size: 40),
-                  const SizedBox(height: 8),
-                  Text(
-                    l10n.storeSubscribeUnlock,
-                    style: const TextStyle(color: Colors.white70),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-          StaggeredItem(
-            index: 0,
-            child: _CourseDetailTabs(
-              selected: _selectedTab,
-              onSelected: (i) {
-                setState(() {
-                  _selectedTab = i;
-                  if (i != 2) _qaComposerFocused = false;
-                });
-              },
-              lessonsCount: lessons.length,
-              quizzesCount: unlocked ? _quizzes.length : 0,
-              materialsCount: unlocked ? _materials.length : 0,
-              l10n: l10n,
-            ),
+            ],
           ),
-          const SizedBox(height: 8),
-        ],
-      ),
+        ),
+        VerticalDivider(width: 1, thickness: 1, color: AppTheme.cardBorder),
+        SizedBox(
+          width: (MediaQuery.sizeOf(context).width * 0.38).clamp(280.0, 360.0),
+          child: Column(
+            children: [
+              _buildTabsBar(lessons: lessons, unlocked: unlocked, l10n: l10n),
+              const SizedBox(height: 4),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: tabContent,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -1048,73 +1195,142 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     final activeUrl = active?['fileUrl']?.toString();
     final activeId = active?['id']?.toString();
 
+    final collapseStage = _selectedTab == 2 && _qaComposerFocused;
+    final tabContent = _buildSelectedTabContent(
+      course: course,
+      lessons: lessons,
+      unlocked: unlocked,
+      activeId: activeId,
+      l10n: l10n,
+      active: active,
+      teacherName: teacherName,
+      rating: rating,
+      views: views,
+      subscribers: subscribers,
+      totalSec: totalSec,
+      likes: likes,
+      dislikes: dislikes,
+      myReaction: myReaction,
+      description: description,
+      teacher: teacher,
+      onTeacherTap: () => _openTeacherProfile(teacher, teacherName),
+    );
+
+    final isLandscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+
     return Scaffold(
       resizeToAvoidBottomInset: true,
-      appBar: GlassAppBar(
-        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        actions: [
-          if (!_isOwnCourse)
-            IconButton(
-              tooltip: l10n.reelsReportContent,
-              icon: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
-              onPressed: () => ReportContentSheet.show(
-                context,
-                targetType: 'STORE_COURSE',
-                targetId: widget.courseId,
-                contentTitle: title,
+      appBar: isLandscape
+          ? null
+          : GlassAppBar(
+              title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              actions: [
+                if (!_isOwnCourse)
+                  IconButton(
+                    tooltip: l10n.reelsReportContent,
+                    icon: const Icon(Icons.flag_outlined,
+                        color: Colors.orangeAccent),
+                    onPressed: () => ReportContentSheet.show(
+                      context,
+                      targetType: 'STORE_COURSE',
+                      targetId: widget.courseId,
+                      contentTitle: title,
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: FavoriteButton(
+                    active: _favorited,
+                    onTap: _toggleFavorite,
+                    size: 36,
+                  ),
+                ),
+              ],
+            ),
+      body: isLandscape
+          ? SafeArea(
+              child: Column(
+                children: [
+                  // Compact landscape chrome — back + title + actions
+                  SizedBox(
+                    height: 44,
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                              size: 18),
+                          onPressed: () => Navigator.of(context).maybePop(),
+                        ),
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                        FavoriteButton(
+                          active: _favorited,
+                          onTap: _toggleFavorite,
+                          size: 34,
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: _buildLandscapeBody(
+                      course: course,
+                      lessons: lessons,
+                      unlocked: unlocked,
+                      active: active,
+                      activeUrl: activeUrl,
+                      activeId: activeId,
+                      courseTitle: title,
+                      l10n: l10n,
+                      tabContent: tabContent,
+                    ),
+                  ),
+                ],
               ),
+            )
+          : Column(
+              children: [
+                // Edge-to-edge YouTube-style stage (video / quiz / docs)
+                _buildPlayerStage(
+                  lessons: lessons,
+                  unlocked: unlocked,
+                  active: active,
+                  activeUrl: activeUrl,
+                  activeId: activeId,
+                  l10n: l10n,
+                  collapse: collapseStage,
+                  edgeToEdge: true,
+                ),
+                if (!collapseStage)
+                  _buildNowPlayingStrip(
+                    active: active,
+                    courseTitle: title,
+                    l10n: l10n,
+                  ),
+                _buildTabsBar(
+                  lessons: lessons,
+                  unlocked: unlocked,
+                  l10n: l10n,
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: tabContent,
+                  ),
+                ),
+              ],
             ),
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: FavoriteButton(
-              active: _favorited,
-              onTap: _toggleFavorite,
-              size: 36,
-            ),
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          _buildCourseHeader(
-            course: course,
-            lessons: lessons,
-            unlocked: unlocked,
-            active: active,
-            activeUrl: activeUrl,
-            activeId: activeId,
-            views: views,
-            subscribers: subscribers,
-            l10n: l10n,
-            collapseVideo: _selectedTab == 2 && _qaComposerFocused,
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: _buildSelectedTabContent(
-                course: course,
-                lessons: lessons,
-                unlocked: unlocked,
-                activeId: activeId,
-                l10n: l10n,
-                active: active,
-                teacherName: teacherName,
-                rating: rating,
-                views: views,
-                subscribers: subscribers,
-                totalSec: totalSec,
-                likes: likes,
-                dislikes: dislikes,
-                myReaction: myReaction,
-                description: description,
-                teacher: teacher,
-                onTeacherTap: () => _openTeacherProfile(teacher, teacherName),
-              ),
-            ),
-          ),
-        ],
-      ),
-      bottomSheet: unlocked
+      bottomSheet: unlocked || isLandscape
           ? null
           : Container(
               padding: EdgeInsets.fromLTRB(
@@ -1162,7 +1378,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                               ),
                               onPressed: _buying ? null : _buy,
                               icon: const Icon(Icons.workspace_premium_outlined),
-                              label: Text(_buying ? l10n.t('student.issuing') : l10n.subscribe),
+                              label: Text(_buying
+                                  ? l10n.t('student.issuing')
+                                  : l10n.subscribe),
                             ),
                     ),
                   ),
@@ -1446,6 +1664,42 @@ class _CourseDetailsTab extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.only(bottom: 16),
       children: [
+        if (isOwnCourse) ...[
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _MetaTag(
+                icon: Icons.verified_outlined,
+                label: l10n.storeYourCourse,
+                accent: true,
+              ),
+              _MetaTag(
+                label: (course['status']?.toString() ?? 'APPROVED')
+                    .replaceAll('_', ' '),
+              ),
+              _MetaTag(label: l10n.homeViews(views)),
+              if (subscribers > 0)
+                _MetaTag(label: l10n.homeSubscribers(subscribers)),
+              ActionChip(
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                avatar: const Icon(Icons.video_call_outlined, size: 16),
+                label: Text(
+                  l10n.storeManageInStudio,
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const TeacherStudioScreen(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+        ],
         Text(
           l10n.t('mobile.store.currentVideo'),
           style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
@@ -2028,6 +2282,8 @@ class _CourseQATab extends StatefulWidget {
     required this.onSelectLesson,
     required this.lessonTitle,
     this.onComposerFocusChanged,
+    this.highlightQuestionId,
+    this.autoFocusAnswer = false,
   });
 
   final List<Map<String, dynamic>> lessons;
@@ -2036,6 +2292,8 @@ class _CourseQATab extends StatefulWidget {
   final ValueChanged<Map<String, dynamic>> onSelectLesson;
   final String Function(Map<String, dynamic> lesson, int index) lessonTitle;
   final ValueChanged<bool>? onComposerFocusChanged;
+  final String? highlightQuestionId;
+  final bool autoFocusAnswer;
 
   @override
   State<_CourseQATab> createState() => _CourseQATabState();
@@ -2131,6 +2389,8 @@ class _CourseQATabState extends State<_CourseQATab> {
                 key: ValueKey(selectedId),
                 lessonId: selectedId,
                 onComposerFocusChanged: widget.onComposerFocusChanged,
+                highlightQuestionId: widget.highlightQuestionId,
+                autoFocusAnswer: widget.autoFocusAnswer,
               ),
             ],
           ),
@@ -2390,11 +2650,13 @@ class _LessonDocumentsPanel extends StatelessWidget {
     required this.materials,
     required this.onView,
     required this.onNext,
+    this.embedded = false,
   });
 
   final List<Map<String, dynamic>> materials;
   final ValueChanged<Map<String, dynamic>> onView;
   final VoidCallback onNext;
+  final bool embedded;
 
   String _sizeLabel(int? bytes) {
     if (bytes == null || bytes <= 0) return '';
@@ -2406,6 +2668,112 @@ class _LessonDocumentsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppTheme.accent.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                l10n.t('mobile.store.documentsStep'),
+                style: const TextStyle(
+                  color: AppTheme.accent,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const Spacer(),
+            Text(
+              l10n.t('mobile.store.lessonMaterials'),
+              style: TextStyle(color: AppTheme.muted, fontSize: 12),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          l10n.t('mobile.store.documentsAfterLesson'),
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 12),
+        ...materials.map((m) {
+            final title = m['title']?.toString() ?? l10n.t('mobile.teacher.documentFallback');
+            final size = _sizeLabel((m['fileSize'] as num?)?.toInt());
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Material(
+              color: AppTheme.primary.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => onView(m),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.picture_as_pdf_rounded,
+                            color: AppTheme.accent),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            if (size.isNotEmpty)
+                              Text(size,
+                                  style: TextStyle(
+                                      color: AppTheme.muted, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      FilledButton.tonal(
+                        onPressed: () => onView(m),
+                        child: Text(l10n.t('mobile.store.viewDocument')),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          onPressed: onNext,
+          icon: const Icon(Icons.arrow_forward_rounded),
+          label: Text(l10n.next),
+        ),
+      ],
+    );
+
+    if (embedded) {
+      return ColoredBox(
+        color: AppTheme.card,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+          child: content,
+        ),
+      );
+    }
+
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
@@ -2413,98 +2781,7 @@ class _LessonDocumentsPanel extends StatelessWidget {
         border: Border.all(color: AppTheme.cardBorder),
       ),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppTheme.accent.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  l10n.t('mobile.store.documentsStep'),
-                  style: const TextStyle(
-                    color: AppTheme.accent,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              const Spacer(),
-              Text(
-                l10n.t('mobile.store.lessonMaterials'),
-                style: TextStyle(color: AppTheme.muted, fontSize: 12),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            l10n.t('mobile.store.documentsAfterLesson'),
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 12),
-          ...materials.map((m) {
-            final title = m['title']?.toString() ?? l10n.t('mobile.teacher.documentFallback');
-            final size = _sizeLabel((m['fileSize'] as num?)?.toInt());
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Material(
-                color: AppTheme.primary.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(12),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => onView(m),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: AppTheme.accent.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(Icons.picture_as_pdf_rounded, color: AppTheme.accent),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                title,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontWeight: FontWeight.w600),
-                              ),
-                              if (size.isNotEmpty)
-                                Text(size, style: TextStyle(color: AppTheme.muted, fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                        FilledButton.tonal(
-                          onPressed: () => onView(m),
-                          child: Text(l10n.t('mobile.store.viewDocument')),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }),
-          const SizedBox(height: 8),
-          FilledButton.icon(
-            onPressed: onNext,
-            icon: const Icon(Icons.arrow_forward_rounded),
-            label: Text(l10n.next),
-          ),
-        ],
-      ),
+      child: content,
     );
   }
 }

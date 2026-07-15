@@ -32,7 +32,8 @@ class _AdsOffersScreenState extends State<AdsOffersScreen> {
     setState(() => _loading = true);
     try {
       final api = context.read<ApiClient>();
-      final home = await api.get('/api/home');
+      final locale = context.localeCode;
+      final home = await api.get('/api/home?locale=${Uri.encodeComponent(locale)}');
       final notif = await api.get('/api/notifications');
       if (!mounted) return;
       final ads = ((home['ads'] as List?) ?? [])

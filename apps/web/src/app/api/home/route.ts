@@ -1,6 +1,7 @@
 import { json, optionalAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { resolvePublicMediaUrl } from "@/lib/r2";
+import { CourseGroupService } from "@/services/course-group.service";
 import { CourseRatingService } from "@/services/course-rating.service";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 import { AiExamService } from "@/services/ai";
@@ -28,6 +29,7 @@ export async function GET(request: Request) {
     : undefined;
   const q = searchParams.get("q") ?? undefined;
   const levelParam = searchParams.get("level") ?? undefined;
+  const localeParam = searchParams.get("locale")?.toUpperCase();
   const levels = levelParam
     ? (levelParam.split(",").filter((l) => LEVELS.includes(l as TeacherLevel)) as TeacherLevel[])
     : undefined;
@@ -111,11 +113,22 @@ export async function GET(request: Request) {
   }
 
   const now = new Date();
+  const adsLocale =
+    (localeParam === "AR" ||
+    localeParam === "EN" ||
+    localeParam === "KU" ||
+    localeParam === "TR"
+      ? localeParam
+      : null) ||
+    user?.locale ||
+    "AR";
+
   const [adsRaw, courses, stages] = await Promise.all([
     prisma.advertisement.findMany({
       where: {
         isActive: true,
         deletedAt: null,
+        locale: adsLocale,
         OR: [{ startsAt: null }, { startsAt: { lte: now } }],
         AND: [{ OR: [{ endsAt: null }, { endsAt: { gte: now } }] }],
       },
@@ -158,8 +171,24 @@ export async function GET(request: Request) {
     ads.map(async (a) => {
       const imageUrl =
         (await resolvePublicMediaUrl(a.imageUrl, a.imageKey).catch(() => null)) ?? "";
+      const title =
+        a.title ||
+        (adsLocale === "AR"
+          ? a.titleAr
+          : adsLocale === "KU"
+            ? a.titleKu
+            : adsLocale === "TR"
+              ? a.titleTr
+              : a.titleEn) ||
+        a.titleEn ||
+        a.titleAr ||
+        a.titleKu ||
+        a.titleTr ||
+        null;
       return {
         id: a.id,
+        locale: a.locale,
+        title,
         titleEn: a.titleEn,
         titleAr: a.titleAr,
         titleKu: a.titleKu,
@@ -188,11 +217,16 @@ export async function GET(request: Request) {
       }))
     : null;
 
+  const groups = stageId
+    ? await CourseGroupService.listForStage(stageId).catch(() => [])
+    : [];
+
   return json({
     stage,
     stages,
     interests: interestSubjects,
     courses: coursesOut,
+    groups,
     ads: adsOut,
     aiExamStats,
   });

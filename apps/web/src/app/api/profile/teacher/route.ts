@@ -1,16 +1,13 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import {
+  MAX_TEACHER_INSIGHTS,
   MAX_TEACHER_SPECIALTIES,
   TeacherProfileService,
 } from "@/services/teacher-profile.service";
 import { z } from "zod";
 
-const patchSchema = z.object({
-  subjectIds: z.array(z.string()).min(1).max(MAX_TEACHER_SPECIALTIES),
-});
-
-/** Teacher: read profile specialties, catalog, and stages for course creation. */
+/** Teacher: read profile specialties/insights, catalog, and stages for course creation. */
 export async function GET() {
   const auth = await requireAuth(["TEACHER"]);
   if (auth.error) return auth.error;
@@ -18,23 +15,39 @@ export async function GET() {
   const ctx = await TeacherProfileService.getTeacherContext(auth.session.userId);
   if (!ctx) return error("Teacher profile not found", 404, "NOT_FOUND");
 
+  const max =
+    ctx.teachingTrack === "CERTIFICATE"
+      ? MAX_TEACHER_INSIGHTS
+      : MAX_TEACHER_SPECIALTIES;
+
   return json({
+    teachingTrack: ctx.teachingTrack,
     specialties: ctx.specialties,
+    insights: ctx.insights,
     available: ctx.available,
     stages: ctx.stages,
-    maxSpecialties: MAX_TEACHER_SPECIALTIES,
+    maxSpecialties: max,
   });
 }
 
-/** Teacher: set up to 3 teaching specialties on their profile. */
+/** Teacher: update assigned specialties (school) or insights (certificate track). */
 export async function PATCH(request: Request) {
-  const auth = await requireAuth(["TEACHER"]);
+  const auth = await requireAuth(["TEACHER"], { requireApproved: true });
   if (auth.error) return auth.error;
 
   const profile = await prisma.teacherProfile.findFirst({
     where: { userId: auth.session.userId, deletedAt: null },
   });
   if (!profile) return error("Teacher profile not found", 404, "NOT_FOUND");
+
+  const max =
+    profile.teachingTrack === "CERTIFICATE"
+      ? MAX_TEACHER_INSIGHTS
+      : MAX_TEACHER_SPECIALTIES;
+
+  const patchSchema = z.object({
+    subjectIds: z.array(z.string()).min(1).max(max),
+  });
 
   const parsed = patchSchema.safeParse(await request.json());
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
@@ -44,16 +57,19 @@ export async function PATCH(request: Request) {
     parsed.data.subjectIds
   );
   if (!result.success) {
+    const label =
+      profile.teachingTrack === "CERTIFICATE" ? "insights" : "specialties";
     const msg =
       result.error === "INVALID_SPECIALTY_COUNT"
-        ? `Select 1 to ${MAX_TEACHER_SPECIALTIES} specialties`
+        ? `Select 1 to ${max} ${label}`
         : result.error === "INVALID_SUBJECT"
-          ? "One or more specialties are not available"
+          ? `One or more ${label} are not available`
           : "Update failed";
     return error(msg, 400, result.error);
   }
 
   return json({
+    teachingTrack: profile.teachingTrack,
     specialties: result.subjects.map((s) => ({
       id: s.id,
       nameEn: s.nameEn,

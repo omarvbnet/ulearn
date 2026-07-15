@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 export type PendingCountKey =
   | "users"
+  | "teacherRequests"
   | "courseReview"
   | "shortVideos"
   | "stageRequests"

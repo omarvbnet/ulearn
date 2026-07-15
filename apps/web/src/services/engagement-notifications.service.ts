@@ -18,7 +18,7 @@ export async function notifyTeacherCourseLike(params: {
       bodyKu: `${params.likerName} لە کۆرسەکەت "${params.courseTitle}" حەزی کرد.`,
       bodyTr: `${params.likerName}, "${params.courseTitle}" kursunuzu beğendi.`,
     },
-    { type: "course", courseId: params.courseId, screen: "course" }
+    { type: "like", courseId: params.courseId, screen: "course" }
   ).catch(() => {});
 }
 
@@ -42,7 +42,7 @@ export async function notifyTeacherVideoLike(params: {
       bodyTr: `${params.likerName}, "${params.lessonTitle}" videosunu beğendi.`,
     },
     {
-      type: "course",
+      type: "like",
       courseId: params.courseId,
       lessonId: params.lessonId,
       screen: "course",
@@ -69,7 +69,33 @@ export async function notifyTeacherShortVideoLike(params: {
       bodyTr: `${params.likerName}, "${params.videoTitle}" kısa videonuzu beğendi.`,
     },
     {
-      type: "reel",
+      type: "like",
+      shortVideoId: params.shortVideoId,
+      screen: "reels",
+    }
+  ).catch(() => {});
+}
+
+export async function notifyTeacherShortVideoSave(params: {
+  teacherUserId: string;
+  videoTitle: string;
+  saverName: string;
+  shortVideoId?: string;
+}) {
+  await NotificationService.notifyUser(
+    params.teacherUserId,
+    {
+      titleEn: "Someone saved your reel",
+      titleAr: "شخص ما حفظ فيديوك القصير",
+      titleKu: "کەسێک ڤیدیۆکەتی پاشەکەوت کرد",
+      titleTr: "Birisi reelinizi kaydetti",
+      bodyEn: `${params.saverName} saved your short video "${params.videoTitle}".`,
+      bodyAr: `${params.saverName} حفظ فيديوك القصير "${params.videoTitle}".`,
+      bodyKu: `${params.saverName} ڤیدیۆی کورت "${params.videoTitle}" پاشەکەوت کرد.`,
+      bodyTr: `${params.saverName}, "${params.videoTitle}" kısa videonuzu kaydetti.`,
+    },
+    {
+      type: "save",
       shortVideoId: params.shortVideoId,
       screen: "reels",
     }
@@ -82,6 +108,7 @@ export async function notifyTeacherShortVideoComment(params: {
   commenterName: string;
   comment: string;
   shortVideoId?: string;
+  commentId?: string;
 }) {
   await NotificationService.notifyUser(
     params.teacherUserId,
@@ -98,6 +125,7 @@ export async function notifyTeacherShortVideoComment(params: {
     {
       type: "comment",
       shortVideoId: params.shortVideoId,
+      commentId: params.commentId,
       screen: "comments",
     }
   ).catch(() => {});
@@ -110,6 +138,7 @@ export async function notifyTeacherNewQuestion(params: {
   question: string;
   courseId?: string;
   lessonId?: string;
+  questionId?: string;
 }) {
   await NotificationService.notifyUser(
     params.teacherUserId,
@@ -127,6 +156,7 @@ export async function notifyTeacherNewQuestion(params: {
       type: "question",
       courseId: params.courseId,
       lessonId: params.lessonId,
+      questionId: params.questionId,
       screen: "course",
     }
   ).catch(() => {});
@@ -138,6 +168,8 @@ export async function notifyStudentAnswer(params: {
   answererName: string;
   courseId?: string;
   lessonId?: string;
+  questionId?: string;
+  answerId?: string;
 }) {
   await NotificationService.notifyUser(
     params.studentUserId,
@@ -155,6 +187,35 @@ export async function notifyStudentAnswer(params: {
       type: "answer",
       courseId: params.courseId,
       lessonId: params.lessonId,
+      questionId: params.questionId,
+      answerId: params.answerId,
+      screen: "course",
+    }
+  ).catch(() => {});
+}
+
+/** Teacher gets notified when a student successfully subscribes / purchases. */
+export async function notifyTeacherNewSubscription(params: {
+  teacherUserId: string;
+  studentName: string;
+  courseTitle: string;
+  courseId: string;
+}) {
+  await NotificationService.notifyUser(
+    params.teacherUserId,
+    {
+      titleEn: "New course subscription",
+      titleAr: "اشتراك جديد في الدورة",
+      titleKu: "بەشداری نوێ لە کۆرس",
+      titleTr: "Yeni kurs aboneliği",
+      bodyEn: `${params.studentName} subscribed to "${params.courseTitle}".`,
+      bodyAr: `${params.studentName} اشترك في "${params.courseTitle}".`,
+      bodyKu: `${params.studentName} بەشداری "${params.courseTitle}" بوو.`,
+      bodyTr: `${params.studentName}, "${params.courseTitle}" kursuna abone oldu.`,
+    },
+    {
+      type: "subscription",
+      courseId: params.courseId,
       screen: "course",
     }
   ).catch(() => {});

@@ -273,7 +273,13 @@
       "awaitingPayment": "Awaiting payment confirmation",
       "continueWatching": "Continue watching",
       "resumeCourse": "Pick up where you left off",
-      "allInsights": "All my insights"
+      "allInsights": "All my insights",
+      "courseGroups": "Course groups",
+      "groupCourseCount": "{count} courses",
+      "groupIncludes": "Included courses",
+      "groupTotal": "Package total",
+      "groupUnlocked": "All courses in this group are unlocked",
+      "groupAlreadyOwned": "You already own this group"
     },
     "profile": {
       "tapChangePhoto": "Tap to change photo",

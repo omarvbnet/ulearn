@@ -118,11 +118,31 @@ export async function PATCH(
   }
 
   if (lesson.course.status === "APPROVED" && hasMediaChange) {
+    const changeTags: string[] = [];
+    if (data.title != null && data.title !== lesson.title) changeTags.push("title");
+    if (data.fileKey || data.fileUrl || data.videoAssetId) changeTags.push("video");
+    if (data.thumbnailKey || data.thumbnailUrl) changeTags.push("thumbnail");
+    if (data.durationSec != null && data.durationSec !== lesson.durationSec) {
+      changeTags.push("duration");
+    }
+
     const pending = await prisma.courseLessonUpdateRequest.create({
       data: {
         lessonId,
         teacherId: teacher.id,
-        ...lessonPatch,
+        title: data.title,
+        fileKey: data.fileKey,
+        fileUrl: data.fileUrl,
+        thumbnailKey: data.thumbnailKey,
+        thumbnailUrl: data.thumbnailUrl,
+        durationSec: data.durationSec,
+        previousTitle: lesson.title,
+        previousFileKey: lesson.fileKey,
+        previousFileUrl: lesson.fileUrl,
+        previousThumbnailKey: lesson.thumbnailKey,
+        previousThumbnailUrl: lesson.thumbnailUrl,
+        previousDurationSec: lesson.durationSec,
+        changeSummary: changeTags.join(",") || "video",
         status: "PENDING",
       },
     });

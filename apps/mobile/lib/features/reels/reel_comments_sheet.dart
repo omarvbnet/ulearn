@@ -15,12 +15,16 @@ class ReelCommentsSheet extends StatefulWidget {
     required this.videoTitle,
     required this.initialCount,
     required this.onCountChanged,
+    this.highlightCommentId,
   });
 
   final String videoId;
   final String videoTitle;
   final int initialCount;
   final ValueChanged<int> onCountChanged;
+
+  /// When set (notification deep link), prefill a reply to this comment.
+  final String? highlightCommentId;
 
   @override
   State<ReelCommentsSheet> createState() => _ReelCommentsSheetState();
@@ -55,13 +59,39 @@ class _ReelCommentsSheetState extends State<ReelCommentsSheet> {
           .read<ApiClient>()
           .get('/api/store/short-videos/${widget.videoId}/comments');
       if (!mounted) return;
+      final comments = ((data['comments'] as List<dynamic>?) ?? [])
+          .cast<Map<String, dynamic>>()
+          .reversed
+          .toList();
       setState(() {
-        _comments = ((data['comments'] as List<dynamic>?) ?? [])
-            .cast<Map<String, dynamic>>()
-            .reversed
-            .toList();
+        _comments = comments;
         _loading = false;
       });
+      final highlightId = widget.highlightCommentId;
+      if (highlightId != null && highlightId.isNotEmpty) {
+        Map<String, dynamic>? target;
+        for (final c in comments) {
+          if (c['id']?.toString() == highlightId) {
+            target = c;
+            break;
+          }
+          final replies =
+              ((c['replies'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+          for (final r in replies) {
+            if (r['id']?.toString() == highlightId) {
+              // Reply to the parent thread when the highlight is a reply.
+              target = c;
+              break;
+            }
+          }
+          if (target != null) break;
+        }
+        if (target != null && mounted) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _startReply(target!);
+          });
+        }
+      }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }

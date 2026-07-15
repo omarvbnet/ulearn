@@ -272,7 +272,13 @@
       "awaitingPayment": "Ödeme onayı bekleniyor",
       "continueWatching": "İzlemeye devam et",
       "resumeCourse": "Kaldığınız yerden devam edin",
-      "allInsights": "Tüm ilgi alanlarım"
+      "allInsights": "Tüm ilgi alanlarım",
+      "courseGroups": "Kurs grupları",
+      "groupCourseCount": "{count} kurs",
+      "groupIncludes": "Dahil kurslar",
+      "groupTotal": "Paket toplamı",
+      "groupUnlocked": "Bu gruptaki tüm kursların kilidi açıldı",
+      "groupAlreadyOwned": "Bu gruba zaten sahipsiniz"
     },
     "profile": {
       "tapChangePhoto": "Fotoğrafı değiştirmek için dokunun",
