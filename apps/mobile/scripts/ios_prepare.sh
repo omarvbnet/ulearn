@@ -48,7 +48,7 @@ if [ ! -f "$PODS_CHECK" ] || [ ! -f "$FIREBASE_CHECK" ] || [ ! -f "$GOOGLEUTILS_
   echo "CocoaPods incomplete or corrupted — reinstalling..."
   rm -rf ios/Pods ios/Podfile.lock ios/.symlinks
   flutter pub get
-  (cd ios && pod install --repo-update)
+  (cd ios && pod install)
   echo "CocoaPods reinstalled."
 fi
 
@@ -60,7 +60,7 @@ if find ios/Pods -name '* [0-9]*' -print -quit 2>/dev/null | grep -q .; then
   echo "Duplicate iCloud Pod copies detected — reinstalling CocoaPods..."
   rm -rf ios/Pods ios/Podfile.lock ios/.symlinks
   flutter pub get
-  (cd ios && pod install --repo-update)
+  (cd ios && pod install)
   echo "CocoaPods reinstalled after duplicate cleanup."
 fi
 

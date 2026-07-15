@@ -27,6 +27,18 @@ function pickLocale(msg: LocalizedMessage, locale: Locale) {
   return map[locale] ?? map.EN;
 }
 
+/** UI historically used "ALL"; Prisma enum is EVERYONE. */
+function normalizeNotificationTarget(
+  raw: NotificationTarget | string
+): NotificationTarget {
+  const value = String(raw ?? "").toUpperCase();
+  if (value === "ALL" || value === "EVERYONE") return "EVERYONE";
+  if (value === "COUNTRY" || value === "PROVINCE" || value === "USERS") {
+    return value;
+  }
+  throw new Error(`Invalid notification target: ${raw}`);
+}
+
 /** Drop undefined/null so Prisma JSON / Accelerate don't reject the payload. */
 function sanitizeLinkData(data: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
@@ -72,7 +84,7 @@ export class NotificationService {
   static async broadcast(params: {
     message: LocalizedMessage;
     channels: NotificationChannel[];
-    target: NotificationTarget;
+    target: NotificationTarget | string;
     countryId?: string;
     provinceId?: string;
     userIds?: string[];
@@ -80,11 +92,12 @@ export class NotificationService {
     /** Deep-link payload for mobile (ads, course, etc.). */
     data?: Record<string, unknown>;
   }) {
+    const target = normalizeNotificationTarget(params.target);
     const notification = await prisma.notification.create({
       data: {
         ...params.message,
         channels: params.channels,
-        target: params.target,
+        target,
         ...(params.countryId ? { countryId: params.countryId } : {}),
         ...(params.provinceId ? { provinceId: params.provinceId } : {}),
         userIds: params.userIds ?? [],
@@ -93,7 +106,10 @@ export class NotificationService {
       },
     });
 
-    const users = await this.resolveTargets(params);
+    const users = await this.resolveTargets({
+      ...params,
+      target,
+    });
     const linkData = sanitizeLinkData(
       params.data ?? {
         type: "admin",
@@ -204,9 +220,24 @@ export class NotificationService {
       },
       body: JSON.stringify({
         registration_ids: tokens,
-        notification: { title, body },
+        priority: "high",
+        content_available: true,
+        notification: {
+          title,
+          body,
+          sound: "default",
+        },
         data: stringData,
       }),
+    }).then(async (res) => {
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.error(`[FCM] send failed ${res.status}: ${text}`);
+      } else if (process.env.NODE_ENV === "development") {
+        console.info(`[FCM] sent to ${tokens.length} device(s)`);
+      }
+    }).catch((err) => {
+      console.error("[FCM] send error:", err);
     });
   }
 

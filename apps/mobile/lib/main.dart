@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -18,8 +19,11 @@ import 'package:ulearn/features/splash/splash_screen.dart';
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Must be registered before runApp so background isolates can handle FCM.
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  await PushNotificationService.instance.ensureFirebaseReady();
   // Hardware-accelerated video (libmdk) for smooth course + shorts playback.
   fvp.registerWith(options: {
     'platforms': ['ios', 'android'],

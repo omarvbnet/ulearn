@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/l10n/locale_provider.dart';
+import 'package:ulearn/core/notifications/push_notification_service.dart';
 
 class StageModel {
   final String id;
@@ -160,6 +162,7 @@ class AuthProvider extends ChangeNotifier {
       final data = await _api.get('/api/auth/me');
       user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
       await _locale?.syncFromUser(user?.locale);
+      unawaited(PushNotificationService.instance.onUserLoggedIn());
     } catch (_) {
       user = null;
     }
@@ -207,12 +210,14 @@ class AuthProvider extends ChangeNotifier {
     if (data['user'] != null) {
       user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
       await _locale?.syncFromUser(user?.locale);
+      unawaited(PushNotificationService.instance.onUserLoggedIn());
     }
     notifyListeners();
     return data;
   }
 
   Future<void> logout() async {
+    await PushNotificationService.instance.onUserLoggedOut();
     try {
       await _api.post('/api/auth/logout', {});
     } catch (_) {}
@@ -227,6 +232,7 @@ class AuthProvider extends ChangeNotifier {
     final data = await _api.post('/api/auth/delete-account', {});
     final requiresAdmin = data['requiresAdminApproval'] == true;
     if (!requiresAdmin) {
+      await PushNotificationService.instance.onUserLoggedOut();
       await _api.setToken(null);
       user = null;
       notifyListeners();
@@ -238,6 +244,7 @@ class AuthProvider extends ChangeNotifier {
     user = UserModel.fromJson(json);
     _locale?.syncFromUser(user?.locale);
     notifyListeners();
+    unawaited(PushNotificationService.instance.onUserLoggedIn());
   }
 
   Future<void> refreshUser() async {
