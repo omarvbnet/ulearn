@@ -53,7 +53,9 @@ Set all keys from `.env.example` in the Vercel project:
 3. Enable **Firebase Cloud Messaging API** in Google Cloud for that project  
 4. For iOS: upload an **APNs Authentication Key** under Cloud Messaging  
 5. Remove any old `FCM_SERVER_KEY` env var (unused)
-6. **Critical for iOS:** Apple Developer → Keys → create a key with **Apple Push Notifications service (APNs)** → download `.p8` once → Firebase Console → Project settings → Cloud Messaging → Apple app (`com.ulearn.mobile`) → upload APNs Authentication Key + Key ID + Team ID (`28YT228VJ4`)
+6. **Critical for iOS:** Apple Developer → Keys → create a key with **Apple Push Notifications service (APNs)** → download `.p8` once → Firebase Console → Project settings → Cloud Messaging → Apple app (`com.ulearn.mobile`) → upload **APNs Authentication Key** (not a production-only .p12 certificate) + Key ID + Team ID (`28YT228VJ4`)
+
+The Auth Key works for **both sandbox and production**. Local installs (`flutter run` / `flutter run --release`) register **sandbox** tokens. If Firebase only has a Production APNs certificate, sends fail with `BadEnvironmentKeyInToken`.
 
 Without the APNs key, FCM can accept Android tokens but iOS sends fail with `THIRD_PARTY_AUTH_ERROR` even when a device token is stored.
 

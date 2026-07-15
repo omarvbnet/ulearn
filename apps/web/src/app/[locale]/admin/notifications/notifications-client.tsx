@@ -119,10 +119,17 @@ export function NotificationsClient() {
         );
       } else if (push?.requested && (push.failed ?? 0) > 0) {
         const err = push.lastError ?? "unknown";
-        const hint =
-          err.includes("THIRD_PARTY_AUTH") || err.includes("InvalidProviderToken")
-            ? " — upload APNs Auth Key (.p8) in Firebase → Cloud Messaging"
-            : "";
+        let hint = "";
+        if (err === "BadEnvironmentKeyInToken") {
+          hint =
+            " — iOS token is sandbox (local install) but Firebase APNs is production-only. Upload an APNs Auth Key (.p8) in Firebase → Cloud Messaging (works for both), or test via TestFlight.";
+        } else if (
+          err.includes("THIRD_PARTY_AUTH") ||
+          err.includes("InvalidProviderToken")
+        ) {
+          hint =
+            " — upload APNs Auth Key (.p8) in Firebase → Cloud Messaging for com.ulearn.mobile";
+        }
         toast(
           `FCM failed ${push.failed}/${push.tokenCount} (${err})${hint}`,
           "error"

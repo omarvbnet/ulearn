@@ -87,13 +87,23 @@ function parseFcmError(status: number, text: string): string {
       error?: {
         status?: string;
         message?: string;
-        details?: Array<{ errorCode?: string; reason?: string }>;
+        details?: Array<{
+          errorCode?: string;
+          reason?: string;
+          "@type"?: string;
+        }>;
       };
     };
+    // Prefer APNs reason — e.g. BadEnvironmentKeyInToken is actionable.
+    const apns = parsed.error?.details?.find(
+      (d) => d.reason && String(d["@type"] ?? "").includes("ApnsError")
+    );
+    if (apns?.reason) return apns.reason;
+
     const detail = parsed.error?.details?.find((d) => d.errorCode || d.reason);
     return (
-      detail?.errorCode ||
       detail?.reason ||
+      detail?.errorCode ||
       parsed.error?.status ||
       parsed.error?.message ||
       `HTTP_${status}`
