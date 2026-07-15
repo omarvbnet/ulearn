@@ -27,8 +27,17 @@ export async function POST(request: Request) {
   const {
     titleEn, titleAr, titleKu, titleTr,
     bodyEn, bodyAr, bodyKu, bodyTr,
-    channels, target, countryId, provinceId, userIds,
+    channels, countryId, provinceId, userIds,
   } = body;
+
+  // UI historically sent "ALL"; Prisma enum is EVERYONE.
+  const rawTarget = String(body.target ?? "");
+  const target =
+    rawTarget === "ALL" || rawTarget === "EVERYONE"
+      ? "EVERYONE"
+      : rawTarget === "COUNTRY" || rawTarget === "PROVINCE" || rawTarget === "USERS"
+        ? rawTarget
+        : null;
 
   if (!titleEn || !bodyEn || !channels?.length || !target) {
     return error("Missing required fields", 422, "VALIDATION");

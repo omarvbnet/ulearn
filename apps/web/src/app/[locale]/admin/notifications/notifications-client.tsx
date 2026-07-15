@@ -34,7 +34,7 @@ export function NotificationsClient() {
   const [form, setForm] = useState({
     titleEn: "", titleAr: "", titleKu: "", titleTr: "",
     bodyEn: "", bodyAr: "", bodyKu: "", bodyTr: "",
-    target: "ALL",
+    target: "EVERYONE",
     countryId: "",
     provinceId: "",
     channels: ["IN_APP", "PUSH"] as string[],
@@ -142,7 +142,7 @@ export function NotificationsClient() {
             <Card className="space-y-4">
               <h3 className="font-semibold">Audience</h3>
               <Select label="Target" value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })}>
-                <option value="ALL">Everyone (approved users)</option>
+                <option value="EVERYONE">Everyone (approved users)</option>
                 <option value="COUNTRY">Specific country</option>
                 <option value="PROVINCE">Specific province</option>
               </Select>
