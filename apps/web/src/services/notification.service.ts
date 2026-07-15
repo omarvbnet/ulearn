@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Locale, NotificationChannel, NotificationTarget, Prisma } from "@prisma/client";
 import { Resend } from "resend";
+import { sendFcmPush } from "@/services/fcm.service";
 
 const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
@@ -195,50 +196,26 @@ export class NotificationService {
     body: string,
     data?: Record<string, unknown>
   ) {
-    const serverKey = process.env.FCM_SERVER_KEY;
-    if (!serverKey) {
-      if (process.env.NODE_ENV === "development") {
-        console.info(`[DEV] FCM push: ${title} → ${tokens.length} devices`);
-      }
-      return;
-    }
+    const { invalidTokens } = await sendFcmPush(tokens, title, body, data);
+    if (invalidTokens.length === 0) return;
 
-    // FCM data payloads must be string key/values.
-    const stringData: Record<string, string> = {};
-    if (data) {
-      for (const [key, value] of Object.entries(data)) {
-        if (value === undefined || value === null) continue;
-        stringData[key] = typeof value === "string" ? value : String(value);
+    // Drop dead FCM tokens so future broadcasts skip them.
+    for (const bad of invalidTokens) {
+      try {
+        const users = await prisma.user.findMany({
+          where: { fcmTokens: { has: bad } },
+          select: { id: true, fcmTokens: true },
+        });
+        for (const user of users) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { fcmTokens: user.fcmTokens.filter((t) => t !== bad) },
+          });
+        }
+      } catch (err) {
+        console.error("[FCM] prune token failed", err);
       }
     }
-
-    await fetch("https://fcm.googleapis.com/fcm/send", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `key=${serverKey}`,
-      },
-      body: JSON.stringify({
-        registration_ids: tokens,
-        priority: "high",
-        content_available: true,
-        notification: {
-          title,
-          body,
-          sound: "default",
-        },
-        data: stringData,
-      }),
-    }).then(async (res) => {
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        console.error(`[FCM] send failed ${res.status}: ${text}`);
-      } else if (process.env.NODE_ENV === "development") {
-        console.info(`[FCM] sent to ${tokens.length} device(s)`);
-      }
-    }).catch((err) => {
-      console.error("[FCM] send error:", err);
-    });
   }
 
   private static async sendEmail(to: string, subject: string, html: string) {

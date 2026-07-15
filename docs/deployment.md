@@ -36,8 +36,23 @@ Set all keys from `.env.example` in the Vercel project:
 | `R2_*` | Yes (media) |
 | `WHATSAPP_*` | Yes (auth) |
 | `RESEND_API_KEY` | Recommended |
-| `FCM_SERVER_KEY` | Recommended |
+| `FIREBASE_PROJECT_ID` | Recommended (default `u-learn-5eb31`) |
+| `FIREBASE_CLIENT_EMAIL` | Recommended (service account email) |
+| `FIREBASE_PRIVATE_KEY` | Recommended (service account private key; escape newlines as `\n`) |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | Optional alternative (full JSON of the service account key) |
 | `DEV_OTP` | **No** (dev only) |
+
+> Firebase no longer exposes a Cloud Messaging **server key**. Use a service account with the **Firebase Cloud Messaging API** and FCM HTTP v1 (see below).
+
+### Firebase push (FCM HTTP v1)
+
+1. Firebase Console → Project settings → **Service accounts** → Generate new private key  
+2. Set either:
+   - `FIREBASE_SERVICE_ACCOUNT_JSON` = entire JSON file contents, **or**
+   - `FIREBASE_PROJECT_ID` + `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY`  
+3. Enable **Firebase Cloud Messaging API** in Google Cloud for that project  
+4. For iOS: upload an **APNs Authentication Key** under Cloud Messaging  
+5. Remove any old `FCM_SERVER_KEY` env var (unused)
 
 ## 3. Deploy Web / API to Vercel
 

@@ -32,6 +32,7 @@
     "docx": "^9.7.1",
     "effect": "^3.21.4",
     "exceljs": "^4.4.0",
+    "google-auth-library": "^10.9.0",
     "jose": "^6.2.3",
     "lucide-react": "^1.23.0",
     "mammoth": "^1.12.0",
