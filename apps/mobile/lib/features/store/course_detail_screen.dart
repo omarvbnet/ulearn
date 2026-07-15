@@ -182,7 +182,18 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       final materials =
           ((course['materials'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
 
-      final introOutro = data['introOutro'] as Map<String, dynamic>?;
+      var introOutro = data['introOutro'] as Map<String, dynamic>?;
+      // Older deploys / race: fetch clips separately if course payload has none.
+      if (introOutro == null ||
+          (introOutro['intro'] == null && introOutro['outro'] == null)) {
+        try {
+          if (!mounted) return;
+          final clipData =
+              await context.read<ApiClient>().get('/api/intro-outro');
+          if (!mounted) return;
+          introOutro = clipData['introOutro'] as Map<String, dynamic>?;
+        } catch (_) {}
+      }
       final intro = introOutro?['intro'] as Map<String, dynamic>?;
       final outro = introOutro?['outro'] as Map<String, dynamic>?;
       final introUrl = intro?['fileUrl']?.toString();
@@ -940,7 +951,10 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
 
     if (activeUrl != null && activeUrl.isNotEmpty) {
       return CourseInlinePlayer(
-        key: ValueKey('${activeUrl}_${active?['watchPositionSec']}'),
+        // Include intro/outro in the key so the player remounts once clips load.
+        key: ValueKey(
+          '${activeUrl}_${active?['watchPositionSec']}_${_introUrl ?? ''}_${_outroUrl ?? ''}',
+        ),
         url: ApiClient.absoluteUrl(activeUrl),
         title: active?['title']?.toString() ?? l10n.t('student.videos'),
         lessonId: activeId,

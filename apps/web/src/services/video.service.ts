@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { computeVideoCompletion } from "@/lib/video-progress.util";
-import { getDownloadUrl } from "@/lib/r2";
+import { getDownloadUrl, mediaProxyPath } from "@/lib/r2";
 import { CourseService } from "@/services/course.service";
 
 export class VideoService {
@@ -153,16 +153,25 @@ export class VideoService {
     locale: "AR" | "KU" | "TR" | "EN",
     countryId?: string
   ) {
-    const { intro, outro } = await this.getIntroOutro(locale, countryId);
-
-    const sign = async (clip: typeof intro) => {
+    const sign = async (
+      clip: Awaited<ReturnType<typeof VideoService.getIntroOutro>>["intro"]
+    ) => {
       if (!clip) return null;
-      const fileUrl =
-        (clip.fileKey
-          ? await getDownloadUrl(clip.fileKey, 3 * 3600).catch(() => null)
-          : null) ||
-        clip.fileUrl ||
-        null;
+      let fileUrl: string | null = null;
+      if (clip.fileKey) {
+        fileUrl = await getDownloadUrl(clip.fileKey, 3 * 3600).catch(() => null);
+      }
+      // Prefer proxy path over stale absolute URLs so mobile can resolve against API origin.
+      if (!fileUrl) {
+        const raw = clip.fileUrl?.trim() || "";
+        if (raw.startsWith("/api/media/") || raw.startsWith("/uploads/")) {
+          fileUrl = raw;
+        } else if (raw.startsWith("http://") || raw.startsWith("https://")) {
+          fileUrl = raw;
+        } else if (clip.fileKey) {
+          fileUrl = mediaProxyPath(clip.fileKey);
+        }
+      }
       if (!fileUrl) return null;
       return {
         id: clip.id,
@@ -172,9 +181,39 @@ export class VideoService {
       };
     };
 
+    // Prefer the user's locale, then fall back so KU/TR (etc.) still get clips.
+    const tryLocales: Array<"AR" | "KU" | "TR" | "EN"> = [
+      locale,
+      "AR",
+      "EN",
+      "KU",
+      "TR",
+    ];
+    const seen = new Set<string>();
+    for (const loc of tryLocales) {
+      if (seen.has(loc)) continue;
+      seen.add(loc);
+      const pair = await this.getIntroOutro(loc, countryId);
+      if (pair.intro || pair.outro) {
+        return {
+          intro: await sign(pair.intro),
+          outro: await sign(pair.outro),
+        };
+      }
+    }
+
+    // Last resort: any active intro/outro regardless of locale.
+    const anyIntro = await prisma.introOutro.findFirst({
+      where: { type: "INTRO", isActive: true },
+      orderBy: { updatedAt: "desc" },
+    });
+    const anyOutro = await prisma.introOutro.findFirst({
+      where: { type: "OUTRO", isActive: true },
+      orderBy: { updatedAt: "desc" },
+    });
     return {
-      intro: await sign(intro),
-      outro: await sign(outro),
+      intro: await sign(anyIntro),
+      outro: await sign(anyOutro),
     };
   }
 }

@@ -135,9 +135,9 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     _lessonWasCompleted = widget.initiallyCompleted;
     _completionSaved = widget.initiallyCompleted;
     final resumeSec = widget.initialPositionSec ?? 0;
+    // Play intro every open unless we're resuming an incomplete lesson mid-way.
     final playIntro = _introUrl != null &&
-        !_lessonWasCompleted &&
-        resumeSec <= 5;
+        (_lessonWasCompleted || resumeSec <= 5);
     _phase = playIntro ? _PlayPhase.intro : _PlayPhase.main;
     MediaCacheBudget.pin(_urlForPhase(_phase));
     MediaCacheBudget.pin(widget.url);
@@ -178,14 +178,33 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       _advancingPhase = false;
       final resumeSec = widget.initialPositionSec ?? 0;
       final playIntro = _introUrl != null &&
-          !_lessonWasCompleted &&
-          resumeSec <= 5;
+          (_lessonWasCompleted || resumeSec <= 5);
       _phase = playIntro ? _PlayPhase.intro : _PlayPhase.main;
       MediaCacheBudget.pin(_urlForPhase(_phase));
       MediaCacheBudget.pin(widget.url);
       _loading = true;
       _error = null;
       _init();
+    } else if (oldWidget.introUrl != widget.introUrl ||
+        oldWidget.outroUrl != widget.outroUrl) {
+      // Intro/outro often arrives after the first course paint — restart with them.
+      if (widget.introUrl != null &&
+          widget.introUrl!.isNotEmpty &&
+          _phase == _PlayPhase.main &&
+          (_controller == null ||
+              _controller!.value.position.inSeconds <= 5) &&
+          !_lessonWasCompleted) {
+        _progressTimer?.cancel();
+        _controller?.removeListener(_onControllerTick);
+        _controller?.dispose();
+        _controller = null;
+        _phase = _PlayPhase.intro;
+        _loading = true;
+        _error = null;
+        _advancingPhase = false;
+        MediaCacheBudget.pin(widget.introUrl!);
+        _init();
+      }
     } else if (oldWidget.initiallyCompleted != widget.initiallyCompleted) {
       _lessonWasCompleted = widget.initiallyCompleted;
       _completionSaved = widget.initiallyCompleted;
