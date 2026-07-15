@@ -86,7 +86,7 @@ export async function POST(request: Request) {
       linkData.courseId = String(body.courseId || body.data.courseId);
     }
 
-    const notification = await NotificationService.broadcast({
+    const { notification, push } = await NotificationService.broadcast({
       message: {
         titleEn,
         titleAr: titleAr || titleEn,
@@ -106,7 +106,7 @@ export async function POST(request: Request) {
       data: linkData,
     });
 
-    return json({ notification }, 201);
+    return json({ notification, push }, 201);
   } catch (e) {
     console.error("[admin/notifications] POST failed", e);
     const message =

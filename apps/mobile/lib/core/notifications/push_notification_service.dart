@@ -15,10 +15,12 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   try {
     await Firebase.initializeApp();
   } catch (_) {}
-  // Payload is delivered again via getInitialMessage / onMessageOpenedApp.
-  if (kDebugMode) {
-    debugPrint('[FCM background] ${message.messageId} ${message.data}');
-  }
+  debugPrint('[FCM background] ${message.messageId} ${message.data}');
+}
+
+void _fcmLog(String message) {
+  // Keep visible in --release so device install issues are diagnosable.
+  debugPrint('[FCM] $message');
 }
 
 /// Registers FCM tokens and routes notification taps.
@@ -30,6 +32,8 @@ class PushNotificationService {
   GlobalKey<NavigatorState>? _navigatorKey;
   bool _ready = false;
   bool _firebaseReady = false;
+  bool _tokenRegisterInFlight = false;
+  bool _pendingLoginRegister = false;
   StreamSubscription<RemoteMessage>? _fg;
   StreamSubscription<RemoteMessage>? _opened;
   String? _lastUploadedToken;
@@ -41,7 +45,7 @@ class PushNotificationService {
       await Firebase.initializeApp();
       _firebaseReady = true;
     } catch (e) {
-      if (kDebugMode) debugPrint('[FCM] Firebase.initializeApp: $e');
+      _fcmLog('Firebase.initializeApp: $e');
       // May already be initialized by the native layer.
       _firebaseReady = Firebase.apps.isNotEmpty;
     }
@@ -57,19 +61,18 @@ class PushNotificationService {
 
     await ensureFirebaseReady();
     if (!_firebaseReady && Firebase.apps.isEmpty) {
-      if (kDebugMode) {
-        debugPrint('[FCM] Firebase not configured — skip push setup');
-      }
+      _fcmLog('Firebase not configured — skip push setup');
       return;
     }
 
     final messaging = FirebaseMessaging.instance;
-    await messaging.requestPermission(
+    final settings = await messaging.requestPermission(
       alert: true,
       badge: true,
       sound: true,
       provisional: false,
     );
+    _fcmLog('permission=${settings.authorizationStatus}');
 
     if (Platform.isIOS) {
       await messaging.setForegroundNotificationPresentationOptions(
@@ -81,7 +84,10 @@ class PushNotificationService {
     }
 
     await _registerToken();
-    messaging.onTokenRefresh.listen((t) => _uploadToken(t));
+    messaging.onTokenRefresh.listen((t) {
+      _fcmLog('token refresh');
+      unawaited(_uploadToken(t));
+    });
 
     _fg?.cancel();
     _fg = FirebaseMessaging.onMessage.listen(_onForeground);
@@ -98,14 +104,25 @@ class PushNotificationService {
     }
 
     _ready = true;
+    if (_pendingLoginRegister) {
+      _pendingLoginRegister = false;
+      await _registerToken();
+    }
   }
 
   Future<void> onUserLoggedIn() async {
     if (!_ready) {
-      // init may still be running; retry shortly once UI/auth settle.
-      Future<void>.delayed(const Duration(milliseconds: 500), () async {
-        if (_ready) await _registerToken();
-      });
+      _pendingLoginRegister = true;
+      // Retry a few times while init / APNs settle.
+      for (var i = 0; i < 10; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        if (_ready) {
+          _pendingLoginRegister = false;
+          await _registerToken();
+          return;
+        }
+      }
+      _fcmLog('onUserLoggedIn: init not ready after retries');
       return;
     }
     await _registerToken();
@@ -119,34 +136,41 @@ class PushNotificationService {
     try {
       await api.delete('/api/notifications/fcm-token', {'token': token});
     } catch (e) {
-      if (kDebugMode) debugPrint('[FCM] delete token: $e');
+      _fcmLog('delete token: $e');
     }
   }
 
   /// iOS needs an APNs token before FCM [getToken] succeeds.
   Future<void> _waitForApnsToken(FirebaseMessaging messaging) async {
-    for (var i = 0; i < 20; i++) {
+    for (var i = 0; i < 40; i++) {
       final apns = await messaging.getAPNSToken();
       if (apns != null && apns.isNotEmpty) {
-        if (kDebugMode) debugPrint('[FCM] APNs token ready');
+        _fcmLog('APNs token ready');
         return;
       }
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
-    if (kDebugMode) {
-      debugPrint('[FCM] APNs token still missing after wait');
-    }
+    _fcmLog('APNs token still missing after wait');
   }
 
   Future<void> _registerToken() async {
+    if (_tokenRegisterInFlight) return;
+    _tokenRegisterInFlight = true;
     try {
       if (Platform.isIOS) {
         await _waitForApnsToken(FirebaseMessaging.instance);
       }
       final token = await FirebaseMessaging.instance.getToken();
-      if (token != null) await _uploadToken(token);
+      if (token == null || token.isEmpty) {
+        _fcmLog('getToken returned null');
+        return;
+      }
+      _fcmLog('got FCM token (${token.length} chars)');
+      await _uploadToken(token);
     } catch (e) {
-      if (kDebugMode) debugPrint('[FCM] getToken: $e');
+      _fcmLog('getToken: $e');
+    } finally {
+      _tokenRegisterInFlight = false;
     }
   }
 
@@ -156,8 +180,9 @@ class PushNotificationService {
     try {
       await api.post('/api/notifications/fcm-token', {'token': token});
       _lastUploadedToken = token;
+      _fcmLog('token uploaded');
     } catch (e) {
-      if (kDebugMode) debugPrint('[FCM] upload token: $e');
+      _fcmLog('upload token: $e');
     }
   }
 

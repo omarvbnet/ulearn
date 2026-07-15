@@ -81,7 +81,7 @@ export function isFcmConfigured(): boolean {
   return loadCredentials() !== null;
 }
 
-/** Send one FCM HTTP v1 message. Returns false if the token is invalid/unregistered. */
+/** Send one FCM HTTP v1 message. */
 async function sendToToken(
   accessToken: string,
   projectId: string,
@@ -107,17 +107,19 @@ async function sendToToken(
             priority: "high",
             notification: {
               sound: "default",
+              defaultSound: true,
             },
           },
           apns: {
             headers: {
               "apns-priority": "10",
+              "apns-push-type": "alert",
             },
             payload: {
               aps: {
                 alert: { title, body },
                 sound: "default",
-                "content-available": 1,
+                badge: 1,
               },
             },
           },
@@ -131,16 +133,15 @@ async function sendToToken(
   const text = await res.text().catch(() => "");
   console.error(`[FCM] v1 send failed ${res.status}: ${text}`);
 
-  // Stale / unregistered device tokens — caller may prune them.
-  if (
-    res.status === 404 ||
-    text.includes("UNREGISTERED") ||
-    text.includes("NOT_FOUND") ||
-    text.includes("INVALID_ARGUMENT")
-  ) {
-    return "invalid";
-  }
-  return "error";
+  // Only prune clearly dead device tokens — not generic INVALID_ARGUMENT
+  // (payload/config errors would wipe good tokens).
+  const deadToken =
+    text.includes('"errorCode": "UNREGISTERED"') ||
+    text.includes('"status": "UNREGISTERED"') ||
+    text.includes("Requested entity was not found") ||
+    (res.status === 404 && text.includes("NOT_FOUND"));
+
+  return deadToken ? "invalid" : "error";
 }
 
 /**
@@ -152,22 +153,18 @@ export async function sendFcmPush(
   title: string,
   body: string,
   data?: Record<string, unknown>
-): Promise<{ sent: number; invalidTokens: string[] }> {
+): Promise<{ sent: number; failed: number; invalidTokens: string[]; configured: boolean }> {
   const unique = [...new Set(tokens.filter(Boolean))];
-  if (unique.length === 0) return { sent: 0, invalidTokens: [] };
+  if (unique.length === 0) {
+    return { sent: 0, failed: 0, invalidTokens: [], configured: isFcmConfigured() };
+  }
 
   const auth = await getAccessToken();
   if (!auth) {
-    if (process.env.NODE_ENV === "development") {
-      console.info(
-        `[DEV] FCM not configured (set FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY or FIREBASE_SERVICE_ACCOUNT_JSON). Would send: ${title} → ${unique.length} device(s)`
-      );
-    } else {
-      console.error(
-        "[FCM] Missing Firebase service account credentials — push skipped"
-      );
-    }
-    return { sent: 0, invalidTokens: [] };
+    console.error(
+      "[FCM] Missing Firebase service account credentials — push skipped. Set FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY."
+    );
+    return { sent: 0, failed: unique.length, invalidTokens: [], configured: false };
   }
 
   const stringData: Record<string, string> = {};
@@ -179,9 +176,9 @@ export async function sendFcmPush(
   }
 
   let sent = 0;
+  let failed = 0;
   const invalidTokens: string[] = [];
 
-  // Sequential with small concurrency to stay under FCM quotas.
   const concurrency = 8;
   for (let i = 0; i < unique.length; i += concurrency) {
     const chunk = unique.slice(i, i + concurrency);
@@ -197,13 +194,14 @@ export async function sendFcmPush(
     );
     for (const r of results) {
       if (r.status === "ok") sent += 1;
+      else failed += 1;
       if (r.status === "invalid") invalidTokens.push(r.token);
     }
   }
 
-  if (process.env.NODE_ENV === "development") {
-    console.info(`[FCM] v1 sent ${sent}/${unique.length} (invalid ${invalidTokens.length})`);
-  }
+  console.info(
+    `[FCM] v1 sent ${sent}/${unique.length} (failed ${failed}, invalid ${invalidTokens.length}) project=${auth.projectId}`
+  );
 
-  return { sent, invalidTokens };
+  return { sent, failed, invalidTokens, configured: true };
 }

@@ -97,7 +97,30 @@ export function NotificationsClient() {
     });
     setSending(false);
     if (res.ok) {
-      toast("Notification sent");
+      const payload = await res.json().catch(() => null);
+      const push = payload?.push as
+        | {
+            requested?: boolean;
+            fcmConfigured?: boolean;
+            tokenCount?: number;
+            usersWithTokens?: number;
+            recipients?: number;
+          }
+        | undefined;
+      if (push?.requested && !push.fcmConfigured) {
+        toast("Saved, but push skipped — Firebase service account not configured on server", "error");
+      } else if (push?.requested && (push.tokenCount ?? 0) === 0) {
+        toast(
+          `Saved in-app for ${push.recipients ?? 0} users, but none have an FCM token yet (open the app while logged in)`,
+          "error"
+        );
+      } else {
+        toast(
+          push?.requested
+            ? `Notification sent (push tokens: ${push.tokenCount ?? 0})`
+            : "Notification sent"
+        );
+      }
       setForm((f) => ({ ...f, titleEn: "", titleAr: "", titleKu: "", titleTr: "", bodyEn: "", bodyAr: "", bodyKu: "", bodyTr: "" }));
       setHistory(null);
     } else {

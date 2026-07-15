@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Locale, NotificationChannel, NotificationTarget, Prisma } from "@prisma/client";
 import { Resend } from "resend";
-import { sendFcmPush } from "@/services/fcm.service";
+import { isFcmConfigured, sendFcmPush } from "@/services/fcm.service";
 
 const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
@@ -158,7 +158,25 @@ export class NotificationService {
       }
     }
 
-    return notification;
+    const pushEnabled = params.channels.includes("PUSH");
+    const usersWithTokens = users.filter((u) => u.fcmTokens.length > 0).length;
+    const tokenCount = users.reduce((n, u) => n + u.fcmTokens.length, 0);
+    const push = {
+      requested: pushEnabled,
+      fcmConfigured: isFcmConfigured(),
+      recipients: users.length,
+      usersWithTokens,
+      tokenCount,
+    };
+    if (pushEnabled && !push.fcmConfigured) {
+      console.error("[NotificationService] PUSH selected but Firebase service account is not configured");
+    } else if (pushEnabled && tokenCount === 0) {
+      console.warn(
+        `[NotificationService] PUSH selected but no fcmTokens on ${users.length} recipient(s)`
+      );
+    }
+
+    return { notification, push };
   }
 
   private static async resolveTargets(params: {
