@@ -122,22 +122,29 @@ export default function LoginPage() {
           <form onSubmit={sendOtp} className="space-y-4">
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-muted">{t.auth.phone}</label>
-              <div className="flex gap-2" dir="ltr">
+              {/* Force LTR: compact country code on the left, phone field takes the rest */}
+              <div
+                className="flex w-full items-stretch gap-2"
+                dir="ltr"
+                style={{ direction: "ltr" }}
+              >
                 <select
-                  className="input w-[10.5rem] shrink-0 px-2 text-sm"
+                  className="input h-11 w-[7.25rem] shrink-0 grow-0 basis-[7.25rem] px-1.5 text-sm tabular-nums"
                   value={countryIso}
                   onChange={(e) => setCountryIso(e.target.value)}
                   aria-label="Country code"
                 >
                   {countries.map((c) => (
                     <option key={c.iso} value={c.iso}>
-                      {c.flag} +{c.dial} {c.name}
+                      {c.flag} +{c.dial}
                     </option>
                   ))}
                 </select>
                 <input
                   type="tel"
-                  className="input flex-1"
+                  inputMode="tel"
+                  autoComplete="tel-national"
+                  className="input h-11 min-w-0 flex-1 grow basis-0 text-base"
                   placeholder={
                     selected.iso === "IQ" ? "7XX XXX XXXX" : "Phone number"
                   }
