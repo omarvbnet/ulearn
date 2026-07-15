@@ -569,11 +569,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     if (quiz != null && quiz['passedByMe'] != true) {
       Future.delayed(const Duration(milliseconds: 600), () {
         if (!mounted) return;
-        setState(() {
-          _playerStage = _PlayerStage.quiz;
-          _stageQuiz = quiz;
-          _stageDocs = [];
-        });
+        _openQuiz(quiz);
       });
       return;
     }
@@ -902,6 +898,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     required Map<String, dynamic>? active,
     required String courseTitle,
     required dynamic l10n,
+    bool theater = false,
   }) {
     final title = active != null
         ? _lessonTitle(
@@ -921,9 +918,15 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       decoration: BoxDecoration(
-        color: AppTheme.card.withValues(alpha: 0.55),
+        color: theater
+            ? const Color(0xFF0A0A12)
+            : AppTheme.card.withValues(alpha: 0.55),
         border: Border(
-          bottom: BorderSide(color: AppTheme.cardBorder.withValues(alpha: 0.7)),
+          bottom: BorderSide(
+            color: theater
+                ? Colors.white.withValues(alpha: 0.08)
+                : AppTheme.cardBorder.withValues(alpha: 0.7),
+          ),
         ),
       ),
       child: Row(
@@ -949,7 +952,11 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+                color: theater ? Colors.white : AppTheme.foreground,
+              ),
             ),
           ),
         ],
@@ -973,7 +980,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           });
         },
         lessonsCount: lessons.length,
-        quizzesCount: unlocked ? _quizzes.length : 0,
+        quizzesCount: _quizzes.length,
         materialsCount: unlocked ? _materials.length : 0,
         l10n: l10n,
       ),
@@ -981,6 +988,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   /// Landscape: left = fixed stage (video/quiz/docs), right = tabs + content.
+  /// Always black theater chrome (never light/white sides around the video).
   Widget _buildLandscapeBody({
     required Map<String, dynamic> course,
     required List<Map<String, dynamic>> lessons,
@@ -992,58 +1000,73 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     required dynamic l10n,
     required Widget tabContent,
   }) {
-    return Row(
-      children: [
-        Expanded(
-          flex: 5,
-          child: Column(
-            children: [
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: ColoredBox(
-                      color: Colors.black,
-                      child: _buildStageContent(
-                        lessons: lessons,
-                        unlocked: unlocked,
-                        active: active,
-                        activeUrl: activeUrl,
-                        activeId: activeId,
-                        l10n: l10n,
-                        edgeToEdge: true,
-                        expandPlayer: true,
+    return ColoredBox(
+      color: Colors.black,
+      child: Row(
+        children: [
+          Expanded(
+            flex: 5,
+            child: Column(
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: ColoredBox(
+                        color: Colors.black,
+                        child: _buildStageContent(
+                          lessons: lessons,
+                          unlocked: unlocked,
+                          active: active,
+                          activeUrl: activeUrl,
+                          activeId: activeId,
+                          l10n: l10n,
+                          edgeToEdge: true,
+                          expandPlayer: true,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              _buildNowPlayingStrip(
-                active: active,
-                courseTitle: courseTitle,
-                l10n: l10n,
-              ),
-            ],
-          ),
-        ),
-        VerticalDivider(width: 1, thickness: 1, color: AppTheme.cardBorder),
-        SizedBox(
-          width: (MediaQuery.sizeOf(context).width * 0.38).clamp(280.0, 360.0),
-          child: Column(
-            children: [
-              _buildTabsBar(lessons: lessons, unlocked: unlocked, l10n: l10n),
-              const SizedBox(height: 4),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                  child: tabContent,
+                _buildNowPlayingStrip(
+                  active: active,
+                  courseTitle: courseTitle,
+                  l10n: l10n,
+                  theater: true,
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ],
+          const VerticalDivider(
+            width: 1,
+            thickness: 1,
+            color: Color(0xFF1A1A35),
+          ),
+          SizedBox(
+            width: (MediaQuery.sizeOf(context).width * 0.38).clamp(280.0, 360.0),
+            child: ColoredBox(
+              color: const Color(0xFF0A0A12),
+              child: Column(
+                children: [
+                  _buildTabsBar(
+                    lessons: lessons,
+                    unlocked: unlocked,
+                    l10n: l10n,
+                  ),
+                  const SizedBox(height: 4),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                      child: tabContent,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1056,38 +1079,30 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     return _courseTimeline(lessons).asMap().entries.map((e) {
       final item = e.value;
       if (item.isQuiz) {
-        if (!unlocked) return const SizedBox.shrink();
         final quiz = item.data;
         final title = localizedText(quiz, context.localeCode);
+        final passed = quiz['passedByMe'] == true;
+        final qCount = (quiz['_count']?['questions'] as num?)?.toInt() ??
+            (quiz['questions'] as List?)?.length;
         return Padding(
           key: ValueKey('quiz-${quiz['id']}'),
           padding: const EdgeInsets.only(bottom: 6),
           child: _QuizTimelineCard(
-            title: title,
+            title: title.isEmpty
+                ? context.l10n.t('student.quizzes')
+                : title,
             passPct: (quiz['passPercentage'] as num?)?.toInt() ?? 50,
-            questionCount: (quiz['_count']?['questions'] as num?)?.toInt(),
+            questionCount: qCount,
+            locked: !unlocked,
+            passed: passed,
             onTap: () {
-              final afterId = quiz['afterLessonId']?.toString();
-              if (afterId != null) {
-                final lessons = ((_course?['lessons'] as List<dynamic>?) ?? [])
-                    .cast<Map<String, dynamic>>();
-                Map<String, dynamic>? lesson;
-                for (final l in lessons) {
-                  if (l['id']?.toString() == afterId) {
-                    lesson = l;
-                    break;
-                  }
-                }
-                if (lesson != null) {
-                  setState(() {
-                    _activeLesson = lesson;
-                    _playerStage = _PlayerStage.quiz;
-                    _stageQuiz = quiz;
-                    _stageDocs = [];
-                  });
-                  return;
-                }
+              if (!unlocked) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(context.l10n.storeSubscribeUnlock)),
+                );
+                return;
               }
+              // Always open the full exam screen from the curriculum list.
               _openQuiz(quiz);
             },
           ),
@@ -1216,6 +1231,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         MediaQuery.orientationOf(context) == Orientation.landscape;
 
     return Scaffold(
+      backgroundColor: isLandscape ? Colors.black : AppTheme.background,
       resizeToAvoidBottomInset: true,
       appBar: isLandscape
           ? null
@@ -1245,53 +1261,60 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               ],
             ),
       body: isLandscape
-          ? SafeArea(
-              child: Column(
-                children: [
-                  // Compact landscape chrome — back + title + actions
-                  SizedBox(
-                    height: 44,
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                              size: 18),
-                          onPressed: () => Navigator.of(context).maybePop(),
-                        ),
-                        Expanded(
-                          child: Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 15,
+          ? ColoredBox(
+              color: Colors.black,
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    // Compact landscape chrome — always black, light icons/text
+                    SizedBox(
+                      height: 44,
+                      child: Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(
+                              Icons.arrow_back_ios_new_rounded,
+                              size: 18,
+                              color: Colors.white,
+                            ),
+                            onPressed: () => Navigator.of(context).maybePop(),
+                          ),
+                          Expanded(
+                            child: Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
-                        ),
-                        FavoriteButton(
-                          active: _favorited,
-                          onTap: _toggleFavorite,
-                          size: 34,
-                        ),
-                        const SizedBox(width: 8),
-                      ],
+                          FavoriteButton(
+                            active: _favorited,
+                            onTap: _toggleFavorite,
+                            size: 34,
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                      ),
                     ),
-                  ),
-                  Expanded(
-                    child: _buildLandscapeBody(
-                      course: course,
-                      lessons: lessons,
-                      unlocked: unlocked,
-                      active: active,
-                      activeUrl: activeUrl,
-                      activeId: activeId,
-                      courseTitle: title,
-                      l10n: l10n,
-                      tabContent: tabContent,
+                    Expanded(
+                      child: _buildLandscapeBody(
+                        course: course,
+                        lessons: lessons,
+                        unlocked: unlocked,
+                        active: active,
+                        activeUrl: activeUrl,
+                        activeId: activeId,
+                        courseTitle: title,
+                        l10n: l10n,
+                        tabContent: tabContent,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             )
           : Column(
@@ -2197,12 +2220,16 @@ class _QuizTimelineCard extends StatelessWidget {
     required this.passPct,
     required this.questionCount,
     required this.onTap,
+    this.locked = false,
+    this.passed = false,
   });
 
   final String title;
   final int passPct;
   final int? questionCount;
   final VoidCallback onTap;
+  final bool locked;
+  final bool passed;
 
   @override
   Widget build(BuildContext context) {
@@ -2214,7 +2241,11 @@ class _QuizTimelineCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppTheme.card,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppTheme.accent.withValues(alpha: 0.35)),
+          border: Border.all(
+            color: passed
+                ? Colors.greenAccent.withValues(alpha: 0.45)
+                : AppTheme.accent.withValues(alpha: 0.35),
+          ),
         ),
         child: Material(
           color: Colors.transparent,
@@ -2229,10 +2260,19 @@ class _QuizTimelineCard extends StatelessWidget {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      gradient: AppTheme.gradient,
+                      gradient: locked ? null : AppTheme.gradient,
+                      color: locked ? AppTheme.cardBorder : null,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.quiz_outlined, color: Colors.white, size: 20),
+                    child: Icon(
+                      locked
+                          ? Icons.lock_outline
+                          : passed
+                              ? Icons.check_circle_outline
+                              : Icons.quiz_outlined,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -2244,12 +2284,18 @@ class _QuizTimelineCard extends StatelessWidget {
                           title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                            color: AppTheme.foreground,
+                          ),
                         ),
                         const SizedBox(height: 3),
                         Text(
                           [
-                            if (questionCount != null) '${l10n.t('quiz.questions')}: $questionCount',
+                            if (passed) l10n.t('quiz.passed'),
+                            if (questionCount != null)
+                              '${l10n.t('quiz.questions')}: $questionCount',
                             '${l10n.t('quiz.passMark')} $passPct%',
                           ].join(' · '),
                           maxLines: 1,
@@ -2259,7 +2305,13 @@ class _QuizTimelineCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Icon(Icons.arrow_forward_ios_rounded, size: 12, color: AppTheme.muted),
+                  Icon(
+                    locked
+                        ? Icons.lock_outline
+                        : Icons.play_circle_outline_rounded,
+                    size: 18,
+                    color: locked ? AppTheme.muted : AppTheme.accent,
+                  ),
                 ],
               ),
             ),

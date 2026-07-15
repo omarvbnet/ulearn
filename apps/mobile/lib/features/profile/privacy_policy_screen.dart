@@ -50,8 +50,14 @@ class PrivacyPolicyScreen extends StatelessWidget {
     ];
 
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: Text(l10n.t('mobile.privacy.title')),
+        backgroundColor: AppTheme.background,
+        foregroundColor: AppTheme.foreground,
+        title: Text(
+          l10n.t('mobile.privacy.title'),
+          style: TextStyle(color: AppTheme.foreground),
+        ),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
@@ -73,9 +79,10 @@ class PrivacyPolicyScreen extends StatelessWidget {
           for (final (title, body) in sections) ...[
             Text(
               title,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
+                color: AppTheme.foreground,
               ),
             ),
             const SizedBox(height: 8),

@@ -92,6 +92,9 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   bool _didSeekResume = false;
   bool _showResumeChip = false;
   StreamSubscription<bool>? _castSub;
+  /// Bumped on orientation change so the platform texture rebinds (avoids black frame).
+  int _textureEpoch = 0;
+  Orientation? _lastOrientation;
 
   @override
   void initState() {
@@ -100,6 +103,19 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     _completionSaved = widget.initiallyCompleted;
     MediaCacheBudget.pin(widget.url);
     _init();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final orientation = MediaQuery.orientationOf(context);
+    if (_lastOrientation != null && _lastOrientation != orientation) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() => _textureEpoch++);
+      });
+    }
+    _lastOrientation = orientation;
   }
 
   @override
@@ -335,6 +351,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
 
   /// Texture/platform views often collapse to zero size under loose
   /// constraints (especially after rotate) — pin intrinsic video size then fit.
+  /// Pinch with [InteractiveViewer] to zoom in/out.
   Widget _videoSurface() {
     final c = _controller!;
     return ValueListenableBuilder<VideoPlayerValue>(
@@ -343,13 +360,28 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
         final ar = value.aspectRatio <= 0 ? 16 / 9 : value.aspectRatio;
         return ColoredBox(
           color: Colors.black,
-          child: FittedBox(
-            fit: BoxFit.contain,
-            child: SizedBox(
-              width: ar * 1000,
-              height: 1000,
-              child: VideoPlayer(c),
-            ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return InteractiveViewer(
+                minScale: 1,
+                maxScale: 4,
+                boundaryMargin: const EdgeInsets.all(80),
+                clipBehavior: Clip.hardEdge,
+                child: SizedBox(
+                  width: constraints.maxWidth,
+                  height: constraints.maxHeight,
+                  child: Center(
+                    child: AspectRatio(
+                      aspectRatio: ar,
+                      child: VideoPlayer(
+                        c,
+                        key: ValueKey('vp-$_textureEpoch-${widget.lessonId}'),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         );
       },
@@ -359,14 +391,19 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return _frame(child: const SkeletonVideoPlayer());
+      return _frame(
+        child: const ColoredBox(
+          color: Colors.black,
+          child: SkeletonVideoPlayer(),
+        ),
+      );
     }
     if (_error != null) {
       return _frame(
         child: Container(
-          color: AppTheme.card,
+          color: Colors.black,
           child: Center(
-            child: Text(_error!, style: TextStyle(color: AppTheme.muted)),
+            child: Text(_error!, style: const TextStyle(color: Colors.white70)),
           ),
         ),
       );
@@ -389,18 +426,21 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
               AnimatedOpacity(
                 opacity: _showControls ? 1 : 0,
                 duration: const Duration(milliseconds: 220),
-                child: ValueListenableBuilder<VideoPlayerValue>(
-                  valueListenable: _controller!,
-                  builder: (context, _, child) => _ControlsOverlay(
-                    controller: _controller!,
-                    protection: _protection,
-                    speed: _speed,
-                    onSpeed: (s) {
-                      setState(() => _speed = s);
-                      _controller!.setPlaybackSpeed(s);
-                    },
-                    onFullscreen: _enterFullscreen,
-                    onCast: _openCast,
+                child: IgnorePointer(
+                  ignoring: !_showControls,
+                  child: ValueListenableBuilder<VideoPlayerValue>(
+                    valueListenable: _controller!,
+                    builder: (context, _, child) => _ControlsOverlay(
+                      controller: _controller!,
+                      protection: _protection,
+                      speed: _speed,
+                      onSpeed: (s) {
+                        setState(() => _speed = s);
+                        _controller!.setPlaybackSpeed(s);
+                      },
+                      onFullscreen: _enterFullscreen,
+                      onCast: _openCast,
+                    ),
                   ),
                 ),
               ),
@@ -674,12 +714,17 @@ class _FullscreenPlayerState extends State<_FullscreenPlayer> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Center(
-                      child: AspectRatio(
-                        aspectRatio: widget.controller.value.aspectRatio == 0
-                            ? 16 / 9
-                            : widget.controller.value.aspectRatio,
-                        child: VideoPlayer(widget.controller),
+                    InteractiveViewer(
+                      minScale: 1,
+                      maxScale: 4,
+                      boundaryMargin: const EdgeInsets.all(120),
+                      child: Center(
+                        child: AspectRatio(
+                          aspectRatio: widget.controller.value.aspectRatio == 0
+                              ? 16 / 9
+                              : widget.controller.value.aspectRatio,
+                          child: VideoPlayer(widget.controller),
+                        ),
                       ),
                     ),
                     const VideoBrandLogo(markSize: 26),

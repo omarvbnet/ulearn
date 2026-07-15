@@ -44,7 +44,10 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     final brand = locale.ready ? locale.l10n.brand : 'U Learn';
     final tagline = locale.ready ? locale.l10n.learnWithoutLimits : 'Learn without limits';
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
+      backgroundColor: AppTheme.background,
       body: Stack(
         fit: StackFit.expand,
         children: [
@@ -58,7 +61,8 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                   builder: (context, _) => ULearnLogo(
                     size: 150,
                     progress: _draw.value,
-                    glow: _draw.isCompleted ? 0.4 + 0.5 * _pulse.value : 0.5,
+                    glow: (_draw.isCompleted ? 0.4 + 0.5 * _pulse.value : 0.5) *
+                        (isDark ? 1.0 : 0.55),
                   ),
                 ),
                 const SizedBox(height: 26),
@@ -130,7 +134,8 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                         gradient: AppTheme.gradient,
                         boxShadow: [
                           BoxShadow(
-                            color: AppTheme.accent.withValues(alpha: 0.6),
+                            color: AppTheme.accent
+                                .withValues(alpha: isDark ? 0.6 : 0.35),
                             blurRadius: 8,
                           ),
                         ],

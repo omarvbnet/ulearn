@@ -64,10 +64,14 @@ flutter_launcher_icons:
   adaptive_icon_foreground: assets/brand/icon_foreground.png
 
 # Native launch screen shown before Flutter boots, matching the
-# in-app animated splash.
+# in-app animated splash (light + dark).
 flutter_native_splash:
-  color: "#050510"
+  color: "#F4F6FB"
+  color_dark: "#050510"
   image: assets/brand/splash_logo.png
+  image_dark: assets/brand/splash_logo.png
   android_12:
-    color: "#050510"
+    color: "#F4F6FB"
+    color_dark: "#050510"
     image: assets/brand/splash_logo.png
+    image_dark: assets/brand/splash_logo.png

@@ -171,7 +171,10 @@ class _LoginScreenState extends State<LoginScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
+      backgroundColor: AppTheme.background,
       resizeToAvoidBottomInset: true,
       body: Stack(
         fit: StackFit.expand,
@@ -227,11 +230,25 @@ class _LoginScreenState extends State<LoginScreen>
                             width: double.infinity,
                             padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.04),
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.04)
+                                  : AppTheme.card.withValues(alpha: 0.92),
                               borderRadius: BorderRadius.circular(24),
                               border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.08),
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.08)
+                                    : AppTheme.cardBorder,
                               ),
+                              boxShadow: isDark
+                                  ? null
+                                  : [
+                                      BoxShadow(
+                                        color: AppTheme.primary
+                                            .withValues(alpha: 0.08),
+                                        blurRadius: 24,
+                                        offset: const Offset(0, 8),
+                                      ),
+                                    ],
                             ),
                             child: AnimatedSize(
                               duration: const Duration(milliseconds: 300),
@@ -304,7 +321,11 @@ class _LoginScreenState extends State<LoginScreen>
           widget.startAsRegister
               ? l10n.t('mobile.auth.registerWelcome')
               : l10n.loginWelcome,
-          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: AppTheme.foreground,
+          ),
         ),
         const SizedBox(height: 6),
         Text(
@@ -431,7 +452,11 @@ class _LoginScreenState extends State<LoginScreen>
       children: [
         Text(
           l10n.loginEnterCode,
-          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: AppTheme.foreground,
+          ),
         ),
         const SizedBox(height: 6),
         Text.rich(
@@ -470,7 +495,9 @@ class _LoginScreenState extends State<LoginScreen>
                         curve: Curves.easeOut,
                         height: 52,
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.04),
+                          color: AppTheme.isDark
+                              ? Colors.white.withValues(alpha: 0.04)
+                              : AppTheme.background,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color: isCurrent
