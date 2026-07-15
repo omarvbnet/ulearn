@@ -695,6 +695,8 @@ class _CourseGroupsRail extends StatelessWidget {
                                   child: CachedImage(
                                     url: cover,
                                     fit: BoxFit.cover,
+                                    width: double.infinity,
+                                    height: double.infinity,
                                   ),
                                 )
                               else
@@ -1689,20 +1691,24 @@ class CourseCard extends StatelessWidget {
             Hero(
               tag: 'course-cover-$id',
               child: AspectRatio(
-                aspectRatio: 16 / 8,
+                aspectRatio: 16 / 9,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
                     if (thumbnail != null && thumbnail.isNotEmpty)
-                      CachedImage(
-                        url: thumbnail,
-                        fit: BoxFit.cover,
-                        cacheVersion: course['updatedAt']?.toString(),
-                        placeholder: const _CoverFallback(),
-                        error: const _CoverFallback(),
+                      Positioned.fill(
+                        child: CachedImage(
+                          url: thumbnail,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          height: double.infinity,
+                          cacheVersion: course['updatedAt']?.toString(),
+                          placeholder: const _CoverFallback(),
+                          error: const _CoverFallback(),
+                        ),
                       )
                     else
-                      const _CoverFallback(),
+                      const Positioned.fill(child: _CoverFallback()),
                     DecoratedBox(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(

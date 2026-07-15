@@ -205,8 +205,12 @@ export function LessonClient({ lessonId, locale }: { lessonId: string; locale: s
                 autoPlay
                 controls={false}
                 onContextMenu={(e) => e.preventDefault()}
-                onEnded={() => setPhase("main")}
-                onError={() => setPhase("main")}
+                onEnded={() => {
+                  if (phase === "intro") setPhase("main");
+                }}
+                onError={() => {
+                  if (phase === "intro") setPhase("main");
+                }}
                 className={cn(theater ? "h-full w-full object-contain" : "aspect-video w-full")}
               />
             ) : (

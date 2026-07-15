@@ -171,7 +171,12 @@ class _CourseGroupDetailScreenState extends State<CourseGroupDetailScreen> {
                           style: const TextStyle(fontSize: 16),
                         ),
                         background: cover != null && cover.isNotEmpty
-                            ? CachedImage(url: cover, fit: BoxFit.cover)
+                            ? CachedImage(
+                                url: cover,
+                                fit: BoxFit.cover,
+                                width: double.infinity,
+                                height: double.infinity,
+                              )
                             : Container(
                                 color: AppTheme.primary.withValues(alpha: 0.25),
                                 child: Center(

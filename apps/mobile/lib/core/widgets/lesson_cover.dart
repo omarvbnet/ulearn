@@ -54,15 +54,19 @@ class LessonCover extends StatelessWidget {
     final hasThumb = thumb != null && thumb.isNotEmpty;
 
     final coverLayer = hasThumb
-        ? CachedImage(
-            url: thumb,
-            fit: BoxFit.cover,
-            width: width.isFinite ? width : null,
-            height: height.isFinite ? height : null,
-            placeholder: _ProceduralCover(id: id, title: displayTitle, index: index),
-            error: _ProceduralCover(id: id, title: displayTitle, index: index),
+        ? SizedBox.expand(
+            child: CachedImage(
+              url: thumb,
+              fit: BoxFit.cover,
+              width: double.infinity,
+              height: double.infinity,
+              placeholder: _ProceduralCover(id: id, title: displayTitle, index: index),
+              error: _ProceduralCover(id: id, title: displayTitle, index: index),
+            ),
           )
-        : _ProceduralCover(id: id, title: displayTitle, index: index);
+        : SizedBox.expand(
+            child: _ProceduralCover(id: id, title: displayTitle, index: index),
+          );
 
     if (coverOnly) {
       return _wrapSize(

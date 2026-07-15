@@ -1,9 +1,12 @@
 import { error, json, optionalAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser } from "@/lib/auth/session";
 import { PUBLIC_LESSON_WHERE } from "@/lib/video-visibility";
 import { CourseRatingService } from "@/services/course-rating.service";
 import { TeacherCourseService } from "@/services/teacher-course.service";
+import { VideoService } from "@/services/video.service";
 import { getDownloadUrl } from "@/lib/r2";
+import type { Locale } from "@prisma/client";
 
 /** Course detail — public browse; purchase/progress fields when signed in. */
 export async function GET(
@@ -226,6 +229,13 @@ export async function GET(
       })
     : null;
 
+  const user = userId ? await getCurrentUser() : null;
+  const locale = (user?.locale ?? "AR") as Locale;
+  const introOutro = await VideoService.getPlayableIntroOutro(
+    locale,
+    user?.countryId ?? undefined
+  );
+
   return json({
     course: {
       ...course,
@@ -247,5 +257,6 @@ export async function GET(
     isOwnCourse,
     favorites: favoriteCount,
     favoritedByMe: Boolean(myFavorite),
+    introOutro,
   });
 }

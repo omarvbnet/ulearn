@@ -66,7 +66,12 @@ class CachedImage extends StatelessWidget {
     }
 
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    final memW = width != null && width!.isFinite ? (width! * dpr).round() : 900;
+    final memW = width != null && width!.isFinite && width! > 0
+        ? (width! * dpr).round()
+        : 900;
+    final memH = height != null && height!.isFinite && height! > 0
+        ? (height! * dpr).round()
+        : null;
 
     Widget image = CachedNetworkImage(
       imageUrl: _resolved,
@@ -78,6 +83,7 @@ class CachedImage extends StatelessWidget {
       width: width,
       height: height,
       memCacheWidth: memW.clamp(64, 1600),
+      memCacheHeight: memH != null ? memH.clamp(64, 1600) : null,
       fadeInDuration: const Duration(milliseconds: 180),
       fadeOutDuration: const Duration(milliseconds: 100),
       placeholder: (context, url) => _loading,

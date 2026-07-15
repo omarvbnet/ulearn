@@ -51,6 +51,9 @@ class CourseInlinePlayer extends StatefulWidget {
     this.onSelectPlaylistItem,
     this.borderRadius = 14,
     this.expand = false,
+    this.showFullscreen = true,
+    this.introUrl,
+    this.outroUrl,
   });
 
   final String url;
@@ -72,10 +75,18 @@ class CourseInlinePlayer extends StatefulWidget {
   /// Fill parent bounds instead of forcing an inner 16:9 AspectRatio
   /// (needed in landscape when the parent already sized the stage).
   final bool expand;
+  /// When false, hides the fullscreen control (portrait course detail zooms the stage instead).
+  final bool showFullscreen;
+  /// Admin-configured branded intro clip (plays before the lesson when not resuming).
+  final String? introUrl;
+  /// Admin-configured branded outro clip (plays after the lesson finishes).
+  final String? outroUrl;
 
   @override
   State<CourseInlinePlayer> createState() => _CourseInlinePlayerState();
 }
+
+enum _PlayPhase { intro, main, outro }
 
 class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   VideoPlayerController? _controller;
@@ -95,13 +106,43 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   /// Bumped on orientation change so the platform texture rebinds (avoids black frame).
   int _textureEpoch = 0;
   Orientation? _lastOrientation;
+  _PlayPhase _phase = _PlayPhase.main;
+  bool _advancingPhase = false;
+
+  String? get _introUrl {
+    final u = widget.introUrl?.trim();
+    return u != null && u.isNotEmpty ? u : null;
+  }
+
+  String? get _outroUrl {
+    final u = widget.outroUrl?.trim();
+    return u != null && u.isNotEmpty ? u : null;
+  }
+
+  bool get _isMainPhase => _phase == _PlayPhase.main;
+
+  String _urlForPhase(_PlayPhase phase) {
+    return switch (phase) {
+      _PlayPhase.intro => _introUrl ?? widget.url,
+      _PlayPhase.main => widget.url,
+      _PlayPhase.outro => _outroUrl ?? widget.url,
+    };
+  }
 
   @override
   void initState() {
     super.initState();
     _lessonWasCompleted = widget.initiallyCompleted;
     _completionSaved = widget.initiallyCompleted;
+    final resumeSec = widget.initialPositionSec ?? 0;
+    final playIntro = _introUrl != null &&
+        !_lessonWasCompleted &&
+        resumeSec <= 5;
+    _phase = playIntro ? _PlayPhase.intro : _PlayPhase.main;
+    MediaCacheBudget.pin(_urlForPhase(_phase));
     MediaCacheBudget.pin(widget.url);
+    if (_introUrl != null) CourseVideoCache.prefetch(_introUrl!);
+    if (_outroUrl != null) CourseVideoCache.prefetch(_outroUrl!);
     _init();
   }
 
@@ -124,7 +165,6 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     if (oldWidget.url != widget.url || oldWidget.lessonId != widget.lessonId) {
       MediaCacheBudget.unpin(oldWidget.url);
       CourseVideoCache.onPlaybackEnded(oldWidget.url);
-      MediaCacheBudget.pin(widget.url);
       _progressTimer?.cancel();
       _controller?.removeListener(_onControllerTick);
       _controller?.dispose();
@@ -135,6 +175,14 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       _previewLimitHit = false;
       _didSeekResume = false;
       _showResumeChip = false;
+      _advancingPhase = false;
+      final resumeSec = widget.initialPositionSec ?? 0;
+      final playIntro = _introUrl != null &&
+          !_lessonWasCompleted &&
+          resumeSec <= 5;
+      _phase = playIntro ? _PlayPhase.intro : _PlayPhase.main;
+      MediaCacheBudget.pin(_urlForPhase(_phase));
+      MediaCacheBudget.pin(widget.url);
       _loading = true;
       _error = null;
       _init();
@@ -151,33 +199,128 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
 
   void _onPlaybackUpdate() {
     final c = _controller;
-    if (c == null || !c.value.isInitialized) return;
+    if (c == null || !c.value.isInitialized || _advancingPhase) return;
     final v = c.value;
-    final limit = widget.freePreviewLimitSec;
-    if (limit != null && limit > 0 && !_previewLimitHit) {
-      if (v.position.inSeconds >= limit) {
-        _previewLimitHit = true;
-        c.pause();
-        c.seekTo(Duration(seconds: limit));
-        widget.onPreviewLimitReached?.call();
-        if (mounted) setState(() {});
-        return;
-      }
-    }
-    if (_completionSaved) return;
     final duration = v.duration.inSeconds;
     if (duration <= 0) return;
+
+    if (_phase == _PlayPhase.main) {
+      final limit = widget.freePreviewLimitSec;
+      if (limit != null && limit > 0 && !_previewLimitHit) {
+        if (v.position.inSeconds >= limit) {
+          _previewLimitHit = true;
+          c.pause();
+          c.seekTo(Duration(seconds: limit));
+          widget.onPreviewLimitReached?.call();
+          if (mounted) setState(() {});
+          return;
+        }
+      }
+    }
+
     final nearEnd = v.isCompleted || v.position.inSeconds >= duration - 2;
-    if (nearEnd) {
-      _completionSaved = true;
-      _saveProgress(completed: true).then((_) {
-        if (!mounted) return;
-        setState(() => _showCompleteFlash = true);
-        widget.onCompleted?.call();
-        Future.delayed(const Duration(milliseconds: 1400), () {
-          if (mounted) setState(() => _showCompleteFlash = false);
-        });
+    if (!nearEnd) return;
+
+    if (_phase == _PlayPhase.intro) {
+      _goToMain(fromIntro: true);
+      return;
+    }
+
+    if (_phase == _PlayPhase.outro) {
+      _advancingPhase = true;
+      return;
+    }
+
+    if (_completionSaved) return;
+    _completionSaved = true;
+    _saveProgress(completed: true).then((_) async {
+      if (!mounted) return;
+      widget.onCompleted?.call();
+      if (_outroUrl != null) {
+        await _goToOutro();
+        return;
+      }
+      setState(() => _showCompleteFlash = true);
+      Future.delayed(const Duration(milliseconds: 1400), () {
+        if (mounted) setState(() => _showCompleteFlash = false);
       });
+    });
+  }
+
+  Future<void> _goToMain({bool fromIntro = false}) async {
+    if (_advancingPhase) return;
+    _advancingPhase = true;
+    try {
+      await _swapController(widget.url, phase: _PlayPhase.main);
+      if (!mounted) return;
+      final resumeSec = widget.initialPositionSec ?? 0;
+      if (!_lessonWasCompleted && resumeSec > 5 && !_didSeekResume && !fromIntro) {
+        final duration = _controller?.value.duration.inSeconds ?? 0;
+        final target = duration > 0 ? resumeSec.clamp(0, duration - 2) : resumeSec;
+        if (target > 5) {
+          await _controller?.seekTo(Duration(seconds: target));
+          _didSeekResume = true;
+          _showResumeChip = true;
+          Future.delayed(const Duration(seconds: 4), () {
+            if (mounted) setState(() => _showResumeChip = false);
+          });
+        }
+      }
+      if (widget.autoPlay) await _controller?.play();
+      _startProgressTimer();
+    } finally {
+      _advancingPhase = false;
+    }
+  }
+
+  Future<void> _goToOutro() async {
+    if (_outroUrl == null || _advancingPhase) return;
+    _advancingPhase = true;
+    try {
+      _progressTimer?.cancel();
+      await _swapController(_outroUrl!, phase: _PlayPhase.outro);
+      if (!mounted) return;
+      if (widget.autoPlay) await _controller?.play();
+    } finally {
+      _advancingPhase = false;
+    }
+  }
+
+  Future<void> _skipIntro() async {
+    if (_phase != _PlayPhase.intro) return;
+    await _goToMain(fromIntro: true);
+  }
+
+  Future<void> _swapController(String url, {required _PlayPhase phase}) async {
+    final old = _controller;
+    old?.removeListener(_onControllerTick);
+    setState(() {
+      _loading = true;
+      _error = null;
+      _phase = phase;
+      _textureEpoch++;
+    });
+    MediaCacheBudget.pin(url);
+    final next = await CourseVideoCache.createController(url);
+    try {
+      await next.initialize();
+      if (!mounted) {
+        await next.dispose();
+        return;
+      }
+      _controller = next;
+      next.addListener(_onControllerTick);
+      setState(() => _loading = false);
+      CourseVideoCache.cacheAfterPlay(url);
+    } catch (_) {
+      await next.dispose();
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = context.l10n.t('mobile.video.playFailed');
+      });
+    } finally {
+      await old?.dispose();
     }
   }
 
@@ -190,6 +333,8 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
   Future<void> _saveProgress({bool completed = false}) async {
     final c = _controller;
     if (c == null || !c.value.isInitialized || widget.lessonId == null) return;
+    // Only track the main lesson — never intro/outro clips.
+    if (!_isMainPhase && !completed) return;
     // Completed lessons stay completed — skip saves that would regress progress.
     if (_lessonWasCompleted && !completed) return;
     try {
@@ -217,8 +362,9 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
         if (mounted) setState(() {});
       });
 
+    final startUrl = _urlForPhase(_phase);
     // Start network/file controller while refreshing protection identity.
-    final controllerFuture = CourseVideoCache.createController(widget.url);
+    final controllerFuture = CourseVideoCache.createController(startUrl);
     await ensureFreshProtectionIdentity(
       auth,
       _protection!,
@@ -244,27 +390,35 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
         return;
       }
       _controller = controller;
-      final resumeSec = widget.initialPositionSec ?? 0;
-      if (!_lessonWasCompleted && resumeSec > 5 && !_didSeekResume) {
-        final duration = controller.value.duration.inSeconds;
-        final target = duration > 0 ? resumeSec.clamp(0, duration - 2) : resumeSec;
-        if (target > 5) {
-          await controller.seekTo(Duration(seconds: target));
-          _didSeekResume = true;
-          _showResumeChip = true;
-          Future.delayed(const Duration(seconds: 4), () {
-            if (mounted) setState(() => _showResumeChip = false);
-          });
+      if (_phase == _PlayPhase.main) {
+        final resumeSec = widget.initialPositionSec ?? 0;
+        if (!_lessonWasCompleted && resumeSec > 5 && !_didSeekResume) {
+          final duration = controller.value.duration.inSeconds;
+          final target =
+              duration > 0 ? resumeSec.clamp(0, duration - 2) : resumeSec;
+          if (target > 5) {
+            await controller.seekTo(Duration(seconds: target));
+            _didSeekResume = true;
+            _showResumeChip = true;
+            Future.delayed(const Duration(seconds: 4), () {
+              if (mounted) setState(() => _showResumeChip = false);
+            });
+          }
         }
+        _startProgressTimer();
       }
       if (widget.autoPlay) await _controller!.play();
       _controller!.addListener(_onControllerTick);
       setState(() => _loading = false);
-      _startProgressTimer();
-      // Quietly cache the *next* lesson; cache this one after the user leaves.
+      CourseVideoCache.cacheAfterPlay(startUrl);
       CourseVideoCache.cacheAfterPlay(widget.url);
     } catch (_) {
       await controller.dispose();
+      // Intro failed — fall through to the lesson instead of blocking playback.
+      if (_phase == _PlayPhase.intro && mounted) {
+        await _goToMain(fromIntro: true);
+        return;
+      }
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -349,9 +503,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     return AspectRatio(aspectRatio: 16 / 9, child: clipped);
   }
 
-  /// Texture/platform views often collapse to zero size under loose
-  /// constraints (especially after rotate) — pin intrinsic video size then fit.
-  /// Pinch with [InteractiveViewer] to zoom in/out.
+  /// Fill the player frame; stage-level zoom lives on the course detail page.
   Widget _videoSurface() {
     final c = _controller!;
     return ValueListenableBuilder<VideoPlayerValue>(
@@ -360,28 +512,14 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
         final ar = value.aspectRatio <= 0 ? 16 / 9 : value.aspectRatio;
         return ColoredBox(
           color: Colors.black,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              return InteractiveViewer(
-                minScale: 1,
-                maxScale: 4,
-                boundaryMargin: const EdgeInsets.all(80),
-                clipBehavior: Clip.hardEdge,
-                child: SizedBox(
-                  width: constraints.maxWidth,
-                  height: constraints.maxHeight,
-                  child: Center(
-                    child: AspectRatio(
-                      aspectRatio: ar,
-                      child: VideoPlayer(
-                        c,
-                        key: ValueKey('vp-$_textureEpoch-${widget.lessonId}'),
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
+          child: Center(
+            child: AspectRatio(
+              aspectRatio: ar,
+              child: VideoPlayer(
+                c,
+                key: ValueKey('vp-$_textureEpoch-${widget.lessonId}'),
+              ),
+            ),
           ),
         );
       },
@@ -422,18 +560,58 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
               if (_protection != null) DynamicWatermark(controller: _protection!),
               if (_protection != null) CastingIdentityBanner(controller: _protection!),
               if (_protection != null)
-                ScreenshotBlockOverlay(visible: _protection!.screenshotBlocked),
+                ScreenshotBlockOverlay(
+                  visible: _protection!.screenshotBlocked ||
+                      _protection!.isScreenCaptured,
+                ),
+              if (_phase == _PlayPhase.intro)
+                Positioned(
+                  top: 10,
+                  right: 10,
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      backgroundColor: Colors.black54,
+                      foregroundColor: Colors.white,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: _skipIntro,
+                    child: Text(context.l10n.t('mobile.store.skipIntro')),
+                  ),
+                ),
+              if (_phase == _PlayPhase.outro)
+                Positioned(
+                  top: 10,
+                  left: 10,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      context.l10n.t('mobile.store.outroPlaying'),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
               AnimatedOpacity(
-                opacity: _showControls ? 1 : 0,
+                opacity: _showControls && _isMainPhase ? 1 : 0,
                 duration: const Duration(milliseconds: 220),
                 child: IgnorePointer(
-                  ignoring: !_showControls,
+                  ignoring: !_showControls || !_isMainPhase,
                   child: ValueListenableBuilder<VideoPlayerValue>(
                     valueListenable: _controller!,
                     builder: (context, _, child) => _ControlsOverlay(
                       controller: _controller!,
                       protection: _protection,
                       speed: _speed,
+                      showFullscreen:
+                          widget.showFullscreen && _isMainPhase,
                       onSpeed: (s) {
                         setState(() => _speed = s);
                         _controller!.setPlaybackSpeed(s);
@@ -562,6 +740,7 @@ class _ControlsOverlay extends StatelessWidget {
     required this.onSpeed,
     required this.onFullscreen,
     required this.onCast,
+    this.showFullscreen = true,
   });
 
   final VideoPlayerController controller;
@@ -570,6 +749,7 @@ class _ControlsOverlay extends StatelessWidget {
   final ValueChanged<double> onSpeed;
   final VoidCallback onFullscreen;
   final VoidCallback onCast;
+  final bool showFullscreen;
 
   @override
   Widget build(BuildContext context) {
@@ -630,10 +810,11 @@ class _ControlsOverlay extends StatelessWidget {
                           ),
                           onPressed: onCast,
                         ),
-                      IconButton(
-                        icon: const Icon(Icons.fullscreen, color: Colors.white),
-                        onPressed: onFullscreen,
-                      ),
+                      if (showFullscreen)
+                        IconButton(
+                          icon: const Icon(Icons.fullscreen, color: Colors.white),
+                          onPressed: onFullscreen,
+                        ),
                     ],
                   ),
                 ],
@@ -731,7 +912,8 @@ class _FullscreenPlayerState extends State<_FullscreenPlayer> {
                     DynamicWatermark(controller: widget.protection),
                     CastingIdentityBanner(controller: widget.protection),
                     ScreenshotBlockOverlay(
-                      visible: widget.protection.screenshotBlocked,
+                      visible: widget.protection.screenshotBlocked ||
+                          widget.protection.isScreenCaptured,
                     ),
                     AnimatedOpacity(
                       opacity: _showControls ? 1 : 0,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/auth/require_auth.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
@@ -18,6 +19,7 @@ import 'package:ulearn/features/store/course_inline_player.dart';
 import 'package:ulearn/features/store/course_material_pdf_screen.dart';
 import 'package:ulearn/features/store/lesson_qa_section.dart';
 import 'package:ulearn/features/store/teacher_studio_screen.dart';
+import 'package:ulearn/features/video/video_protection.dart';
 import 'package:ulearn/core/widgets/glass.dart';
 
 enum _PlayerStage { playing, quiz, documents }
@@ -72,6 +74,16 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   _PlayerStage _playerStage = _PlayerStage.playing;
   Map<String, dynamic>? _stageQuiz;
   List<Map<String, dynamic>> _stageDocs = [];
+  /// Portrait: pinch zooms the whole player stage (content below moves).
+  double _playerZoom = 1.0;
+  double _playerZoomAtScaleStart = 1.0;
+  String? _introUrl;
+  String? _outroUrl;
+  VideoProtectionController? _captureGuard;
+  bool _captureBlocked = false;
+
+  static const double _minPlayerZoom = 1.0;
+  static const double _maxPlayerZoom = 2.15;
 
   @override
   void initState() {
@@ -79,6 +91,41 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     _course = widget.summary != null ? Map.of(widget.summary!) : null;
     _load();
     _countView();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _enableCaptureGuard());
+  }
+
+  @override
+  void dispose() {
+    _captureGuard?.removeListener(_onCaptureGuardChanged);
+    _captureGuard?.disable();
+    VideoProtectionController.disableScreenHardening();
+    super.dispose();
+  }
+
+  Future<void> _enableCaptureGuard() async {
+    if (!mounted) return;
+    final auth = context.read<AuthProvider>();
+    final l10n = context.l10n;
+    _captureGuard = videoProtectionFromAuth(
+      auth: auth,
+      fallbackName: l10n.t('mobile.roles.student'),
+    )..addListener(_onCaptureGuardChanged);
+    await ensureFreshProtectionIdentity(
+      auth,
+      _captureGuard!,
+      l10n.t('mobile.roles.student'),
+    );
+    await _captureGuard!.enable();
+    await VideoProtectionController.enableScreenHardening();
+  }
+
+  void _onCaptureGuardChanged() {
+    if (!mounted || _captureGuard == null) return;
+    final blocked =
+        _captureGuard!.screenshotBlocked || _captureGuard!.isScreenCaptured;
+    if (blocked != _captureBlocked) {
+      setState(() => _captureBlocked = blocked);
+    }
   }
 
   void _onQaComposerFocusChanged(bool focused) {
@@ -135,6 +182,18 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       final materials =
           ((course['materials'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
 
+      final introOutro = data['introOutro'] as Map<String, dynamic>?;
+      final intro = introOutro?['intro'] as Map<String, dynamic>?;
+      final outro = introOutro?['outro'] as Map<String, dynamic>?;
+      final introUrl = intro?['fileUrl']?.toString();
+      final outroUrl = outro?['fileUrl']?.toString();
+      if (introUrl != null && introUrl.isNotEmpty) {
+        CourseVideoCache.prefetch(ApiClient.absoluteUrl(introUrl));
+      }
+      if (outroUrl != null && outroUrl.isNotEmpty) {
+        CourseVideoCache.prefetch(ApiClient.absoluteUrl(outroUrl));
+      }
+
       setState(() {
         _course = {
           ...?widget.summary,
@@ -149,6 +208,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         _quizzes = quizzes;
         _materials = materials;
         _completion = data['completion'] as Map<String, dynamic>?;
+        _introUrl = introUrl != null && introUrl.isNotEmpty
+            ? ApiClient.absoluteUrl(introUrl)
+            : null;
+        _outroUrl = outroUrl != null && outroUrl.isNotEmpty
+            ? ApiClient.absoluteUrl(outroUrl)
+            : null;
         _error = null;
         _selectInitialLesson(lessons, unlocked);
         final deepLessonId = widget.initialLessonId;
@@ -699,7 +764,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   /// Fixed stage shared by video, quiz, and documents.
-  /// Portrait uses a slightly taller-than-16:9 frame for easier watching.
+  /// Portrait uses a slightly taller-than-16:9 frame; pinch zooms the stage height
+  /// so widgets under the video move down / up with zoom.
   static const double _portraitStageAspect = 16 / 10;
 
   Widget _buildPlayerStage({
@@ -729,9 +795,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           l10n: l10n,
           edgeToEdge: edgeToEdge,
           expandPlayer: true,
+          showFullscreen: false,
         ),
       ),
     );
+
+    final zoomed = _playerZoom > 1.02;
 
     return ClipRect(
       child: AnimatedAlign(
@@ -739,12 +808,80 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         heightFactor: collapse ? 0.0 : 1.0,
         duration: const Duration(milliseconds: 280),
         curve: Curves.easeInOutCubic,
-        child: ColoredBox(
-          color: Colors.black,
-          child: AspectRatio(
-            aspectRatio: _portraitStageAspect,
-            child: stageBody,
-          ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final baseHeight = width / _portraitStageAspect;
+            final height = baseHeight * _playerZoom;
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onScaleStart: (_) {
+                _playerZoomAtScaleStart = _playerZoom;
+              },
+              onScaleUpdate: (details) {
+                // Ignore tiny scale noise from finger tap jitter.
+                if ((details.scale - 1).abs() < 0.01 &&
+                    _playerZoomAtScaleStart == _playerZoom) {
+                  return;
+                }
+                final next =
+                    (_playerZoomAtScaleStart * details.scale)
+                        .clamp(_minPlayerZoom, _maxPlayerZoom);
+                if ((next - _playerZoom).abs() < 0.004) return;
+                setState(() => _playerZoom = next);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 40),
+                width: width,
+                height: height,
+                color: Colors.black,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    stageBody,
+                    if (zoomed)
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Material(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(20),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(20),
+                            onTap: () => setState(() => _playerZoom = 1.0),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.zoom_out_map_rounded,
+                                    size: 16,
+                                    color: Colors.white,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    l10n.t('mobile.store.resetPlayerSize'),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -759,6 +896,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     required dynamic l10n,
     required bool edgeToEdge,
     bool expandPlayer = false,
+    bool showFullscreen = true,
   }) {
     if (_playerStage == _PlayerStage.quiz && _stageQuiz != null) {
       return QuizInlinePanel(
@@ -808,6 +946,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         lessonId: activeId,
         borderRadius: edgeToEdge ? 0 : 14,
         expand: expandPlayer,
+        showFullscreen: showFullscreen,
+        introUrl: _introUrl,
+        outroUrl: _outroUrl,
         initiallyCompleted: active != null && _isLessonCompleted(active),
         initialPositionSec: active != null && !_isLessonCompleted(active)
             ? (active['watchPositionSec'] as num?)?.toInt()
@@ -1024,6 +1165,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                           l10n: l10n,
                           edgeToEdge: true,
                           expandPlayer: true,
+                          showFullscreen: true,
                         ),
                       ),
                     ),
@@ -1230,7 +1372,10 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     final isLandscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
 
-    return Scaffold(
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Scaffold(
       backgroundColor: isLandscape ? Colors.black : AppTheme.background,
       resizeToAvoidBottomInset: true,
       appBar: isLandscape
@@ -1406,6 +1551,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                 ],
               ),
             ),
+        ),
+        if (_captureBlocked)
+          const Positioned.fill(
+            child: ColoredBox(color: Colors.black),
+          ),
+      ],
     );
   }
 }

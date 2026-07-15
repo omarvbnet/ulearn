@@ -477,14 +477,18 @@ class _CourseManageCard extends StatelessWidget {
                     fit: StackFit.expand,
                     children: [
                       if (thumb != null && thumb.isNotEmpty)
-                        CachedImage(
-                          url: thumb,
-                          fit: BoxFit.cover,
-                          cacheVersion: course['updatedAt']?.toString(),
-                          error: const _CoverFallback(),
+                        Positioned.fill(
+                          child: CachedImage(
+                            url: thumb,
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                            height: double.infinity,
+                            cacheVersion: course['updatedAt']?.toString(),
+                            error: const _CoverFallback(),
+                          ),
                         )
                       else
-                        const _CoverFallback(),
+                        const Positioned.fill(child: _CoverFallback()),
                       Positioned(
                         top: 12,
                         left: 12,

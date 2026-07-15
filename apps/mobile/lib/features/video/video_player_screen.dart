@@ -210,7 +210,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     if (_protection != null) DynamicWatermark(controller: _protection!),
                     if (_protection != null) CastingIdentityBanner(controller: _protection!),
                     if (_protection != null)
-                      ScreenshotBlockOverlay(visible: _protection!.screenshotBlocked),
+                      ScreenshotBlockOverlay(
+                        visible: _protection!.screenshotBlocked ||
+                            _protection!.isScreenCaptured,
+                      ),
                     Positioned(
                       left: 0,
                       right: 0,

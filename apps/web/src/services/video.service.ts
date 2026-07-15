@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { computeVideoCompletion } from "@/lib/video-progress.util";
+import { getDownloadUrl } from "@/lib/r2";
 import { CourseService } from "@/services/course.service";
 
 export class VideoService {
@@ -145,5 +146,35 @@ export class VideoService {
     });
 
     return { intro, outro };
+  }
+
+  /** Intro/outro clips with short-lived signed playback URLs for clients. */
+  static async getPlayableIntroOutro(
+    locale: "AR" | "KU" | "TR" | "EN",
+    countryId?: string
+  ) {
+    const { intro, outro } = await this.getIntroOutro(locale, countryId);
+
+    const sign = async (clip: typeof intro) => {
+      if (!clip) return null;
+      const fileUrl =
+        (clip.fileKey
+          ? await getDownloadUrl(clip.fileKey, 3 * 3600).catch(() => null)
+          : null) ||
+        clip.fileUrl ||
+        null;
+      if (!fileUrl) return null;
+      return {
+        id: clip.id,
+        type: clip.type,
+        locale: clip.locale,
+        fileUrl,
+      };
+    };
+
+    return {
+      intro: await sign(intro),
+      outro: await sign(outro),
+    };
   }
 }

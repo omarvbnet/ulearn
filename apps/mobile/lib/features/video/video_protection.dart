@@ -53,17 +53,7 @@ class VideoProtectionController {
   bool get showIdentityOverlay => isCasting;
 
   Future<void> enable() async {
-    try {
-      await ScreenProtector.protectDataLeakageOn();
-      await ScreenProtector.preventScreenshotOn();
-    } catch (_) {}
-
-    if (Platform.isAndroid) {
-      try {
-        const channel = MethodChannel('ulearn/security');
-        await channel.invokeMethod('enableSecureFlag');
-      } catch (_) {}
-    }
+    await enableScreenHardening();
 
     if (Platform.isIOS) {
       try {
@@ -81,20 +71,17 @@ class VideoProtectionController {
       if (Platform.isIOS) {
         ScreenProtector.removeListener();
       }
-      await ScreenProtector.protectDataLeakageOff();
-      await ScreenProtector.preventScreenshotOff();
     } catch (_) {}
-
-    if (Platform.isAndroid) {
-      try {
-        const channel = MethodChannel('ulearn/security');
-        await channel.invokeMethod('disableSecureFlag');
-      } catch (_) {}
-    }
+    await disableScreenHardening();
   }
+
+  /// Nested refcount so course-detail page + inline player can share hardening.
+  static int _hardenCount = 0;
 
   /// Enables screenshot / recording hardening without a video watermark controller.
   static Future<void> enableScreenHardening() async {
+    _hardenCount++;
+    if (_hardenCount > 1) return;
     try {
       await ScreenProtector.protectDataLeakageOn();
       await ScreenProtector.preventScreenshotOn();
@@ -109,6 +96,9 @@ class VideoProtectionController {
   }
 
   static Future<void> disableScreenHardening() async {
+    if (_hardenCount <= 0) return;
+    _hardenCount--;
+    if (_hardenCount > 0) return;
     try {
       await ScreenProtector.protectDataLeakageOff();
       await ScreenProtector.preventScreenshotOff();
@@ -137,6 +127,8 @@ class VideoProtectionController {
   void setScreenCaptured(bool captured) {
     if (isScreenCaptured == captured) return;
     isScreenCaptured = captured;
+    // Keep a solid black frame for the entire recording session.
+    screenshotBlocked = captured;
     _notify();
   }
 
@@ -144,8 +136,11 @@ class VideoProtectionController {
     screenshotBlocked = true;
     _notify();
     Future.delayed(const Duration(seconds: 2), () {
-      screenshotBlocked = false;
-      _notify();
+      // Don't clear while an active screen recording is still going.
+      if (!isScreenCaptured) {
+        screenshotBlocked = false;
+        _notify();
+      }
     });
   }
 

@@ -278,7 +278,12 @@ class _StoreScreenState extends State<StoreScreen> {
                             children: [
                               Expanded(
                                 child: image != null && image.isNotEmpty
-                                    ? CachedImage(url: image, fit: BoxFit.cover)
+                                    ? CachedImage(
+                                        url: image,
+                                        fit: BoxFit.cover,
+                                        width: double.infinity,
+                                        height: double.infinity,
+                                      )
                                     : Container(
                                         color: AppTheme.primary.withValues(alpha: 0.1),
                                         child: Icon(Icons.shopping_bag_outlined, size: 40, color: AppTheme.muted),

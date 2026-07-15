@@ -20,10 +20,12 @@ export async function GET(
   const result = await CourseService.getLesson(id, user.id);
   if (!result) return error("Lesson not found", 404);
 
-  const introOutro = await VideoService.getIntroOutro(
-    user.locale,
-    user.countryId ?? undefined
-  );
+  const introOutro = result.hasAccess
+    ? await VideoService.getPlayableIntroOutro(
+        user.locale,
+        user.countryId ?? undefined
+      )
+    : { intro: null, outro: null };
 
   // Attach short-lived signed media URLs only when the user may watch.
   let contents = result.lesson.contents;
