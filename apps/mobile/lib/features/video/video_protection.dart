@@ -7,6 +7,10 @@ import 'package:screen_protector/screen_protector.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 
+/// When false, screenshots/recordings are not blacked out (needed for App Review).
+/// Re-enable before production if content protection is required again.
+const bool kEnableScreenshotHardening = false;
+
 /// Video protection: screen capture hardening, casting awareness, and a
 /// moving viewer watermark (name + national ID) during playback and casting.
 class VideoProtectionController {
@@ -55,7 +59,7 @@ class VideoProtectionController {
   Future<void> enable() async {
     await enableScreenHardening();
 
-    if (Platform.isIOS) {
+    if (kEnableScreenshotHardening && Platform.isIOS) {
       try {
         ScreenProtector.addListener(
           onScreenshotDetected,
@@ -68,7 +72,7 @@ class VideoProtectionController {
   Future<void> disable() async {
     _watermarkTimer?.cancel();
     try {
-      if (Platform.isIOS) {
+      if (kEnableScreenshotHardening && Platform.isIOS) {
         ScreenProtector.removeListener();
       }
     } catch (_) {}
@@ -80,6 +84,7 @@ class VideoProtectionController {
 
   /// Enables screenshot / recording hardening without a video watermark controller.
   static Future<void> enableScreenHardening() async {
+    if (!kEnableScreenshotHardening) return;
     _hardenCount++;
     if (_hardenCount > 1) return;
     try {
@@ -96,6 +101,7 @@ class VideoProtectionController {
   }
 
   static Future<void> disableScreenHardening() async {
+    if (!kEnableScreenshotHardening) return;
     if (_hardenCount <= 0) return;
     _hardenCount--;
     if (_hardenCount > 0) return;
@@ -128,11 +134,12 @@ class VideoProtectionController {
     if (isScreenCaptured == captured) return;
     isScreenCaptured = captured;
     // Keep a solid black frame for the entire recording session.
-    screenshotBlocked = captured;
+    screenshotBlocked = kEnableScreenshotHardening && captured;
     _notify();
   }
 
   void onScreenshotDetected() {
+    if (!kEnableScreenshotHardening) return;
     screenshotBlocked = true;
     _notify();
     Future.delayed(const Duration(seconds: 2), () {
@@ -308,7 +315,9 @@ class ScreenshotBlockOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!visible) return const SizedBox.shrink();
+    if (!kEnableScreenshotHardening || !visible) {
+      return const SizedBox.shrink();
+    }
     return const Positioned.fill(child: ColoredBox(color: Colors.black));
   }
 }

@@ -15,6 +15,14 @@ type Lesson = {
   freePreviewSec?: number | null;
 };
 
+type CourseDocument = {
+  id: string;
+  title: string;
+  type?: string;
+  fileUrl?: string | null;
+  mimeType?: string | null;
+};
+
 type CourseEdit = {
   id: string;
   titleEn: string;
@@ -22,6 +30,7 @@ type CourseEdit = {
   price: number;
   thumbnail?: string | null;
   lessons: Lesson[];
+  materials?: CourseDocument[];
 };
 
 type AccessMode = "paid" | "fullFree" | "timedFree";
@@ -58,6 +67,9 @@ export function AdminCourseEditor({
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [busyLessonId, setBusyLessonId] = useState<string | null>(null);
+  const [docTitle, setDocTitle] = useState("");
+  const [docFile, setDocFile] = useState<File | null>(null);
+  const [docUploading, setDocUploading] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -350,6 +362,82 @@ export function AdminCourseEditor({
     }
   }
 
+  async function uploadDocument(e: React.FormEvent) {
+    e.preventDefault();
+    if (!docFile) {
+      toast("Pick a PDF", "error");
+      return;
+    }
+    setDocUploading(true);
+    try {
+      const presign = await fetch("/api/admin/uploads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: docFile.name,
+          contentType: "application/pdf",
+          size: docFile.size,
+          category: "document",
+          folder: "teacher-course-pdfs",
+        }),
+      });
+      if (!presign.ok) {
+        const d = await presign.json().catch(() => ({}));
+        throw new Error(d.error || "Upload failed");
+      }
+      const { uploadUrl, key, publicUrl } = await presign.json();
+      await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: docFile,
+      });
+      const res = await fetch(`/api/teacher/courses/${courseId}/documents`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: docTitle.trim() || docFile.name.replace(/\.pdf$/i, ""),
+          fileKey: key,
+          fileUrl: publicUrl,
+          mimeType: "application/pdf",
+          fileSize: docFile.size,
+          type: "PDF",
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || "Failed to add document");
+      }
+      toast("Document uploaded");
+      setDocTitle("");
+      setDocFile(null);
+      load();
+      onChanged();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to upload document", "error");
+    } finally {
+      setDocUploading(false);
+    }
+  }
+
+  async function removeDocument(documentId: string, title: string) {
+    if (!confirm(`Remove document "${title}"?`)) return;
+    const res = await fetch(`/api/teacher/courses/${courseId}/documents`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ documentId }),
+    });
+    if (res.ok) {
+      toast("Document removed");
+      load();
+      onChanged();
+    } else {
+      const d = await res.json().catch(() => ({}));
+      toast(d.error || "Could not remove document", "error");
+    }
+  }
+
+  const documents = course?.materials ?? [];
+
   const freeCount = course?.lessons.filter((l) => l.isFreePreview).length ?? 0;
   const timedCount =
     course?.lessons.filter((l) => !l.isFreePreview && (l.freePreviewSec ?? 0) > 0).length ?? 0;
@@ -619,6 +707,72 @@ export function AdminCourseEditor({
                 })}
                 {course.lessons.length === 0 && (
                   <p className="text-sm text-muted">No lessons yet.</p>
+                )}
+              </ul>
+            </div>
+
+            <div className="space-y-4 rounded-xl border border-card-border p-4">
+              <div>
+                <h3 className="text-sm font-semibold">Course documents</h3>
+                <p className="mt-1 text-xs text-muted">
+                  PDFs and supplementary materials for students ({documents.length} uploaded).
+                </p>
+              </div>
+
+              <form
+                onSubmit={uploadDocument}
+                className="space-y-3 rounded-lg border border-dashed border-card-border p-3"
+              >
+                <Input
+                  label="Document title"
+                  value={docTitle}
+                  onChange={(e) => setDocTitle(e.target.value)}
+                  placeholder="e.g. Chapter 1 notes"
+                />
+                <div>
+                  <label className="mb-1 block text-sm font-medium">PDF file</label>
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    onChange={(e) => setDocFile(e.target.files?.[0] ?? null)}
+                    className="input file:me-3 file:rounded-lg file:border-0 file:bg-accent/15 file:px-3 file:py-1.5 file:text-sm file:text-accent"
+                  />
+                </div>
+                <Button type="submit" disabled={docUploading || !docFile}>
+                  {docUploading ? "Uploading…" : "Upload document"}
+                </Button>
+              </form>
+
+              <ul className="space-y-2">
+                {documents.map((doc) => (
+                  <li
+                    key={doc.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-card-border px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{doc.title}</p>
+                      {doc.fileUrl && (
+                        <a
+                          href={doc.fileUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-accent hover:underline"
+                        >
+                          View PDF
+                        </a>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="text-xs text-danger"
+                      onClick={() => removeDocument(doc.id, doc.title)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+                {documents.length === 0 && (
+                  <p className="text-sm text-muted">No documents yet.</p>
                 )}
               </ul>
             </div>

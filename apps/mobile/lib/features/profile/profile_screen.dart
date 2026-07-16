@@ -26,7 +26,6 @@ import 'package:ulearn/core/widgets/teacher_cover_presets.dart';
 import 'package:ulearn/features/profile/teacher_specialties_section.dart';
 import 'package:ulearn/features/profile/privacy_policy_screen.dart';
 import 'package:ulearn/features/store/teacher_studio_screen.dart';
-import 'package:ulearn/features/subscriptions/subscriptions_screen.dart';
 import 'package:ulearn/core/widgets/glass.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -459,26 +458,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ),
-        if (user.role != 'TEACHER') ...[
-          const SizedBox(height: 16),
-          StaggeredItem(
-            index: 3,
-            child: Card(
-              child: ListTile(
-                leading: const Icon(Icons.card_membership_outlined, color: AppTheme.primary),
-                title: Text(l10n.navSubscriptions),
-                subtitle: Text(
-                  l10n.profileSubscriptionsHint,
-                  style: TextStyle(color: AppTheme.muted, fontSize: 12),
-                ),
-                trailing: Icon(Icons.chevron_right, color: AppTheme.muted),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SubscriptionsScreen()),
-                ),
-              ),
-            ),
-          ),
-        ],
         if (user.role == 'STUDENT') ...[
           const SizedBox(height: 16),
           StaggeredItem(
