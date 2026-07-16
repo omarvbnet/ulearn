@@ -70,6 +70,18 @@ export default async function LandingPage({
           ))}
         </div>
       </main>
+
+      <footer className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-6 px-6 pb-12 text-sm text-muted">
+        <Link className="hover:text-accent" href={`/${locale}/support`}>
+          Support
+        </Link>
+        <Link className="hover:text-accent" href={`/${locale}/privacy`}>
+          Privacy Policy
+        </Link>
+        <a className="hover:text-accent" href="mailto:support@ulearn.usmart-iot.com">
+          support@ulearn.usmart-iot.com
+        </a>
+      </footer>
     </div>
   );
 }
