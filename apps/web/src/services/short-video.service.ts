@@ -313,6 +313,20 @@ export class ShortVideoService {
     return { success: true as const };
   }
 
+  static async adminDelete(videoId: string) {
+    const video = await prisma.teacherShortVideo.findFirst({
+      where: { id: videoId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!video) return { success: false as const, error: "NOT_FOUND" as const };
+
+    await prisma.teacherShortVideo.update({
+      where: { id: videoId },
+      data: { deletedAt: new Date() },
+    });
+    return { success: true as const };
+  }
+
   static async listComments(videoId: string, limit = 50) {
     const video = await prisma.teacherShortVideo.findFirst({
       where: { id: videoId, ...PUBLIC_SHORT_VIDEO_WHERE },

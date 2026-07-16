@@ -28,17 +28,29 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string; lessonId: string }> }
 ) {
-  const auth = await requireAuth(["TEACHER"]);
+  const auth = await requireAuth(["TEACHER", "SUPER_ADMIN", "COUNTRY_ADMIN"]);
   if (auth.error) return auth.error;
+  const isAdmin =
+    auth.session.role === "SUPER_ADMIN" || auth.session.role === "COUNTRY_ADMIN";
 
   const { id: courseId, lessonId } = await params;
-  const teacher = await prisma.teacherProfile.findFirst({
-    where: { userId: auth.session.userId, deletedAt: null },
-  });
-  if (!teacher) return error("Teacher profile not found", 404);
+  let teacherId: string | null = null;
+  if (!isAdmin) {
+    const teacher = await prisma.teacherProfile.findFirst({
+      where: { userId: auth.session.userId, deletedAt: null },
+    });
+    if (!teacher) return error("Teacher profile not found", 404);
+    teacherId = teacher.id;
+  }
 
   const lesson = await prisma.courseLesson.findFirst({
-    where: { id: lessonId, courseId, course: { teacherId: teacher.id, deletedAt: null } },
+    where: {
+      id: lessonId,
+      courseId,
+      course: isAdmin
+        ? { deletedAt: null }
+        : { teacherId: teacherId!, deletedAt: null },
+    },
     include: { course: { select: { status: true } } },
   });
   if (!lesson) return error("Lesson not found", 404, "NOT_FOUND");
@@ -117,7 +129,7 @@ export async function PATCH(
     lessonPatch.freePreviewSec = sec != null && sec > 0 ? sec : null;
   }
 
-  if (lesson.course.status === "APPROVED" && hasMediaChange) {
+  if (!isAdmin && lesson.course.status === "APPROVED" && hasMediaChange) {
     const changeTags: string[] = [];
     if (data.title != null && data.title !== lesson.title) changeTags.push("title");
     if (data.fileKey || data.fileUrl || data.videoAssetId) changeTags.push("video");
@@ -129,7 +141,7 @@ export async function PATCH(
     const pending = await prisma.courseLessonUpdateRequest.create({
       data: {
         lessonId,
-        teacherId: teacher.id,
+        teacherId: teacherId!,
         title: data.title,
         fileKey: data.fileKey,
         fileUrl: data.fileUrl,

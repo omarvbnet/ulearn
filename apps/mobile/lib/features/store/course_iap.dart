@@ -34,7 +34,8 @@ class CourseIapPurchase {
 
     _sub ??= _iap.purchaseStream.listen(_onPurchases);
     final resp = await _iap.queryProductDetails({productId});
-    if (resp.productDetails.isEmpty) {
+    var details = List<ProductDetails>.from(resp.productDetails);
+    if (details.isEmpty) {
       // Also try short aliases.
       final aliases = <String>{
         productId,
@@ -47,13 +48,15 @@ class CourseIapPurchase {
       if (again.productDetails.isEmpty) {
         throw Exception('product_missing');
       }
-      resp.productDetails.addAll(again.productDetails);
+      details.addAll(List<ProductDetails>.from(again.productDetails));
     }
 
-    final product = resp.productDetails.firstWhere(
-      (p) => p.id == productId,
-      orElse: () => resp.productDetails.first,
-    );
+    if (details.isEmpty) {
+      throw Exception('product_missing');
+    }
+
+    final matched = details.where((p) => p.id == productId);
+    final product = matched.isNotEmpty ? matched.first : details.first;
 
     _wait = Completer<PurchaseDetails>();
     final ok = await _iap.buyNonConsumable(

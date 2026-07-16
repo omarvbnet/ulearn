@@ -653,7 +653,24 @@ export class TeacherCourseService {
       where: { id: courseId, teacherId, deletedAt: null },
     });
     if (!course) return { success: false as const, error: "NOT_FOUND" as const };
+    return this.reorderLessonsForCourse(courseId, course.status, lessonIds);
+  }
 
+  /** Admin can reorder lessons for any non-deleted course. */
+  static async reorderLessonsAsAdmin(courseId: string, lessonIds: string[]) {
+    const course = await prisma.course.findFirst({
+      where: { id: courseId, deletedAt: null },
+      select: { status: true },
+    });
+    if (!course) return { success: false as const, error: "NOT_FOUND" as const };
+    return this.reorderLessonsForCourse(courseId, course.status, lessonIds);
+  }
+
+  private static async reorderLessonsForCourse(
+    courseId: string,
+    courseStatus: CourseStatus,
+    lessonIds: string[]
+  ) {
     const lessons = await prisma.courseLesson.findMany({
       where: { courseId, deletedAt: null, id: { in: lessonIds } },
       select: { id: true, isInterview: true },
@@ -677,7 +694,7 @@ export class TeacherCourseService {
       )
     );
 
-    if (course.status === "APPROVED") {
+    if (courseStatus === "APPROVED") {
       await this.markCoursePendingReview(courseId);
     }
 

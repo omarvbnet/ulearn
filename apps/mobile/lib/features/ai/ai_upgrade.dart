@@ -157,7 +157,7 @@ class AiUpgradeController {
       ..._candidateIds(yearly: true),
     };
     final resp = await _iap.queryProductDetails(ids);
-    products = resp.productDetails;
+    products = List<ProductDetails>.from(resp.productDetails);
     notFoundIds = resp.notFoundIDs.toSet();
     if (resp.error != null && products.isEmpty) {
       error = resp.error!.message;

@@ -3,7 +3,12 @@ import { prisma } from "@/lib/prisma";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 import { z } from "zod";
 
-async function ownCourse(userId: string, courseId: string) {
+async function editableCourse(userId: string, role: string, courseId: string) {
+  if (role === "SUPER_ADMIN" || role === "COUNTRY_ADMIN") {
+    return prisma.course.findFirst({
+      where: { id: courseId, deletedAt: null },
+    });
+  }
   return prisma.course.findFirst({
     where: { id: courseId, deletedAt: null, teacher: { userId, deletedAt: null } },
   });
@@ -33,11 +38,11 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["TEACHER"]);
+  const auth = await requireAuth(["TEACHER", "SUPER_ADMIN", "COUNTRY_ADMIN"]);
   if (auth.error) return auth.error;
 
   const { id } = await params;
-  const course = await ownCourse(auth.session.userId, id);
+  const course = await editableCourse(auth.session.userId, auth.session.role, id);
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
   const parsed = lessonSchema.safeParse(await request.json());
@@ -135,11 +140,11 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["TEACHER"]);
+  const auth = await requireAuth(["TEACHER", "SUPER_ADMIN", "COUNTRY_ADMIN"]);
   if (auth.error) return auth.error;
 
   const { id } = await params;
-  const course = await ownCourse(auth.session.userId, id);
+  const course = await editableCourse(auth.session.userId, auth.session.role, id);
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
   const { lessonId } = (await request.json()) as { lessonId?: string };

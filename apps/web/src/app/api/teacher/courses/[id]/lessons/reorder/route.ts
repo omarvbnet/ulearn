@@ -12,24 +12,26 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["TEACHER"]);
+  const auth = await requireAuth(["TEACHER", "SUPER_ADMIN", "COUNTRY_ADMIN"]);
   if (auth.error) return auth.error;
+  const isAdmin =
+    auth.session.role === "SUPER_ADMIN" || auth.session.role === "COUNTRY_ADMIN";
 
-  const teacher = await prisma.teacherProfile.findFirst({
-    where: { userId: auth.session.userId, deletedAt: null },
-    select: { id: true },
-  });
-  if (!teacher) return error("Teacher profile not found", 404, "NOT_FOUND");
+  const teacher = isAdmin
+    ? null
+    : await prisma.teacherProfile.findFirst({
+        where: { userId: auth.session.userId, deletedAt: null },
+        select: { id: true },
+      });
+  if (!isAdmin && !teacher) return error("Teacher profile not found", 404, "NOT_FOUND");
 
   const { id } = await params;
   const parsed = schema.safeParse(await request.json());
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
-  const result = await TeacherCourseService.reorderLessons(
-    id,
-    teacher.id,
-    parsed.data.lessonIds
-  );
+  const result = isAdmin
+    ? await TeacherCourseService.reorderLessonsAsAdmin(id, parsed.data.lessonIds)
+    : await TeacherCourseService.reorderLessons(id, teacher!.id, parsed.data.lessonIds);
 
   if (!result.success) {
     if (result.error === "NOT_FOUND") return error("Course not found", 404, "NOT_FOUND");

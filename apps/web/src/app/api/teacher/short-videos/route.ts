@@ -2,6 +2,8 @@ import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
+const SHORT_VIDEO_ROLES = ["TEACHER", "SUPER_ADMIN", "COUNTRY_ADMIN"] as const;
+
 const schema = z.object({
   title: z.string().min(1),
   description: z.string().max(500).optional(),
@@ -13,13 +15,29 @@ const schema = z.object({
 });
 
 export async function GET() {
-  const auth = await requireAuth(["TEACHER"]);
+  const auth = await requireAuth([...SHORT_VIDEO_ROLES]);
   if (auth.error) return auth.error;
 
-  const teacher = await prisma.teacherProfile.findFirst({
-    where: { userId: auth.session.userId, deletedAt: null },
+  const user = await prisma.user.findUnique({
+    where: { id: auth.session.userId },
+    select: { id: true, countryId: true, provinceId: true },
   });
-  if (!teacher) return error("Teacher not found", 404);
+  if (!user) return error("User not found", 404, "NOT_FOUND");
+
+  const teacher = await prisma.teacherProfile.upsert({
+    where: { userId: auth.session.userId },
+    create: {
+      userId: auth.session.userId,
+      countryId: user.countryId,
+      provinceId: user.provinceId,
+    },
+    update: {
+      deletedAt: null,
+      countryId: user.countryId,
+      provinceId: user.provinceId,
+      isActive: true,
+    },
+  });
 
   const videos = await prisma.teacherShortVideo.findMany({
     where: { teacherId: teacher.id, deletedAt: null },
@@ -46,13 +64,29 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireAuth(["TEACHER"]);
+  const auth = await requireAuth([...SHORT_VIDEO_ROLES]);
   if (auth.error) return auth.error;
 
-  const teacher = await prisma.teacherProfile.findFirst({
-    where: { userId: auth.session.userId, deletedAt: null },
+  const user = await prisma.user.findUnique({
+    where: { id: auth.session.userId },
+    select: { id: true, countryId: true, provinceId: true },
   });
-  if (!teacher) return error("Teacher not found", 404);
+  if (!user) return error("User not found", 404, "NOT_FOUND");
+
+  const teacher = await prisma.teacherProfile.upsert({
+    where: { userId: auth.session.userId },
+    create: {
+      userId: auth.session.userId,
+      countryId: user.countryId,
+      provinceId: user.provinceId,
+    },
+    update: {
+      deletedAt: null,
+      countryId: user.countryId,
+      provinceId: user.provinceId,
+      isActive: true,
+    },
+  });
 
   const parsed = schema.safeParse(await request.json());
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
