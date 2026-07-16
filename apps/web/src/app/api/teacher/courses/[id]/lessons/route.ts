@@ -34,6 +34,7 @@ export async function POST(
 ) {
   const auth = await requireAuth([...TEACHER_COURSE_ROLES]);
   if (auth.error) return auth.error;
+  const isAdmin = isAdminRole(auth.session.role);
 
   const { id } = await params;
   const course = await findEditableCourse(auth.session.userId, auth.session.role, id);
@@ -51,8 +52,8 @@ export async function POST(
         ? parsed.data.freePreviewSec
         : null;
 
-  // Students may sample at most 2 free preview videos per paid course.
-  if (isFreePreview) {
+  // Teachers: at most 2 full free preview videos. Admins can set freely.
+  if (isFreePreview && !isAdmin) {
     const previews = await prisma.courseLesson.count({
       where: { courseId: id, isFreePreview: true, deletedAt: null },
     });
@@ -115,7 +116,7 @@ export async function POST(
     });
   }
 
-  if (course.status === "APPROVED" && !isAdminRole(auth.session.role)) {
+  if (course.status === "APPROVED" && !isAdmin) {
     await TeacherCourseService.markCoursePendingReview(id);
   }
 
@@ -136,6 +137,7 @@ export async function DELETE(
 ) {
   const auth = await requireAuth([...TEACHER_COURSE_ROLES]);
   if (auth.error) return auth.error;
+  const isAdmin = isAdminRole(auth.session.role);
 
   const { id } = await params;
   const course = await findEditableCourse(auth.session.userId, auth.session.role, id);
@@ -150,7 +152,8 @@ export async function DELETE(
   });
   if (!lesson) return error("Lesson not found", 404, "NOT_FOUND");
 
-  if (lesson.isFreePreview) {
+  // Teachers must keep 2 free previews. Admins can remove freely.
+  if (lesson.isFreePreview && !isAdmin) {
     const remainingFree = await prisma.courseLesson.count({
       where: { courseId: id, isFreePreview: true, deletedAt: null, id: { not: lessonId } },
     });
@@ -167,7 +170,7 @@ export async function DELETE(
     where: { id: lessonId, courseId: id },
     data: { deletedAt: new Date(), isHidden: true },
   });
-  if (course.status === "APPROVED" && !isAdminRole(auth.session.role)) {
+  if (course.status === "APPROVED" && !isAdmin) {
     await TeacherCourseService.markCoursePendingReview(id);
   }
   return json({ success: true });

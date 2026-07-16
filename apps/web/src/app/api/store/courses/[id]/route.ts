@@ -136,13 +136,21 @@ export async function GET(
           : null;
       const canWatch = hasAccess || l.isFreePreview || freePreviewSec != null;
       const previewOnly = !hasAccess && !l.isFreePreview && freePreviewSec != null;
-      let fileUrl = canWatch ? l.fileUrl : null;
-      if (canWatch && l.fileKey && !fileUrl) {
-        fileUrl = await getDownloadUrl(l.fileKey).catch(() => null);
+      // Always prefer a fresh signed URL from fileKey. Stale absolute/proxy
+      // fileUrl values (common after admin web uploads) play as a black screen.
+      let fileUrl: string | null = null;
+      if (canWatch) {
+        if (l.fileKey) {
+          fileUrl = await getDownloadUrl(l.fileKey).catch(() => null);
+        }
+        if (!fileUrl) {
+          fileUrl = l.fileUrl;
+        }
       }
       let thumbnailUrl = l.thumbnailUrl;
-      if (!thumbnailUrl && l.thumbnailKey) {
-        thumbnailUrl = await getDownloadUrl(l.thumbnailKey).catch(() => null);
+      if (l.thumbnailKey) {
+        thumbnailUrl =
+          (await getDownloadUrl(l.thumbnailKey).catch(() => null)) ?? thumbnailUrl;
       }
       const durationSec = l.durationSec ?? watchedDuration.get(l.id) ?? null;
       return {

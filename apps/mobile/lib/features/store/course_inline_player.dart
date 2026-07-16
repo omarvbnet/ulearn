@@ -408,6 +408,15 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
         await controller.dispose();
         return;
       }
+      // Black / empty intro clips (bad codec or corrupt admin upload) — skip to lesson.
+      final aspect = controller.value.aspectRatio;
+      final durationMs = controller.value.duration.inMilliseconds;
+      if (_phase == _PlayPhase.intro &&
+          (durationMs < 400 || aspect <= 0 || !aspect.isFinite)) {
+        await controller.dispose();
+        if (mounted) await _goToMain(fromIntro: true);
+        return;
+      }
       _controller = controller;
       if (_phase == _PlayPhase.main) {
         final resumeSec = widget.initialPositionSec ?? 0;

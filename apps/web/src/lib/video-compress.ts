@@ -16,7 +16,7 @@ import {
   Output,
 } from "mediabunny";
 
-/** Files below this size are uploaded as-is; compression wouldn't pay off. */
+/** Files below this size skip compression unless `force` is set. */
 const MIN_COMPRESS_BYTES = 30 * 1024 * 1024; // 30 MB
 
 const MAX_HEIGHT = 1080;
@@ -37,7 +37,8 @@ export function isCompressionSupported(): boolean {
 
 export async function compressVideo(
   file: File,
-  onProgress?: (pct: number) => void
+  onProgress?: (pct: number) => void,
+  options?: { force?: boolean }
 ): Promise<CompressResult> {
   const keepOriginal = (): CompressResult => ({
     file,
@@ -46,7 +47,17 @@ export async function compressVideo(
     finalBytes: file.size,
   });
 
-  if (file.size < MIN_COMPRESS_BYTES || !isCompressionSupported()) {
+  const force = options?.force === true;
+  // Non-MP4 (MOV/HEVC from iPhone) must be re-encoded or many devices show a black screen.
+  const needsTranscode =
+    force ||
+    !/video\/mp4/i.test(file.type) ||
+    !/\.mp4$/i.test(file.name);
+
+  if (
+    (!needsTranscode && file.size < MIN_COMPRESS_BYTES) ||
+    !isCompressionSupported()
+  ) {
     return keepOriginal();
   }
 

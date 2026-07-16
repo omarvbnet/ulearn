@@ -2,6 +2,7 @@
 
 import { Button, Card, Input, Select } from "@/components/ui";
 import { SkeletonRows, useToast } from "@/components/overlay";
+import { compressVideo } from "@/lib/video-compress";
 import { useCallback, useEffect, useState } from "react";
 
 type SettingsMap = Record<string, unknown>;
@@ -687,13 +688,21 @@ function IntroOutroCard() {
     setUploading(true);
 
     try {
+      // Re-encode to H.264/MP4 so branded intro/outro isn't a black screen on Android.
+      const compressed = await compressVideo(file, undefined, { force: true });
+      const uploadFile = compressed.file.type.startsWith("video/")
+        ? new File([compressed.file], file.name.replace(/\.[^.]+$/, "") + ".mp4", {
+            type: "video/mp4",
+          })
+        : compressed.file;
+
       const presign = await fetch("/api/admin/uploads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          filename: file.name,
-          contentType: file.type,
-          size: file.size,
+          filename: uploadFile.name,
+          contentType: "video/mp4",
+          size: uploadFile.size,
           category: "video",
           folder: "intro-outro",
         }),
@@ -703,8 +712,8 @@ function IntroOutroCard() {
 
       const put = await fetch(uploadUrl, {
         method: "PUT",
-        headers: { "Content-Type": file.type },
-        body: file,
+        headers: { "Content-Type": "video/mp4" },
+        body: uploadFile,
       });
       if (!put.ok) throw new Error("Upload failed");
 
@@ -738,7 +747,9 @@ function IntroOutroCard() {
       <div>
         <h3 className="font-semibold">Intro & Outro Videos</h3>
         <p className="mt-1 text-sm text-muted">
-          Per-language clips played before and after every lesson video.
+          Per-language clips played before and after every lesson video. Upload
+          H.264 MP4 when possible — MOV/HEVC from iPhone often plays as a black
+          screen on Android.
         </p>
       </div>
 

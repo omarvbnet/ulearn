@@ -16,6 +16,8 @@ export type ProcessVideoOptions = {
   courseName?: string;
   instructorName?: string;
   onProgress?: (pct: number) => void;
+  /** Force H.264/AAC re-encode (admin uploads / non-MP4 sources). */
+  forceTranscode?: boolean;
 };
 
 function buildWatermarkLabel(
@@ -42,13 +44,18 @@ export async function processVideoForUpload(file: File, options: ProcessVideoOpt
   });
 
   options.onProgress?.(5);
-  const compressed = await compressVideo(file, (pct) => {
-    options.onProgress?.(5 + Math.round(pct * 0.9));
-  });
+  const compressed = await compressVideo(
+    file,
+    (pct) => {
+      options.onProgress?.(5 + Math.round(pct * 0.9));
+    },
+    { force: options.forceTranscode === true }
+  );
 
   const named = new File(
     [compressed.file],
-    compressed.file.name.replace(/\.mp4$/i, "") + `-${label.slice(0, 24).replace(/\W+/g, "-")}.mp4`,
+    compressed.file.name.replace(/\.[^.]+$/, "") +
+      `-${label.slice(0, 24).replace(/\W+/g, "-")}.mp4`,
     { type: "video/mp4" }
   );
 

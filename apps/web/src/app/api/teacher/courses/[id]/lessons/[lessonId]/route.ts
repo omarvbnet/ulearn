@@ -98,7 +98,8 @@ export async function PATCH(
 
   const becomingPaid =
     lessonPatch.isFreePreview === false && lesson.isFreePreview === true;
-  if (becomingPaid) {
+  // Teachers must keep 2 free previews. Admins can change freely.
+  if (becomingPaid && !isAdmin) {
     const remainingFree = await prisma.courseLesson.count({
       where: { courseId, isFreePreview: true, deletedAt: null, id: { not: lessonId } },
     });
@@ -116,7 +117,7 @@ export async function PATCH(
     (lessonPatch.isFreePreview === undefined &&
       (lesson.isFreePreview || lessonPatch.isInterview === true));
 
-  if (willBeFree && lessonPatch.isFreePreview !== false) {
+  if (!isAdmin && willBeFree && lessonPatch.isFreePreview !== false) {
     const previews = await prisma.courseLesson.count({
       where: { courseId, isFreePreview: true, deletedAt: null, id: { not: lessonId } },
     });

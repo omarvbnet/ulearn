@@ -12,6 +12,7 @@ type Lesson = {
   durationSec: number | null;
   isFreePreview?: boolean;
   isInterview?: boolean;
+  freePreviewSec?: number | null;
 };
 
 type CourseEdit = {
@@ -22,6 +23,16 @@ type CourseEdit = {
   thumbnail?: string | null;
   lessons: Lesson[];
 };
+
+type AccessMode = "paid" | "fullFree" | "timedFree";
+
+const FREE_MINUTE_PRESETS = [30, 60, 120, 180, 300];
+
+function fmtSec(sec: number) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
 export function AdminCourseEditor({
   courseId,
@@ -42,8 +53,11 @@ export function AdminCourseEditor({
   const [form, setForm] = useState({ titleEn: "", description: "", price: "0" });
   const [lessonTitle, setLessonTitle] = useState("");
   const [lessonFile, setLessonFile] = useState<File | null>(null);
+  const [newAccess, setNewAccess] = useState<AccessMode>("paid");
+  const [newFreeSec, setNewFreeSec] = useState(120);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [busyLessonId, setBusyLessonId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -122,6 +136,9 @@ export function AdminCourseEditor({
       watermark,
       courseName: course?.titleEn ?? courseTitle,
       onProgress: setProgress,
+      // Admin web uploads often come from iPhone MOV/HEVC — force H.264/MP4
+      // so mobile players don't show a black screen.
+      forceTranscode: true,
     });
 
     let thumbnailKey: string | undefined;
@@ -195,6 +212,7 @@ export function AdminCourseEditor({
         durationSec = uploaded.durationSec;
       }
 
+      const isFullFree = newAccess === "fullFree";
       const res = await fetch(`/api/teacher/courses/${courseId}/lessons`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -206,15 +224,25 @@ export function AdminCourseEditor({
           thumbnailUrl,
           durationSec,
           sortOrder: course?.lessons.length ?? 0,
+          isFreePreview: isFullFree,
+          freePreviewSec: newAccess === "timedFree" ? newFreeSec : null,
         }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         throw new Error(d.error || "Failed to add lesson");
       }
-      toast("Lesson video added");
+      toast(
+        newAccess === "fullFree"
+          ? "Free preview video added"
+          : newAccess === "timedFree"
+            ? `Video added with ${fmtSec(newFreeSec)} free`
+            : "Lesson video added"
+      );
       setLessonTitle("");
       setLessonFile(null);
+      setNewAccess("paid");
+      setNewFreeSec(120);
       load();
       onChanged();
     } catch (err) {
@@ -222,6 +250,57 @@ export function AdminCourseEditor({
     } finally {
       setUploading(false);
     }
+  }
+
+  async function patchLessonAccess(
+    lesson: Lesson,
+    payload: { isFreePreview?: boolean; freePreviewSec?: number | null }
+  ) {
+    setBusyLessonId(lesson.id);
+    try {
+      const res = await fetch(`/api/teacher/courses/${courseId}/lessons/${lesson.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || "Failed to update free access");
+      }
+      toast("Free access updated");
+      load();
+      onChanged();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to update free access", "error");
+    } finally {
+      setBusyLessonId(null);
+    }
+  }
+
+  async function setFullFree(lesson: Lesson, makeFree: boolean) {
+    if (lesson.isInterview && !makeFree) {
+      toast("Interview video must stay free", "error");
+      return;
+    }
+    await patchLessonAccess(lesson, {
+      isFreePreview: makeFree,
+      freePreviewSec: makeFree ? null : null,
+    });
+  }
+
+  async function setTimedFree(lesson: Lesson, sec: number) {
+    if (lesson.isFreePreview || lesson.isInterview) {
+      toast("Turn off full free preview first to set free minutes", "error");
+      return;
+    }
+    await patchLessonAccess(lesson, {
+      isFreePreview: false,
+      freePreviewSec: sec > 0 ? sec : null,
+    });
+  }
+
+  async function clearTimedFree(lesson: Lesson) {
+    await patchLessonAccess(lesson, { freePreviewSec: null });
   }
 
   async function replaceLessonVideo(lesson: Lesson, file: File) {
@@ -270,6 +349,10 @@ export function AdminCourseEditor({
       toast(d.error || "Could not remove lesson", "error");
     }
   }
+
+  const freeCount = course?.lessons.filter((l) => l.isFreePreview).length ?? 0;
+  const timedCount =
+    course?.lessons.filter((l) => !l.isFreePreview && (l.freePreviewSec ?? 0) > 0).length ?? 0;
 
   return (
     <Modal open onClose={onClose} title={`Edit course — ${courseTitle}`} wide>
@@ -322,8 +405,16 @@ export function AdminCourseEditor({
             </form>
 
             <div className="space-y-4 rounded-xl border border-card-border p-4">
-              <h3 className="text-sm font-semibold">Lesson videos</h3>
-              <form onSubmit={addLesson} className="space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold">Lesson videos & free access</h3>
+                  <p className="mt-1 text-xs text-muted">
+                    Full free videos: {freeCount} · Timed free minutes: {timedCount}
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={addLesson} className="space-y-3 rounded-lg border border-dashed border-card-border p-3">
                 <Input
                   label="New lesson title"
                   value={lessonTitle}
@@ -339,6 +430,58 @@ export function AdminCourseEditor({
                     className="input file:me-3 file:rounded-lg file:border-0 file:bg-accent/15 file:px-3 file:py-1.5 file:text-sm file:text-accent"
                   />
                 </div>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Student access</p>
+                  <div className="flex flex-wrap gap-2">
+                    {(
+                      [
+                        ["paid", "Paid only"],
+                        ["fullFree", "Full free video"],
+                        ["timedFree", "Free minutes"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setNewAccess(value)}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-medium ring-1 ${
+                          newAccess === value
+                            ? "bg-accent/15 text-accent ring-accent/40"
+                            : "text-muted ring-card-border hover:bg-card"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {newAccess === "timedFree" && (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {FREE_MINUTE_PRESETS.map((sec) => (
+                        <button
+                          key={sec}
+                          type="button"
+                          onClick={() => setNewFreeSec(sec)}
+                          className={`rounded-md px-2.5 py-1 text-xs ring-1 ${
+                            newFreeSec === sec
+                              ? "bg-accent/15 text-accent ring-accent/40"
+                              : "text-muted ring-card-border"
+                          }`}
+                        >
+                          {fmtSec(sec)}
+                        </button>
+                      ))}
+                      <Input
+                        label="Custom seconds"
+                        type="number"
+                        min={15}
+                        max={3600}
+                        value={String(newFreeSec)}
+                        onChange={(e) => setNewFreeSec(Number(e.target.value) || 0)}
+                        className="max-w-[140px]"
+                      />
+                    </div>
+                  )}
+                </div>
                 {uploading && (
                   <p className="text-xs text-muted">Uploading… {progress}%</p>
                 )}
@@ -348,44 +491,132 @@ export function AdminCourseEditor({
               </form>
 
               <ul className="space-y-3">
-                {course.lessons.map((lesson, i) => (
-                  <li key={lesson.id} className="rounded-lg border border-card-border p-3">
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-sm font-medium">
-                        {i + 1}. {lesson.title}
-                      </span>
-                      <div className="flex gap-2">
-                        <label className="cursor-pointer text-xs text-accent">
-                          Replace video
-                          <input
-                            type="file"
-                            accept="video/*"
-                            className="hidden"
-                            disabled={uploading}
-                            onChange={(e) => {
-                              const f = e.target.files?.[0];
-                              if (f) void replaceLessonVideo(lesson, f);
-                              e.target.value = "";
-                            }}
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          className="text-xs text-danger"
-                          disabled={uploading}
-                          onClick={() => removeLesson(lesson.id)}
-                        >
-                          Remove
-                        </button>
+                {course.lessons.map((lesson, i) => {
+                  const timed = !lesson.isFreePreview && (lesson.freePreviewSec ?? 0) > 0;
+                  const busy = busyLessonId === lesson.id || uploading;
+                  return (
+                    <li key={lesson.id} className="rounded-lg border border-card-border p-3">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <span className="text-sm font-medium">
+                            {i + 1}. {lesson.title}
+                          </span>
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            {lesson.isInterview && (
+                              <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[11px] text-accent">
+                                Interview
+                              </span>
+                            )}
+                            {lesson.isFreePreview && (
+                              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-300">
+                                Full free
+                              </span>
+                            )}
+                            {timed && (
+                              <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[11px] text-sky-300">
+                                Free {fmtSec(lesson.freePreviewSec ?? 0)}
+                              </span>
+                            )}
+                            {!lesson.isFreePreview && !timed && (
+                              <span className="rounded bg-card px-1.5 py-0.5 text-[11px] text-muted ring-1 ring-card-border">
+                                Paid
+                              </span>
+                            )}
+                            {lesson.durationSec != null && (
+                              <span className="text-[11px] text-muted">
+                                {Math.round(lesson.durationSec / 60)} min total
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <label className="cursor-pointer text-xs text-accent">
+                            Replace
+                            <input
+                              type="file"
+                              accept="video/*"
+                              className="hidden"
+                              disabled={busy}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) void replaceLessonVideo(lesson, f);
+                                e.target.value = "";
+                              }}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className="text-xs text-danger"
+                            disabled={busy}
+                            onClick={() => removeLesson(lesson.id)}
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                    {lesson.durationSec != null && (
-                      <p className="text-xs text-muted">
-                        {Math.round(lesson.durationSec / 60)} min
-                      </p>
-                    )}
-                  </li>
-                ))}
+
+                      <div className="mt-3 space-y-2 border-t border-card-border pt-3">
+                        <p className="text-xs font-medium text-muted">Free access for students</p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => setFullFree(lesson, true)}
+                            className={`rounded-md px-2.5 py-1 text-xs ring-1 ${
+                              lesson.isFreePreview
+                                ? "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30"
+                                : "text-muted ring-card-border hover:bg-card"
+                            }`}
+                          >
+                            Full free video
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy || lesson.isInterview}
+                            onClick={() => setFullFree(lesson, false)}
+                            className={`rounded-md px-2.5 py-1 text-xs ring-1 ${
+                              !lesson.isFreePreview && !timed
+                                ? "bg-card text-foreground ring-card-border"
+                                : "text-muted ring-card-border hover:bg-card"
+                            }`}
+                          >
+                            Paid only
+                          </button>
+                        </div>
+                        {!lesson.isFreePreview && !lesson.isInterview && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs text-muted">Free minutes:</span>
+                            {FREE_MINUTE_PRESETS.map((sec) => (
+                              <button
+                                key={sec}
+                                type="button"
+                                disabled={busy}
+                                onClick={() => setTimedFree(lesson, sec)}
+                                className={`rounded-md px-2 py-1 text-xs ring-1 ${
+                                  (lesson.freePreviewSec ?? 0) === sec
+                                    ? "bg-sky-500/15 text-sky-300 ring-sky-500/30"
+                                    : "text-muted ring-card-border hover:bg-card"
+                                }`}
+                              >
+                                {fmtSec(sec)}
+                              </button>
+                            ))}
+                            {timed && (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => clearTimedFree(lesson)}
+                                className="text-xs text-danger"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
                 {course.lessons.length === 0 && (
                   <p className="text-sm text-muted">No lessons yet.</p>
                 )}

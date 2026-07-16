@@ -100,10 +100,11 @@ export async function GET(
 
   const lessons = await Promise.all(
     course.lessons.map(async (l) => {
-      let fileUrl = l.fileUrl;
-      if (l.fileKey && !fileUrl) {
+      let fileUrl: string | null = null;
+      if (l.fileKey) {
         fileUrl = await getDownloadUrl(l.fileKey).catch(() => null);
       }
+      if (!fileUrl) fileUrl = l.fileUrl;
       const thumbnailUrl =
         (await resolvePublicMediaUrl(l.thumbnailUrl, l.thumbnailKey).catch(() => null)) ??
         l.thumbnailUrl;
