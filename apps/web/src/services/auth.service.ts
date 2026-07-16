@@ -8,6 +8,49 @@ import type { Gender, Locale, UserRole } from "@prisma/client";
 const OTP_EXPIRY_MINUTES = 5;
 const OTP_MAX_ATTEMPTS = 5;
 
+/** Normalize phone for comparison (digits only, drop leading 00). */
+function phoneDigits(phone: string): string {
+  let d = phone.replace(/\D/g, "");
+  if (d.startsWith("00")) d = d.slice(2);
+  return d;
+}
+
+type DemoLoginConfig = {
+  enabled: boolean;
+  phone: string;
+  otp: string;
+};
+
+async function loadDemoLoginConfig(): Promise<DemoLoginConfig | null> {
+  const rows = await prisma.systemSetting.findMany({
+    where: {
+      countryId: null,
+      key: {
+        in: ["demo_login_enabled", "demo_login_phone", "demo_login_otp"],
+      },
+    },
+  });
+  const map: Record<string, unknown> = {};
+  for (const r of rows) map[r.key] = r.value;
+
+  const enabled = map.demo_login_enabled === true || map.demo_login_enabled === "true";
+  const phone =
+    typeof map.demo_login_phone === "string" ? map.demo_login_phone.trim() : "";
+  const otp =
+    typeof map.demo_login_otp === "string"
+      ? map.demo_login_otp.trim()
+      : typeof map.demo_login_otp === "number"
+        ? String(map.demo_login_otp)
+        : "";
+
+  if (!enabled || !phone || otp.length < 4) return null;
+  return { enabled, phone, otp };
+}
+
+function isDemoPhone(config: DemoLoginConfig, phone: string): boolean {
+  return phoneDigits(config.phone) === phoneDigits(phone);
+}
+
 export interface RegisterStudentInput {
   phone: string;
   fullLegalName: string;
@@ -83,6 +126,28 @@ export class AuthService {
     warning?: string | null;
   }> {
     const normalized = phone.replace(/\s+/g, "");
+    const demo = await loadDemoLoginConfig();
+    const useDemo = demo && isDemoPhone(demo, normalized);
+
+    if (useDemo) {
+      const expiresAt = new Date();
+      expiresAt.setMinutes(expiresAt.getMinutes() + OTP_EXPIRY_MINUTES);
+      await prisma.otpCode.create({
+        data: { phone: normalized, code: demo.otp, expiresAt },
+      });
+      console.info(
+        `[Auth] Demo login OTP issued for ${normalized} (WhatsApp skipped)`
+      );
+      return {
+        success: true,
+        expiresIn: OTP_EXPIRY_MINUTES * 60,
+        messageId: null,
+        messageStatus: "demo",
+        displayNameStatus: null,
+        warning: "Demo login: use the admin-configured OTP (WhatsApp not sent).",
+      };
+    }
+
     const {
       isWhatsAppConfigured,
       assertWhatsAppSenderReady,
@@ -137,6 +202,25 @@ export class AuthService {
     meta?: { deviceId?: string; ipAddress?: string; userAgent?: string }
   ) {
     const normalized = phone.replace(/\s+/g, "");
+    const submitted = code.trim();
+
+    // App Review / sandbox: fixed phone + OTP from Admin → Settings (no WhatsApp).
+    const demo = await loadDemoLoginConfig();
+    if (demo && isDemoPhone(demo, normalized) && submitted === demo.otp) {
+      const expiresAt = new Date();
+      expiresAt.setMinutes(expiresAt.getMinutes() + OTP_EXPIRY_MINUTES);
+      const row = await prisma.otpCode.create({
+        data: {
+          phone: normalized,
+          code: demo.otp,
+          expiresAt,
+          usedAt: new Date(),
+        },
+      });
+      // Mark used already; continue with same post-verify flow via a synthetic path.
+      void row;
+      return this.completeVerifiedLogin(normalized, meta);
+    }
 
     const otp = await prisma.otpCode.findFirst({
       where: {
@@ -155,7 +239,7 @@ export class AuthService {
       return { success: false as const, error: "OTP_MAX_ATTEMPTS" };
     }
 
-    if (otp.code !== code) {
+    if (otp.code !== submitted) {
       await prisma.otpCode.update({
         where: { id: otp.id },
         data: { attempts: { increment: 1 } },
@@ -168,6 +252,14 @@ export class AuthService {
       data: { usedAt: new Date() },
     });
 
+    return this.completeVerifiedLogin(normalized, meta);
+  }
+
+  /** Shared post-OTP success path (real OTP or demo login). */
+  private static async completeVerifiedLogin(
+    normalized: string,
+    meta?: { deviceId?: string; ipAddress?: string; userAgent?: string }
+  ) {
     const user = await prisma.user.findFirst({
       where: { phone: normalized, deletedAt: null },
     });

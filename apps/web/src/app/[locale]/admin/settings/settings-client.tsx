@@ -36,6 +36,9 @@ export function SettingsClient() {
   const [inactivityDays, setInactivityDays] = useState("30");
   const [otpExpiryMin, setOtpExpiryMin] = useState("5");
   const [supportWhatsApp, setSupportWhatsApp] = useState("");
+  const [demoLoginEnabled, setDemoLoginEnabled] = useState(false);
+  const [demoLoginPhone, setDemoLoginPhone] = useState("");
+  const [demoLoginOtp, setDemoLoginOtp] = useState("");
 
   useEffect(() => {
     fetch("/api/admin/settings").then(async (r) => {
@@ -64,6 +67,17 @@ export function SettingsClient() {
                 ? String((v as { phone?: unknown }).phone ?? "")
                 : String(v)
           );
+        }
+        if (map.demo_login_enabled !== undefined) {
+          setDemoLoginEnabled(
+            map.demo_login_enabled === true || map.demo_login_enabled === "true"
+          );
+        }
+        if (typeof map.demo_login_phone === "string") {
+          setDemoLoginPhone(map.demo_login_phone);
+        }
+        if (map.demo_login_otp !== undefined && map.demo_login_otp !== null) {
+          setDemoLoginOtp(String(map.demo_login_otp));
         }
       }
       setLoading(false);
@@ -199,6 +213,72 @@ export function SettingsClient() {
           }
         >
           Save Support Number
+        </Button>
+      </Card>
+
+      <Card className="space-y-4 md:col-span-2">
+        <div>
+          <h3 className="font-semibold">Demo login (App Store / testing)</h3>
+          <p className="mt-1 text-sm text-muted">
+            Fixed phone + OTP that skips WhatsApp. Use for Apple App Review. The user must already
+            exist and be APPROVED. Disable when review is finished.
+          </p>
+        </div>
+        <label className="flex items-center gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={demoLoginEnabled}
+            onChange={(e) => setDemoLoginEnabled(e.target.checked)}
+            className="h-4 w-4 accent-[var(--accent)]"
+          />
+          Enable demo login
+        </label>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input
+            label="Demo phone"
+            value={demoLoginPhone}
+            onChange={(e) => setDemoLoginPhone(e.target.value)}
+            placeholder="+9647000000099"
+            dir="ltr"
+          />
+          <Input
+            label="Demo OTP"
+            value={demoLoginOtp}
+            onChange={(e) => setDemoLoginOtp(e.target.value)}
+            placeholder="123456"
+            dir="ltr"
+            maxLength={8}
+          />
+        </div>
+        <Button
+          disabled={saving === "demo_login"}
+          onClick={async () => {
+            const phone = demoLoginPhone.trim();
+            const otp = demoLoginOtp.trim();
+            if (demoLoginEnabled && (!phone || otp.length < 4)) {
+              toast("Enter demo phone and OTP (min 4 digits)", "error");
+              return;
+            }
+            setSaving("demo_login");
+            const payloads = [
+              { key: "demo_login_enabled", value: demoLoginEnabled },
+              { key: "demo_login_phone", value: phone },
+              { key: "demo_login_otp", value: otp },
+            ];
+            let ok = true;
+            for (const p of payloads) {
+              const res = await fetch("/api/admin/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(p),
+              });
+              if (!res.ok) ok = false;
+            }
+            setSaving(null);
+            toast(ok ? "Demo login saved" : "Failed to save demo login", ok ? undefined : "error");
+          }}
+        >
+          Save Demo Login
         </Button>
       </Card>
 
