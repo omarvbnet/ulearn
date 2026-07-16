@@ -4,7 +4,7 @@ import { z } from "zod";
 
 const schema = z.object({
   phone: z.string().min(8).max(20),
-  code: z.string().length(6),
+  code: z.string().min(4).max(8),
   deviceId: z.string().optional(),
 });
 

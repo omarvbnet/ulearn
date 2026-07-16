@@ -12,7 +12,33 @@ const OTP_MAX_ATTEMPTS = 5;
 function phoneDigits(phone: string): string {
   let d = phone.replace(/\D/g, "");
   if (d.startsWith("00")) d = d.slice(2);
+  // Iraq national mobile 07XXXXXXXXX → 9647XXXXXXXXX
+  if (d.startsWith("07") && d.length === 11) {
+    d = `964${d.slice(1)}`;
+  }
   return d;
+}
+
+function phonesMatch(a: string, b: string): boolean {
+  const da = phoneDigits(a);
+  const db = phoneDigits(b);
+  if (!da || !db) return false;
+  if (da === db) return true;
+  // Same subscriber number with/without country code (e.g. +9647… vs 07…).
+  const la = da.slice(-10);
+  const lb = db.slice(-10);
+  return la.length >= 9 && la === lb;
+}
+
+function normalizeOtp(code: unknown): string {
+  if (typeof code === "number" && Number.isFinite(code)) {
+    return String(Math.trunc(code));
+  }
+  if (typeof code === "string") {
+    return code.replace(/\s+/g, "").trim();
+  }
+  if (code != null) return String(code).replace(/\s+/g, "").trim();
+  return "";
 }
 
 type DemoLoginConfig = {
@@ -24,31 +50,53 @@ type DemoLoginConfig = {
 async function loadDemoLoginConfig(): Promise<DemoLoginConfig | null> {
   const rows = await prisma.systemSetting.findMany({
     where: {
-      countryId: null,
       key: {
         in: ["demo_login_enabled", "demo_login_phone", "demo_login_otp"],
       },
     },
   });
+  // Prefer global (countryId null) over country-scoped duplicates.
   const map: Record<string, unknown> = {};
-  for (const r of rows) map[r.key] = r.value;
+  for (const r of rows) {
+    if (!(r.key in map) || r.countryId == null) {
+      map[r.key] = r.value;
+    }
+  }
 
-  const enabled = map.demo_login_enabled === true || map.demo_login_enabled === "true";
-  const phone =
-    typeof map.demo_login_phone === "string" ? map.demo_login_phone.trim() : "";
-  const otp =
-    typeof map.demo_login_otp === "string"
-      ? map.demo_login_otp.trim()
-      : typeof map.demo_login_otp === "number"
-        ? String(map.demo_login_otp)
-        : "";
+  const enabledRaw = map.demo_login_enabled;
+  const enabled =
+    enabledRaw === true ||
+    enabledRaw === "true" ||
+    enabledRaw === 1 ||
+    enabledRaw === "1";
 
-  if (!enabled || !phone || otp.length < 4) return null;
+  let phone = "";
+  const phoneRaw = map.demo_login_phone;
+  if (typeof phoneRaw === "string") phone = phoneRaw.trim();
+  else if (typeof phoneRaw === "number") phone = String(phoneRaw);
+  else if (
+    phoneRaw &&
+    typeof phoneRaw === "object" &&
+    "phone" in (phoneRaw as object)
+  ) {
+    phone = String((phoneRaw as { phone?: unknown }).phone ?? "").trim();
+  }
+
+  const otp = normalizeOtp(map.demo_login_otp);
+
+  if (!enabled || !phone || otp.length < 4) {
+    if (enabled) {
+      console.warn(
+        `[Auth] Demo login enabled but incomplete (phone=${Boolean(phone)} otpLen=${otp.length})`
+      );
+    }
+    return null;
+  }
   return { enabled, phone, otp };
 }
 
 function isDemoPhone(config: DemoLoginConfig, phone: string): boolean {
-  return phoneDigits(config.phone) === phoneDigits(phone);
+  return phonesMatch(config.phone, phone);
 }
 
 export interface RegisterStudentInput {
@@ -202,24 +250,19 @@ export class AuthService {
     meta?: { deviceId?: string; ipAddress?: string; userAgent?: string }
   ) {
     const normalized = phone.replace(/\s+/g, "");
-    const submitted = code.trim();
+    const submitted = normalizeOtp(code);
 
     // App Review / sandbox: fixed phone + OTP from Admin → Settings (no WhatsApp).
     const demo = await loadDemoLoginConfig();
-    if (demo && isDemoPhone(demo, normalized) && submitted === demo.otp) {
-      const expiresAt = new Date();
-      expiresAt.setMinutes(expiresAt.getMinutes() + OTP_EXPIRY_MINUTES);
-      const row = await prisma.otpCode.create({
-        data: {
-          phone: normalized,
-          code: demo.otp,
-          expiresAt,
-          usedAt: new Date(),
-        },
-      });
-      // Mark used already; continue with same post-verify flow via a synthetic path.
-      void row;
-      return this.completeVerifiedLogin(normalized, meta);
+    if (demo && isDemoPhone(demo, normalized)) {
+      if (submitted === demo.otp) {
+        console.info(`[Auth] Demo login verified for ${normalized}`);
+        return this.completeVerifiedLogin(normalized, meta);
+      }
+      console.warn(
+        `[Auth] Demo phone matched but OTP mismatch (expectedLen=${demo.otp.length} gotLen=${submitted.length})`
+      );
+      return { success: false as const, error: "OTP_INVALID" };
     }
 
     const otp = await prisma.otpCode.findFirst({
@@ -239,7 +282,7 @@ export class AuthService {
       return { success: false as const, error: "OTP_MAX_ATTEMPTS" };
     }
 
-    if (otp.code !== submitted) {
+    if (normalizeOtp(otp.code) !== submitted) {
       await prisma.otpCode.update({
         where: { id: otp.id },
         data: { attempts: { increment: 1 } },

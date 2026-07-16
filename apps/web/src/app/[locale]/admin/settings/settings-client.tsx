@@ -221,7 +221,8 @@ export function SettingsClient() {
           <h3 className="font-semibold">Demo login (App Store / testing)</h3>
           <p className="mt-1 text-sm text-muted">
             Fixed phone + OTP that skips WhatsApp. Use for Apple App Review. The user must already
-            exist and be APPROVED. Disable when review is finished.
+            exist and be APPROVED. Disable when review is finished. Phone must match the app format
+            (e.g. +9647… — not 07…).
           </p>
         </div>
         <label className="flex items-center gap-3 text-sm">
@@ -253,12 +254,20 @@ export function SettingsClient() {
         <Button
           disabled={saving === "demo_login"}
           onClick={async () => {
-            const phone = demoLoginPhone.trim();
-            const otp = demoLoginOtp.trim();
+            let phone = demoLoginPhone.trim().replace(/\s+/g, "");
+            const otp = demoLoginOtp.trim().replace(/\s+/g, "");
+            const digits = phone.replace(/\D/g, "");
+            if (digits.startsWith("07") && digits.length === 11) {
+              phone = `+964${digits.slice(1)}`;
+            } else if (digits && !phone.startsWith("+")) {
+              phone = `+${digits}`;
+            }
             if (demoLoginEnabled && (!phone || otp.length < 4)) {
               toast("Enter demo phone and OTP (min 4 digits)", "error");
               return;
             }
+            setDemoLoginPhone(phone);
+            setDemoLoginOtp(otp);
             setSaving("demo_login");
             const payloads = [
               { key: "demo_login_enabled", value: demoLoginEnabled },
