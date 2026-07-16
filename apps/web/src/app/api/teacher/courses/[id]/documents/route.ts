@@ -1,14 +1,13 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { TeacherCourseService } from "@/services/teacher-course.service";
+import {
+  findEditableCourse,
+  isAdminRole,
+  TEACHER_COURSE_ROLES,
+} from "@/lib/teacher-course-access";
 import { ContentType } from "@prisma/client";
 import { z } from "zod";
-
-async function ownCourse(userId: string, courseId: string) {
-  return prisma.course.findFirst({
-    where: { id: courseId, deletedAt: null, teacher: { userId, deletedAt: null } },
-  });
-}
 
 const docSchema = z.object({
   title: z.string().min(1).max(200),
@@ -27,11 +26,11 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["TEACHER"]);
+  const auth = await requireAuth([...TEACHER_COURSE_ROLES]);
   if (auth.error) return auth.error;
 
   const { id } = await params;
-  const course = await ownCourse(auth.session.userId, id);
+  const course = await findEditableCourse(auth.session.userId, auth.session.role, id);
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
   const parsed = docSchema.safeParse(await request.json());
@@ -73,11 +72,11 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["TEACHER"]);
+  const auth = await requireAuth([...TEACHER_COURSE_ROLES]);
   if (auth.error) return auth.error;
 
   const { id } = await params;
-  const course = await ownCourse(auth.session.userId, id);
+  const course = await findEditableCourse(auth.session.userId, auth.session.role, id);
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
   const { documentId } = (await request.json()) as { documentId?: string };
@@ -88,7 +87,7 @@ export async function DELETE(
     data: { deletedAt: new Date() },
   });
 
-  if (course.status === "APPROVED") {
+  if (course.status === "APPROVED" && !isAdminRole(auth.session.role)) {
     await TeacherCourseService.markCoursePendingReview(id);
   }
 
@@ -100,11 +99,11 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["TEACHER"]);
+  const auth = await requireAuth([...TEACHER_COURSE_ROLES]);
   if (auth.error) return auth.error;
 
   const { id } = await params;
-  const course = await ownCourse(auth.session.userId, id);
+  const course = await findEditableCourse(auth.session.userId, auth.session.role, id);
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
   const documents = await prisma.courseMaterial.findMany({
@@ -121,11 +120,11 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["TEACHER"]);
+  const auth = await requireAuth([...TEACHER_COURSE_ROLES]);
   if (auth.error) return auth.error;
 
   const { id } = await params;
-  const course = await ownCourse(auth.session.userId, id);
+  const course = await findEditableCourse(auth.session.userId, auth.session.role, id);
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
   const body = z

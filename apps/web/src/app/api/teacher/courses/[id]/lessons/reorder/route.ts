@@ -1,6 +1,7 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { TeacherCourseService } from "@/services/teacher-course.service";
+import { isAdminRole, TEACHER_COURSE_ROLES } from "@/lib/teacher-course-access";
 import { z } from "zod";
 
 const schema = z.object({
@@ -12,10 +13,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["TEACHER", "SUPER_ADMIN", "COUNTRY_ADMIN"]);
+  const auth = await requireAuth([...TEACHER_COURSE_ROLES]);
   if (auth.error) return auth.error;
-  const isAdmin =
-    auth.session.role === "SUPER_ADMIN" || auth.session.role === "COUNTRY_ADMIN";
+  const isAdmin = isAdminRole(auth.session.role);
 
   const teacher = isAdmin
     ? null

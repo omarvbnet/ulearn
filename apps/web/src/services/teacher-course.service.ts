@@ -283,6 +283,36 @@ export class TeacherCourseService {
     return { success: true as const, course };
   }
 
+  /** Admin can edit any course; subject/track rules are not enforced. */
+  static async updateCourseAsAdmin(
+    courseId: string,
+    input: Partial<{
+      titleEn: string;
+      titleAr: string;
+      titleKu: string;
+      titleTr: string;
+      description: string;
+      thumbnail: string;
+      price: number;
+      stageId: string;
+      subjectId: string;
+      accessMonths: number;
+      appleProductId: string | null;
+      googleProductId: string | null;
+    }>
+  ) {
+    const course = await prisma.course.findFirst({
+      where: { id: courseId, deletedAt: null },
+    });
+    if (!course) return { success: false as const, error: "NOT_FOUND" };
+
+    const updated = await prisma.course.update({
+      where: { id: courseId },
+      data: input,
+    });
+    return { success: true as const, course: updated };
+  }
+
   static async updateCourse(
     teacherId: string,
     courseId: string,
@@ -375,6 +405,19 @@ export class TeacherCourseService {
   static async deleteCourse(teacherId: string, courseId: string) {
     const course = await prisma.course.findFirst({
       where: { id: courseId, teacherId, deletedAt: null },
+    });
+    if (!course) return { success: false as const, error: "NOT_FOUND" };
+
+    await prisma.course.update({
+      where: { id: courseId },
+      data: { deletedAt: new Date() },
+    });
+    return { success: true as const };
+  }
+
+  static async deleteCourseAsAdmin(courseId: string) {
+    const course = await prisma.course.findFirst({
+      where: { id: courseId, deletedAt: null },
     });
     if (!course) return { success: false as const, error: "NOT_FOUND" };
 
@@ -653,7 +696,7 @@ export class TeacherCourseService {
       where: { id: courseId, teacherId, deletedAt: null },
     });
     if (!course) return { success: false as const, error: "NOT_FOUND" as const };
-    return this.reorderLessonsForCourse(courseId, course.status, lessonIds);
+    return this.reorderLessonsAndReview(courseId, course.status, lessonIds);
   }
 
   /** Admin can reorder lessons for any non-deleted course. */
@@ -694,11 +737,20 @@ export class TeacherCourseService {
       )
     );
 
-    if (courseStatus === "APPROVED") {
+    return { success: true as const, lessonIds: ordered };
+  }
+
+  /** Reorder lessons on an approved course and send back for teacher review. */
+  static async reorderLessonsAndReview(
+    courseId: string,
+    courseStatus: CourseStatus,
+    lessonIds: string[]
+  ) {
+    const result = await this.reorderLessonsForCourse(courseId, courseStatus, lessonIds);
+    if (result.success && courseStatus === "APPROVED") {
       await this.markCoursePendingReview(courseId);
     }
-
-    return { success: true as const, lessonIds: ordered };
+    return result;
   }
 
   static async markCoursePendingReview(courseId: string) {

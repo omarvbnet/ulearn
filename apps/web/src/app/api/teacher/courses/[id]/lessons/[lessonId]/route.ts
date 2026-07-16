@@ -1,6 +1,11 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { TeacherCourseService } from "@/services/teacher-course.service";
+import {
+  findEditableCourse,
+  isAdminRole,
+  TEACHER_COURSE_ROLES,
+} from "@/lib/teacher-course-access";
 import { z } from "zod";
 
 const schema = z.object({
@@ -28,10 +33,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string; lessonId: string }> }
 ) {
-  const auth = await requireAuth(["TEACHER", "SUPER_ADMIN", "COUNTRY_ADMIN"]);
+  const auth = await requireAuth([...TEACHER_COURSE_ROLES]);
   if (auth.error) return auth.error;
-  const isAdmin =
-    auth.session.role === "SUPER_ADMIN" || auth.session.role === "COUNTRY_ADMIN";
+  const isAdmin = isAdminRole(auth.session.role);
 
   const { id: courseId, lessonId } = await params;
   let teacherId: string | null = null;
@@ -193,6 +197,7 @@ export async function PATCH(
   }
 
   if (
+    !isAdmin &&
     lesson.course.status === "APPROVED" &&
     (Object.keys(lessonPatch).length > 0 || pdfFileKey || pdfFileUrl || removePdf)
   ) {

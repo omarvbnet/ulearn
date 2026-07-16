@@ -2,6 +2,11 @@ import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { QuizService } from "@/services/quiz.service";
 import { TeacherCourseService } from "@/services/teacher-course.service";
+import {
+  findEditableCourse,
+  isAdminRole,
+  TEACHER_COURSE_ROLES,
+} from "@/lib/teacher-course-access";
 import { z } from "zod";
 
 const questionSchema = z.object({
@@ -27,22 +32,18 @@ const patchSchema = z.object({
   questions: z.array(questionSchema).min(1).optional(),
 });
 
-/** Teacher: update a course quiz (re-submits course for review if live). */
+/** Teacher or admin: update a course quiz. */
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string; quizId: string }> }
 ) {
-  const auth = await requireAuth(["TEACHER"]);
+  const auth = await requireAuth([...TEACHER_COURSE_ROLES]);
   if (auth.error) return auth.error;
 
   const { id: courseId, quizId } = await params;
-  const course = await prisma.course.findFirst({
-    where: {
-      id: courseId,
-      deletedAt: null,
-      teacher: { userId: auth.session.userId, deletedAt: null },
-    },
-    select: { id: true, status: true },
+  const course = await findEditableCourse(auth.session.userId, auth.session.role, courseId, {
+    id: true,
+    status: true,
   });
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
@@ -65,9 +66,7 @@ export async function PATCH(
 
   const updated = await QuizService.updateCourseQuiz(quizId, {
     ...meta,
-    ...(afterLessonId !== undefined
-      ? { afterLessonId: afterLessonId ?? null }
-      : {}),
+    ...(afterLessonId !== undefined ? { afterLessonId: afterLessonId ?? null } : {}),
     questions: questions?.map((q) => ({
       textEn: q.textEn,
       textAr: q.textAr || q.textEn,
@@ -80,7 +79,7 @@ export async function PATCH(
     })),
   });
 
-  if (course.status === "APPROVED") {
+  if (course.status === "APPROVED" && !isAdminRole(auth.session.role)) {
     await TeacherCourseService.markCoursePendingReview(courseId);
   }
 

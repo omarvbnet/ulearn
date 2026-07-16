@@ -1,18 +1,12 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { TeacherCourseService } from "@/services/teacher-course.service";
+import {
+  findEditableCourse,
+  isAdminRole,
+  TEACHER_COURSE_ROLES,
+} from "@/lib/teacher-course-access";
 import { z } from "zod";
-
-async function editableCourse(userId: string, role: string, courseId: string) {
-  if (role === "SUPER_ADMIN" || role === "COUNTRY_ADMIN") {
-    return prisma.course.findFirst({
-      where: { id: courseId, deletedAt: null },
-    });
-  }
-  return prisma.course.findFirst({
-    where: { id: courseId, deletedAt: null, teacher: { userId, deletedAt: null } },
-  });
-}
 
 const lessonSchema = z.object({
   title: z.string().min(1),
@@ -38,11 +32,11 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["TEACHER", "SUPER_ADMIN", "COUNTRY_ADMIN"]);
+  const auth = await requireAuth([...TEACHER_COURSE_ROLES]);
   if (auth.error) return auth.error;
 
   const { id } = await params;
-  const course = await editableCourse(auth.session.userId, auth.session.role, id);
+  const course = await findEditableCourse(auth.session.userId, auth.session.role, id);
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
   const parsed = lessonSchema.safeParse(await request.json());
@@ -121,7 +115,7 @@ export async function POST(
     });
   }
 
-  if (course.status === "APPROVED") {
+  if (course.status === "APPROVED" && !isAdminRole(auth.session.role)) {
     await TeacherCourseService.markCoursePendingReview(id);
   }
 
@@ -140,11 +134,11 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["TEACHER", "SUPER_ADMIN", "COUNTRY_ADMIN"]);
+  const auth = await requireAuth([...TEACHER_COURSE_ROLES]);
   if (auth.error) return auth.error;
 
   const { id } = await params;
-  const course = await editableCourse(auth.session.userId, auth.session.role, id);
+  const course = await findEditableCourse(auth.session.userId, auth.session.role, id);
   if (!course) return error("Course not found", 404, "NOT_FOUND");
 
   const { lessonId } = (await request.json()) as { lessonId?: string };
@@ -173,7 +167,7 @@ export async function DELETE(
     where: { id: lessonId, courseId: id },
     data: { deletedAt: new Date(), isHidden: true },
   });
-  if (course.status === "APPROVED") {
+  if (course.status === "APPROVED" && !isAdminRole(auth.session.role)) {
     await TeacherCourseService.markCoursePendingReview(id);
   }
   return json({ success: true });

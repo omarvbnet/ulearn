@@ -2,6 +2,7 @@
 
 import { Badge, Button, Card, Input, PageHeader, Textarea } from "@/components/ui";
 import { EmptyState, Modal, SkeletonRows, Tabs, useToast } from "@/components/overlay";
+import { AdminCourseEditor } from "@/components/admin-course-editor";
 import { CourseVideosPanel } from "./course-videos-panel";
 import { useCallback, useEffect, useState } from "react";
 
@@ -190,6 +191,7 @@ export function CourseReviewClient() {
   const [appleProductId, setAppleProductId] = useState("");
   const [googleProductId, setGoogleProductId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [contentEditorFor, setContentEditorFor] = useState<Course | null>(null);
 
   const loadCourses = useCallback(() => {
     setCourses(null);
@@ -1092,6 +1094,12 @@ export function CourseReviewClient() {
             />
             <div className="flex flex-wrap gap-3">
               <Button
+                variant="outline"
+                onClick={() => setContentEditorFor(selected)}
+              >
+                Edit videos & cover
+              </Button>
+              <Button
                 disabled={busy || (readiness ? !readiness.ready : false)}
                 onClick={() => review("APPROVED")}
               >
@@ -1103,6 +1111,30 @@ export function CourseReviewClient() {
             </div>
           </div>
         </Modal>
+      )}
+
+      {contentEditorFor && (
+        <AdminCourseEditor
+          courseId={contentEditorFor.id}
+          courseTitle={contentEditorFor.titleEn}
+          onClose={() => setContentEditorFor(null)}
+          onChanged={() => {
+            loadCourses();
+            if (selected?.id === contentEditorFor.id) {
+              setDetail(null);
+              setDetailLoading(true);
+              fetch(`/api/admin/teacher-courses/${contentEditorFor.id}`)
+                .then((r) => (r.ok ? r.json() : null))
+                .then((d) => {
+                  if (d) {
+                    setDetail(d.course);
+                    setReadiness(d.readiness);
+                  }
+                })
+                .finally(() => setDetailLoading(false));
+            }
+          }}
+        />
       )}
     </div>
   );
