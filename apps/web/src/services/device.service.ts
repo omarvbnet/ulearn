@@ -2,20 +2,31 @@ import { prisma } from "@/lib/prisma";
 
 /**
  * Device registration and limit enforcement.
- * A user's device limit is the highest limit among their active subscriptions
- * (default 1 when no subscription — free content only needs one device).
+ * Effective limit = max(user.deviceLimit, highest active subscription deviceLimit), at least 1.
+ * Admin can raise `User.deviceLimit` on the Users page (e.g. App Review demo account).
  */
 export class DeviceService {
   static async getDeviceLimit(userId: string): Promise<number> {
-    const subs = await prisma.subscription.findMany({
-      where: {
-        userId,
-        status: "ACTIVE",
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-      },
-      select: { deviceLimit: true },
-    });
-    return Math.max(1, ...subs.map((s) => s.deviceLimit));
+    const [user, subs] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { deviceLimit: true },
+      }),
+      prisma.subscription.findMany({
+        where: {
+          userId,
+          status: "ACTIVE",
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+        select: { deviceLimit: true },
+      }),
+    ]);
+
+    const fromUser = user?.deviceLimit ?? 1;
+    const fromSubs = subs.length
+      ? Math.max(...subs.map((s) => s.deviceLimit))
+      : 1;
+    return Math.max(1, fromUser, fromSubs);
   }
 
   /**
@@ -64,6 +75,22 @@ export class DeviceService {
     });
   }
 
+  /** Admin: set per-user device quota (1–20). */
+  static async setUserDeviceLimit(userId: string, deviceLimit: number) {
+    const limit = Math.min(20, Math.max(1, Math.floor(deviceLimit)));
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { deviceLimit: limit },
+      select: {
+        id: true,
+        phone: true,
+        fullLegalName: true,
+        deviceLimit: true,
+      },
+    });
+    return user;
+  }
+
   /** Deactivate a device, freeing a slot. Also kills its sessions. */
   static async deactivateDevice(userId: string, id: string) {
     const device = await prisma.device.findFirst({ where: { id, userId } });
@@ -72,5 +99,10 @@ export class DeviceService {
     await prisma.device.update({ where: { id }, data: { isActive: false } });
     await prisma.session.deleteMany({ where: { userId, deviceId: device.deviceId } });
     return { success: true as const };
+  }
+
+  /** Admin: deactivate any device for a user. */
+  static async adminDeactivateDevice(userId: string, deviceRowId: string) {
+    return this.deactivateDevice(userId, deviceRowId);
   }
 }

@@ -50,6 +50,11 @@ export async function GET(request: Request) {
         province: true,
         studentProfile: true,
         certificateProfile: true,
+        _count: {
+          select: {
+            devices: { where: { isActive: true } },
+          },
+        },
         ...(includeTeacher
           ? {
               teacherProfile: {
@@ -79,5 +84,10 @@ export async function GET(request: Request) {
     prisma.user.count({ where }),
   ]);
 
-  return json({ users, total, page, limit });
+  const usersWithDevices = users.map((u) => ({
+    ...u,
+    activeDeviceCount: u._count.devices,
+  }));
+
+  return json({ users: usersWithDevices, total, page, limit });
 }
