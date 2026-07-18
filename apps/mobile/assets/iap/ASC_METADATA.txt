@@ -1,0 +1,42 @@
+U Learn — App Store Connect IAP metadata (Guideline 2.3.2)
+==========================================================
+Upload each UNIQUE promotional image (1024×1024) to its product.
+Do NOT reuse images or copy across products.
+
+----------------------------------------------------------
+1) Physics Course (Non-Consumable)
+Product ID:   (exact appleProductId from Admin Course Review)
+Display Name: Physics Course Unlock
+Description:  Unlock full Physics course access
+Promo image:  apps/mobile/assets/iap/iap-promo-physics.png
+
+----------------------------------------------------------
+2) Chemistry Course (Non-Consumable)
+Product ID:   (exact appleProductId from Admin Course Review)
+Display Name: Chemistry Course Unlock
+Description:  Unlock full Chemistry course access
+Promo image:  apps/mobile/assets/iap/iap-promo-chemistry.png
+
+----------------------------------------------------------
+3) AI Assistant Monthly (Auto-Renewable Subscription)
+Product ID:   com.ulearn.mobile.ai.monthly
+Subscription Group: AI (same group as Yearly)
+Display Name: AI Assistant Monthly
+Description:  Monthly AI chat, exams & studio
+Promo image:  apps/mobile/assets/iap/iap-promo-ai-monthly.png
+
+----------------------------------------------------------
+4) AI Assistant Yearly (Auto-Renewable Subscription)
+Product ID:   com.ulearn.mobile.ai.yearly
+Subscription Group: AI (same group as Monthly)
+Display Name: AI Assistant Yearly
+Description:  Yearly AI chat, exams & studio
+Promo image:  apps/mobile/assets/iap/iap-promo-ai-yearly.png
+
+----------------------------------------------------------
+App Store Connect checklist before resubmit
+- Paid Apps Agreement = Active (+ banking/tax complete)
+- Each IAP Cleared for Sale + localized + priced
+- Each IAP attached to the new app version (1.0.3)
+- Unique promo image + unique display name + unique description
+- Test with Sandbox Tester: Settings → App Store → Sandbox Account

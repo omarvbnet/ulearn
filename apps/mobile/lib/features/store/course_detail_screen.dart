@@ -416,12 +416,13 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
             return;
           } else {
             if (!mounted) return;
+            // Surface StoreKit Sandbox messages (e.g. not authorised) clearly.
+            final clean = msg
+                .replaceFirst(RegExp(r'^StoreIapException:\s*'), '')
+                .replaceFirst(RegExp(r'^Exception:\s*'), '')
+                .replaceFirst(RegExp(r'^storekit_error:\s*'), '');
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  msg.replaceFirst('Exception: ', ''),
-                ),
-              ),
+              SnackBar(content: Text(clean)),
             );
             return;
           }

@@ -4,15 +4,16 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/iap/store_iap.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/core/iap/iap_fulfillment.dart';
 
-/// Loads AI entitlement and purchases monthly (USD) / yearly (IQD) via store IAP.
+/// Loads AI entitlement and purchases monthly / yearly via store IAP.
 class AiUpgradeController {
   AiUpgradeController(this.api);
 
   final ApiClient api;
-  final InAppPurchase _iap = InAppPurchase.instance;
 
   Map<String, dynamic>? status;
   bool loading = true;
@@ -21,7 +22,7 @@ class AiUpgradeController {
   bool storeAvailable = false;
   Set<String> notFoundIds = {};
 
-  StreamSubscription<List<PurchaseDetails>>? _sub;
+  StreamSubscription<PurchaseDetails>? _unownedSub;
   List<ProductDetails> products = [];
 
   bool get access => status?['access'] == true;
@@ -101,15 +102,11 @@ class AiUpgradeController {
     loading = true;
     error = null;
     try {
+      await StoreIap.ensureInitialized();
       await refreshStatus();
-      storeAvailable = await _iap.isAvailable();
+      storeAvailable = StoreIap.storeAvailable;
       if (storeAvailable) {
-        _sub ??= _iap.purchaseStream.listen(
-          _onPurchases,
-          onError: (e) {
-            error = e.toString();
-          },
-        );
+        _unownedSub ??= StoreIap.listenUnowned(_onUnownedPurchase);
         await _loadProducts();
       }
     } catch (e) {
@@ -156,7 +153,7 @@ class AiUpgradeController {
       ..._candidateIds(yearly: false),
       ..._candidateIds(yearly: true),
     };
-    final resp = await _iap.queryProductDetails(ids);
+    final resp = await StoreIap.queryProducts(ids);
     products = List<ProductDetails>.from(resp.productDetails);
     notFoundIds = resp.notFoundIDs.toSet();
     if (resp.error != null && products.isEmpty) {
@@ -166,14 +163,12 @@ class AiUpgradeController {
 
   ProductDetails? _resolveProduct({required bool yearly}) {
     final preferred = yearly ? configuredYearlyId : configuredMonthlyId;
-    for (final p in products) {
-      if (p.id == preferred) return p;
-    }
-    final aliases = _candidateIds(yearly: yearly);
-    for (final p in products) {
-      if (aliases.contains(p.id)) return p;
-    }
-    // Heuristic: id contains monthly/year
+    final matched = StoreIap.pickProduct(
+      products,
+      preferredId: preferred,
+      aliases: _candidateIds(yearly: yearly),
+    );
+    if (matched != null) return matched;
     final key = yearly ? 'year' : 'month';
     for (final p in products) {
       final id = p.id.toLowerCase();
@@ -182,6 +177,13 @@ class AiUpgradeController {
       }
     }
     return null;
+  }
+
+  bool _isAiProductId(String productId) {
+    final id = productId.toLowerCase();
+    return _candidateIds(yearly: false).any((e) => e.toLowerCase() == id) ||
+        _candidateIds(yearly: true).any((e) => e.toLowerCase() == id) ||
+        id.contains('ai') && (id.contains('month') || id.contains('year'));
   }
 
   Future<void> buyMonthly() => _buyStore(yearly: false);
@@ -194,21 +196,20 @@ class AiUpgradeController {
       if (!storeAvailable) {
         throw _PurchaseException('store_unavailable');
       }
+      await IapFulfillment.bind(api);
       await _loadProducts();
       final product = yearly ? yearlyProduct : monthlyProduct;
       if (product == null) {
         throw _PurchaseException('product_missing');
       }
-      final param = PurchaseParam(productDetails: product);
-      // Subscriptions and non-consumables share this entry point in the plugin.
-      final ok = await _iap.buyNonConsumable(purchaseParam: param);
-      if (!ok) {
-        throw _PurchaseException('purchase_start_failed');
-      }
+      final purchase = await StoreIap.buyAndWait(product);
+      await IapFulfillment.fulfill(purchase);
+      await refreshStatus();
     } catch (e) {
       error = e.toString();
-      purchasing = false;
       rethrow;
+    } finally {
+      purchasing = false;
     }
   }
 
@@ -229,7 +230,6 @@ class AiUpgradeController {
       await refreshStatus();
     } catch (e) {
       error = e.toString();
-      purchasing = false;
       rethrow;
     } finally {
       purchasing = false;
@@ -240,8 +240,9 @@ class AiUpgradeController {
     purchasing = true;
     error = null;
     try {
-      await _iap.restorePurchases();
-      await Future<void>.delayed(const Duration(milliseconds: 800));
+      await StoreIap.restorePurchases();
+      // Restored transactions arrive on the purchase stream / unowned handler.
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
       await refreshStatus();
     } catch (e) {
       error = e.toString();
@@ -251,51 +252,26 @@ class AiUpgradeController {
     }
   }
 
-  Future<void> _onPurchases(List<PurchaseDetails> purchases) async {
-    for (final purchase in purchases) {
-      if (purchase.status == PurchaseStatus.pending) {
-        purchasing = true;
-        continue;
-      }
-      if (purchase.status == PurchaseStatus.error) {
-        purchasing = false;
-        error = purchase.error?.message ?? 'Purchase failed';
-        continue;
-      }
-      if (purchase.status == PurchaseStatus.purchased ||
-          purchase.status == PurchaseStatus.restored) {
-        try {
-          await _verify(purchase);
-          if (purchase.pendingCompletePurchase) {
-            await _iap.completePurchase(purchase);
-          }
-          await refreshStatus();
-        } catch (e) {
-          error = e.toString();
-        } finally {
-          purchasing = false;
-        }
-      } else if (purchase.status == PurchaseStatus.canceled) {
-        purchasing = false;
-      }
+  Future<void> _onUnownedPurchase(PurchaseDetails purchase) async {
+    if (purchase.status != PurchaseStatus.purchased &&
+        purchase.status != PurchaseStatus.restored) {
+      return;
+    }
+    if (!_isAiProductId(purchase.productID)) return;
+    purchasing = true;
+    try {
+      await IapFulfillment.bind(api);
+      await IapFulfillment.fulfill(purchase);
+      await refreshStatus();
+    } catch (e) {
+      error = e.toString();
+    } finally {
+      purchasing = false;
     }
   }
 
-  Future<void> _verify(PurchaseDetails purchase) async {
-    final platform = Platform.isIOS ? 'APPLE' : 'GOOGLE';
-    final transactionId = purchase.purchaseID ??
-        purchase.verificationData.serverVerificationData.hashCode.toString();
-    await api.post('/api/ai/creative/iap/verify', {
-      'platform': platform,
-      'productId': purchase.productID,
-      'transactionId': transactionId,
-      'purchaseToken': purchase.verificationData.serverVerificationData,
-      'receiptData': purchase.verificationData.localVerificationData,
-    });
-  }
-
   void dispose() {
-    _sub?.cancel();
+    _unownedSub?.cancel();
   }
 }
 
@@ -377,6 +353,15 @@ class _AiUpgradeSheetState extends State<_AiUpgradeSheet>
     }
     if (s.contains('purchase_start_failed')) {
       return l10n.t('mobile.ai.upgradeStartFailed');
+    }
+    if (s.contains('not authorised') ||
+        s.contains('not authorized') ||
+        s.contains('permission to make In-App Purchases')) {
+      return 'This Apple Account cannot purchase in Sandbox. '
+          'Use a Sandbox tester, or ensure Paid Apps Agreement is Active.';
+    }
+    if (s.contains('storekit_error:')) {
+      return s.replaceFirst('storekit_error:', '').trim();
     }
     if (s.contains('Exception: ')) {
       return s.replaceFirst('Exception: ', '');

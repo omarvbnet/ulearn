@@ -3,7 +3,7 @@ import { CourseIapService } from "@/services/course-iap.service";
 import { z } from "zod";
 
 const schema = z.object({
-  courseId: z.string().min(1),
+  courseId: z.string().min(1).optional(),
   platform: z.enum(["APPLE", "GOOGLE"]),
   productId: z.string().min(1).max(200),
   transactionId: z.string().min(1).max(200),
@@ -27,6 +27,7 @@ export async function POST(request: Request) {
       ok: true,
       alreadyProcessed: result.alreadyProcessed,
       purchaseId: result.purchase.id,
+      courseId: result.purchase.courseId,
       expiresAt: result.purchase.expiresAt,
       status: result.purchase.status,
     });

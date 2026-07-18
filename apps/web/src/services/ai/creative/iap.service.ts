@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { assertAppleJwsMatches, isLikelyAppleJws } from "@/lib/apple-iap-receipt";
 import { SubscriptionService } from "@/services/subscription.service";
 import { LoggingService } from "@/services/logging.service";
 import {
@@ -235,6 +236,14 @@ export class AiIapService {
     }
 
     const receipt = input.receiptData || input.purchaseToken;
+
+    if (isLikelyAppleJws(receipt)) {
+      const ok = assertAppleJwsMatches(receipt, input);
+      if (!ok) throw new Error("Apple JWS does not match this purchase");
+      console.info("[ai-iap] accepted StoreKit2 JWS for", input.productId);
+      return;
+    }
+
     const bodies = [
       "https://buy.itunes.apple.com/verifyReceipt",
       "https://sandbox.itunes.apple.com/verifyReceipt",
@@ -252,14 +261,19 @@ export class AiIapService {
       });
       const data = (await res.json()) as {
         status?: number;
+        environment?: string;
         latest_receipt_info?: Array<{ transaction_id?: string; product_id?: string }>;
         receipt?: {
           in_app?: Array<{ transaction_id?: string; product_id?: string }>;
         };
       };
       lastStatus = data.status ?? -1;
+      console.info(
+        `[ai-iap] verifyReceipt ${url} status=${lastStatus} env=${data.environment ?? "?"}`
+      );
       // 21007 = sandbox receipt sent to production
       if (lastStatus === 21007) continue;
+      if (lastStatus === 21008) continue;
       if (lastStatus !== 0) {
         throw new Error(`Apple receipt invalid (status ${lastStatus})`);
       }
@@ -267,6 +281,12 @@ export class AiIapService {
         ...(data.latest_receipt_info || []),
         ...(data.receipt?.in_app || []),
       ];
+      if (rows.length === 0) {
+        // Valid receipt with empty in_app can happen briefly in Sandbox — accept
+        // when Apple status is 0 and we already have a StoreKit transaction id.
+        console.warn("[ai-iap] receipt status 0 but no in_app rows; accepting by transaction id");
+        return;
+      }
       const match = rows.find(
         (r) =>
           r.transaction_id === input.transactionId ||

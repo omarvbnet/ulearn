@@ -1,24 +1,24 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/iap/iap_fulfillment.dart';
+import 'package:ulearn/core/iap/store_iap.dart';
 
 /// Purchase a store course via Apple / Google IAP, then verify on the server.
 class CourseIapPurchase {
   CourseIapPurchase(this.api);
 
   final ApiClient api;
-  final InAppPurchase _iap = InAppPurchase.instance;
-  StreamSubscription<List<PurchaseDetails>>? _sub;
-  Completer<PurchaseDetails>? _wait;
 
   Future<Map<String, dynamic>> buy({
     required String courseId,
     required String? appleProductId,
     required String? googleProductId,
   }) async {
+    await IapFulfillment.bind(api);
+    await StoreIap.ensureInitialized();
+
     final productId = Platform.isIOS
         ? (appleProductId?.trim().isNotEmpty == true
             ? appleProductId!.trim()
@@ -27,92 +27,65 @@ class CourseIapPurchase {
             ? googleProductId!.trim()
             : 'course_$courseId');
 
-    final available = await _iap.isAvailable();
-    if (!available) {
-      throw Exception('store_unavailable');
+    if (!StoreIap.storeAvailable) {
+      throw StoreIapException(
+        'store_unavailable',
+        'The App Store is not available on this device.',
+      );
     }
 
-    _sub ??= _iap.purchaseStream.listen(_onPurchases);
-    final resp = await _iap.queryProductDetails({productId});
-    var details = List<ProductDetails>.from(resp.productDetails);
-    if (details.isEmpty) {
-      // Also try short aliases.
-      final aliases = <String>{
-        productId,
-        'com.ulearn.mobile.course.$courseId',
-        'course_$courseId',
-        if (appleProductId != null) appleProductId,
-        if (googleProductId != null) googleProductId,
-      }.whereType<String>().toSet();
-      final again = await _iap.queryProductDetails(aliases);
-      if (again.productDetails.isEmpty) {
-        throw Exception('product_missing');
-      }
-      details.addAll(List<ProductDetails>.from(again.productDetails));
-    }
+    final aliases = <String>{
+      productId,
+      'com.ulearn.mobile.course.$courseId',
+      'course_$courseId',
+      if (appleProductId != null && appleProductId.trim().isNotEmpty)
+        appleProductId.trim(),
+      if (googleProductId != null && googleProductId.trim().isNotEmpty)
+        googleProductId.trim(),
+    };
 
-    if (details.isEmpty) {
-      throw Exception('product_missing');
-    }
-
-    final matched = details.where((p) => p.id == productId);
-    final product = matched.isNotEmpty ? matched.first : details.first;
-
-    _wait = Completer<PurchaseDetails>();
-    final ok = await _iap.buyNonConsumable(
-      purchaseParam: PurchaseParam(productDetails: product),
-    );
-    if (!ok) throw Exception('purchase_start_failed');
-
-    final purchase = await _wait!.future.timeout(
-      const Duration(minutes: 2),
-      onTimeout: () => throw Exception('purchase_timeout'),
+    final resp = await StoreIap.queryProducts(aliases);
+    final product = StoreIap.pickProduct(
+      resp.productDetails,
+      preferredId: productId,
+      aliases: aliases,
     );
 
-    final platform = Platform.isIOS ? 'APPLE' : 'GOOGLE';
-    final transactionId = purchase.purchaseID ??
-        purchase.verificationData.serverVerificationData.hashCode.toString();
-
-    final verified = await api.post('/api/store/courses/iap/verify', {
-      'courseId': courseId,
-      'platform': platform,
-      'productId': purchase.productID,
-      'transactionId': transactionId,
-      'purchaseToken': purchase.verificationData.serverVerificationData,
-      'receiptData': purchase.verificationData.localVerificationData,
-    });
-
-    if (purchase.pendingCompletePurchase) {
-      await _iap.completePurchase(purchase);
+    if (product == null) {
+      throw StoreIapException(
+        'product_missing',
+        'Product "$productId" was not returned by the App Store. '
+        'Not found: ${resp.notFoundIDs.join(", ")}. '
+        '${resp.error?.message ?? ""}'.trim(),
+      );
     }
 
-    return Map<String, dynamic>.from(verified);
+    // So orphan recovery / unowned delivery knows which course to unlock.
+    IapFulfillment.rememberCourseBuy(
+      productId: product.id,
+      courseId: courseId,
+    );
+
+    // 1) Apple confirmation sheet → StoreKit purchased
+    final purchase = await StoreIap.buyAndWait(product);
+
+    // 2) Our servers unlock access  3) only then finish StoreKit transaction
+    final result = await IapFulfillment.fulfill(
+      purchase,
+      courseId: courseId,
+    );
+
+    return {
+      'ok': true,
+      'alreadyProcessed': result.alreadyProcessed,
+      'courseId': result.courseId ?? courseId,
+      'expiresAt': result.expiresAt,
+      ...?result.raw,
+    };
   }
 
-  void _onPurchases(List<PurchaseDetails> purchases) {
-    for (final p in purchases) {
-      if (p.status == PurchaseStatus.pending) continue;
-      if (p.status == PurchaseStatus.error) {
-        _wait?.completeError(
-          Exception(p.error?.message ?? 'Purchase failed'),
-        );
-        _wait = null;
-        continue;
-      }
-      if (p.status == PurchaseStatus.purchased ||
-          p.status == PurchaseStatus.restored) {
-        _wait?.complete(p);
-        _wait = null;
-      } else if (p.status == PurchaseStatus.canceled) {
-        _wait?.completeError(Exception('purchase_canceled'));
-        _wait = null;
-      }
-    }
-  }
-
-  void dispose() {
-    _sub?.cancel();
-  }
+  /// No-op kept for call-site compatibility.
+  void dispose() {}
 }
 
 /// True when we should attempt IAP (mobile + product configured or fallback).
@@ -120,4 +93,64 @@ bool shouldUseCourseIap(Map<String, dynamic>? course) {
   if (kIsWeb) return false;
   if (!Platform.isIOS && !Platform.isAndroid) return false;
   return true;
+}
+
+/// Preload whether the App Store knows this course product (for UI gating).
+Future<CourseIapProductCheck> checkCourseIapProduct({
+  required String courseId,
+  required String? appleProductId,
+  required String? googleProductId,
+}) async {
+  await StoreIap.ensureInitialized();
+  if (!StoreIap.storeAvailable) {
+    return const CourseIapProductCheck(
+      available: false,
+      reason: 'store_unavailable',
+    );
+  }
+  final productId = Platform.isIOS
+      ? (appleProductId?.trim().isNotEmpty == true
+          ? appleProductId!.trim()
+          : 'com.ulearn.mobile.course.$courseId')
+      : (googleProductId?.trim().isNotEmpty == true
+          ? googleProductId!.trim()
+          : 'course_$courseId');
+  final aliases = <String>{
+    productId,
+    'com.ulearn.mobile.course.$courseId',
+    if (appleProductId != null && appleProductId.trim().isNotEmpty)
+      appleProductId.trim(),
+  };
+  final resp = await StoreIap.queryProducts(aliases);
+  final product = StoreIap.pickProduct(
+    resp.productDetails,
+    preferredId: productId,
+    aliases: aliases,
+  );
+  if (product == null) {
+    return CourseIapProductCheck(
+      available: false,
+      reason: 'product_missing',
+      productId: productId,
+    );
+  }
+  return CourseIapProductCheck(
+    available: true,
+    productId: product.id,
+    priceLabel: product.price,
+  );
+}
+
+class CourseIapProductCheck {
+  const CourseIapProductCheck({
+    required this.available,
+    this.reason,
+    this.productId,
+    this.priceLabel,
+  });
+
+  final bool available;
+  final String? reason;
+  final String? productId;
+  final String? priceLabel;
 }

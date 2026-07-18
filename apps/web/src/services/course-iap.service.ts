@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { assertAppleJwsMatches, isLikelyAppleJws } from "@/lib/apple-iap-receipt";
 import { LoggingService } from "@/services/logging.service";
 import { NotificationService } from "@/services/notification.service";
 import { TeacherCourseService } from "@/services/teacher-course.service";
@@ -7,7 +8,8 @@ export type CourseIapPlatform = "APPLE" | "GOOGLE";
 
 export type CourseIapVerifyInput = {
   userId: string;
-  courseId: string;
+  /** Optional when productId uniquely identifies the course. */
+  courseId?: string;
   platform: CourseIapPlatform;
   productId: string;
   transactionId: string;
@@ -26,9 +28,44 @@ function addMonths(from: Date, months: number): Date {
  * with expiresAt = now + course.accessMonths.
  */
 export class CourseIapService {
-  static async verifyAndActivate(input: CourseIapVerifyInput) {
+  /** Resolve course id from explicit id or App Store / Play product id. */
+  static async resolveCourseId(input: {
+    courseId?: string;
+    platform: CourseIapPlatform;
+    productId: string;
+  }): Promise<string> {
+    if (input.courseId?.trim()) return input.courseId.trim();
+
+    const productId = input.productId.trim();
+    const applePrefix = "com.ulearn.mobile.course.";
+    if (productId.startsWith(applePrefix)) {
+      return productId.slice(applePrefix.length);
+    }
+    if (productId.startsWith("course_")) {
+      return productId.slice("course_".length);
+    }
+
     const course = await prisma.course.findFirst({
-      where: { id: input.courseId, status: "APPROVED", deletedAt: null },
+      where: {
+        deletedAt: null,
+        status: "APPROVED",
+        OR: [
+          { appleProductId: productId },
+          { googleProductId: productId },
+        ],
+      },
+      select: { id: true },
+    });
+    if (!course) {
+      throw new Error(`No course mapped to product "${productId}"`);
+    }
+    return course.id;
+  }
+
+  static async verifyAndActivate(input: CourseIapVerifyInput) {
+    const courseId = await this.resolveCourseId(input);
+    const course = await prisma.course.findFirst({
+      where: { id: courseId, status: "APPROVED", deletedAt: null },
       include: { teacher: true },
     });
     if (!course) throw new Error("Course not available");
@@ -40,11 +77,13 @@ export class CourseIapService {
       input.platform === "APPLE"
         ? course.appleProductId
         : course.googleProductId;
+    const fallbackApple = `com.ulearn.mobile.course.${course.id}`;
+    const fallbackGoogle = `course_${course.id}`;
     const productOk =
       !expectedId ||
       expectedId === input.productId ||
-      input.productId.toLowerCase().includes("course") ||
-      input.productId.includes(course.id.slice(0, 8));
+      input.productId === fallbackApple ||
+      input.productId === fallbackGoogle;
     if (!productOk) {
       throw new Error("Product id does not match this course");
     }
@@ -59,7 +98,7 @@ export class CourseIapService {
       };
     }
 
-    await this.verifyWithStore(input);
+    await this.verifyWithStore({ ...input, courseId });
 
     const months = course.accessMonths > 0 ? course.accessMonths : 10;
     const expiresAt = addMonths(new Date(), months);
@@ -71,7 +110,7 @@ export class CourseIapService {
 
     const existing = await prisma.coursePurchase.findUnique({
       where: {
-        courseId_userId: { courseId: input.courseId, userId: input.userId },
+        courseId_userId: { courseId, userId: input.userId },
       },
     });
 
@@ -95,7 +134,7 @@ export class CourseIapService {
         })
       : await prisma.coursePurchase.create({
           data: {
-            courseId: input.courseId,
+            courseId,
             userId: input.userId,
             price: course.price,
             currency: course.currency,
@@ -117,7 +156,7 @@ export class CourseIapService {
       entityType: "CoursePurchase",
       entityId: purchase.id,
       newValue: {
-        courseId: input.courseId,
+        courseId,
         platform: input.platform,
         productId: input.productId,
         expiresAt: expiresAt.toISOString(),
@@ -160,10 +199,22 @@ export class CourseIapService {
         throw new Error("Apple IAP is not configured");
       }
       const receipt = input.receiptData || input.purchaseToken;
-      for (const url of [
+
+      // StoreKit 2 JWS fallback (should be rare — mobile forces StoreKit 1).
+      if (isLikelyAppleJws(receipt)) {
+        const ok = assertAppleJwsMatches(receipt, input);
+        if (!ok) throw new Error("Apple JWS does not match this purchase");
+        console.info("[course-iap] accepted StoreKit2 JWS for", input.productId);
+        return;
+      }
+
+      // Production first, then Sandbox (status 21007). Critical for App Review.
+      const endpoints = [
         "https://buy.itunes.apple.com/verifyReceipt",
         "https://sandbox.itunes.apple.com/verifyReceipt",
-      ]) {
+      ];
+      let lastStatus = -1;
+      for (const url of endpoints) {
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -173,14 +224,22 @@ export class CourseIapService {
             "exclude-old-transactions": true,
           }),
         });
-        const data = (await res.json()) as { status?: number };
-        if (data.status === 21007) continue;
-        if (data.status !== 0) {
-          throw new Error(`Apple receipt invalid (status ${data.status})`);
+        const data = (await res.json()) as {
+          status?: number;
+          environment?: string;
+        };
+        lastStatus = data.status ?? -1;
+        console.info(
+          `[course-iap] verifyReceipt ${url} status=${lastStatus} env=${data.environment ?? "?"}`
+        );
+        if (lastStatus === 21007) continue; // sandbox receipt → retry sandbox
+        if (lastStatus === 21008) continue; // prod receipt sent to sandbox
+        if (lastStatus !== 0) {
+          throw new Error(`Apple receipt invalid (status ${lastStatus})`);
         }
         return;
       }
-      throw new Error("Apple receipt verification failed");
+      throw new Error(`Apple receipt verification failed (status ${lastStatus})`);
     }
 
     const packageName = process.env.GOOGLE_PLAY_PACKAGE_NAME;

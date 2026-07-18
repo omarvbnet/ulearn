@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/iap/iap_fulfillment.dart';
 import 'package:ulearn/core/l10n/locale_provider.dart';
 import 'package:ulearn/core/notifications/push_notification_service.dart';
 
@@ -163,6 +164,7 @@ class AuthProvider extends ChangeNotifier {
       user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
       await _locale?.syncFromUser(user?.locale);
       unawaited(PushNotificationService.instance.onUserLoggedIn());
+      unawaited(IapFulfillment.bind(_api));
     } catch (_) {
       user = null;
     }
@@ -211,6 +213,7 @@ class AuthProvider extends ChangeNotifier {
       user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
       await _locale?.syncFromUser(user?.locale);
       unawaited(PushNotificationService.instance.onUserLoggedIn());
+      unawaited(IapFulfillment.bind(_api));
     }
     notifyListeners();
     return data;
@@ -218,6 +221,7 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> logout() async {
     await PushNotificationService.instance.onUserLoggedOut();
+    IapFulfillment.unbind();
     try {
       await _api.post('/api/auth/logout', {});
     } catch (_) {}

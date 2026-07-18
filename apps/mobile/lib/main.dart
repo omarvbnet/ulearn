@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -8,6 +10,7 @@ import 'package:fvp/fvp.dart' as fvp;
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
+import 'package:ulearn/core/iap/store_iap.dart';
 import 'package:ulearn/core/l10n/locale_provider.dart';
 import 'package:ulearn/core/notifications/push_notification_service.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
@@ -21,6 +24,10 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // StoreKit listener must start before any purchase UI (App Review / Sandbox).
+  if (!kIsWeb && (Platform.isIOS || Platform.isAndroid)) {
+    unawaited(StoreIap.ensureInitialized());
+  }
   // Must be registered before runApp so background isolates can handle FCM.
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   await PushNotificationService.instance.ensureFirebaseReady();

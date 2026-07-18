@@ -78,6 +78,9 @@ export default async function LandingPage({
         <Link className="hover:text-accent" href={`/${locale}/privacy`}>
           Privacy Policy
         </Link>
+        <Link className="hover:text-accent" href={`/${locale}/terms`}>
+          Terms of Use
+        </Link>
         <a className="hover:text-accent" href="mailto:support@ulearn.usmart-iot.com">
           support@ulearn.usmart-iot.com
         </a>
