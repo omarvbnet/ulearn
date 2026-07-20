@@ -24,22 +24,22 @@ npx prisma migrate deploy
 npm run db:seed
 ```
 
-### Prisma Accelerate (connection pool + query cache)
+## Database Providers (Admin)
 
-Production should use a Prisma Accelerate (or Prisma Postgres) URL so hot reads are cached and serverless connections are pooled.
+Admin → **Database Providers** lets you register Prisma Postgres / Accelerate, Supabase, VPS, or custom Postgres hosts, then switch safely:
 
-1. In [Prisma Console](https://console.prisma.io) enable **Accelerate** for your project (or use Prisma Postgres which includes it).
-2. Set env vars on Vercel:
+1. **Export backup** — full JSON dump of all tables from the live DB (keep this file safe)  
+2. **Test connection** — verify the saved target URL responds  
+3. **Transfer test** — seeds temporary tester data (user + device + setting + inactive ad) on the live DB, copies it to the target, verifies integrity, then cleans up. **Required before migrate** (pass valid 24h)  
+4. **Migrate data here** — full copy into the target (optional wipe); re-runs transfer test after import  
+5. **Compare counts** — spot-check key tables  
+6. **Set env + redeploy** — the app cannot hot-swap `DATABASE_URL` in-process  
+7. **Confirm activated** — mark the new provider as active in admin metadata  
 
-| Variable | Value |
-|----------|--------|
-| `DATABASE_URL` | Accelerate URL (`prisma://…` or `prisma+postgres://…`) |
-| `DIRECT_DATABASE_URL` | Direct `postgresql://…` URL (migrations / Studio) |
-| `PRISMA_ACCELERATE_URL` | Optional if `DATABASE_URL` is already Accelerate |
+Connection secrets are encrypted at rest (`DB_PROVIDER_SECRET` or `JWT_SECRET`). A mirror copy is written to `apps/web/.data/db-providers.json` (gitignored).
 
-3. Hot paths already pass `cacheStrategy` (home catalog, countries, stages, packages). No code change needed per deploy.
+Always export a backup **before** switching. Target databases must already have the Prisma schema applied (`npx prisma migrate deploy` with `DIRECT_DATABASE_URL`). Do not change env until Transfer test + Migrate both succeed.
 
-Locally you can keep both URLs as the same `postgresql://…` string; Accelerate caching is simply skipped when not using a `prisma://` URL.
 
 ## 2. Environment Variables (Vercel)
 

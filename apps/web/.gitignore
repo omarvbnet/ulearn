@@ -35,6 +35,9 @@ yarn-error.log*
 .env.*
 !.env.example
 
+# Local DB provider secrets / backups (never commit)
+.data/
+
 # vercel
 .vercel
 
