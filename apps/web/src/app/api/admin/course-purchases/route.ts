@@ -36,10 +36,10 @@ export async function GET(request: Request) {
 
 const actionSchema = z.object({
   purchaseId: z.string(),
-  action: z.enum(["approve", "reject"]),
+  action: z.enum(["approve", "reject", "cancel"]),
 });
 
-/** Admin: confirm (payment received) or reject a purchase request. */
+/** Admin: confirm, reject, or cancel (revoke paid access) a course purchase. */
 export async function POST(request: Request) {
   const auth = await requireAuth(ADMIN_ROLES);
   if (auth.error) return auth.error;
@@ -47,16 +47,15 @@ export async function POST(request: Request) {
   const parsed = actionSchema.safeParse(await request.json());
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
+  const { purchaseId, action } = parsed.data;
+  const actorId = auth.session.userId;
+
   const result =
-    parsed.data.action === "approve"
-      ? await TeacherCourseService.approvePurchase(
-          parsed.data.purchaseId,
-          auth.session.userId
-        )
-      : await TeacherCourseService.rejectPurchase(
-          parsed.data.purchaseId,
-          auth.session.userId
-        );
+    action === "approve"
+      ? await TeacherCourseService.approvePurchase(purchaseId, actorId)
+      : action === "cancel"
+        ? await TeacherCourseService.cancelPurchase(purchaseId, actorId)
+        : await TeacherCourseService.rejectPurchase(purchaseId, actorId);
 
   if (!result.success) return error(result.error, 400, result.error);
   return json(result);

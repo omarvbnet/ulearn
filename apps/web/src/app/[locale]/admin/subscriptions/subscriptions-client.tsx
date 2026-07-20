@@ -35,12 +35,31 @@ type Code = {
 
 type Country = { id: string; nameEn: string };
 
+type ActiveSub = {
+  id: string;
+  status: string;
+  startsAt: string | null;
+  expiresAt: string | null;
+  user: { id: string; fullLegalName: string | null; phone: string };
+  package: {
+    id: string;
+    type: string;
+    nameEn: string;
+    price: string;
+    currency: string;
+  };
+};
+
 export function SubscriptionsClient() {
   const { toast } = useToast();
   const [tab, setTab] = useState("requests");
   const [requests, setRequests] = useState<Request[] | null>(null);
   const [packages, setPackages] = useState<Package[] | null>(null);
   const [codes, setCodes] = useState<Code[] | null>(null);
+  const [activeSubs, setActiveSubs] = useState<ActiveSub[] | null>(null);
+  const [activeFilter, setActiveFilter] = useState("");
+  const [activeQ, setActiveQ] = useState("");
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [countries, setCountries] = useState<Country[]>([]);
   const [showCreatePkg, setShowCreatePkg] = useState(false);
   const [showGenCodes, setShowGenCodes] = useState(false);
@@ -60,6 +79,16 @@ export function SubscriptionsClient() {
     if (res.ok) setCodes((await res.json()).codes);
   }, []);
 
+  const loadActive = useCallback(async () => {
+    setActiveSubs(null);
+    const params = new URLSearchParams();
+    if (activeFilter) params.set("type", activeFilter);
+    if (activeQ.trim()) params.set("q", activeQ.trim());
+    const res = await fetch(`/api/admin/subscriptions/active?${params}`);
+    if (res.ok) setActiveSubs((await res.json()).subscriptions ?? []);
+    else setActiveSubs([]);
+  }, [activeFilter, activeQ]);
+
   useEffect(() => {
     loadRequests();
     fetch("/api/countries").then(async (r) => {
@@ -70,7 +99,8 @@ export function SubscriptionsClient() {
   useEffect(() => {
     if (tab === "packages" && packages === null) loadPackages();
     if (tab === "codes" && codes === null) loadCodes();
-  }, [tab, packages, codes, loadPackages, loadCodes]);
+    if (tab === "active") loadActive();
+  }, [tab, packages, codes, loadPackages, loadCodes, loadActive]);
 
   async function approve(requestId: string) {
     const res = await fetch("/api/admin/subscriptions/requests", {
@@ -100,6 +130,29 @@ export function SubscriptionsClient() {
       loadRequests();
     } else {
       toast("Failed to decline request", "error");
+    }
+  }
+
+  async function cancelSubscription(sub: ActiveSub) {
+    if (
+      !confirm(
+        `Cancel subscription "${sub.package.nameEn}" for ${sub.user.fullLegalName ?? sub.user.phone}?`
+      )
+    ) {
+      return;
+    }
+    setCancellingId(sub.id);
+    const res = await fetch("/api/admin/subscriptions/active", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subscriptionId: sub.id }),
+    });
+    setCancellingId(null);
+    if (res.ok) {
+      toast("Subscription cancelled");
+      loadActive();
+    } else {
+      toast("Failed to cancel subscription", "error");
     }
   }
 
@@ -134,6 +187,7 @@ export function SubscriptionsClient() {
       <Tabs
         tabs={[
           { id: "requests", label: "Requests" },
+          { id: "active", label: "Active Access" },
           { id: "packages", label: "Packages" },
           { id: "codes", label: "Activation Codes" },
         ]}
@@ -167,6 +221,92 @@ export function SubscriptionsClient() {
             ))}
           </div>
         ))}
+
+      {/* ── Active access (AI + package subscriptions) ── */}
+      {tab === "active" && (
+        <>
+          <Card className="grid gap-3 sm:grid-cols-3">
+            <Input
+              label="Search"
+              value={activeQ}
+              onChange={(e) => setActiveQ(e.target.value)}
+              placeholder="Name or phone"
+            />
+            <Select
+              label="Type"
+              value={activeFilter}
+              onChange={(e) => setActiveFilter(e.target.value)}
+            >
+              <option value="">All types</option>
+              <option value="AI_CREATIVE">AI Creative</option>
+              <option value="SINGLE_SUBJECT">Single subject</option>
+              <option value="FULL_STAGE">Full stage</option>
+              <option value="CERTIFICATE_PROGRAM">Certificate</option>
+            </Select>
+            <div className="flex items-end">
+              <Button className="w-full" onClick={() => void loadActive()}>
+                Refresh
+              </Button>
+            </div>
+          </Card>
+          {activeSubs === null ? (
+            <SkeletonRows rows={5} />
+          ) : activeSubs.length === 0 ? (
+            <EmptyState
+              title="No active subscriptions"
+              hint="Active AI and package subscriptions for all users appear here."
+            />
+          ) : (
+            <div className="card overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-card-border text-xs uppercase tracking-wide text-muted">
+                    <th className="p-3 text-start">User</th>
+                    <th className="p-3 text-start">Package</th>
+                    <th className="p-3 text-start">Type</th>
+                    <th className="p-3 text-start">Expires</th>
+                    <th className="p-3 text-start">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="stagger">
+                  {activeSubs.map((s) => (
+                    <tr
+                      key={s.id}
+                      className="border-b border-card-border/40 transition hover:bg-white/[0.02]"
+                    >
+                      <td className="p-3">
+                        <p className="font-medium">{s.user.fullLegalName ?? "—"}</p>
+                        <p className="text-xs text-muted" dir="ltr">
+                          {s.user.phone}
+                        </p>
+                      </td>
+                      <td className="p-3">{s.package.nameEn}</td>
+                      <td className="p-3">
+                        <Badge status="ACTIVE">{s.package.type}</Badge>
+                      </td>
+                      <td className="p-3 text-muted">
+                        {s.expiresAt
+                          ? new Date(s.expiresAt).toLocaleDateString()
+                          : "—"}
+                      </td>
+                      <td className="p-3">
+                        <Button
+                          variant="danger"
+                          className="!py-1.5 text-xs"
+                          disabled={cancellingId === s.id}
+                          onClick={() => void cancelSubscription(s)}
+                        >
+                          {cancellingId === s.id ? "Cancelling…" : "Cancel"}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
 
       {/* ── Packages ── */}
       {tab === "packages" && (

@@ -193,6 +193,8 @@ export function CourseReviewClient() {
   const [busy, setBusy] = useState(false);
   const [contentEditorFor, setContentEditorFor] = useState<Course | null>(null);
 
+  const [purchaseFilter, setPurchaseFilter] = useState<"PENDING" | "PAID">("PENDING");
+
   const loadCourses = useCallback(() => {
     setCourses(null);
     setPurchases(null);
@@ -210,11 +212,11 @@ export function CourseReviewClient() {
         .then((d) => setCourses(d.courses || []));
     } else {
       Promise.all([
-        fetch("/api/admin/course-purchases?status=PENDING").then((r) =>
+        fetch(`/api/admin/course-purchases?status=${purchaseFilter}`).then((r) =>
           r.ok ? r.json() : { purchases: [] }
         ),
-        fetch("/api/admin/course-group-purchases").then((r) =>
-          r.ok ? r.json() : { purchases: [] }
+        fetch(`/api/admin/course-group-purchases?status=${purchaseFilter}`).then(
+          (r) => (r.ok ? r.json() : { purchases: [] })
         ),
       ]).then(([courseData, groupData]) => {
         const coursePurchases: Purchase[] = (courseData.purchases || []).map(
@@ -248,7 +250,7 @@ export function CourseReviewClient() {
         );
       });
     }
-  }, [tab]);
+  }, [tab, purchaseFilter]);
 
   useEffect(loadCourses, [loadCourses]);
 
@@ -347,9 +349,15 @@ export function CourseReviewClient() {
 
   async function handlePurchase(
     purchaseId: string,
-    action: "approve" | "reject",
+    action: "approve" | "reject" | "cancel",
     kind: "course" | "group" = "course"
   ) {
+    if (
+      action === "cancel" &&
+      !confirm("Cancel this paid access? The student will lose course access immediately.")
+    ) {
+      return;
+    }
     const endpoint =
       kind === "group"
         ? "/api/admin/course-group-purchases"
@@ -365,7 +373,9 @@ export function CourseReviewClient() {
           ? kind === "group"
             ? "Group payment confirmed — all courses unlocked"
             : "Payment confirmed — course unlocked"
-          : "Purchase rejected"
+          : action === "cancel"
+            ? "Access cancelled"
+            : "Purchase rejected"
       );
       loadCourses();
     } else {
@@ -388,7 +398,7 @@ export function CourseReviewClient() {
           { id: "APPROVED", label: "Live" },
           { id: "REJECTED", label: "Rejected" },
           { id: "CLOSED", label: "Closed" },
-          { id: "PURCHASES", label: "Purchase Requests" },
+          { id: "PURCHASES", label: "Purchases" },
         ]}
         active={tab}
         onChange={setTab}
@@ -434,72 +444,112 @@ export function CourseReviewClient() {
             </div>
           )
         ) : tab === "PURCHASES" ? (
-          purchases === null ? (
-            <SkeletonRows rows={3} />
-          ) : purchases.length === 0 ? (
-            <EmptyState title="No pending purchases" />
-          ) : (
-            <div className="stagger space-y-3">
-              {purchases.map((p) => (
-                <Card
-                  key={`${p.kind}-${p.id}`}
-                  className="flex flex-wrap items-center justify-between gap-3 p-4"
-                >
-                  <div>
-                    <p className="font-semibold">{p.user.fullLegalName}</p>
-                    <p className="text-sm text-muted" dir="ltr">{p.user.phone}</p>
-                  </div>
-                  <div className="text-sm">
-                    {p.kind === "group" ? (
-                      <>
-                        <p className="font-medium">
-                          Group: {p.group?.titleEn ?? "Course group"}
-                        </p>
-                        <p className="text-muted">
-                          {p.group?.stage?.nameEn ?? "—"} ·{" "}
-                          {p.group?.items?.length ?? 0} courses
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <p className="font-medium">{p.course?.titleEn}</p>
-                        <p className="text-muted">
-                          by {p.course?.teacher.user.fullLegalName} ·{" "}
-                          <Badge
-                            status={
-                              LEVEL_BADGE[p.course?.teacher.level ?? ""] ?? "PENDING"
+          <>
+            <div className="mb-4 flex flex-wrap gap-2">
+              <Button
+                variant={purchaseFilter === "PENDING" ? "primary" : "outline"}
+                className="!py-1.5 text-xs"
+                onClick={() => setPurchaseFilter("PENDING")}
+              >
+                Pending requests
+              </Button>
+              <Button
+                variant={purchaseFilter === "PAID" ? "primary" : "outline"}
+                className="!py-1.5 text-xs"
+                onClick={() => setPurchaseFilter("PAID")}
+              >
+                Active (paid)
+              </Button>
+            </div>
+            {purchases === null ? (
+              <SkeletonRows rows={3} />
+            ) : purchases.length === 0 ? (
+              <EmptyState
+                title={
+                  purchaseFilter === "PAID"
+                    ? "No active course subscriptions"
+                    : "No pending purchases"
+                }
+              />
+            ) : (
+              <div className="stagger space-y-3">
+                {purchases.map((p) => (
+                  <Card
+                    key={`${p.kind}-${p.id}`}
+                    className="flex flex-wrap items-center justify-between gap-3 p-4"
+                  >
+                    <div>
+                      <p className="font-semibold">{p.user.fullLegalName}</p>
+                      <p className="text-sm text-muted" dir="ltr">
+                        {p.user.phone}
+                      </p>
+                    </div>
+                    <div className="text-sm">
+                      {p.kind === "group" ? (
+                        <>
+                          <p className="font-medium">
+                            Group: {p.group?.titleEn ?? "Course group"}
+                          </p>
+                          <p className="text-muted">
+                            {p.group?.stage?.nameEn ?? "—"} ·{" "}
+                            {p.group?.items?.length ?? 0} courses
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="font-medium">{p.course?.titleEn}</p>
+                          <p className="text-muted">
+                            by {p.course?.teacher.user.fullLegalName} ·{" "}
+                            <Badge
+                              status={
+                                LEVEL_BADGE[p.course?.teacher.level ?? ""] ??
+                                "PENDING"
+                              }
+                            >
+                              {(p.course?.teacher.level ?? "").replace(/_/g, " ")}
+                            </Badge>
+                          </p>
+                        </>
+                      )}
+                    </div>
+                    <p className="font-semibold text-accent">
+                      {p.price} {p.currency}
+                    </p>
+                    <div className="flex gap-2">
+                      {purchaseFilter === "PENDING" ? (
+                        <>
+                          <Button
+                            onClick={() =>
+                              handlePurchase(p.id, "approve", p.kind ?? "course")
                             }
                           >
-                            {(p.course?.teacher.level ?? "").replace(/_/g, " ")}
-                          </Badge>
-                        </p>
-                      </>
-                    )}
-                  </div>
-                  <p className="font-semibold text-accent">
-                    {p.price} {p.currency}
-                  </p>
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={() =>
-                        handlePurchase(p.id, "approve", p.kind ?? "course")
-                      }
-                    >
-                      Confirm Payment
-                    </Button>
-                    <Button
-                      variant="danger"
-                      onClick={() =>
-                        handlePurchase(p.id, "reject", p.kind ?? "course")
-                      }
-                    >
-                      Reject
-                    </Button>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )
+                            Confirm Payment
+                          </Button>
+                          <Button
+                            variant="danger"
+                            onClick={() =>
+                              handlePurchase(p.id, "reject", p.kind ?? "course")
+                            }
+                          >
+                            Reject
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant="danger"
+                          onClick={() =>
+                            handlePurchase(p.id, "cancel", p.kind ?? "course")
+                          }
+                        >
+                          Cancel access
+                        </Button>
+                      )}
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </>
         ) : courses === null ? (
           <SkeletonRows rows={3} />
         ) : courses.length === 0 ? (

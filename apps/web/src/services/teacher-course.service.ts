@@ -1592,6 +1592,60 @@ export class TeacherCourseService {
     return { success: true as const };
   }
 
+  /** Admin cancels a paid course subscription — revokes access immediately. */
+  static async cancelPurchase(purchaseId: string, actorId: string) {
+    const purchase = await prisma.coursePurchase.findUnique({
+      where: { id: purchaseId },
+      include: {
+        course: { select: { id: true, titleEn: true } },
+        user: { select: { id: true } },
+      },
+    });
+    if (!purchase || purchase.status !== "PAID") {
+      return { success: false as const, error: "INVALID_PURCHASE" };
+    }
+
+    const updated = await prisma.coursePurchase.update({
+      where: { id: purchaseId },
+      data: {
+        status: "REJECTED",
+        approvedById: actorId,
+        approvedAt: new Date(),
+        expiresAt: new Date(),
+      },
+    });
+
+    await LoggingService.log({
+      actorId,
+      action: "CANCEL_COURSE_PURCHASE",
+      entityType: "CoursePurchase",
+      entityId: purchaseId,
+      previousValue: { status: "PAID", courseId: purchase.courseId },
+      newValue: { status: "REJECTED", userId: purchase.userId },
+    });
+
+    await NotificationService.notifyUser(
+      purchase.userId,
+      {
+        titleEn: "Course access cancelled",
+        titleAr: "تم إلغاء الوصول للدورة",
+        titleKu: "دەستگەیشتن بە کۆرس هەڵوەشایەوە",
+        titleTr: "Kurs erişimi iptal edildi",
+        bodyEn: `Your access to "${purchase.course.titleEn}" was cancelled by admin.`,
+        bodyAr: `تم إلغاء وصولك إلى "${purchase.course.titleEn}" بواسطة المسؤول.`,
+        bodyKu: `دەستگەیشتنت بۆ "${purchase.course.titleEn}" لەلایەن ئەدمینەوە هەڵوەشایەوە.`,
+        bodyTr: `"${purchase.course.titleEn}" kursuna erişiminiz yönetici tarafından iptal edildi.`,
+      },
+      {
+        type: "course",
+        courseId: purchase.courseId,
+        screen: "course",
+      }
+    ).catch(() => {});
+
+    return { success: true as const, purchase: updated };
+  }
+
   static async hasPurchased(courseId: string, userId: string) {
     const p = await prisma.coursePurchase.findUnique({
       where: { courseId_userId: { courseId, userId } },

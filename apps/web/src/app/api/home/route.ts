@@ -217,9 +217,13 @@ export async function GET(request: Request) {
       }))
     : null;
 
-  const groups = stageId
-    ? await CourseGroupService.listForStage(stageId).catch(() => [])
-    : [];
+  const groups = await CourseGroupService.listForHome({
+    stageId: stageId && stageId !== "all" ? stageId : undefined,
+    countryId: user?.countryId ?? undefined,
+  }).catch((err) => {
+    console.error("[home] course groups failed", err);
+    return [];
+  });
 
   return json({
     stage,

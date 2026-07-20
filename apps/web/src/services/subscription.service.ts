@@ -292,6 +292,98 @@ export class SubscriptionService {
     return sub;
   }
 
+  /** Admin cancels an active (or pending) subscription — AI or subject/stage package. */
+  static async cancelSubscription(subscriptionId: string, actorId: string) {
+    const previous = await prisma.subscription.findUnique({
+      where: { id: subscriptionId },
+      include: {
+        package: { select: { type: true, nameEn: true } },
+        user: { select: { id: true, fullLegalName: true } },
+      },
+    });
+    if (!previous) {
+      return { success: false as const, error: "NOT_FOUND" };
+    }
+    if (previous.status === "CANCELLED") {
+      return { success: false as const, error: "ALREADY_CANCELLED" };
+    }
+
+    const sub = await prisma.subscription.update({
+      where: { id: subscriptionId },
+      data: { status: "CANCELLED", expiresAt: new Date() },
+    });
+
+    await LoggingService.log({
+      actorId,
+      action: "CANCEL_SUBSCRIPTION",
+      entityType: "Subscription",
+      entityId: subscriptionId,
+      previousValue: {
+        status: previous.status,
+        expiresAt: previous.expiresAt?.toISOString() ?? null,
+        packageType: previous.package.type,
+      },
+      newValue: { status: "CANCELLED", userId: previous.userId },
+    });
+
+    await NotificationService.notifyUser(previous.userId, {
+      titleEn: "Subscription cancelled",
+      titleAr: "تم إلغاء الاشتراك",
+      titleKu: "بەشداریکردن هەڵوەشایەوە",
+      titleTr: "Abonelik iptal edildi",
+      bodyEn: `Your subscription to "${previous.package.nameEn}" was cancelled by admin.`,
+      bodyAr: `تم إلغاء اشتراكك في "${previous.package.nameEn}" بواسطة المسؤول.`,
+      bodyKu: `بەشداریکردنت بۆ "${previous.package.nameEn}" لەلایەن ئەدمینەوە هەڵوەشایەوە.`,
+      bodyTr: `"${previous.package.nameEn}" aboneliğiniz yönetici tarafından iptal edildi.`,
+    }).catch(() => {});
+
+    return { success: true as const, subscription: sub };
+  }
+
+  /** List active subscriptions for admin management (optional package type filter). */
+  static async listActiveSubscriptions(opts?: {
+    packageType?: string;
+    q?: string;
+    take?: number;
+  }) {
+    const q = opts?.q?.trim();
+    return prisma.subscription.findMany({
+      where: {
+        status: "ACTIVE",
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        ...(opts?.packageType
+          ? { package: { type: opts.packageType as never, deletedAt: null } }
+          : { package: { deletedAt: null } }),
+        ...(q
+          ? {
+              user: {
+                OR: [
+                  { fullLegalName: { contains: q, mode: "insensitive" as const } },
+                  { phone: { contains: q } },
+                ],
+              },
+            }
+          : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: opts?.take ?? 200,
+      include: {
+        user: {
+          select: { id: true, fullLegalName: true, phone: true },
+        },
+        package: {
+          select: {
+            id: true,
+            type: true,
+            nameEn: true,
+            price: true,
+            currency: true,
+          },
+        },
+      },
+    });
+  }
+
   static async expireDueSubscriptions() {
     const result = await prisma.subscription.updateMany({
       where: { status: "ACTIVE", expiresAt: { lt: new Date() } },

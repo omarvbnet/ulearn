@@ -117,6 +117,7 @@ export async function GET(request: Request) {
         unlockCount: config.courseUnlockCount,
         expiresAt: sub?.expiresAt?.toISOString() ?? null,
         packageName: sub?.package.nameEn ?? null,
+        subscriptionId: sub?.id ?? null,
       };
     })
     .filter((s) => {

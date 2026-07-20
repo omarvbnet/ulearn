@@ -181,6 +181,10 @@ class HomeFeedState extends State<HomeFeed> {
       _levelFilter != null ||
       _search.text.trim().isNotEmpty;
 
+  /// Hide promo rails only while searching — stage/level filters should still
+  /// show ads and course groups for the selected stage.
+  bool get _hidePromoRails => _search.text.trim().isNotEmpty;
+
   String _stageLabel(BuildContext context, String locale) {
     final l10n = context.l10n;
     if (_stageFilter == null) return l10n.homeMyStage;
@@ -501,7 +505,7 @@ class HomeFeedState extends State<HomeFeed> {
               },
             ),
           ),
-          if (_ads.isNotEmpty && !_hasActiveFilters) ...[
+          if (_ads.isNotEmpty && !_hidePromoRails) ...[
             const SizedBox(height: 8),
             StaggeredItem(
               index: 2,
@@ -523,7 +527,7 @@ class HomeFeedState extends State<HomeFeed> {
               ),
             ),
           ],
-          if (_groups.isNotEmpty && !_hasActiveFilters) ...[
+          if (_groups.isNotEmpty && !_hidePromoRails) ...[
             const SizedBox(height: 8),
             StaggeredItem(
               index: 4,

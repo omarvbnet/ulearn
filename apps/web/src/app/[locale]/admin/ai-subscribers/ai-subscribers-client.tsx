@@ -15,6 +15,7 @@ type Row = {
   remaining: number;
   courseCount: number;
   expiresAt: string | null;
+  subscriptionId: string | null;
 };
 
 export function AiSubscribersClient() {
@@ -25,6 +26,7 @@ export function AiSubscribersClient() {
   const [provinceId, setProvinceId] = useState("");
   const [plan, setPlan] = useState("");
   const [q, setQ] = useState("");
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,11 +55,43 @@ export function AiSubscribersClient() {
     window.location.href = `/api/admin/ai-subscribers/export?${params}`;
   }
 
+  async function cancelAi(row: Row) {
+    if (!row.subscriptionId && row.plan === "FREE") {
+      toast("This user has no paid AI subscription to cancel", "error");
+      return;
+    }
+    if (
+      !confirm(
+        `Cancel AI subscription for ${row.name || row.phone}? They will lose paid AI access immediately.`
+      )
+    ) {
+      return;
+    }
+    setCancellingId(row.id);
+    const res = await fetch("/api/admin/ai-subscribers/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        row.subscriptionId
+          ? { subscriptionId: row.subscriptionId }
+          : { userId: row.id }
+      ),
+    });
+    setCancellingId(null);
+    if (res.ok) {
+      toast("AI subscription cancelled");
+      void load();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      toast(data.error || "Failed to cancel", "error");
+    }
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader
         title="AI Subscribers"
-        description="Users with AI Creative activity or an AI Creative plan, by province."
+        description="Users with AI Creative activity or an AI Creative plan, by province. Cancel paid AI access anytime."
         actions={
           <Button onClick={exportExcel}>
             Export Excel
@@ -111,12 +145,13 @@ export function AiSubscribersClient() {
                 <th className="px-4 py-3">Uses</th>
                 <th className="px-4 py-3">Courses</th>
                 <th className="px-4 py-3">Expires</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-muted">
+                  <td colSpan={8} className="px-4 py-8 text-center text-muted">
                     No AI Creative users yet.
                   </td>
                 </tr>
@@ -135,6 +170,20 @@ export function AiSubscribersClient() {
                       {r.expiresAt
                         ? new Date(r.expiresAt).toLocaleDateString()
                         : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {r.subscriptionId ? (
+                        <Button
+                          variant="danger"
+                          className="!py-1.5 text-xs"
+                          disabled={cancellingId === r.id}
+                          onClick={() => void cancelAi(r)}
+                        >
+                          {cancellingId === r.id ? "…" : "Cancel AI"}
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted">—</span>
+                      )}
                     </td>
                   </tr>
                 ))

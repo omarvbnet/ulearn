@@ -269,13 +269,16 @@ export class CourseGroupService {
     return { success: true as const };
   }
 
-  /** Public / home listing for a stage. */
-  static async listForStage(stageId: string) {
+  /** Public / home listing. Optionally scoped to a stage and/or country. */
+  static async listForHome(opts?: { stageId?: string; countryId?: string }) {
     const groups = await prisma.courseGroup.findMany({
       where: {
-        stageId,
         isActive: true,
         deletedAt: null,
+        ...(opts?.stageId ? { stageId: opts.stageId } : {}),
+        ...(opts?.countryId
+          ? { OR: [{ countryId: null }, { countryId: opts.countryId }] }
+          : {}),
       },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
       include: {
@@ -296,7 +299,7 @@ export class CourseGroupService {
       },
     });
 
-    return Promise.all(
+    const mapped = await Promise.all(
       groups.map(async (g) => {
         const live = g.items
           .map((i) => i.course)
@@ -321,6 +324,14 @@ export class CourseGroupService {
         };
       })
     );
+
+    // Hide empty shells (no live courses) from the home rail.
+    return mapped.filter((g) => g.courseCount > 0);
+  }
+
+  /** @deprecated Prefer listForHome — kept for callers that always pass a stage. */
+  static async listForStage(stageId: string) {
+    return this.listForHome({ stageId });
   }
 
   static async getPublic(id: string, userId?: string) {
@@ -625,6 +636,75 @@ export class CourseGroupService {
         approvedAt: new Date(),
       },
     });
+    return { success: true as const };
+  }
+
+  /** Admin cancels a paid group purchase and revokes PAID access for member courses. */
+  static async cancelPurchase(purchaseId: string, actorId: string) {
+    const purchase = await prisma.courseGroupPurchase.findUnique({
+      where: { id: purchaseId },
+      include: {
+        group: {
+          include: {
+            items: { select: { courseId: true } },
+          },
+        },
+      },
+    });
+    if (!purchase || purchase.status !== "PAID") {
+      return { success: false as const, error: "INVALID_PURCHASE" };
+    }
+
+    const courseIds = purchase.group.items.map((i) => i.courseId);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.courseGroupPurchase.update({
+        where: { id: purchaseId },
+        data: {
+          status: "REJECTED",
+          approvedById: actorId,
+          approvedAt: new Date(),
+          expiresAt: new Date(),
+        },
+      });
+
+      if (courseIds.length) {
+        await tx.coursePurchase.updateMany({
+          where: {
+            userId: purchase.userId,
+            courseId: { in: courseIds },
+            status: "PAID",
+          },
+          data: {
+            status: "REJECTED",
+            approvedById: actorId,
+            approvedAt: new Date(),
+            expiresAt: new Date(),
+          },
+        });
+      }
+    });
+
+    await LoggingService.log({
+      actorId,
+      action: "CANCEL_COURSE_GROUP_PURCHASE",
+      entityType: "CourseGroupPurchase",
+      entityId: purchaseId,
+      previousValue: { status: "PAID", groupId: purchase.groupId },
+      newValue: { status: "REJECTED", userId: purchase.userId, courseIds },
+    });
+
+    await NotificationService.notifyUser(purchase.userId, {
+      titleEn: "Course group access cancelled",
+      titleAr: "تم إلغاء الوصول لمجموعة الدورات",
+      titleKu: "دەستگەیشتن بە کۆمەڵەی کۆرس هەڵوەشایەوە",
+      titleTr: "Kurs grubu erişimi iptal edildi",
+      bodyEn: `Your access to "${purchase.group.titleEn}" was cancelled by admin.`,
+      bodyAr: `تم إلغاء وصولك إلى "${purchase.group.titleEn}" بواسطة المسؤول.`,
+      bodyKu: `دەستگەیشتنت بۆ "${purchase.group.titleEn}" لەلایەن ئەدمینەوە هەڵوەشایەوە.`,
+      bodyTr: `"${purchase.group.titleEn}" grubuna erişiminiz yönetici tarafından iptal edildi.`,
+    }).catch(() => {});
+
     return { success: true as const };
   }
 }
