@@ -210,6 +210,31 @@ function createClient(databaseUrl: string): PrismaClient {
   });
 }
 
+/** Core tables that must exist before transfer/migrate (empty Supabase fails without these). */
+const REQUIRED_SCHEMA_TABLES = [
+  "Country",
+  "User",
+  "Device",
+  "SystemSetting",
+  "Advertisement",
+  "_prisma_migrations",
+] as const;
+
+async function inspectTargetSchema(client: PrismaClient) {
+  const rows = await client.$queryRaw<{ table_name: string }[]>`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+  `;
+  const present = new Set(rows.map((r) => r.table_name));
+  const missing = REQUIRED_SCHEMA_TABLES.filter((t) => !present.has(t));
+  return {
+    tableCount: present.size,
+    missing: [...missing],
+    ready: missing.length === 0,
+  };
+}
+
 async function persistLocalCopy(config: DbProvidersConfig) {
   try {
     await mkdir(path.dirname(LOCAL_FILE), { recursive: true });
@@ -435,7 +460,10 @@ export class DatabaseProviderService {
         FROM information_schema.tables
         WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
       `;
-      const userCount = await client.user.count().catch(() => -1);
+      const schema = await inspectTargetSchema(client);
+      const userCount = schema.ready
+        ? await client.user.count().catch(() => -1)
+        : -1;
       const latencyMs = Date.now() - started;
 
       if (opts.providerId) {
@@ -454,7 +482,12 @@ export class DatabaseProviderService {
         latencyMs,
         tableCount: Number(tables[0]?.count ?? 0),
         userCount,
+        schemaReady: schema.ready,
+        missingTables: schema.missing,
         urlMasked: maskConnectionUrl(url),
+        hint: schema.ready
+          ? undefined
+          : "Target DB has no U Learn schema. Click “Apply schema” (prisma migrate deploy) before Transfer test.",
       };
     } catch (err) {
       if (opts.providerId) {
@@ -778,6 +811,84 @@ export class DatabaseProviderService {
   }
 
   /**
+   * Apply Prisma migrations to the target provider (empty Supabase / VPS).
+   * Uses DIRECT postgresql URL — required before Transfer test / Migrate.
+   */
+  static async applySchemaToProvider(providerId: string, actorId: string) {
+    const config = await this.getConfig();
+    const profile = config.profiles.find((p) => p.id === providerId);
+    if (!profile) throw new Error("NOT_FOUND");
+
+    const url = assertDirectPostgresUrl(
+      decryptSecret(profile.directUrlEnc),
+      "DIRECT_DATABASE_URL"
+    );
+
+    const { spawnSync } = await import("child_process");
+    const path = await import("path");
+    const prismaBin = path.join(process.cwd(), "node_modules", ".bin", "prisma");
+    const result = spawnSync(
+      prismaBin,
+      ["migrate", "deploy", "--schema", "prisma/schema.prisma"],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          DATABASE_URL: url,
+          DIRECT_DATABASE_URL: url,
+        },
+        encoding: "utf8",
+        timeout: 180_000,
+        shell: process.platform === "win32",
+      }
+    );
+
+    const stdout = result.stdout?.toString() || "";
+    const stderr = result.stderr?.toString() || "";
+    const combined = `${stdout}\n${stderr}`.trim();
+
+    const client = createClient(url);
+    let schema;
+    try {
+      schema = await inspectTargetSchema(client);
+    } finally {
+      await client.$disconnect().catch(() => {});
+    }
+
+    const ok = result.status === 0 && schema.ready;
+    await LoggingService.log({
+      actorId,
+      action: "APPLY_DB_SCHEMA",
+      entityType: "DatabaseProvider",
+      entityId: providerId,
+      newValue: {
+        ok,
+        status: result.status,
+        missing: schema.missing,
+        tableCount: schema.tableCount,
+      },
+    });
+
+    if (!ok) {
+      return {
+        ok: false as const,
+        schema,
+        output: combined.slice(-4000),
+        message: schema.ready
+          ? `migrate deploy exited ${result.status}: ${combined.slice(-500)}`
+          : `Schema still incomplete (missing: ${schema.missing.join(", ")}). Output: ${combined.slice(-500)}`,
+      };
+    }
+
+    return {
+      ok: true as const,
+      schema,
+      output: combined.slice(-4000),
+      message: `Schema applied — ${schema.tableCount} public tables. Run Transfer test next.`,
+    };
+  }
+
+  /**
    * Seeds identifiable tester data on the current DB, copies it to the target,
    * verifies round-trip integrity, then cleans up. Must pass before migrate/activate.
    */
@@ -817,6 +928,22 @@ export class DatabaseProviderService {
     let targetAdId: string | null = null;
 
     try {
+      // ── 0. Target must already have Prisma schema ─────────────
+      const schema = await inspectTargetSchema(target);
+      steps.push({
+        step: "check_schema",
+        ok: schema.ready,
+        detail: schema.ready
+          ? `${schema.tableCount} tables`
+          : `missing ${schema.missing.join(", ")} — click Apply schema first`,
+      });
+      if (!schema.ready) {
+        const summary =
+          "Target database has no U Learn tables (e.g. Country). Apply schema (prisma migrate deploy) on this provider, then retry Transfer test.";
+        await this.markTransferProbe(config, profile.id, false, summary, actorId);
+        return { ok: false as const, summary, steps, missingTables: schema.missing };
+      }
+
       // ── 1. Seed on source ─────────────────────────────────────
       const country = await prisma.country.findFirst({
         where: { deletedAt: null },
@@ -1121,8 +1248,11 @@ export class DatabaseProviderService {
       return { ok, summary, token, steps, phone };
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
+      const schemaMissing = /does not exist in the current database/i.test(detail);
       steps.push({ step: "exception", ok: false, detail });
-      const summary = `Transfer probe error: ${detail}`;
+      const summary = schemaMissing
+        ? "Target is missing Prisma tables. Click Apply schema, then retry Transfer test."
+        : `Transfer probe error: ${detail}`;
       await this.markTransferProbe(config, profile.id, false, summary, actorId);
       return { ok: false as const, summary, steps };
     } finally {

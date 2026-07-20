@@ -3,6 +3,8 @@ import { ADMIN_ROLES } from "@/lib/auth/session";
 import { DatabaseProviderService } from "@/services/database-provider.service";
 import { z } from "zod";
 
+export const maxDuration = 180;
+
 const migrateSchema = z.object({
   action: z.literal("migrate"),
   providerId: z.string().min(1),
@@ -24,11 +26,17 @@ const probeSchema = z.object({
   providerId: z.string().min(1),
 });
 
+const applySchemaSchema = z.object({
+  action: z.literal("apply_schema"),
+  providerId: z.string().min(1),
+});
+
 const schema = z.discriminatedUnion("action", [
   migrateSchema,
   confirmSchema,
   compareSchema,
   probeSchema,
+  applySchemaSchema,
 ]);
 
 export async function POST(request: Request) {
@@ -39,6 +47,16 @@ export async function POST(request: Request) {
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
   try {
+    if (parsed.data.action === "apply_schema") {
+      const result = await DatabaseProviderService.applySchemaToProvider(
+        parsed.data.providerId,
+        auth.session.userId
+      );
+      if (!result.ok) {
+        return error(result.message, 400, "APPLY_SCHEMA_FAILED", { result });
+      }
+      return json(result);
+    }
     if (parsed.data.action === "transfer_test") {
       const result = await DatabaseProviderService.runTransferProbe(
         parsed.data.providerId,

@@ -169,7 +169,9 @@ export function DatabaseProvidersClient() {
       return;
     }
     toast(
-      `OK · ${data.latencyMs}ms · ${data.tableCount} tables · users=${data.userCount}`
+      data.schemaReady === false
+        ? `Connected · ${data.tableCount} tables · schema incomplete — click Apply schema`
+        : `OK · ${data.latencyMs}ms · ${data.tableCount} tables · users=${data.userCount}`
     );
     void load();
   }
@@ -248,6 +250,30 @@ export function DatabaseProvidersClient() {
       token: probe.token,
     });
     toast("Transfer test passed — safe to migrate");
+    void load();
+  }
+
+  async function applySchema(p: Profile) {
+    if (
+      !confirm(
+        `Apply U Learn Prisma schema to "${p.name}"?\n\nThis runs prisma migrate deploy on the target (creates Country, User, …). Safe on empty Supabase; do not run on a DB that already has conflicting tables.`
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    const res = await fetch("/api/admin/database-providers/migrate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "apply_schema", providerId: p.id }),
+    });
+    setBusy(false);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      toast(data.error || data.message || "Apply schema failed", "error");
+      return;
+    }
+    toast(data.message || "Schema applied — run Transfer test next");
     void load();
   }
 
@@ -545,6 +571,14 @@ export function DatabaseProvidersClient() {
                   onClick={() => void testProfile(p)}
                 >
                   Test connection
+                </Button>
+                <Button
+                  variant="outline"
+                  className="!py-1.5 text-xs"
+                  disabled={busy}
+                  onClick={() => void applySchema(p)}
+                >
+                  Apply schema
                 </Button>
                 <Button
                   variant="outline"
