@@ -52,6 +52,9 @@ export type PublicDbProviderProfile = Omit<
 
 const SETTINGS_KEY = "database_providers";
 const LOCAL_FILE = path.join(process.cwd(), ".data", "db-providers.json");
+/** Survives Vercel redeploys / DB switches — paste value from Admin → Copy providers env. */
+const ENV_MIRROR_KEY = "DB_PROVIDERS_CONFIG";
+const LIVE_PROFILE_ID = "dbp_live_env";
 
 /**
  * Parent → child export order so imports can run with FKs enabled.
@@ -244,44 +247,246 @@ async function persistLocalCopy(config: DbProvidersConfig) {
   }
 }
 
-export class DatabaseProviderService {
-  static async getConfig(): Promise<DbProvidersConfig> {
-    const row = await prisma.systemSetting.findFirst({
-      where: { key: SETTINGS_KEY, countryId: null },
+function encodeConfigMirror(config: DbProvidersConfig): string {
+  return encryptSecret(JSON.stringify(config));
+}
+
+function decodeConfigMirror(raw: string | undefined | null): DbProvidersConfig | null {
+  if (!raw?.trim()) return null;
+  try {
+    const json = decryptSecret(raw.trim());
+    const parsed = JSON.parse(json) as DbProvidersConfig;
+    if (!parsed || !Array.isArray(parsed.profiles)) return null;
+    return {
+      version: 1,
+      activeProviderId: parsed.activeProviderId ?? null,
+      pendingActivationId: parsed.pendingActivationId ?? null,
+      profiles: parsed.profiles,
+      updatedAt: parsed.updatedAt || new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function mergeConfigs(...parts: (DbProvidersConfig | null | undefined)[]): DbProvidersConfig {
+  const base = emptyConfig();
+  const byId = new Map<string, DbProviderProfile>();
+  for (const part of parts) {
+    if (!part) continue;
+    if (part.activeProviderId) base.activeProviderId = part.activeProviderId;
+    if (part.pendingActivationId) base.pendingActivationId = part.pendingActivationId;
+    if (part.updatedAt && part.updatedAt > (base.updatedAt || "")) {
+      base.updatedAt = part.updatedAt;
+    }
+    for (const p of part.profiles || []) {
+      const prev = byId.get(p.id);
+      if (!prev || (p.updatedAt || "") >= (prev.updatedAt || "")) {
+        byId.set(p.id, p);
+      }
+    }
+  }
+  base.profiles = [...byId.values()].sort((a, b) =>
+    (a.name || "").localeCompare(b.name || "")
+  );
+  return base;
+}
+
+function hostFingerprint(url: string): string | null {
+  try {
+    const normalized = normalizePostgresUrl(url, { allowAccelerate: true });
+    const u = new URL(
+      normalized
+        .replace(/^prisma\+postgres:/i, "http:")
+        .replace(/^prisma:/i, "http:")
+        .replace(/^postgres(ql)?:/i, "http:")
+    );
+    return `${u.hostname}:${u.port || "5432"}`;
+  } catch {
+    return null;
+  }
+}
+
+function kindFromUrl(url: string): DbProviderKind {
+  if (url.includes("supabase")) return "SUPABASE";
+  if (
+    url.startsWith("prisma://") ||
+    url.startsWith("prisma+postgres://") ||
+    url.includes("prisma.io") ||
+    url.includes("accelerate.prisma-data.net")
+  ) {
+    return "PRISMA_POSTGRES";
+  }
+  if (url.includes("localhost") || url.includes("127.0.0.1")) return "LOCAL_CUSTOM";
+  return "VPS_POSTGRES";
+}
+
+/** Always keep the live Vercel/.env connection as a switch-back target. */
+function withLiveEnvProfile(config: DbProvidersConfig): DbProvidersConfig {
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  const directUrl = (
+    process.env.DIRECT_DATABASE_URL ||
+    process.env.DATABASE_URL ||
+    ""
+  ).trim();
+  if (!databaseUrl || !directUrl) return config;
+
+  let dbNorm: string;
+  let directNorm: string;
+  try {
+    dbNorm = normalizePostgresUrl(databaseUrl, { allowAccelerate: true });
+    directNorm = normalizePostgresUrl(directUrl, {
+      allowAccelerate: directUrl.startsWith("prisma"),
     });
-    if (row?.value && typeof row.value === "object") {
-      return row.value as DbProvidersConfig;
+  } catch {
+    // Live env may be accelerate-only for DATABASE_URL; keep raw if normalize fails on one.
+    try {
+      dbNorm = normalizePostgresUrl(databaseUrl, { allowAccelerate: true });
+    } catch {
+      return config;
     }
     try {
-      const raw = await readFile(LOCAL_FILE, "utf8");
-      return JSON.parse(raw) as DbProvidersConfig;
+      directNorm = normalizePostgresUrl(directUrl, { allowAccelerate: true });
     } catch {
-      return emptyConfig();
+      directNorm = directUrl;
     }
   }
 
-  static async saveConfig(config: DbProvidersConfig, actorId: string) {
-    const next = { ...config, updatedAt: new Date().toISOString() };
-    const existing = await prisma.systemSetting.findFirst({
-      where: { key: SETTINGS_KEY, countryId: null },
-    });
-    if (existing) {
-      await prisma.systemSetting.update({
-        where: { id: existing.id },
-        data: { value: next, updatedBy: actorId },
-      });
-    } else {
-      await prisma.systemSetting.create({
-        data: {
-          key: SETTINGS_KEY,
-          countryId: null,
-          value: next,
-          updatedBy: actorId,
-        },
-      });
+  const fp = hostFingerprint(directNorm) || hostFingerprint(dbNorm);
+  const now = new Date().toISOString();
+  const live: DbProviderProfile = {
+    id: LIVE_PROFILE_ID,
+    name: `Live env (${fp || "current"})`,
+    kind: kindFromUrl(dbNorm),
+    databaseUrlEnc: encryptSecret(dbNorm),
+    directUrlEnc: encryptSecret(
+      /^postgres(ql)?:\/\//i.test(directNorm) ? directNorm : dbNorm
+    ),
+    accelerateUrlEnc: process.env.PRISMA_ACCELERATE_URL?.trim()
+      ? encryptSecret(process.env.PRISMA_ACCELERATE_URL.trim())
+      : null,
+    notes:
+      "Auto-captured from Vercel / process env so you can switch back after moving to another provider.",
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  // Prefer matching by host so we don't duplicate Supabase/Prisma entries.
+  const profiles = config.profiles.filter((p) => {
+    if (p.id === LIVE_PROFILE_ID) return false;
+    try {
+      const pFp =
+        hostFingerprint(decryptSecret(p.directUrlEnc)) ||
+        hostFingerprint(decryptSecret(p.databaseUrlEnc));
+      return !fp || pFp !== fp;
+    } catch {
+      return true;
     }
+  });
+
+  return {
+    ...config,
+    profiles: [live, ...profiles],
+    activeProviderId: config.activeProviderId || LIVE_PROFILE_ID,
+  };
+}
+
+async function writeConfigToClient(client: PrismaClient, config: DbProvidersConfig, actorId: string) {
+  const existing = await client.systemSetting.findFirst({
+    where: { key: SETTINGS_KEY, countryId: null },
+  });
+  if (existing) {
+    await client.systemSetting.update({
+      where: { id: existing.id },
+      data: { value: config, updatedBy: actorId },
+    });
+  } else {
+    await client.systemSetting.create({
+      data: {
+        key: SETTINGS_KEY,
+        countryId: null,
+        value: config,
+        updatedBy: actorId,
+      },
+    });
+  }
+}
+
+/** Best-effort: keep the provider list on every known Postgres target. */
+async function replicateConfigToKnownProviders(
+  config: DbProvidersConfig,
+  actorId: string
+) {
+  for (const profile of config.profiles) {
+    try {
+      const url = assertDirectPostgresUrl(
+        decryptSecret(profile.directUrlEnc),
+        "DIRECT_DATABASE_URL"
+      );
+      const client = createClient(url);
+      try {
+        await writeConfigToClient(client, config, actorId);
+      } finally {
+        await client.$disconnect().catch(() => {});
+      }
+    } catch {
+      // Target may be unreachable — env mirror still covers Vercel.
+    }
+  }
+}
+
+export class DatabaseProviderService {
+  static async getConfig(): Promise<DbProvidersConfig> {
+    let fromDb: DbProvidersConfig | null = null;
+    try {
+      const row = await prisma.systemSetting.findFirst({
+        where: { key: SETTINGS_KEY, countryId: null },
+      });
+      if (row?.value && typeof row.value === "object") {
+        fromDb = row.value as DbProvidersConfig;
+      }
+    } catch {
+      fromDb = null;
+    }
+
+    let fromFile: DbProvidersConfig | null = null;
+    try {
+      const raw = await readFile(LOCAL_FILE, "utf8");
+      fromFile = JSON.parse(raw) as DbProvidersConfig;
+    } catch {
+      fromFile = null;
+    }
+
+    const fromEnv = decodeConfigMirror(process.env[ENV_MIRROR_KEY]);
+    const merged = withLiveEnvProfile(mergeConfigs(fromEnv, fromFile, fromDb));
+
+    // Hydrate empty DB from env/file so Admin UI keeps previous providers after a switch.
+    if ((!fromDb || fromDb.profiles.length === 0) && merged.profiles.length > 0) {
+      try {
+        await writeConfigToClient(prisma, merged, "system");
+        await persistLocalCopy(merged);
+      } catch {
+        /* ignore hydrate errors */
+      }
+    }
+
+    return merged;
+  }
+
+  static async saveConfig(config: DbProvidersConfig, actorId: string) {
+    const next = withLiveEnvProfile({
+      ...config,
+      updatedAt: new Date().toISOString(),
+    });
+    await writeConfigToClient(prisma, next, actorId);
     await persistLocalCopy(next);
+    // Fire-and-forget replicate so saving on Supabase also updates old Prisma DB when reachable.
+    void replicateConfigToKnownProviders(next, actorId);
     return next;
+  }
+
+  static getEnvMirror(config: DbProvidersConfig): string {
+    return encodeConfigMirror(config);
   }
 
   static async listPublic() {
@@ -309,6 +514,7 @@ export class DatabaseProviderService {
           return null;
         }
       })(),
+      hasEnvMirror: Boolean(process.env[ENV_MIRROR_KEY]?.trim()),
     };
     return {
       config: {
@@ -316,6 +522,11 @@ export class DatabaseProviderService {
         profiles: config.profiles.map(toPublic),
       },
       current,
+      envMirror: {
+        key: ENV_MIRROR_KEY,
+        value: encodeConfigMirror(config),
+        hint: "Paste this into Vercel env so provider list survives DB switches and redeploys.",
+      },
       kinds: [
         {
           id: "PRISMA_POSTGRES",
@@ -744,13 +955,25 @@ export class DatabaseProviderService {
       p.lastTransferTestOk = true;
       p.lastTransferTestSummary = postProbe.summary;
     }
-    await this.saveConfig(config, actorId);
+    const saved = await this.saveConfig(config, actorId);
+    // Ensure the target DB itself has the full provider list for switch-back.
+    try {
+      const targetClient = createClient(decryptSecret(profile.directUrlEnc));
+      try {
+        await writeConfigToClient(targetClient, saved, actorId);
+      } finally {
+        await targetClient.$disconnect().catch(() => {});
+      }
+    } catch {
+      /* target write best-effort */
+    }
 
     const databaseUrl = decryptSecret(profile.databaseUrlEnc);
     const directUrl = decryptSecret(profile.directUrlEnc);
     const accelerateUrl = profile.accelerateUrlEnc
       ? decryptSecret(profile.accelerateUrlEnc)
       : null;
+    const providersMirror = encodeConfigMirror(saved);
 
     await LoggingService.log({
       actorId,
@@ -768,7 +991,7 @@ export class DatabaseProviderService {
     return {
       success: true as const,
       provider: toPublic(
-        config.profiles.find((x) => x.id === providerId) ?? profile
+        saved.profiles.find((x) => x.id === providerId) ?? profile
       ),
       sourceTotal,
       import: imported,
@@ -778,14 +1001,16 @@ export class DatabaseProviderService {
         instructions: [
           "1. Confirm transfer test + row counts on the target look correct.",
           "2. Set these environment variables on the host (Vercel / VPS / local .env).",
-          "3. Run `npx prisma migrate deploy` against DIRECT_DATABASE_URL if the target was empty.",
-          "4. Redeploy / restart the app so it picks up the new URLs.",
-          "5. Open Admin → Database Providers and click “Confirm activated”.",
+          "3. Also set DB_PROVIDERS_CONFIG (included below) so Admin keeps ALL provider profiles after redeploy — required to switch back safely.",
+          "4. Run `npx prisma migrate deploy` against DIRECT_DATABASE_URL if the target was empty.",
+          "5. Redeploy / restart the app so it picks up the new URLs.",
+          "6. Open Admin → Database Providers and click “Confirm activated”.",
         ],
         env: {
           DATABASE_URL: databaseUrl,
           DIRECT_DATABASE_URL: directUrl,
           ...(accelerateUrl ? { PRISMA_ACCELERATE_URL: accelerateUrl } : {}),
+          DB_PROVIDERS_CONFIG: providersMirror,
         },
       },
     };

@@ -44,15 +44,20 @@ Admin → **Database Providers** lets you register Prisma Postgres / Accelerate,
 
 1. **Export backup** — full JSON dump of all tables from the live DB (keep this file safe)  
 2. **Test connection** — verify the saved target URL responds  
-3. **Transfer test** — seeds temporary tester data (user + device + setting + inactive ad) on the live DB, copies it to the target, verifies integrity, then cleans up. **Required before migrate** (pass valid 24h)  
-4. **Migrate data here** — full copy into the target (optional wipe); re-runs transfer test after import  
-5. **Compare counts** — spot-check key tables  
-6. **Set env + redeploy** — the app cannot hot-swap `DATABASE_URL` in-process  
-7. **Confirm activated** — mark the new provider as active in admin metadata  
+3. **Apply schema** — run `prisma migrate deploy` / schema push on empty targets (e.g. new Supabase)  
+4. **Transfer test** — seeds temporary tester data, copies to target, verifies, cleans up (**required**, valid 24h)  
+5. **Migrate data here** — full copy into the target (optional wipe); re-runs transfer test after import  
+6. **Copy providers env** — set `DB_PROVIDERS_CONFIG` on Vercel so the provider list survives the switch  
+7. **Set DATABASE_URL / DIRECT_DATABASE_URL + redeploy** — the app cannot hot-swap URLs in-process  
+8. **Confirm activated** — mark the new provider as active in admin metadata  
 
-Connection secrets are encrypted at rest (`DB_PROVIDER_SECRET` or `JWT_SECRET`). A mirror copy is written to `apps/web/.data/db-providers.json` (gitignored).
+**Why providers disappear after redeploy:** profiles were only stored in `SystemSetting` on the *current* DB. After pointing Vercel at Supabase, that row was missing. The app now:
 
-Always export a backup **before** switching. Target databases must already have the Prisma schema applied (`npx prisma migrate deploy` with `DIRECT_DATABASE_URL`). Do not change env until Transfer test + Migrate both succeed.
+- Auto-registers the live env connection as a switch-back profile  
+- Mirrors the full list to `DB_PROVIDERS_CONFIG` (encrypted)  
+- Replicates the list onto every reachable provider DB when you save  
+
+Always click **Copy providers env** and paste into Vercel before/after a switch.
 
 
 ## 2. Environment Variables (Vercel)

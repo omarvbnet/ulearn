@@ -53,6 +53,12 @@ export function DatabaseProvidersClient() {
     directUrlMasked: string;
     usesAccelerate: boolean;
     hostHint: string | null;
+    hasEnvMirror?: boolean;
+  } | null>(null);
+  const [envMirror, setEnvMirror] = useState<{
+    key: string;
+    value: string;
+    hint: string;
   } | null>(null);
 
   const [editing, setEditing] = useState(false);
@@ -86,6 +92,7 @@ export function DatabaseProvidersClient() {
     setPendingId(data.config?.pendingActivationId ?? null);
     setKinds(data.kinds || []);
     setCurrent(data.current || null);
+    setEnvMirror(data.envMirror || null);
   }, [toast]);
 
   useEffect(() => {
@@ -373,6 +380,15 @@ export function DatabaseProvidersClient() {
     toast("Env vars copied — paste into Vercel / .env then redeploy");
   }
 
+  function copyProvidersEnvMirror() {
+    if (!envMirror?.value) {
+      toast("No providers mirror yet — save a provider first", "error");
+      return;
+    }
+    void navigator.clipboard.writeText(`${envMirror.key}="${envMirror.value}"`);
+    toast("DB_PROVIDERS_CONFIG copied — paste into Vercel env, then redeploy");
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -382,6 +398,14 @@ export function DatabaseProvidersClient() {
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" disabled={busy} onClick={() => void exportBackup()}>
               Export backup
+            </Button>
+            <Button
+              variant="outline"
+              disabled={busy || !envMirror?.value}
+              onClick={copyProvidersEnvMirror}
+              title="Keeps all provider profiles after switching DB / redeploying"
+            >
+              Copy providers env
             </Button>
             <Button
               variant="outline"
@@ -425,9 +449,17 @@ export function DatabaseProvidersClient() {
           <p className="text-muted">Loading…</p>
         )}
         <p className="text-xs text-muted">
-          Safe switch: Export backup → Test connection → Transfer test (seeds temporary tester
-          data and verifies copy) → Migrate → set env + redeploy → Confirm. Source DB is never
-          deleted. The app cannot hot-swap its connection string in-process.
+          Safe switch: Export backup → Test → Apply schema (if empty) → Transfer test → Migrate →
+          set env + <span className="text-foreground">DB_PROVIDERS_CONFIG</span> + redeploy →
+          Confirm. Provider list is stored in the DB and mirrored to Vercel env so you can switch
+          back to a previous host. Use <span className="text-foreground">Copy providers env</span>{" "}
+          after saving profiles.
+          {current?.hasEnvMirror === false && (
+            <span className="block mt-1 text-amber-400">
+              DB_PROVIDERS_CONFIG is not set on this deployment — previous providers may disappear
+              after a DB switch until you paste the mirror into Vercel.
+            </span>
+          )}
         </p>
       </Card>
 
