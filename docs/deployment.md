@@ -31,8 +31,10 @@ npm run db:seed
 
 | `DATABASE_URL` | Client | Caching | Generate |
 |---|---|---|---|
-| `postgres://…@pooled.db.prisma.io` | Query engine | Off (safe) | `prisma generate` |
-| `prisma://` / `prisma+postgres://` | Accelerate | `cacheStrategy` on hot reads | `prisma generate --no-engine` |
+| `postgres://…@pooled.db.prisma.io` | Query engine | Off (safe) | `prisma generate` (engine included) |
+| `prisma://` / `prisma+postgres://` | Accelerate | `cacheStrategy` on hot reads | `prisma generate` (engine still included) |
+
+We always ship the query engine so Admin → **Database Providers** can open temporary clients against Supabase / VPS `postgresql://` URLs. Generating with `--no-engine` makes Prisma reject those URLs (`must start with protocol prisma://`).
 
 If you see `UnknownJsonError` on simple reads (e.g. `country.findMany`), either Accelerate cannot reach the DB (check console / plan / direct connectivity) or the app was sending `cacheStrategy` without a real Accelerate URL — the client now only enables Accelerate when the URL protocol is `prisma://` / `prisma+postgres://`.
 

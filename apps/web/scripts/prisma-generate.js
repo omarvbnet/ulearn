@@ -1,33 +1,28 @@
 /**
- * Generate Prisma Client for the current DATABASE_URL shape.
+ * Always generate Prisma Client WITH the query engine.
  *
- * Accelerate / Prisma Postgres (`prisma://`, `prisma+postgres://`) →
- *   `prisma generate --no-engine` (queries go through Accelerate HTTP).
- * Plain postgres / pooled URLs →
- *   normal `prisma generate` (needs the query engine binary).
+ * Admin → Database Providers opens temporary clients against arbitrary
+ * `postgresql://` targets (Supabase, VPS, local). A client built with
+ * `--no-engine` only accepts `prisma://` and rejects those URLs with:
+ *   "the URL must start with the protocol prisma://"
+ *
+ * Accelerate still works at runtime via `withAccelerate()` when
+ * DATABASE_URL / PRISMA_ACCELERATE_URL is `prisma://`.
+ *
+ * Opt-in only (not recommended): PRISMA_GENERATE_NO_ENGINE=1
  */
 const { spawnSync } = require("child_process");
 
-function isAccelerateUrl(url) {
-  if (!url) return false;
-  return (
-    url.startsWith("prisma://") ||
-    url.startsWith("prisma+postgres://") ||
-    url.includes("accelerate.prisma-data.net")
-  );
-}
-
-const useNoEngine =
-  process.env.PRISMA_GENERATE_NO_ENGINE === "1" ||
-  isAccelerateUrl(process.env.PRISMA_ACCELERATE_URL) ||
-  isAccelerateUrl(process.env.DATABASE_URL);
+const useNoEngine = process.env.PRISMA_GENERATE_NO_ENGINE === "1";
 
 const args = ["generate"];
 if (useNoEngine) {
   args.push("--no-engine");
-  console.log("prisma generate --no-engine (Accelerate URL detected)");
+  console.warn(
+    "prisma generate --no-engine: Database Providers cannot test/migrate postgresql:// targets"
+  );
 } else {
-  console.log("prisma generate (local query engine)");
+  console.log("prisma generate (query engine included for multi-provider support)");
 }
 
 const result = spawnSync("npx", ["prisma", ...args], {

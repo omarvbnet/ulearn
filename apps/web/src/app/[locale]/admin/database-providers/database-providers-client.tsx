@@ -663,19 +663,24 @@ export function DatabaseProvidersClient() {
               ))}
             </Select>
             <Input
-              label="DATABASE_URL (app / pool / Accelerate)"
+              label="DATABASE_URL (app runtime — postgres or prisma://)"
               value={form.databaseUrl}
               onChange={(e) => setForm({ ...form, databaseUrl: e.target.value })}
               placeholder="postgresql://… or prisma://…"
               required
             />
             <Input
-              label="DIRECT_DATABASE_URL (migrations & bulk copy)"
+              label="DIRECT_DATABASE_URL (required for test / migrate — postgresql only)"
               value={form.directUrl}
               onChange={(e) => setForm({ ...form, directUrl: e.target.value })}
-              placeholder="postgresql://…"
+              placeholder="postgresql://… (Supabase: direct or session URI, not prisma://)"
               required
             />
+            <p className="text-xs text-muted">
+              Test, transfer probe, and migrate always use the direct Postgres URL. For Supabase
+              paste the Database → Connection string (URI). Do not put an Accelerate{" "}
+              <code className="text-foreground">prisma://</code> URL in the direct field.
+            </p>
             <Input
               label="PRISMA_ACCELERATE_URL (optional)"
               value={form.accelerateUrl}

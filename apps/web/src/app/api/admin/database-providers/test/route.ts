@@ -21,6 +21,13 @@ export async function POST(request: Request) {
     return json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "FAILED";
+    if (/must start with the protocol `?prisma:\/\//i.test(msg)) {
+      return error(
+        "This deployment’s Prisma client cannot open postgresql:// targets. Redeploy after the latest fix (query engine included), and use a DIRECT postgresql:// URL — not prisma://.",
+        400,
+        "PRISMA_ENGINE_REQUIRED"
+      );
+    }
     return error(msg, 400, msg);
   }
 }
