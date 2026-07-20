@@ -1,4 +1,5 @@
 import { json, optionalAuth } from "@/lib/api";
+import { CacheTTL } from "@/lib/prisma-cache";
 import { prisma } from "@/lib/prisma";
 import { resolvePublicMediaUrl } from "@/lib/r2";
 import { CourseGroupService } from "@/services/course-group.service";
@@ -123,23 +124,38 @@ export async function GET(request: Request) {
     user?.locale ||
     "AR";
 
+  // Ads + stages are shared across users — cache via Accelerate.
+  // Course likes (likedByMe) stay uncached when signed in.
   const [adsRaw, courses, stages] = await Promise.all([
-    prisma.advertisement.findMany({
-      where: {
-        isActive: true,
-        deletedAt: null,
-        locale: adsLocale,
-        OR: [{ startsAt: null }, { startsAt: { lte: now } }],
-        AND: [{ OR: [{ endsAt: null }, { endsAt: { gte: now } }] }],
-      },
-      orderBy: { sortOrder: "asc" },
-      include: {
-        _count: { select: { likes: true } },
-        ...(userId
-          ? { likes: { where: { userId }, select: { id: true } } }
-          : {}),
-      },
-    }),
+    userId
+      ? prisma.advertisement.findMany({
+          where: {
+            isActive: true,
+            deletedAt: null,
+            locale: adsLocale,
+            OR: [{ startsAt: null }, { startsAt: { lte: now } }],
+            AND: [{ OR: [{ endsAt: null }, { endsAt: { gte: now } }] }],
+          },
+          orderBy: { sortOrder: "asc" },
+          include: {
+            _count: { select: { likes: true } },
+            likes: { where: { userId }, select: { id: true } },
+          },
+        })
+      : prisma.advertisement.findMany({
+          where: {
+            isActive: true,
+            deletedAt: null,
+            locale: adsLocale,
+            OR: [{ startsAt: null }, { startsAt: { lte: now } }],
+            AND: [{ OR: [{ endsAt: null }, { endsAt: { gte: now } }] }],
+          },
+          orderBy: { sortOrder: "asc" },
+          include: {
+            _count: { select: { likes: true } },
+          },
+          cacheStrategy: CacheTTL.catalog,
+        }),
     TeacherCourseService.listPublishedCourses({
       stageId,
       subjectId,
@@ -162,6 +178,7 @@ export async function GET(request: Request) {
         nameTr: true,
         isCertificateTrack: true,
       },
+      cacheStrategy: CacheTTL.reference,
     }),
   ]);
 

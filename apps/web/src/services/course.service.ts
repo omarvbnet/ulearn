@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { CacheTTL } from "@/lib/prisma-cache";
 import { LoggingService } from "@/services/logging.service";
 import type { Prisma } from "@prisma/client";
 
@@ -13,6 +14,7 @@ export class CourseService {
           orderBy: { sortOrder: "asc" },
         },
       },
+      cacheStrategy: CacheTTL.reference,
     });
   }
 

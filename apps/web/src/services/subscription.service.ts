@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { CacheTTL } from "@/lib/prisma-cache";
 import { defaultSubscriptionExpiry, generateActivationCode } from "@/lib/utils";
 import { LoggingService } from "@/services/logging.service";
 import { NotificationService } from "@/services/notification.service";
@@ -9,6 +10,7 @@ export class SubscriptionService {
       where: { countryId, isActive: true, deletedAt: null },
       include: { subject: true, stage: true },
       orderBy: { price: "asc" },
+      cacheStrategy: CacheTTL.short,
     });
   }
 

@@ -1,9 +1,31 @@
 import { PrismaClient } from "@prisma/client";
+import { withAccelerate } from "@prisma/extension-accelerate";
 
-const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined };
+const globalForPrisma = globalThis as unknown as {
+  prisma: ReturnType<typeof createPrismaClient> | undefined;
+};
 
-/** Prisma Postgres pooled URLs often allow ~5 connections total — cap each serverless instance at 1. */
-function serverlessDatabaseUrl() {
+function isAccelerateUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  return (
+    url.startsWith("prisma://") ||
+    url.startsWith("prisma+postgres://") ||
+    url.includes("accelerate.prisma-data.net")
+  );
+}
+
+/**
+ * Cap pooled Postgres connections per serverless instance.
+ * Skip for Accelerate / Prisma Postgres URLs — Accelerate manages pooling.
+ */
+function resolveDatabaseUrl() {
+  const accelerate =
+    process.env.PRISMA_ACCELERATE_URL ||
+    (isAccelerateUrl(process.env.DATABASE_URL)
+      ? process.env.DATABASE_URL
+      : undefined);
+  if (accelerate) return accelerate;
+
   const url = process.env.DATABASE_URL;
   if (!url || url.includes("connection_limit=")) return url;
 
@@ -12,13 +34,16 @@ function serverlessDatabaseUrl() {
 }
 
 function createPrismaClient() {
-  const url = serverlessDatabaseUrl();
-  return new PrismaClient({
+  const url = resolveDatabaseUrl();
+  const base = new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
     ...(url && url !== process.env.DATABASE_URL
       ? { datasources: { db: { url } } }
       : {}),
   });
+
+  // Connection pooling + optional query cache via `cacheStrategy` on reads.
+  return base.$extends(withAccelerate());
 }
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();

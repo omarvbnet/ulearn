@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { CacheTTL } from "@/lib/prisma-cache";
 import { json } from "@/lib/api";
 
 export async function GET() {
@@ -11,6 +12,7 @@ export async function GET() {
       },
     },
     orderBy: { nameEn: "asc" },
+    cacheStrategy: CacheTTL.reference,
   });
   return json({ countries });
 }

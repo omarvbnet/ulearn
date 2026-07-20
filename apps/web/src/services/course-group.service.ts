@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { CacheTTL } from "@/lib/prisma-cache";
 import { resolvePublicMediaUrl } from "@/lib/r2";
 import { LoggingService } from "@/services/logging.service";
 import { NotificationService } from "@/services/notification.service";
@@ -297,6 +298,7 @@ export class CourseGroupService {
           },
         },
       },
+      cacheStrategy: CacheTTL.catalog,
     });
 
     const mapped = await Promise.all(

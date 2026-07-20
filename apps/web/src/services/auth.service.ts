@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { CacheTTL } from "@/lib/prisma-cache";
 import { generateOtp } from "@/lib/utils";
 import { createSession, destroySession } from "@/lib/auth/session";
 import { LoggingService } from "@/services/logging.service";
@@ -54,6 +55,7 @@ async function loadDemoLoginConfig(): Promise<DemoLoginConfig | null> {
         in: ["demo_login_enabled", "demo_login_phone", "demo_login_otp"],
       },
     },
+    cacheStrategy: CacheTTL.settings,
   });
   // Prefer global (countryId null) over country-scoped duplicates.
   const map: Record<string, unknown> = {};

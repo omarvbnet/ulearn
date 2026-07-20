@@ -16,7 +16,7 @@
 # Create database, then:
 cd apps/web
 cp .env.example .env
-# Set DATABASE_URL and JWT_SECRET
+# Set DATABASE_URL, DIRECT_DATABASE_URL, and JWT_SECRET
 
 npx prisma migrate dev --name init
 # or for production:
@@ -24,13 +24,32 @@ npx prisma migrate deploy
 npm run db:seed
 ```
 
+### Prisma Accelerate (connection pool + query cache)
+
+Production should use a Prisma Accelerate (or Prisma Postgres) URL so hot reads are cached and serverless connections are pooled.
+
+1. In [Prisma Console](https://console.prisma.io) enable **Accelerate** for your project (or use Prisma Postgres which includes it).
+2. Set env vars on Vercel:
+
+| Variable | Value |
+|----------|--------|
+| `DATABASE_URL` | Accelerate URL (`prisma://…` or `prisma+postgres://…`) |
+| `DIRECT_DATABASE_URL` | Direct `postgresql://…` URL (migrations / Studio) |
+| `PRISMA_ACCELERATE_URL` | Optional if `DATABASE_URL` is already Accelerate |
+
+3. Hot paths already pass `cacheStrategy` (home catalog, countries, stages, packages). No code change needed per deploy.
+
+Locally you can keep both URLs as the same `postgresql://…` string; Accelerate caching is simply skipped when not using a `prisma://` URL.
+
 ## 2. Environment Variables (Vercel)
 
 Set all keys from `.env.example` in the Vercel project:
 
 | Variable | Required |
 |----------|----------|
-| `DATABASE_URL` | Yes |
+| `DATABASE_URL` | Yes (Accelerate / Prisma Postgres URL in production) |
+| `DIRECT_DATABASE_URL` | Yes when `DATABASE_URL` is `prisma://` (direct Postgres for migrations) |
+| `PRISMA_ACCELERATE_URL` | Optional (only if `DATABASE_URL` stays as direct Postgres) |
 | `JWT_SECRET` | Yes |
 | `NEXT_PUBLIC_APP_URL` | Yes |
 | `R2_*` | Yes (media) |

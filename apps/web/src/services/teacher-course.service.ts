@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { PUBLIC_LESSON_WHERE, PUBLIC_SHORT_VIDEO_WHERE } from "@/lib/video-visibility";
 import { getDownloadUrl, resolvePublicMediaUrl } from "@/lib/r2";
+import { CacheTTL } from "@/lib/prisma-cache";
 import { LoggingService } from "@/services/logging.service";
 import { NotificationService } from "@/services/notification.service";
 import { Prisma, type CourseStatus, type TeacherLevel } from "@prisma/client";
@@ -1123,6 +1124,8 @@ export class TeacherCourseService {
     levels?: TeacherLevel[];
   }) {
     const q = filter?.q?.trim();
+    // Skip Accelerate cache when searching — results are unique per query.
+    const cacheStrategy = q ? undefined : CacheTTL.catalog;
     return prisma.course.findMany({
       where: {
         status: "APPROVED",
@@ -1193,6 +1196,7 @@ export class TeacherCourseService {
         },
         _count: { select: { purchases: { where: { status: "PAID" } } } },
       },
+      ...(cacheStrategy ? { cacheStrategy } : {}),
     });
   }
 
