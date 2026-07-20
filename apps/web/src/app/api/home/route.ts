@@ -194,63 +194,62 @@ export async function GET(request: Request) {
 
   const ads = adsRaw.filter((a) => !a.countryId || a.countryId === user?.countryId);
 
-  const adsOut = await Promise.all(
-    ads.map(async (a) => {
-      const imageUrl =
-        (await resolvePublicMediaUrl(a.imageUrl, a.imageKey).catch(() => null)) ?? "";
-      const title =
-        a.title ||
-        (adsLocale === "AR"
-          ? a.titleAr
-          : adsLocale === "KU"
-            ? a.titleKu
-            : adsLocale === "TR"
-              ? a.titleTr
-              : a.titleEn) ||
-        a.titleEn ||
-        a.titleAr ||
-        a.titleKu ||
-        a.titleTr ||
-        null;
-      return {
-        id: a.id,
-        locale: a.locale,
-        title,
-        titleEn: a.titleEn,
-        titleAr: a.titleAr,
-        titleKu: a.titleKu,
-        titleTr: a.titleTr,
-        imageUrl,
-        updatedAt: a.updatedAt,
-        linkUrl: a.linkUrl,
-        likes: a._count.likes,
-        likedByMe: userId
-          ? (("likes" in a ? (a.likes as { id: string }[]).length : 0) > 0)
-          : false,
-      };
-    })
-  );
-
-  const coursesOut = CourseRatingService.sortForHomeFeed(
-    await TeacherCourseService.enrichCoursesForUser(courses, userId)
-  );
-
-  const aiExamStats = userId
-    ? await AiExamService.getStats(userId).catch(() => ({
-        total: 0,
-        passed: 0,
-        failed: 0,
-        avgScore: 0,
-      }))
-    : null;
-
-  const groups = await CourseGroupService.listForHome({
-    stageId: stageId && stageId !== "all" ? stageId : undefined,
-    countryId: user?.countryId ?? undefined,
-  }).catch((err) => {
-    console.error("[home] course groups failed", err);
-    return [];
-  });
+  const [adsOut, coursesOut, aiExamStats, groups] = await Promise.all([
+    Promise.all(
+      ads.map(async (a) => {
+        const imageUrl =
+          (await resolvePublicMediaUrl(a.imageUrl, a.imageKey).catch(() => null)) ?? "";
+        const title =
+          a.title ||
+          (adsLocale === "AR"
+            ? a.titleAr
+            : adsLocale === "KU"
+              ? a.titleKu
+              : adsLocale === "TR"
+                ? a.titleTr
+                : a.titleEn) ||
+          a.titleEn ||
+          a.titleAr ||
+          a.titleKu ||
+          a.titleTr ||
+          null;
+        return {
+          id: a.id,
+          locale: a.locale,
+          title,
+          titleEn: a.titleEn,
+          titleAr: a.titleAr,
+          titleKu: a.titleKu,
+          titleTr: a.titleTr,
+          imageUrl,
+          updatedAt: a.updatedAt,
+          linkUrl: a.linkUrl,
+          likes: a._count.likes,
+          likedByMe: userId
+            ? (("likes" in a ? (a.likes as { id: string }[]).length : 0) > 0)
+            : false,
+        };
+      })
+    ),
+    TeacherCourseService.enrichCoursesForUser(courses, userId).then((enriched) =>
+      CourseRatingService.sortForHomeFeed(enriched)
+    ),
+    userId
+      ? AiExamService.getStats(userId).catch(() => ({
+          total: 0,
+          passed: 0,
+          failed: 0,
+          avgScore: 0,
+        }))
+      : Promise.resolve(null),
+    CourseGroupService.listForHome({
+      stageId: stageId && stageId !== "all" ? stageId : undefined,
+      countryId: user?.countryId ?? undefined,
+    }).catch((err) => {
+      console.error("[home] course groups failed", err);
+      return [];
+    }),
+  ]);
 
   return json({
     stage,

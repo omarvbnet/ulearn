@@ -59,6 +59,25 @@ Admin → **Database Providers** lets you register Prisma Postgres / Accelerate,
 
 Always click **Copy providers env** and paste into Vercel before/after a switch.
 
+### Supabase + Vercel performance
+
+Slow fetches usually mean **region mismatch** or **transaction pooler**:
+
+| Issue | Fix |
+|---|---|
+| DB in `ap-northeast-2` (Seoul), app in `iad1` (US) | Deploy web to `icn1` (set in `apps/web/vercel.json`) |
+| `DATABASE_URL` uses `:6543?pgbouncer=true` | Prefer session `:5432` for Prisma; app auto-uses `DIRECT_DATABASE_URL` when it is `:5432` |
+| Many sequential queries | Home API now parallelizes enrich/groups/stats |
+
+Recommended Vercel env for Supabase Seoul:
+
+```text
+DATABASE_URL=postgresql://postgres.PROJECT:PASSWORD@aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres
+DIRECT_DATABASE_URL=postgresql://postgres.PROJECT:PASSWORD@aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres
+```
+
+(Encode special password characters. Avoid `:6543` unless you must scale connections.)
+
 
 ## 2. Environment Variables (Vercel)
 
