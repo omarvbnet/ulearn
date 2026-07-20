@@ -5,7 +5,7 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-function isAccelerateUrl(url: string | undefined): boolean {
+export function isAccelerateUrl(url: string | undefined): boolean {
   if (!url) return false;
   return (
     url.startsWith("prisma://") ||
@@ -15,8 +15,20 @@ function isAccelerateUrl(url: string | undefined): boolean {
 }
 
 /**
+ * True when the runtime connection goes through Prisma Accelerate
+ * (`prisma://` / `prisma+postgres://`). Pooled `postgres://…@pooled.db.prisma.io`
+ * is NOT Accelerate — query cache / `--no-engine` do not apply there.
+ */
+export function isAccelerateEnabled(): boolean {
+  return Boolean(
+    isAccelerateUrl(process.env.PRISMA_ACCELERATE_URL) ||
+      isAccelerateUrl(process.env.DATABASE_URL)
+  );
+}
+
+/**
  * Cap pooled Postgres connections per serverless instance.
- * Skip for Accelerate / Prisma Postgres URLs — Accelerate manages pooling.
+ * Skip for Accelerate / Prisma Postgres Accelerate URLs — Accelerate manages pooling.
  */
 function resolveDatabaseUrl() {
   const accelerate =
@@ -42,7 +54,13 @@ function createPrismaClient(): PrismaClient {
       : {}),
   });
 
-  // Runtime: Accelerate pooling + cacheStrategy support.
+  // Only extend when talking to Accelerate. Applying withAccelerate() +
+  // cacheStrategy against a plain postgres:// URL causes UnknownJsonError
+  // / broken requests in production.
+  if (!isAccelerateEnabled()) {
+    return base;
+  }
+
   // Cast back to PrismaClient so `select` / `include` typings stay correct
   // (`$extends(withAccelerate())` otherwise widens results to the base model).
   return base.$extends(withAccelerate()) as unknown as PrismaClient;

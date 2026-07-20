@@ -2,8 +2,20 @@ import { NextResponse } from "next/server";
 import { getSession, type SessionPayload } from "@/lib/auth/session";
 import type { UserRole } from "@prisma/client";
 
+/** JSON.stringify cannot serialize BigInt (Prisma VideoAsset.fileSize, raw COUNT, etc.). */
+export function jsonReplacer(_key: string, value: unknown): unknown {
+  if (typeof value === "bigint") {
+    const asNumber = Number(value);
+    return Number.isSafeInteger(asNumber) ? asNumber : value.toString();
+  }
+  return value;
+}
+
 export function json<T>(data: T, status = 200) {
-  return NextResponse.json(data, { status });
+  return new NextResponse(JSON.stringify(data, jsonReplacer), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 export function error(
@@ -12,7 +24,13 @@ export function error(
   code?: string,
   extra?: Record<string, unknown>
 ) {
-  return NextResponse.json({ error: message, code, ...extra }, { status });
+  return new NextResponse(
+    JSON.stringify({ error: message, code, ...extra }, jsonReplacer),
+    {
+      status,
+      headers: { "Content-Type": "application/json" },
+    }
+  );
 }
 
 export async function requireAuth(

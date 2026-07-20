@@ -1,4 +1,4 @@
-import { requireAuth } from "@/lib/api";
+import { jsonReplacer, requireAuth } from "@/lib/api";
 import { ADMIN_ROLES } from "@/lib/auth/session";
 import { DatabaseProviderService } from "@/services/database-provider.service";
 
@@ -8,7 +8,7 @@ export async function GET() {
   if (auth.error) return auth.error;
 
   const backup = await DatabaseProviderService.exportBackup(auth.session.userId);
-  const body = JSON.stringify(backup);
+  const body = JSON.stringify(backup, jsonReplacer);
   return new Response(body, {
     headers: {
       "Content-Type": "application/json; charset=utf-8",

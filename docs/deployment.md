@@ -17,12 +17,24 @@
 cd apps/web
 cp .env.example .env
 # Set DATABASE_URL, DIRECT_DATABASE_URL, and JWT_SECRET
+#
+# Important (Prisma Postgres):
+# - DATABASE_URL may be pooled (`…@pooled.db.prisma.io`) OR Accelerate (`prisma://` / `prisma+postgres://`)
+# - DIRECT_DATABASE_URL must be the *direct* host (`…@db.prisma.io`), not the pooled host
+# - Query caching only works with an Accelerate URL; with pooled Postgres the app skips cacheStrategy automatically
 
-npx prisma migrate dev --name init
-# or for production:
 npx prisma migrate deploy
 npm run db:seed
 ```
+
+### Prisma Accelerate vs pooled Postgres
+
+| `DATABASE_URL` | Client | Caching | Generate |
+|---|---|---|---|
+| `postgres://…@pooled.db.prisma.io` | Query engine | Off (safe) | `prisma generate` |
+| `prisma://` / `prisma+postgres://` | Accelerate | `cacheStrategy` on hot reads | `prisma generate --no-engine` |
+
+If you see `UnknownJsonError` on simple reads (e.g. `country.findMany`), either Accelerate cannot reach the DB (check console / plan / direct connectivity) or the app was sending `cacheStrategy` without a real Accelerate URL — the client now only enables Accelerate when the URL protocol is `prisma://` / `prisma+postgres://`.
 
 ## Database Providers (Admin)
 
