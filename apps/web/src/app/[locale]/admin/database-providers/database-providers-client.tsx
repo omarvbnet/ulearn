@@ -132,7 +132,8 @@ export function DatabaseProvidersClient() {
     });
     setBusy(false);
     if (!res.ok) {
-      toast("Failed to save provider", "error");
+      const data = await res.json().catch(() => ({}));
+      toast(data.error || "Failed to save provider", "error");
       return;
     }
     toast(form.id ? "Provider updated" : "Provider saved");

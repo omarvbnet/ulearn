@@ -59,17 +59,111 @@ export type NormalizePostgresOptions = {
   allowAccelerate?: boolean;
 };
 
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 /**
- * Clean + validate a DB URL. Fixes common paste issues (quotes, whitespace)
- * and fails with a clear message when the password has unescaped special chars
- * (the usual cause of Prisma "invalid port number").
+ * Parse postgres URLs even when the password has raw `@`, `:`, `#`, etc.
+ * Uses last `@` as host separator and first `:` in userinfo as user/password split.
+ */
+function parsePostgresParts(s: string): {
+  protocol: "postgres" | "postgresql";
+  user: string;
+  pass: string;
+  host: string;
+  port: string;
+  path: string;
+  search: string;
+} {
+  const protocol = /^postgres:\/\//i.test(s) ? "postgres" : "postgresql";
+  const rest = s.replace(/^postgres(ql)?:\/\//i, "");
+  const at = rest.lastIndexOf("@");
+  if (at < 0) {
+    throw new Error(
+      "URL_MISSING_AT: Expected user:password@host. Example: postgresql://postgres:PASSWORD@db.xxxxx.supabase.co:5432/postgres"
+    );
+  }
+
+  const userinfo = rest.slice(0, at);
+  const hostPart = rest.slice(at + 1);
+  const colon = userinfo.indexOf(":");
+  const userRaw = colon < 0 ? userinfo : userinfo.slice(0, colon);
+  const passRaw = colon < 0 ? "" : userinfo.slice(colon + 1);
+
+  if (!userRaw) {
+    throw new Error("URL_MISSING_USER: Username is empty (for Supabase Direct use postgres).");
+  }
+  if (!passRaw) {
+    throw new Error(
+      "URL_MISSING_PASSWORD: Password is empty. Replace [YOUR-PASSWORD] with the real DB password."
+    );
+  }
+
+  const q = hostPart.indexOf("?");
+  const beforeQuery = q < 0 ? hostPart : hostPart.slice(0, q);
+  const search = q < 0 ? "" : hostPart.slice(q);
+  const slash = beforeQuery.indexOf("/");
+  const hostPort = slash < 0 ? beforeQuery : beforeQuery.slice(0, slash);
+  const path = slash < 0 ? "/postgres" : beforeQuery.slice(slash) || "/postgres";
+
+  if (!hostPort) {
+    throw new Error("URL_MISSING_HOST: Host is empty.");
+  }
+
+  // host:port or [ipv6]:port
+  let host: string;
+  let port = "";
+  if (hostPort.startsWith("[")) {
+    const end = hostPort.indexOf("]");
+    if (end < 0) throw new Error("URL_INVALID_IPV6: Invalid IPv6 host brackets.");
+    host = hostPort.slice(0, end + 1);
+    const after = hostPort.slice(end + 1);
+    if (after.startsWith(":")) port = after.slice(1);
+  } else {
+    const lastColon = hostPort.lastIndexOf(":");
+    if (lastColon > 0 && /^\d+$/.test(hostPort.slice(lastColon + 1))) {
+      host = hostPort.slice(0, lastColon);
+      port = hostPort.slice(lastColon + 1);
+    } else {
+      host = hostPort;
+    }
+  }
+
+  if (port) {
+    const n = Number(port);
+    if (!Number.isInteger(n) || n < 1 || n > 65535) {
+      throw new Error(
+        `URL_INVALID_PORT: Port "${port}" is invalid. Check the host ends with :5432 (direct/session) or :6543 (pooler).`
+      );
+    }
+  }
+
+  return {
+    protocol,
+    user: safeDecode(userRaw),
+    pass: safeDecode(passRaw),
+    host,
+    port,
+    path: path.startsWith("/") ? path : `/${path}`,
+    search,
+  };
+}
+
+/**
+ * Clean + validate a DB URL. Auto-encodes user/password so Prisma accepts
+ * Supabase strings even when the password has @ : # / ? etc.
  */
 export function normalizePostgresUrl(
   raw: string,
   opts?: NormalizePostgresOptions
 ): string {
   let s = raw.trim();
-  // Strip wrapping quotes / backticks from copy-paste
+  // Strip wrapping quotes / backticks / accidental labels from copy-paste
   if (
     (s.startsWith('"') && s.endsWith('"')) ||
     (s.startsWith("'") && s.endsWith("'")) ||
@@ -77,6 +171,8 @@ export function normalizePostgresUrl(
   ) {
     s = s.slice(1, -1).trim();
   }
+  // "Direct postgresql://…" pasted from chat
+  s = s.replace(/^(direct|pooler|session|transaction)\s+/i, "").trim();
   s = s.replace(/[\r\n\t]+/g, "");
 
   if (!s) throw new Error("URL_EMPTY");
@@ -97,58 +193,19 @@ export function normalizePostgresUrl(
   }
 
   if (!isPostgres) {
-    throw new Error("URL_INVALID_PROTOCOL: Expected postgresql:// or postgres://");
+    throw new Error(
+      "URL_INVALID_PROTOCOL: Expected postgresql:// or postgres://. For Supabase copy Database → Connection string → URI."
+    );
   }
 
   if (/\[YOUR-PASSWORD\]|YOUR_PASSWORD|<password>/i.test(s)) {
     throw new Error(
-      "URL_PLACEHOLDER_PASSWORD: Replace [YOUR-PASSWORD] with your real database password (URL-encoded)."
+      "URL_PLACEHOLDER_PASSWORD: Replace [YOUR-PASSWORD] with your real database password."
     );
   }
 
-  const protocol = /^postgres:\/\//i.test(s) ? "postgres" : "postgresql";
-  const afterScheme = s.replace(/^postgres(ql)?:\/\//i, "");
-  const atCount = (afterScheme.match(/@/g) || []).length;
-  if (atCount > 1) {
-    throw new Error(
-      "URL_UNESCAPED_AT: Found more than one @ in the connection string. Encode @ in the password as %40 so Prisma can parse host and port correctly."
-    );
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(s.replace(/^postgres(ql)?:/i, "http:"));
-  } catch {
-    throw new Error(
-      "URL_PARSE_FAILED: Connection string is malformed. If the password contains @ : # / ? % or spaces, URL-encode it (e.g. @ → %40, : → %3A, # → %23)."
-    );
-  }
-
-  const port = parsed.port;
-  if (port) {
-    const n = Number(port);
-    if (!Number.isInteger(n) || n < 1 || n > 65535) {
-      throw new Error(
-        `URL_INVALID_PORT: Parsed port "${port}" is invalid. This usually means the password has unescaped special characters (@ : # / ?). Encode the password, e.g. postgresql://user:${"ENCODED_PASSWORD"}@host:5432/postgres`
-      );
-    }
-  }
-
-  if (!parsed.hostname) {
-    throw new Error(
-      "URL_MISSING_HOST: Could not parse host. Check user:password@host:port/db and encode special characters in the password."
-    );
-  }
-
-  // Re-encode userinfo so Prisma always receives a legal URL
-  const user = parsed.username ? decodeURIComponent(parsed.username) : "";
-  const pass = parsed.password ? decodeURIComponent(parsed.password) : "";
-  const auth =
-    user || pass
-      ? `${encodeURIComponent(user)}:${encodeURIComponent(pass)}@`
-      : "";
-
-  const path = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : "/postgres";
-  const search = parsed.search || "";
-  return `${protocol}://${auth}${parsed.host}${path}${search}`;
+  const parts = parsePostgresParts(s);
+  const auth = `${encodeURIComponent(parts.user)}:${encodeURIComponent(parts.pass)}@`;
+  const hostPort = parts.port ? `${parts.host}:${parts.port}` : parts.host;
+  return `${parts.protocol}://${auth}${hostPort}${parts.path}${parts.search}`;
 }

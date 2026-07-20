@@ -42,7 +42,8 @@ export async function POST(request: Request) {
     return json({ profile }, 201);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "FAILED";
-    return error(msg, 400, msg);
+    console.error("[database-providers] upsert failed", msg);
+    return error(msg, 400, "SAVE_FAILED");
   }
 }
 
