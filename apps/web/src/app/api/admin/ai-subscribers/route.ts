@@ -47,7 +47,25 @@ export async function GET(request: Request) {
     return json({ subscribers: [], provinces, config });
   }
 
-  const users = await prisma.user.findMany({
+  type SubscriberUser = {
+    id: string;
+    fullLegalName: string | null;
+    phone: string;
+    provinceId: string | null;
+    province: { id: string; nameEn: string; nameAr: string } | null;
+    subscriptions: Array<{
+      id: string;
+      expiresAt: Date | null;
+      package: { id: string; nameEn: string; durationDays: number | null };
+    }>;
+    _count: {
+      coursePurchases: number;
+      aiCreativeJobs: number;
+    };
+  };
+
+  // Accelerate `$extends` can widen `select` results to the base User model.
+  const users = (await prisma.user.findMany({
     where: {
       id: { in: [...userIdSet] },
       ...(provinceId ? { provinceId } : {}),
@@ -90,7 +108,7 @@ export async function GET(request: Request) {
       },
     },
     orderBy: { fullLegalName: "asc" },
-  });
+  })) as SubscriberUser[];
 
   const subscribers = users
     .map((u) => {
