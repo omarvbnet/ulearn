@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { PUBLIC_LESSON_WHERE, PUBLIC_SHORT_VIDEO_WHERE } from "@/lib/video-visibility";
 import { getDownloadUrl, resolvePublicMediaUrl } from "@/lib/r2";
-import { CacheTTL } from "@/lib/prisma-cache";
+import { withCache, CacheTTL } from "@/lib/prisma-cache";
 import { LoggingService } from "@/services/logging.service";
 import { NotificationService } from "@/services/notification.service";
 import { Prisma, type CourseStatus, type TeacherLevel } from "@prisma/client";
@@ -1124,11 +1124,9 @@ export class TeacherCourseService {
     levels?: TeacherLevel[];
   }) {
     const q = filter?.q?.trim();
-    // Skip Accelerate cache when searching — results are unique per query.
-    const cacheStrategy = q ? undefined : CacheTTL.catalog;
-    return prisma.course.findMany({
+    const args = {
       where: {
-        status: "APPROVED",
+        status: "APPROVED" as const,
         deletedAt: null,
         ...(filter?.stageId ? { stageId: filter.stageId } : {}),
         ...(filter?.subjectId ? { subjectId: filter.subjectId } : {}),
@@ -1165,25 +1163,35 @@ export class TeacherCourseService {
           deletedAt: null,
           level: filter?.levels?.length
             ? { in: filter.levels.filter((l) => l !== "NEEDS_IMPROVEMENT") }
-            : { not: "NEEDS_IMPROVEMENT" },
-          user: { status: "APPROVED", deletedAt: null },
+            : { not: "NEEDS_IMPROVEMENT" as const },
+          user: { status: "APPROVED" as const, deletedAt: null },
         },
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: "desc" as const },
       include: {
         teacher: {
           select: {
             id: true,
             level: true,
             userId: true,
-            user: { select: { fullLegalName: true, profilePhotoUrl: true, profilePhotoKey: true } },
+            user: {
+              select: {
+                fullLegalName: true,
+                profilePhotoUrl: true,
+                profilePhotoKey: true,
+              },
+            },
           },
         },
-        stage: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
-        subject: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
+        stage: {
+          select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true },
+        },
+        subject: {
+          select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true },
+        },
         lessons: {
           where: PUBLIC_LESSON_WHERE,
-          orderBy: { sortOrder: "asc" },
+          orderBy: { sortOrder: "asc" as const },
           select: {
             id: true,
             title: true,
@@ -1194,10 +1202,12 @@ export class TeacherCourseService {
             sortOrder: true,
           },
         },
-        _count: { select: { purchases: { where: { status: "PAID" } } } },
+        _count: { select: { purchases: { where: { status: "PAID" as const } } } },
       },
-      ...(cacheStrategy ? { cacheStrategy } : {}),
-    });
+    };
+
+    // Skip Accelerate cache when searching — results are unique per query.
+    return prisma.course.findMany(q ? args : withCache(args, CacheTTL.catalog));
   }
 
   /** Public teacher profile with live store courses for students. */

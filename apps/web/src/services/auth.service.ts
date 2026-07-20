@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { CacheTTL } from "@/lib/prisma-cache";
+import { withCache, CacheTTL } from "@/lib/prisma-cache";
 import { generateOtp } from "@/lib/utils";
 import { createSession, destroySession } from "@/lib/auth/session";
 import { LoggingService } from "@/services/logging.service";
@@ -49,14 +49,18 @@ type DemoLoginConfig = {
 };
 
 async function loadDemoLoginConfig(): Promise<DemoLoginConfig | null> {
-  const rows = await prisma.systemSetting.findMany({
-    where: {
-      key: {
-        in: ["demo_login_enabled", "demo_login_phone", "demo_login_otp"],
+  const rows = await prisma.systemSetting.findMany(
+    withCache(
+      {
+        where: {
+          key: {
+            in: ["demo_login_enabled", "demo_login_phone", "demo_login_otp"],
+          },
+        },
       },
-    },
-    cacheStrategy: CacheTTL.settings,
-  });
+      CacheTTL.settings
+    )
+  );
   // Prefer global (countryId null) over country-scoped duplicates.
   const map: Record<string, unknown> = {};
   for (const r of rows) {

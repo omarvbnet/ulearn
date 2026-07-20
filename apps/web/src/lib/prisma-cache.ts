@@ -2,7 +2,7 @@
  * Prisma Accelerate cache strategies for hot read paths.
  * Requires DATABASE_URL to be an Accelerate / Prisma Postgres URL
  * (`prisma://` or `prisma+postgres://`) and the client extended with
- * `withAccelerate()`.
+ * `withAccelerate()` (see `prisma.ts`).
  *
  * ttl  = serve from cache without hitting the DB
  * swr  = after ttl, keep serving stale while refreshing in background
@@ -24,3 +24,15 @@ export type CacheStrategy = {
   swr: number;
   tags?: string[];
 };
+
+/**
+ * Attach an Accelerate `cacheStrategy` at runtime while keeping Prisma's
+ * normal `select`/`include` argument types (needed because we cast the
+ * extended client back to `PrismaClient` for correct result typing).
+ */
+export function withCache<T extends object>(
+  args: T,
+  strategy: CacheStrategy
+): T {
+  return Object.assign({}, args, { cacheStrategy: strategy });
+}

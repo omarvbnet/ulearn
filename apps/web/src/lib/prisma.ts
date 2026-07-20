@@ -2,7 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { withAccelerate } from "@prisma/extension-accelerate";
 
 const globalForPrisma = globalThis as unknown as {
-  prisma: ReturnType<typeof createPrismaClient> | undefined;
+  prisma: PrismaClient | undefined;
 };
 
 function isAccelerateUrl(url: string | undefined): boolean {
@@ -33,7 +33,7 @@ function resolveDatabaseUrl() {
   return `${url}${separator}connection_limit=1&pool_timeout=20`;
 }
 
-function createPrismaClient() {
+function createPrismaClient(): PrismaClient {
   const url = resolveDatabaseUrl();
   const base = new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
@@ -42,8 +42,10 @@ function createPrismaClient() {
       : {}),
   });
 
-  // Connection pooling + optional query cache via `cacheStrategy` on reads.
-  return base.$extends(withAccelerate());
+  // Runtime: Accelerate pooling + cacheStrategy support.
+  // Cast back to PrismaClient so `select` / `include` typings stay correct
+  // (`$extends(withAccelerate())` otherwise widens results to the base model).
+  return base.$extends(withAccelerate()) as unknown as PrismaClient;
 }
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();

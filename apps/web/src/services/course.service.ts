@@ -1,21 +1,25 @@
 import { prisma } from "@/lib/prisma";
-import { CacheTTL } from "@/lib/prisma-cache";
+import { withCache, CacheTTL } from "@/lib/prisma-cache";
 import { LoggingService } from "@/services/logging.service";
 import type { Prisma } from "@prisma/client";
 
 export class CourseService {
   static async listStages(countryId: string) {
-    return prisma.educationalStage.findMany({
-      where: { countryId, deletedAt: null, isActive: true },
-      orderBy: { sortOrder: "asc" },
-      include: {
-        subjects: {
-          where: { deletedAt: null, isActive: true },
-          orderBy: { sortOrder: "asc" },
+    return prisma.educationalStage.findMany(
+      withCache(
+        {
+          where: { countryId, deletedAt: null, isActive: true },
+          orderBy: { sortOrder: "asc" as const },
+          include: {
+            subjects: {
+              where: { deletedAt: null, isActive: true },
+              orderBy: { sortOrder: "asc" as const },
+            },
+          },
         },
-      },
-      cacheStrategy: CacheTTL.reference,
-    });
+        CacheTTL.reference
+      )
+    );
   }
 
   static async listSubjects(countryId: string, stageId?: string) {

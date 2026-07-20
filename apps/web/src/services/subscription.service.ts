@@ -1,17 +1,21 @@
 import { prisma } from "@/lib/prisma";
-import { CacheTTL } from "@/lib/prisma-cache";
+import { withCache, CacheTTL } from "@/lib/prisma-cache";
 import { defaultSubscriptionExpiry, generateActivationCode } from "@/lib/utils";
 import { LoggingService } from "@/services/logging.service";
 import { NotificationService } from "@/services/notification.service";
 
 export class SubscriptionService {
   static async listPackages(countryId: string) {
-    return prisma.subscriptionPackage.findMany({
-      where: { countryId, isActive: true, deletedAt: null },
-      include: { subject: true, stage: true },
-      orderBy: { price: "asc" },
-      cacheStrategy: CacheTTL.short,
-    });
+    return prisma.subscriptionPackage.findMany(
+      withCache(
+        {
+          where: { countryId, isActive: true, deletedAt: null },
+          include: { subject: true, stage: true },
+          orderBy: { price: "asc" as const },
+        },
+        CacheTTL.short
+      )
+    );
   }
 
   static async requestActivation(userId: string, packageId: string) {

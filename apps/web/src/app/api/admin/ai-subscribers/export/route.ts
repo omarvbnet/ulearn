@@ -4,20 +4,6 @@ import { ADMIN_ROLES } from "@/lib/auth/session";
 import { AiCreativeEntitlementService } from "@/services/ai/creative";
 import ExcelJS from "exceljs";
 
-type ExportUser = {
-  fullLegalName: string | null;
-  phone: string;
-  province: { nameEn: string } | null;
-  subscriptions: Array<{
-    expiresAt: Date | null;
-    package: { nameEn: string };
-  }>;
-  _count: {
-    coursePurchases: number;
-    aiCreativeJobs: number;
-  };
-};
-
 export async function GET(request: Request) {
   const auth = await requireAuth(ADMIN_ROLES);
   if (auth.error) return auth.error;
@@ -47,12 +33,10 @@ export async function GET(request: Request) {
     ]),
   ];
 
-  // Accelerate `$extends` can widen `select` results to the base User model;
-  // cast keeps the nested `subscriptions` / `_count` shape for the export.
-  const users: ExportUser[] =
+  const users =
     userIds.length === 0
       ? []
-      : ((await prisma.user.findMany({
+      : await prisma.user.findMany({
           where: {
             id: { in: userIds },
             ...(provinceId ? { provinceId } : {}),
@@ -85,7 +69,7 @@ export async function GET(request: Request) {
             },
           },
           orderBy: { fullLegalName: "asc" },
-        })) as ExportUser[]);
+        });
 
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("AI Subscribers");

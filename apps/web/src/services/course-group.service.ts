@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { CacheTTL } from "@/lib/prisma-cache";
+import { withCache, CacheTTL } from "@/lib/prisma-cache";
 import { resolvePublicMediaUrl } from "@/lib/r2";
 import { LoggingService } from "@/services/logging.service";
 import { NotificationService } from "@/services/notification.service";
@@ -272,34 +272,38 @@ export class CourseGroupService {
 
   /** Public / home listing. Optionally scoped to a stage and/or country. */
   static async listForHome(opts?: { stageId?: string; countryId?: string }) {
-    const groups = await prisma.courseGroup.findMany({
-      where: {
-        isActive: true,
-        deletedAt: null,
-        ...(opts?.stageId ? { stageId: opts.stageId } : {}),
-        ...(opts?.countryId
-          ? { OR: [{ countryId: null }, { countryId: opts.countryId }] }
-          : {}),
-      },
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
-      include: {
-        items: {
-          orderBy: { sortOrder: "asc" },
+    const groups = await prisma.courseGroup.findMany(
+      withCache(
+        {
+          where: {
+            isActive: true,
+            deletedAt: null,
+            ...(opts?.stageId ? { stageId: opts.stageId } : {}),
+            ...(opts?.countryId
+              ? { OR: [{ countryId: null }, { countryId: opts.countryId }] }
+              : {}),
+          },
+          orderBy: [{ sortOrder: "asc" as const }, { createdAt: "desc" as const }],
           include: {
-            course: {
-              select: {
-                id: true,
-                price: true,
-                currency: true,
-                status: true,
-                deletedAt: true,
+            items: {
+              orderBy: { sortOrder: "asc" as const },
+              include: {
+                course: {
+                  select: {
+                    id: true,
+                    price: true,
+                    currency: true,
+                    status: true,
+                    deletedAt: true,
+                  },
+                },
               },
             },
           },
         },
-      },
-      cacheStrategy: CacheTTL.catalog,
-    });
+        CacheTTL.catalog
+      )
+    );
 
     const mapped = await Promise.all(
       groups.map(async (g) => {

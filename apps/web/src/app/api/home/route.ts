@@ -1,5 +1,5 @@
 import { json, optionalAuth } from "@/lib/api";
-import { CacheTTL } from "@/lib/prisma-cache";
+import { withCache, CacheTTL } from "@/lib/prisma-cache";
 import { prisma } from "@/lib/prisma";
 import { resolvePublicMediaUrl } from "@/lib/r2";
 import { CourseGroupService } from "@/services/course-group.service";
@@ -142,20 +142,24 @@ export async function GET(request: Request) {
             likes: { where: { userId }, select: { id: true } },
           },
         })
-      : prisma.advertisement.findMany({
-          where: {
-            isActive: true,
-            deletedAt: null,
-            locale: adsLocale,
-            OR: [{ startsAt: null }, { startsAt: { lte: now } }],
-            AND: [{ OR: [{ endsAt: null }, { endsAt: { gte: now } }] }],
-          },
-          orderBy: { sortOrder: "asc" },
-          include: {
-            _count: { select: { likes: true } },
-          },
-          cacheStrategy: CacheTTL.catalog,
-        }),
+      : prisma.advertisement.findMany(
+          withCache(
+            {
+              where: {
+                isActive: true,
+                deletedAt: null,
+                locale: adsLocale,
+                OR: [{ startsAt: null }, { startsAt: { lte: now } }],
+                AND: [{ OR: [{ endsAt: null }, { endsAt: { gte: now } }] }],
+              },
+              orderBy: { sortOrder: "asc" as const },
+              include: {
+                _count: { select: { likes: true } },
+              },
+            },
+            CacheTTL.catalog
+          )
+        ),
     TeacherCourseService.listPublishedCourses({
       stageId,
       subjectId,
@@ -163,23 +167,29 @@ export async function GET(request: Request) {
       q,
       levels,
     }),
-    prisma.educationalStage.findMany({
-      where: {
-        isActive: true,
-        deletedAt: null,
-        ...(isCertificateUser ? { isCertificateTrack: true } : { isCertificateTrack: false }),
-      },
-      orderBy: { sortOrder: "asc" },
-      select: {
-        id: true,
-        nameEn: true,
-        nameAr: true,
-        nameKu: true,
-        nameTr: true,
-        isCertificateTrack: true,
-      },
-      cacheStrategy: CacheTTL.reference,
-    }),
+    prisma.educationalStage.findMany(
+      withCache(
+        {
+          where: {
+            isActive: true,
+            deletedAt: null,
+            ...(isCertificateUser
+              ? { isCertificateTrack: true }
+              : { isCertificateTrack: false }),
+          },
+          orderBy: { sortOrder: "asc" as const },
+          select: {
+            id: true,
+            nameEn: true,
+            nameAr: true,
+            nameKu: true,
+            nameTr: true,
+            isCertificateTrack: true,
+          },
+        },
+        CacheTTL.reference
+      )
+    ),
   ]);
 
   const ads = adsRaw.filter((a) => !a.countryId || a.countryId === user?.countryId);

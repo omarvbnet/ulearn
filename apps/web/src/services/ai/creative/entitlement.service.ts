@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { CacheTTL } from "@/lib/prisma-cache";
+import { withCache, CacheTTL } from "@/lib/prisma-cache";
 import type { Prisma } from "@prisma/client";
 
 export const AI_CREATIVE_CONFIG_KEY = "ai_creative_config";
@@ -172,16 +172,20 @@ function parseConfig(value: unknown): AiCreativeConfig {
 export class AiCreativeEntitlementService {
   static async getConfig(countryId?: string | null): Promise<AiCreativeConfig> {
     if (countryId) {
-      const countrySetting = await prisma.systemSetting.findFirst({
-        where: { key: AI_CREATIVE_CONFIG_KEY, countryId },
-        cacheStrategy: CacheTTL.settings,
-      });
+      const countrySetting = await prisma.systemSetting.findFirst(
+        withCache(
+          { where: { key: AI_CREATIVE_CONFIG_KEY, countryId } },
+          CacheTTL.settings
+        )
+      );
       if (countrySetting) return parseConfig(countrySetting.value);
     }
-    const globalSetting = await prisma.systemSetting.findFirst({
-      where: { key: AI_CREATIVE_CONFIG_KEY, countryId: null },
-      cacheStrategy: CacheTTL.settings,
-    });
+    const globalSetting = await prisma.systemSetting.findFirst(
+      withCache(
+        { where: { key: AI_CREATIVE_CONFIG_KEY, countryId: null } },
+        CacheTTL.settings
+      )
+    );
     return parseConfig(globalSetting?.value);
   }
 

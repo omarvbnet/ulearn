@@ -1,18 +1,22 @@
 import { prisma } from "@/lib/prisma";
-import { CacheTTL } from "@/lib/prisma-cache";
+import { withCache, CacheTTL } from "@/lib/prisma-cache";
 import { json } from "@/lib/api";
 
 export async function GET() {
-  const countries = await prisma.country.findMany({
-    where: { isActive: true, deletedAt: null },
-    include: {
-      provinces: {
+  const countries = await prisma.country.findMany(
+    withCache(
+      {
         where: { isActive: true, deletedAt: null },
-        orderBy: { nameEn: "asc" },
+        include: {
+          provinces: {
+            where: { isActive: true, deletedAt: null },
+            orderBy: { nameEn: "asc" as const },
+          },
+        },
+        orderBy: { nameEn: "asc" as const },
       },
-    },
-    orderBy: { nameEn: "asc" },
-    cacheStrategy: CacheTTL.reference,
-  });
+      CacheTTL.reference
+    )
+  );
   return json({ countries });
 }
