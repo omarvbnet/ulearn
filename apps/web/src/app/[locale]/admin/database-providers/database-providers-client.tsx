@@ -677,9 +677,12 @@ export function DatabaseProvidersClient() {
               required
             />
             <p className="text-xs text-muted">
-              Test, transfer probe, and migrate always use the direct Postgres URL. For Supabase
-              paste the Database → Connection string (URI). Do not put an Accelerate{" "}
-              <code className="text-foreground">prisma://</code> URL in the direct field.
+              Test / transfer / migrate use the direct Postgres URL. For Supabase: Database →
+              Connection string → URI (session or direct). If the password has{" "}
+              <code className="text-foreground">@ : # / ?</code> or spaces, URL-encode it (
+              <code className="text-foreground">@</code> →{" "}
+              <code className="text-foreground">%40</code>). Do not put{" "}
+              <code className="text-foreground">prisma://</code> in the direct field.
             </p>
             <Input
               label="PRISMA_ACCELERATE_URL (optional)"

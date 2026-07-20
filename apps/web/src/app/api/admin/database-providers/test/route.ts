@@ -28,6 +28,13 @@ export async function POST(request: Request) {
         "PRISMA_ENGINE_REQUIRED"
       );
     }
+    if (/invalid port number/i.test(msg)) {
+      return error(
+        "Invalid database URL port — usually the password has unescaped special characters (@ : # / ?). URL-encode the password (e.g. @ → %40) and paste again. Example: postgresql://postgres:p%40ss@db.xxxxx.supabase.co:5432/postgres",
+        400,
+        "URL_INVALID_PORT"
+      );
+    }
     return error(msg, 400, msg);
   }
 }

@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { decryptSecret, encryptSecret, maskConnectionUrl } from "@/lib/db-crypto";
+import { decryptSecret, encryptSecret, maskConnectionUrl, normalizePostgresUrl } from "@/lib/db-crypto";
 import { LoggingService } from "@/services/logging.service";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
@@ -189,37 +189,17 @@ function toPublic(p: DbProviderProfile): PublicDbProviderProfile {
   };
 }
 
-function isPostgresUrl(url: string): boolean {
-  return url.startsWith("postgres://") || url.startsWith("postgresql://");
-}
-
-function isAccelerateProtocol(url: string): boolean {
-  return (
-    url.startsWith("prisma://") ||
-    url.startsWith("prisma+postgres://") ||
-    url.includes("accelerate.prisma-data.net")
-  );
-}
-
 /**
  * Temporary clients for test / migrate / probe must use a real Postgres URL.
- * Accelerate (`prisma://`) only works for the app's primary client, and a
- * client generated with `--no-engine` rejects any other protocol.
+ * Accelerate (`prisma://`) only works for the app's primary client.
  */
 function assertDirectPostgresUrl(url: string, label = "DIRECT_DATABASE_URL") {
-  const trimmed = url.trim();
-  if (!trimmed) throw new Error(`${label}_REQUIRED`);
-  if (isAccelerateProtocol(trimmed)) {
-    throw new Error(
-      `${label}_MUST_BE_POSTGRES: Use a postgresql:// connection string for test/migrate (not prisma://). For Supabase: Project Settings → Database → Connection string → URI (direct or session mode).`
-    );
+  try {
+    return normalizePostgresUrl(url, { allowAccelerate: false });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`${label}: ${msg}`);
   }
-  if (!isPostgresUrl(trimmed)) {
-    throw new Error(
-      `${label}_INVALID: Expected a postgresql:// or postgres:// URL.`
-    );
-  }
-  return trimmed;
 }
 
 function createClient(databaseUrl: string): PrismaClient {
@@ -353,6 +333,13 @@ export class DatabaseProviderService {
       throw new Error("URLS_REQUIRED");
     }
 
+    // Validate + normalize before encrypt (catches bad ports / unescaped passwords early)
+    const databaseUrl = normalizePostgresUrl(input.databaseUrl, { allowAccelerate: true });
+    const directUrl = normalizePostgresUrl(input.directUrl, { allowAccelerate: false });
+    const accelerateUrl = input.accelerateUrl?.trim()
+      ? normalizePostgresUrl(input.accelerateUrl, { allowAccelerate: true })
+      : null;
+
     const config = await this.getConfig();
     const now = new Date().toISOString();
     const id = input.id || `dbp_${randomId()}`;
@@ -362,11 +349,9 @@ export class DatabaseProviderService {
       id,
       name: input.name.trim(),
       kind: input.kind,
-      databaseUrlEnc: encryptSecret(input.databaseUrl.trim()),
-      directUrlEnc: encryptSecret(input.directUrl.trim()),
-      accelerateUrlEnc: input.accelerateUrl?.trim()
-        ? encryptSecret(input.accelerateUrl.trim())
-        : null,
+      databaseUrlEnc: encryptSecret(databaseUrl),
+      directUrlEnc: encryptSecret(directUrl),
+      accelerateUrlEnc: accelerateUrl ? encryptSecret(accelerateUrl) : null,
       notes: input.notes?.trim() || null,
       createdAt: existingIdx >= 0 ? config.profiles[existingIdx].createdAt : now,
       updatedAt: now,
@@ -433,7 +418,7 @@ export class DatabaseProviderService {
     let url: string;
     if (directUrl?.trim()) {
       url = assertDirectPostgresUrl(directUrl, "DIRECT_DATABASE_URL");
-    } else if (databaseUrl && isAccelerateProtocol(databaseUrl.trim())) {
+    } else if (databaseUrl && /^(prisma\+|prisma:)/i.test(databaseUrl.trim())) {
       throw new Error(
         "DIRECT_DATABASE_URL_REQUIRED: DATABASE_URL is Accelerate (prisma://). Paste a postgresql:// direct/session URL to test or migrate (e.g. Supabase Database → URI)."
       );
