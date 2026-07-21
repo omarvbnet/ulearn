@@ -490,7 +490,14 @@
       "viewDocument": "بینین",
       "continueLesson": "بەردەوامبوون",
       "subscribedOk": "کۆرس لە ڕێگەی کڕینی ناو ئەپ کرایەوە.",
-      "subscribedUntil": "کۆرس تا {date} کراوەیە."
+      "subscribedUntil": "کۆرس تا {date} کراوەیە.",
+      "certTitle": "بڕوانامەی پیشەیی",
+      "certLocked": "هەموو وانە و تاقیکردنەوەکان تەواو بکە بۆ کردنەوە",
+      "certUnlocked": "بڕوانامەی U Learn ئامادەیە بۆ داگرتن",
+      "certLockedHint": "هەموو وانەکان تەواو بکە و هەموو تاقیکردنەوەکان تێپەڕێنە بۆ کردنەوەی ئەم بڕوانامەیە.",
+      "certDownload": "داگرتنی بڕوانامە",
+      "certPreparing": "ئامادەکردن…",
+      "certDownloadFailed": "نەتوانرا بڕوانامەکە دابگیرێت"
     },
     "products": {
       "title": "فرۆشگا",

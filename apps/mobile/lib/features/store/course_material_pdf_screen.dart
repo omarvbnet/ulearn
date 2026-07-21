@@ -13,11 +13,13 @@ import 'package:ulearn/core/widgets/glass.dart';
 class CourseMaterialPdfScreen extends StatefulWidget {
   const CourseMaterialPdfScreen({
     super.key,
-    required this.url,
+    this.url,
+    this.bytes,
     required this.title,
-  });
+  }) : assert(url != null || bytes != null, 'url or bytes required');
 
-  final String url;
+  final String? url;
+  final Uint8List? bytes;
   final String title;
 
   @override
@@ -40,12 +42,17 @@ class _CourseMaterialPdfScreenState extends State<CourseMaterialPdfScreen> {
 
   Future<void> _load() async {
     try {
-      final uri = Uri.parse(ApiClient.absoluteUrl(widget.url));
-      final res = await http.get(uri);
-      if (res.statusCode >= 400) {
-        throw Exception('HTTP ${res.statusCode}');
+      late final Uint8List bytes;
+      if (widget.bytes != null) {
+        bytes = widget.bytes!;
+      } else {
+        final uri = Uri.parse(ApiClient.absoluteUrl(widget.url!));
+        final res = await http.get(uri);
+        if (res.statusCode >= 400) {
+          throw Exception('HTTP ${res.statusCode}');
+        }
+        bytes = res.bodyBytes;
       }
-      final bytes = res.bodyBytes;
       if (bytes.isEmpty) throw Exception('Empty file');
 
       final doc = await PdfDocument.openData(bytes);

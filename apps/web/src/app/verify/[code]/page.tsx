@@ -1,4 +1,5 @@
 import { CertificateService } from "@/services/certificate.service";
+import { CourseCertificateService } from "@/services/course-certificate.service";
 import { ULearnLogo } from "@/components/ulearn-logo";
 
 export default async function VerifyCertificatePage({
@@ -7,7 +8,30 @@ export default async function VerifyCertificatePage({
   params: Promise<{ code: string }>;
 }) {
   const { code } = await params;
-  const cert = await CertificateService.verify(code);
+  const subjectCert = await CertificateService.verify(code);
+  const courseCert = subjectCert
+    ? null
+    : await CourseCertificateService.verify(code);
+
+  const cert = subjectCert
+    ? {
+        userName: subjectCert.userName,
+        courseName: subjectCert.courseName,
+        completionDate: subjectCert.completionDate,
+        certificateNumber: subjectCert.certificateNumber,
+        totalHours: subjectCert.totalHours,
+        teacherName: null as string | null,
+      }
+    : courseCert
+      ? {
+          userName: courseCert.userName,
+          courseName: courseCert.courseTitle,
+          completionDate: courseCert.completionDate,
+          certificateNumber: courseCert.certificateNumber,
+          totalHours: courseCert.totalHours,
+          teacherName: courseCert.teacherName,
+        }
+      : null;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-grid px-4">
@@ -22,6 +46,11 @@ export default async function VerifyCertificatePage({
             <p>
               <span className="text-muted">Course:</span> {cert.courseName}
             </p>
+            {cert.teacherName ? (
+              <p>
+                <span className="text-muted">Instructor:</span> {cert.teacherName}
+              </p>
+            ) : null}
             <p>
               <span className="text-muted">Date:</span>{" "}
               {cert.completionDate.toLocaleDateString()}

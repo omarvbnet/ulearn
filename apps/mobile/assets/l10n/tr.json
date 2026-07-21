@@ -489,7 +489,14 @@
       "viewDocument": "Görüntüle",
       "continueLesson": "Devam et",
       "subscribedOk": "Kurs uygulama içi satın alma ile açıldı.",
-      "subscribedUntil": "Kurs {date} tarihine kadar açık."
+      "subscribedUntil": "Kurs {date} tarihine kadar açık.",
+      "certTitle": "Profesyonel sertifika",
+      "certLocked": "Kilidi açmak için tüm dersleri ve sınavları tamamlayın",
+      "certUnlocked": "U Learn sertifikanız indirilmeye hazır",
+      "certLockedHint": "Bu sertifikanın kilidini açmak için tüm dersleri bitirin ve tüm sınavları geçin.",
+      "certDownload": "Sertifikayı indir",
+      "certPreparing": "Hazırlanıyor…",
+      "certDownloadFailed": "Sertifika indirilemedi"
     },
     "products": {
       "title": "Mağaza",

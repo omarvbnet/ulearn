@@ -489,7 +489,14 @@
       "viewDocument": "عرض",
       "continueLesson": "متابعة",
       "subscribedOk": "تم فتح الدورة عبر الشراء داخل التطبيق.",
-      "subscribedUntil": "الدورة مفتوحة حتى {date}."
+      "subscribedUntil": "الدورة مفتوحة حتى {date}.",
+      "certTitle": "شهادة احترافية",
+      "certLocked": "أكمل كل الدروس والاختبارات لفتح الشهادة",
+      "certUnlocked": "شهادتك من U Learn جاهزة للتنزيل",
+      "certLockedHint": "أنهِ جميع الدروس واجتز جميع الاختبارات لفتح هذه الشهادة.",
+      "certDownload": "تنزيل الشهادة",
+      "certPreparing": "جارٍ التحضير…",
+      "certDownloadFailed": "تعذر تنزيل الشهادة"
     },
     "products": {
       "title": "المتجر",

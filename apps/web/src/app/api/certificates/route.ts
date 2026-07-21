@@ -2,6 +2,7 @@ import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { CertificateService } from "@/services/certificate.service";
+import { CourseCertificateService } from "@/services/course-certificate.service";
 
 /** Earned certificates + progress toward claimable certificate programs. */
 export async function GET() {
@@ -12,6 +13,11 @@ export async function GET() {
   if (!user) return error("Unauthorized", 401);
 
   const certificates = await CertificateService.getUserCertificates(user.id);
+  const courseCertificates =
+    user.role === "CERTIFICATE_USER"
+      ? await CourseCertificateService.getUserCertificates(user.id)
+      : [];
+
 
   const programs = await prisma.subject.findMany({
     where: {
@@ -33,7 +39,7 @@ export async function GET() {
       })
   );
 
-  return json({ certificates, programs: progress });
+  return json({ certificates, courseCertificates, programs: progress });
 }
 
 /** Claim a certificate for a completed program. */

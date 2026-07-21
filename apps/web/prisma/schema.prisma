@@ -215,6 +215,7 @@ model User {
   questions            LessonQuestion[]      @relation("StudentQuestions")
   answers              LessonAnswer[]        @relation("TeacherAnswers")
   certificates         Certificate[]
+  courseCertificates   CourseCertificate[]
   notifications        UserNotification[]
   auditLogs            AuditLog[]            @relation("ActorLogs")
   ratingsGiven         TeacherRating[]
@@ -404,6 +405,7 @@ model Course {
   quizzes   Quiz[]
   materials CourseMaterial[]
   groupItems CourseGroupItem[]
+  certificates CourseCertificate[]
 
   @@index([teacherId])
   @@index([stageId])
@@ -1587,6 +1589,33 @@ model Certificate {
   @@unique([userId, subjectId])
   @@index([verificationCode])
   @@index([certificateNumber])
+}
+
+/// Professional certificate for a completed store Course (CERTIFICATE_USER only).
+model CourseCertificate {
+  id                String   @id @default(cuid())
+  userId            String
+  courseId          String
+  certificateNumber String   @unique
+  verificationCode  String   @unique
+  userName          String
+  courseTitle       String
+  courseDescription String?
+  teacherName       String
+  totalHours        Float
+  completionDate    DateTime
+  pdfKey            String?
+  pdfUrl            String?
+  qrCodeData        String?
+  createdAt         DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@index([verificationCode])
+  @@index([certificateNumber])
+  @@index([courseId])
 }
 
 // ─────────────────────────────────────────────

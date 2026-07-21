@@ -2,6 +2,7 @@ import { error, json, optionalAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { PUBLIC_LESSON_WHERE } from "@/lib/video-visibility";
+import { CourseCertificateService } from "@/services/course-certificate.service";
 import { CourseRatingService } from "@/services/course-rating.service";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 import { VideoService } from "@/services/video.service";
@@ -244,6 +245,11 @@ export async function GET(
     user?.countryId ?? undefined
   );
 
+  const certificate =
+    userId && user?.role === "CERTIFICATE_USER"
+      ? await CourseCertificateService.getStatus(userId, id, user.role)
+      : null;
+
   return json({
     course: {
       ...course,
@@ -260,6 +266,7 @@ export async function GET(
     },
     quizzes: quizzesWithStatus,
     completion,
+    certificate,
     purchased,
     purchaseExpiresAt: purchased ? purchaseRow?.expiresAt ?? null : null,
     isOwnCourse,

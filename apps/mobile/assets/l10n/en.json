@@ -489,7 +489,14 @@
       "viewDocument": "View",
       "continueLesson": "Continue",
       "subscribedOk": "Course unlocked via in-app purchase.",
-      "subscribedUntil": "Course unlocked until {date}."
+      "subscribedUntil": "Course unlocked until {date}.",
+      "certTitle": "Professional certificate",
+      "certLocked": "Complete every lesson and quiz to unlock",
+      "certUnlocked": "Ready to download your U Learn certificate",
+      "certLockedHint": "Finish all lessons and pass all quizzes to unlock this certificate.",
+      "certDownload": "Download certificate",
+      "certPreparing": "Preparing…",
+      "certDownloadFailed": "Could not download the certificate"
     },
     "products": {
       "title": "Store",

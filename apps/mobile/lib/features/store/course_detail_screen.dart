@@ -13,6 +13,7 @@ import 'package:ulearn/features/quiz/quiz_inline_panel.dart';
 import 'package:ulearn/features/quiz/quiz_screen.dart';
 import 'package:ulearn/features/reels/teacher_profile_screen.dart';
 import 'package:ulearn/features/report/report_content_sheet.dart';
+import 'package:ulearn/features/store/course_certificate_card.dart';
 import 'package:ulearn/features/store/course_evaluation_sheet.dart';
 import 'package:ulearn/features/store/course_iap.dart';
 import 'package:ulearn/features/store/course_inline_player.dart';
@@ -70,6 +71,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   String? _error;
   bool _reacting = false;
   Map<String, dynamic>? _completion;
+  Map<String, dynamic>? _certificate;
   bool _evaluationPromptShown = false;
   _PlayerStage _playerStage = _PlayerStage.playing;
   Map<String, dynamic>? _stageQuiz;
@@ -219,6 +221,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         _quizzes = quizzes;
         _materials = materials;
         _completion = data['completion'] as Map<String, dynamic>?;
+        _certificate = data['certificate'] as Map<String, dynamic>?;
         _introUrl = introUrl != null && introUrl.isNotEmpty
             ? ApiClient.absoluteUrl(introUrl)
             : null;
@@ -720,6 +723,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         quizzes: _quizzes,
         unlocked: unlocked,
         completion: _completion,
+        certificate: _certificate,
+        courseId: widget.courseId,
         reacting: _reacting,
         activeLesson: active,
         activeVideoTitle: active != null
@@ -1792,6 +1797,8 @@ class _CourseDetailsTab extends StatelessWidget {
     required this.quizzes,
     required this.unlocked,
     required this.completion,
+    required this.certificate,
+    required this.courseId,
     required this.reacting,
     required this.activeLesson,
     required this.activeVideoTitle,
@@ -1817,6 +1824,8 @@ class _CourseDetailsTab extends StatelessWidget {
   final List<Map<String, dynamic>> quizzes;
   final bool unlocked;
   final Map<String, dynamic>? completion;
+  final Map<String, dynamic>? certificate;
+  final String courseId;
   final bool reacting;
   final Map<String, dynamic>? activeLesson;
   final String? activeVideoTitle;
@@ -2106,6 +2115,12 @@ class _CourseDetailsTab extends StatelessWidget {
               : l10n.t('mobile.store.noDescription'),
           style: TextStyle(color: AppTheme.muted, height: 1.5, fontSize: 13.5),
         ),
+        if (certificate != null && certificate!['eligibleRole'] == true)
+          CourseCertificateCard(
+            courseId: courseId,
+            certificate: certificate!,
+            courseTitle: localizedText(course, context.localeCode),
+          ),
         if (unlocked) ...[
           const SizedBox(height: 20),
           _CourseProgressHeader(
