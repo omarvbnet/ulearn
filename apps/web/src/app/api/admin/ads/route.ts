@@ -9,11 +9,34 @@ export async function GET() {
   const auth = await requireAuth(ADMIN_ROLES);
   if (auth.error) return auth.error;
 
-  const ads = await prisma.advertisement.findMany({
-    where: { deletedAt: null },
-    orderBy: { sortOrder: "asc" },
-    include: { _count: { select: { likes: true } } },
-  });
+  const [ads, stages] = await Promise.all([
+    prisma.advertisement.findMany({
+      where: { deletedAt: null },
+      orderBy: { sortOrder: "asc" },
+      include: {
+        _count: { select: { likes: true } },
+        stage: {
+          select: {
+            id: true,
+            nameEn: true,
+            nameAr: true,
+            isCertificateTrack: true,
+          },
+        },
+      },
+    }),
+    prisma.educationalStage.findMany({
+      where: { deletedAt: null, isActive: true },
+      orderBy: [{ isCertificateTrack: "asc" }, { sortOrder: "asc" }],
+      select: {
+        id: true,
+        nameEn: true,
+        nameAr: true,
+        isCertificateTrack: true,
+        countryId: true,
+      },
+    }),
+  ]);
 
   const resolved = await Promise.all(
     ads.map(async (a) => ({
@@ -24,11 +47,13 @@ export async function GET() {
     }))
   );
 
-  return json({ ads: resolved });
+  return json({ ads: resolved, stages });
 }
 
 const createSchema = z.object({
   locale: z.enum(["AR", "KU", "TR", "EN"]),
+  audience: z.enum(["ALL", "STUDENT", "CERTIFICATE_USER", "TEACHER"]).optional(),
+  stageId: z.string().nullish(),
   title: z.string().optional(),
   titleEn: z.string().optional(),
   titleAr: z.string().optional(),
@@ -51,11 +76,12 @@ export async function POST(request: Request) {
 
   const parsed = createSchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
-  const { startsAt, endsAt, ...rest } = parsed.data;
+  const { startsAt, endsAt, stageId, ...rest } = parsed.data;
 
   const ad = await prisma.advertisement.create({
     data: {
       ...rest,
+      stageId: stageId || null,
       startsAt: startsAt ? new Date(startsAt) : undefined,
       endsAt: endsAt ? new Date(endsAt) : undefined,
     },

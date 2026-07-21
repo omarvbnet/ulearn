@@ -950,12 +950,16 @@ model CourseLessonFavorite {
 }
 
 /// Promotional banner shown on the mobile home screen.
-/// Each ad targets one app language (`locale`); users only see ads for their language.
+/// Targets language (`locale`), optional role audience, and optional educational stage.
 model Advertisement {
   id        String    @id @default(cuid())
   countryId String?
   /// App language this banner is shown for (AR / KU / TR / EN).
   locale    Locale    @default(AR)
+  /// Who should see this ad on Home (ALL = every role).
+  audience  AdAudience @default(ALL)
+  /// Optional stage scope (e.g. 3rd Intermediate). Null = all stages for that audience.
+  stageId   String?
   titleEn   String?
   titleAr   String?
   titleKu   String?
@@ -973,12 +977,22 @@ model Advertisement {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  country Country? @relation(fields: [countryId], references: [id])
+  country Country?          @relation(fields: [countryId], references: [id])
+  stage   EducationalStage? @relation(fields: [stageId], references: [id])
   likes   AdLike[]
 
   @@index([isActive, sortOrder])
   @@index([locale, isActive, sortOrder])
+  @@index([audience, isActive, sortOrder])
+  @@index([stageId])
   @@index([deletedAt])
+}
+
+enum AdAudience {
+  ALL
+  STUDENT
+  CERTIFICATE_USER
+  TEACHER
 }
 
 model AdLike {
@@ -1165,6 +1179,7 @@ model EducationalStage {
   studentProfiles  StudentProfile[]
   courses          Course[]
   courseGroups     CourseGroup[]
+  advertisements   Advertisement[]
   stageRequestsFrom StageChangeRequest[] @relation("StageRequestCurrent")
   stageRequestsTo   StageChangeRequest[] @relation("StageRequestRequested")
 

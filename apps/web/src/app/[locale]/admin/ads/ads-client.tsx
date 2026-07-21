@@ -1,6 +1,6 @@
 "use client";
 
-import { Badge, Button, Card, Input, PageHeader } from "@/components/ui";
+import { Badge, Button, Card, Input, PageHeader, Select } from "@/components/ui";
 import { EmptyState, Modal, SkeletonRows, useToast } from "@/components/overlay";
 import { useCallback, useEffect, useState } from "react";
 
@@ -11,9 +11,26 @@ const LOCALES = [
   { id: "TR", label: "Turkish" },
 ] as const;
 
+const AUDIENCES = [
+  { id: "ALL", label: "All roles" },
+  { id: "STUDENT", label: "Students (school)" },
+  { id: "CERTIFICATE_USER", label: "Certificate users" },
+  { id: "TEACHER", label: "Teachers" },
+] as const;
+
+type Stage = {
+  id: string;
+  nameEn: string;
+  nameAr: string;
+  isCertificateTrack: boolean;
+};
+
 type Ad = {
   id: string;
   locale: string;
+  audience: string;
+  stageId: string | null;
+  stage: Stage | null;
   title: string | null;
   titleEn: string | null;
   titleAr: string | null;
@@ -40,14 +57,22 @@ function displayTitle(ad: Ad) {
   return byLocale || ad.titleEn || ad.titleAr || "Untitled";
 }
 
+function audienceLabel(id: string) {
+  return AUDIENCES.find((a) => a.id === id)?.label || id;
+}
+
 export function AdsClient() {
   const { toast } = useToast();
   const [ads, setAds] = useState<Ad[] | null>(null);
+  const [stages, setStages] = useState<Stage[]>([]);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [filterLocale, setFilterLocale] = useState<string>("ALL");
+  const [filterAudience, setFilterAudience] = useState<string>("ALL");
 
   const [locale, setLocale] = useState<string>("AR");
+  const [audience, setAudience] = useState<string>("ALL");
+  const [stageId, setStageId] = useState<string>("");
   const [title, setTitle] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [sortOrder, setSortOrder] = useState("0");
@@ -56,15 +81,21 @@ export function AdsClient() {
   const load = useCallback(() => {
     setAds(null);
     fetch("/api/admin/ads")
-      .then((r) => (r.ok ? r.json() : { ads: [] }))
-      .then((d) => setAds(d.ads || []));
+      .then((r) => (r.ok ? r.json() : { ads: [], stages: [] }))
+      .then((d) => {
+        setAds(d.ads || []);
+        setStages(d.stages || []);
+      });
   }, []);
 
   useEffect(load, [load]);
 
   const visible =
-    ads?.filter((a) => filterLocale === "ALL" || a.locale === filterLocale) ??
-    null;
+    ads?.filter(
+      (a) =>
+        (filterLocale === "ALL" || a.locale === filterLocale) &&
+        (filterAudience === "ALL" || a.audience === filterAudience)
+    ) ?? null;
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -122,6 +153,8 @@ export function AdsClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           locale,
+          audience,
+          stageId: stageId || null,
           ...titlePayload,
           linkUrl: linkUrl || undefined,
           sortOrder: Number(sortOrder) || 0,
@@ -131,11 +164,13 @@ export function AdsClient() {
       });
       if (!res.ok) throw new Error("Save failed");
 
-      toast(`Advertisement created for ${locale}`);
+      toast(`Advertisement created for ${locale} · ${audienceLabel(audience)}`);
       setCreating(false);
       setTitle("");
       setLinkUrl("");
       setSortOrder("0");
+      setAudience("ALL");
+      setStageId("");
       setFile(null);
       load();
     } catch (err) {
@@ -174,7 +209,7 @@ export function AdsClient() {
     <div>
       <PageHeader
         title="Advertisements"
-        description="Create a separate home banner for each app language — users only see ads matching their selected language"
+        description="Home banners by language, role (student / certificate / teacher), and optional educational stage"
         actions={<Button onClick={() => setCreating(true)}>New Ad</Button>}
       />
 
@@ -188,7 +223,7 @@ export function AdsClient() {
               : "bg-surface-2 text-muted"
           }`}
         >
-          All
+          All languages
         </button>
         {LOCALES.map((l) => (
           <button
@@ -206,11 +241,30 @@ export function AdsClient() {
         ))}
       </div>
 
+      <div className="mt-2 flex flex-wrap gap-2">
+        {[{ id: "ALL", label: "All roles" }, ...AUDIENCES.filter((a) => a.id !== "ALL")].map(
+          (a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => setFilterAudience(a.id)}
+              className={`rounded-lg px-3 py-1.5 text-sm ${
+                filterAudience === a.id
+                  ? "bg-accent/20 font-semibold text-accent"
+                  : "bg-surface-2 text-muted"
+              }`}
+            >
+              {a.label}
+            </button>
+          )
+        )}
+      </div>
+
       <div className="mt-6">
         {visible === null ? (
           <SkeletonRows rows={3} />
         ) : visible.length === 0 ? (
-          <EmptyState title="No advertisements for this language" />
+          <EmptyState title="No advertisements for this filter" />
         ) : (
           <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {visible.map((ad) => (
@@ -229,9 +283,14 @@ export function AdsClient() {
                     </Badge>
                   </div>
                   <p className="text-xs text-muted">
-                    Language:{" "}
-                    {LOCALES.find((l) => l.id === ad.locale)?.label || ad.locale}{" "}
-                    · {ad._count.likes} likes · order {ad.sortOrder}
+                    {LOCALES.find((l) => l.id === ad.locale)?.label || ad.locale}
+                    {" · "}
+                    {audienceLabel(ad.audience)}
+                    {ad.stage
+                      ? ` · ${ad.stage.nameEn || ad.stage.nameAr}`
+                      : " · All stages"}
+                    {" · "}
+                    {ad._count.likes} likes · order {ad.sortOrder}
                   </p>
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={() => toggle(ad)}>
@@ -252,9 +311,7 @@ export function AdsClient() {
         <Modal open onClose={() => setCreating(false)} title="New Advertisement">
           <form onSubmit={create} className="space-y-4">
             <div>
-              <label className="mb-1 block text-sm text-muted">
-                Target language
-              </label>
+              <label className="mb-1 block text-sm text-muted">Target language</label>
               <select
                 className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
                 value={locale}
@@ -267,10 +324,35 @@ export function AdsClient() {
                   </option>
                 ))}
               </select>
-              <p className="mt-1 text-xs text-muted">
-                Only users who selected this language in the app will see this ad
-              </p>
             </div>
+            <Select
+              label="Audience (role)"
+              value={audience}
+              onChange={(e) => setAudience(e.target.value)}
+            >
+              {AUDIENCES.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label}
+                </option>
+              ))}
+            </Select>
+            <Select
+              label="Educational stage (optional)"
+              value={stageId}
+              onChange={(e) => setStageId(e.target.value)}
+            >
+              <option value="">All stages</option>
+              {stages.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nameEn || s.nameAr}
+                  {s.isCertificateTrack ? " (certificate)" : ""}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-muted">
+              Example: audience = Students + stage = 3rd Intermediate shows only on that
+              stage&apos;s home. Certificate users who filter to that stage also see it.
+            </p>
             <div>
               <label className="mb-1 block text-sm text-muted">Banner image</label>
               <input

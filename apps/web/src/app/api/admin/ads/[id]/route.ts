@@ -5,6 +5,8 @@ import { z } from "zod";
 
 const updateSchema = z.object({
   locale: z.enum(["AR", "KU", "TR", "EN"]).optional(),
+  audience: z.enum(["ALL", "STUDENT", "CERTIFICATE_USER", "TEACHER"]).optional(),
+  stageId: z.string().nullish(),
   title: z.string().nullish(),
   titleEn: z.string().nullish(),
   titleAr: z.string().nullish(),
