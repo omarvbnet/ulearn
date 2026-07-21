@@ -20,6 +20,15 @@ type SubjectOpt = {
 
 type Track = "SCHOOL" | "CERTIFICATE";
 
+function inferImageContentType(filename: string): string {
+  const ext = filename.split(".").pop()?.toLowerCase() || "";
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "gif") return "image/gif";
+  if (ext === "heic" || ext === "heif") return "image/heic";
+  return "image/jpeg";
+}
+
 function TeacherRegisterForm({ track }: { track: Track }) {
   const { locale } = useParams<{ locale: string }>();
   const searchParams = useSearchParams();
@@ -109,16 +118,22 @@ function TeacherRegisterForm({ track }: { track: Track }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          phone: phone || "unknown",
           filename: file.name,
-          contentType: file.type,
+          contentType: file.type || inferImageContentType(file.name),
           size: file.size,
         }),
       });
-      if (!presign.ok) throw new Error((await presign.json()).error || "Upload failed");
+      if (!presign.ok) {
+        const d = await presign.json().catch(() => ({}));
+        throw new Error(d.error || "Upload failed");
+      }
       const { uploadUrl, publicUrl, key } = await presign.json();
       const put = await fetch(uploadUrl, {
         method: "PUT",
-        headers: { "Content-Type": file.type },
+        headers: {
+          "Content-Type": file.type || inferImageContentType(file.name),
+        },
         body: file,
       });
       if (!put.ok) throw new Error("Upload failed");

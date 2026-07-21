@@ -127,15 +127,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
     try {
       final api = context.read<ApiClient>();
       final ext = file.extension?.toLowerCase() ?? 'jpg';
-      final contentType = ext == 'png'
-          ? 'image/png'
-          : ext == 'webp'
-              ? 'image/webp'
-              : 'image/jpeg';
+      final contentType = switch (ext) {
+        'png' => 'image/png',
+        'webp' => 'image/webp',
+        'gif' => 'image/gif',
+        'heic' || 'heif' => 'image/heic',
+        _ => 'image/jpeg',
+      };
 
       final presign = await api.post('/api/auth/register/upload', {
         'phone': widget.phone,
-        'filename': file.name,
+        'filename': file.name.isNotEmpty ? file.name : 'national-id.$ext',
         'contentType': contentType,
         'size': bytes.length,
       });

@@ -38,7 +38,14 @@ export const R2_KEY_PREFIXES = [
 ] as const;
 
 const ALLOWED_MIME: Record<string, string[]> = {
-  image: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+  image: [
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/heic",
+    "image/heif",
+  ],
   video: [
     "video/mp4",
     "video/webm",
@@ -64,7 +71,7 @@ const ALLOWED_MIME: Record<string, string[]> = {
 // Browsers report an empty or vendor-specific MIME type for some files,
 // so we also accept files by extension.
 const ALLOWED_EXT: Record<string, string[]> = {
-  image: ["jpg", "jpeg", "png", "webp", "gif"],
+  image: ["jpg", "jpeg", "png", "webp", "gif", "heic", "heif"],
   video: ["mp4", "webm", "mov", "mkv", "avi", "m4v", "mpg", "mpeg", "3gp"],
   document: ["pdf", "zip", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "txt"],
 };
