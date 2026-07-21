@@ -8,6 +8,7 @@ import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/media_cache_budget.dart';
 import 'package:ulearn/core/video/reel_video_cache.dart';
+import 'package:ulearn/core/video/video_playback.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/core/widgets/glass.dart';
@@ -219,7 +220,22 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
       }
 
       if (!c.value.isInitialized) {
-        await c.initialize();
+        try {
+          await VideoPlayback.initializeSafely(
+            c,
+            urlForCacheInvalidation: url,
+          );
+        } catch (_) {
+          await ReelVideoCache.releaseController(c);
+          // Retry once over the network (drop bad disk cache).
+          VideoPathIndex.remove(url);
+          c = VideoPlayback.create(url);
+          if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
+            await ReelVideoCache.releaseController(c);
+            return;
+          }
+          await VideoPlayback.initializeSafely(c, urlForCacheInvalidation: url);
+        }
       }
       if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
         await ReelVideoCache.releaseController(c);

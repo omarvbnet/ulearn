@@ -31,12 +31,15 @@ export async function GET(
   let contents = result.lesson.contents;
   if (result.hasAccess) {
     contents = await Promise.all(
-      contents.map(async (c) => ({
-        ...c,
-        fileUrl:
-          c.fileUrl ||
-          (await getDownloadUrl(c.fileKey, 3 * 3600).catch(() => null)),
-      }))
+      contents.map(async (c) => {
+        let fileUrl: string | null = null;
+        if (c.fileKey) {
+          fileUrl = await getDownloadUrl(c.fileKey, 3 * 3600).catch(() => null);
+        }
+        // Prefer freshly signed URLs over stale stored fileUrl values.
+        if (!fileUrl) fileUrl = c.fileUrl ?? null;
+        return { ...c, fileUrl };
+      })
     );
   } else {
     contents = contents.map((c) => ({ ...c, fileUrl: null, fileKey: "" }));

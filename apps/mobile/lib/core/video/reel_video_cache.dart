@@ -12,8 +12,8 @@ import 'package:video_player/video_player.dart';
 class ReelVideoCache {
   ReelVideoCache._();
 
-  /// Active + prev + next is enough; more decoders = thermal/jank.
-  static const _maxWarmControllers = 2;
+  /// Active + next is enough; more decoders stack and leave reels stuck loading.
+  static const _maxWarmControllers = 1;
 
   static final CacheManager manager = CacheManager(
     Config(
@@ -117,14 +117,17 @@ class ReelVideoCache {
     final resolved = _resolve(url);
     if (_warm.containsKey(resolved) ||
         _inflight.containsKey(resolved) ||
-        _preparing.contains(resolved)) {
+        _preparing.contains(resolved) ||
+        _streaming.isNotEmpty) {
+      // Never warm while something is actively streaming — that stacks
+      // decoders and is the main cause of endless loading spinners.
       return;
     }
     _preparing.add(resolved);
     () async {
       try {
         final c = await _createFresh(resolved, forWarm: true);
-        await c.initialize();
+        await VideoPlayback.initializeSafely(c, urlForCacheInvalidation: resolved);
         if (!c.value.isInitialized || c.value.hasError) {
           await releaseController(c);
           return;

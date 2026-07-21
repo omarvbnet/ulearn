@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -16,12 +17,13 @@ class VideoPlayback {
     allowBackgroundPlayback: false,
   );
 
-  static const httpHeaders = <String, String>{
-    'Connection': 'keep-alive',
-    'Accept': '*/*',
-  };
+  /// How long [initialize] may take before we abort and retry.
+  static const initTimeout = Duration(seconds: 12);
 
   /// Build an optimized controller. Uses disk path when known/cached.
+  ///
+  /// Avoid custom HTTP headers on signed R2 URLs — SigV4 URLs only sign
+  /// `host`, and extra headers have caused players to hang on buffering.
   static VideoPlayerController create(String url, {File? file}) {
     final resolved = ApiClient.absoluteUrl(url);
     final local = file ?? VideoPathIndex.fileFor(resolved);
@@ -40,22 +42,36 @@ class VideoPlayback {
     return VideoPlayerController.networkUrl(
       Uri.parse(resolved),
       videoPlayerOptions: videoPlayerOptions,
-      httpHeaders: httpHeaders,
       formatHint: _formatHint(resolved),
     );
+  }
+
+  /// Initialize with a timeout. On failure with a cached file, drop the
+  /// cache entry so the caller can retry over the network.
+  static Future<void> initializeSafely(
+    VideoPlayerController controller, {
+    String? urlForCacheInvalidation,
+    Duration timeout = initTimeout,
+  }) async {
+    try {
+      await controller.initialize().timeout(timeout);
+      if (controller.value.hasError) {
+        throw StateError(controller.value.errorDescription ?? 'decode error');
+      }
+    } catch (e) {
+      if (urlForCacheInvalidation != null && urlForCacheInvalidation.isNotEmpty) {
+        VideoPathIndex.remove(urlForCacheInvalidation);
+      }
+      rethrow;
+    }
   }
 
   static VideoFormat? _formatHint(String url) {
     final lower = url.toLowerCase();
     if (lower.contains('.m3u8')) return VideoFormat.hls;
     if (lower.contains('.mpd')) return VideoFormat.dash;
-    // Progressive MP4 / media gateway — hint helps ExoPlayer/AVPlayer/fvp start faster.
-    if (lower.contains('.mp4') ||
-        lower.contains('.mov') ||
-        lower.contains('.m4v') ||
-        lower.contains('/api/media/')) {
-      return VideoFormat.other;
-    }
+    // Let fvp / ExoPlayer / AVPlayer probe progressive MP4 themselves.
+    // Forcing [VideoFormat.other] previously caused indefinite init hangs.
     return null;
   }
 }

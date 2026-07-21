@@ -10,6 +10,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/course_video_cache.dart';
 import 'package:ulearn/core/video/course_cast_service.dart';
 import 'package:ulearn/core/video/media_cache_budget.dart';
+import 'package:ulearn/core/video/video_playback.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
@@ -141,8 +142,15 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     _phase = playIntro ? _PlayPhase.intro : _PlayPhase.main;
     MediaCacheBudget.pin(_urlForPhase(_phase));
     MediaCacheBudget.pin(widget.url);
-    if (_introUrl != null) CourseVideoCache.prefetch(_introUrl!);
-    if (_outroUrl != null) CourseVideoCache.prefetch(_outroUrl!);
+    // Never full-download the clip we're about to stream — that races the
+    // progressive player and was a common cause of stuck loading.
+    CourseVideoCache.beginStreaming(_urlForPhase(_phase));
+    if (_outroUrl != null && _phase != _PlayPhase.outro) {
+      CourseVideoCache.prefetch(_outroUrl!);
+    }
+    if (_introUrl != null && _phase != _PlayPhase.intro) {
+      CourseVideoCache.prefetch(_introUrl!);
+    }
     _init();
   }
 
@@ -322,7 +330,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     MediaCacheBudget.pin(url);
     final next = await CourseVideoCache.createController(url);
     try {
-      await next.initialize();
+      await VideoPlayback.initializeSafely(next, urlForCacheInvalidation: url);
       if (!mounted) {
         await next.dispose();
         return;
@@ -333,6 +341,26 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       CourseVideoCache.cacheAfterPlay(url);
     } catch (_) {
       await next.dispose();
+      // One network retry after dropping a bad disk cache entry.
+      try {
+        VideoPathIndex.remove(url);
+        final retry = VideoPlayback.create(url);
+        await VideoPlayback.initializeSafely(retry, urlForCacheInvalidation: url);
+        if (!mounted) {
+          await retry.dispose();
+          return;
+        }
+        _controller = retry;
+        retry.addListener(_onControllerTick);
+        setState(() {
+          _loading = false;
+          _error = null;
+        });
+        CourseVideoCache.cacheAfterPlay(url);
+        return;
+      } catch (_) {
+        /* fall through */
+      }
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -402,7 +430,10 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     try {
       await Future.wait([
         enableFuture,
-        controller.initialize(),
+        VideoPlayback.initializeSafely(
+          controller,
+          urlForCacheInvalidation: startUrl,
+        ),
       ]);
       if (!mounted) {
         await controller.dispose();
@@ -442,6 +473,32 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       CourseVideoCache.cacheAfterPlay(widget.url);
     } catch (_) {
       await controller.dispose();
+      // Retry main lesson once over network if a cached file poisoned init.
+      if (_phase == _PlayPhase.main && mounted) {
+        try {
+          VideoPathIndex.remove(startUrl);
+          final retry = VideoPlayback.create(startUrl);
+          await VideoPlayback.initializeSafely(
+            retry,
+            urlForCacheInvalidation: startUrl,
+          );
+          if (!mounted) {
+            await retry.dispose();
+            return;
+          }
+          _controller = retry;
+          if (widget.autoPlay) await _controller!.play();
+          _controller!.addListener(_onControllerTick);
+          _startProgressTimer();
+          setState(() {
+            _loading = false;
+            _error = null;
+          });
+          return;
+        } catch (_) {
+          /* fall through */
+        }
+      }
       // Intro failed — fall through to the lesson instead of blocking playback.
       if (_phase == _PlayPhase.intro && mounted) {
         await _goToMain(fromIntro: true);

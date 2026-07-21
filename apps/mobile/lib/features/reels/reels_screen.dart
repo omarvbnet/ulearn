@@ -601,17 +601,30 @@ class ReelsScreenState extends State<ReelsScreen> {
 }
 
 /// In-memory feed so returning to Reels skips the full-screen skeleton.
+/// Expires so signed R2 URLs (≈6h) are not reused after they go stale.
 class _ReelFeedMemoryCache {
   static List<Map<String, dynamic>>? _videos;
   static String? _nextCursor;
+  static DateTime? _savedAt;
+  static const _ttl = Duration(minutes: 45);
 
   static void save(List<Map<String, dynamic>> videos, String? nextCursor) {
     _videos = List<Map<String, dynamic>>.from(videos);
     _nextCursor = nextCursor;
+    _savedAt = DateTime.now();
   }
 
   static ({List<Map<String, dynamic>> videos, String? nextCursor})? peek() {
-    if (_videos == null || _videos!.isEmpty) return null;
-    return (videos: List<Map<String, dynamic>>.from(_videos!), nextCursor: _nextCursor);
+    if (_videos == null || _videos!.isEmpty || _savedAt == null) return null;
+    if (DateTime.now().difference(_savedAt!) > _ttl) {
+      _videos = null;
+      _nextCursor = null;
+      _savedAt = null;
+      return null;
+    }
+    return (
+      videos: List<Map<String, dynamic>>.from(_videos!),
+      nextCursor: _nextCursor,
+    );
   }
 }

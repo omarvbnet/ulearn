@@ -150,7 +150,11 @@ export async function getUploadUrl(params: {
 
 export async function getDownloadUrl(key: string, expiresIn = 3600) {
   const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
-  return getSignedUrl(r2, command, { expiresIn });
+  // Keep signed headers minimal so mobile players can Range-request freely.
+  return getSignedUrl(r2, command, {
+    expiresIn,
+    unhoistableHeaders: new Set(["x-amz-checksum-mode"]),
+  });
 }
 
 /** Same-origin media path — path style avoids query-string issues in image caches. */

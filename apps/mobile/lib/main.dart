@@ -31,12 +31,12 @@ Future<void> main() async {
   // Must be registered before runApp so background isolates can handle FCM.
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   await PushNotificationService.instance.ensureFirebaseReady();
-  // Hardware-accelerated video (libmdk) for smooth course + shorts playback.
+  // Hardware-accelerated video (libmdk) for course + shorts playback.
+  // Do NOT enable Android surface tunneling — it commonly leaves players
+  // stuck on the loading spinner / black frame on many devices.
   fvp.registerWith(options: {
     'platforms': ['ios', 'android'],
-    'lowLatency': 1, // VOD: faster first frame / lower buffer delay
-    'fastSeek': true, // snappy scrub on reels
-    'tunnel': true, // Android MediaCodec → Surface (lower GPU cost)
+    'fastSeek': true,
   });
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(

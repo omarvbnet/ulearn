@@ -50,6 +50,7 @@ function isHeavyMedia(key: string): boolean {
     lower.startsWith("teacher-courses/") ||
     lower.startsWith("videos/") ||
     lower.startsWith("lessons/") ||
+    lower.startsWith("intro-outro/") ||
     /\.(mp4|webm|mov|mkv|avi|m4v|mpg|mpeg|3gp)$/i.test(key)
   );
 }
