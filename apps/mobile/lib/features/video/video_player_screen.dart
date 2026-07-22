@@ -10,7 +10,7 @@ import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/quiz/quiz_screen.dart';
 import 'package:ulearn/core/video/cast_watermarked_video.dart';
 import 'package:ulearn/core/video/course_video_cache.dart';
-import 'package:ulearn/core/video/video_playback.dart';
+import 'package:ulearn/core/video/video_url_refresh.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
 import 'package:video_player/video_player.dart';
@@ -97,21 +97,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       }
 
       _videoUrl = url;
-      _controller = await CourseVideoCache.createController(url);
-      try {
-        await VideoPlayback.initializeSafely(
-          _controller!,
-          urlForCacheInvalidation: url,
-        );
-      } catch (_) {
-        await _controller?.dispose();
-        VideoPathIndex.remove(url);
-        _controller = VideoPlayback.create(url);
-        await VideoPlayback.initializeSafely(
-          _controller!,
-          urlForCacheInvalidation: url,
-        );
-      }
+      _controller = await CourseVideoCache.createController(
+        url,
+        initialize: true,
+        refreshUrl: () => VideoUrlRefresh.curriculumLesson(api, widget.lessonId),
+      );
       if (!mounted) {
         await _controller?.dispose();
         CourseVideoCache.endStreaming(url);

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:ulearn/core/api/api_client.dart';
@@ -187,7 +188,11 @@ class ReelVideoCache {
     }
   }
 
-  static Future<VideoPlayerController> createController(String url) async {
+  static Future<VideoPlayerController> createController(
+    String url, {
+    Future<String?> Function()? refreshUrl,
+    bool initialize = false,
+  }) async {
     final key = _cacheKey(url);
     beginStreaming(url);
 
@@ -202,7 +207,12 @@ class ReelVideoCache {
     final pending = _inflight[key];
     if (pending != null) return pending;
 
-    final future = _createFresh(url, forWarm: false);
+    final future = _createFresh(
+      url,
+      forWarm: false,
+      refreshUrl: refreshUrl,
+      initialize: initialize,
+    );
     _inflight[key] = future;
     try {
       return await future;
@@ -214,13 +224,31 @@ class ReelVideoCache {
   static Future<VideoPlayerController> _createFresh(
     String url, {
     required bool forWarm,
+    Future<String?> Function()? refreshUrl,
+    bool initialize = false,
   }) async {
     final playUrl = _playUrl(url);
     final key = _cacheKey(url);
 
+    Future<VideoPlayerController?> tryFile(File file) async {
+      final c = VideoPlayback.create(playUrl, file: file);
+      if (!initialize) return c;
+      try {
+        await VideoPlayback.initializeSafely(c, urlForCacheInvalidation: url);
+        return c;
+      } catch (_) {
+        try {
+          await c.dispose();
+        } catch (_) {}
+        VideoPathIndex.remove(url);
+        return null;
+      }
+    }
+
     final indexed = VideoPathIndex.fileFor(url);
     if (indexed != null) {
-      return VideoPlayback.create(playUrl, file: indexed);
+      final hit = await tryFile(indexed);
+      if (hit != null) return hit;
     }
 
     try {
@@ -230,13 +258,24 @@ class ReelVideoCache {
         try {
           await info.file.setLastModified(DateTime.now());
         } catch (_) {}
-        return VideoPlayback.create(playUrl, file: info.file);
+        final hit = await tryFile(info.file);
+        if (hit != null) return hit;
       }
     } catch (_) {}
 
-    // Progressive network — never full-download this URL in parallel.
+    // Progressive network — never full-download this URL in parallel with warm.
     if (forWarm) {
       unawaited(prefetch(url));
+      return VideoPlayback.create(playUrl);
+    }
+
+    if (initialize) {
+      // HEAD-safe open: fvp GET/Range → refresh signature → GET-to-disk.
+      return VideoPlayback.open(
+        playUrl,
+        refreshUrl: refreshUrl,
+        allowDownloadFallback: true,
+      );
     }
     return VideoPlayback.create(playUrl);
   }

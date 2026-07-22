@@ -170,35 +170,45 @@ export async function getDownloadUrl(
 }
 
 /**
- * Fresh signed HTTPS playback URL for lessons / shorts.
- * Always resigns from fileKey (or a key recovered from fileUrl). Never returns a
- * stale DB absolute URL that still has X-Amz-* query params.
+ * Fresh HTTPS playback URL for lessons / shorts.
+ * Prefer same-origin `/api/media/...` (HEAD + Range) over direct R2 SigV4 URLs.
+ * App Store AVPlayer probes with HEAD; R2 signed GET URLs return HEAD 403.
  */
 export async function resolvePlaybackUrl(
   fileKey?: string | null,
   fileUrl?: string | null,
-  expiresIn = PLAYBACK_URL_EXPIRES_SEC
+  _expiresIn = PLAYBACK_URL_EXPIRES_SEC
 ): Promise<string | null> {
   const key = extractStorageKey(fileUrl, fileKey);
   if (key && isR2Configured()) {
-    try {
-      return await getDownloadUrl(key, expiresIn);
-    } catch {
-      return mediaProxyPath(key);
-    }
+    return absoluteMediaUrl(key);
   }
 
   const trimmed = fileUrl?.trim() || "";
   if (!trimmed) return null;
 
   // Stored absolute signed URLs expire — do not hand them to mobile players.
-  if (/[?&]X-Amz-/i.test(trimmed)) return null;
+  if (/[?&]X-Amz-/i.test(trimmed)) {
+    const recovered = extractStorageKey(trimmed, null);
+    if (recovered && isR2Configured()) return absoluteMediaUrl(recovered);
+    return null;
+  }
 
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
     return forceHttpsUrl(trimmed);
   }
-  if (trimmed.startsWith("/")) return trimmed;
+  if (trimmed.startsWith("/")) {
+    const base = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+    return base ? `${forceHttpsUrl(base)}${trimmed}` : trimmed;
+  }
   return trimmed;
+}
+
+/** Absolute same-origin media gateway URL for mobile/web players. */
+export function absoluteMediaUrl(key: string): string {
+  const path = mediaProxyPath(key);
+  const base = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+  return base ? `${forceHttpsUrl(base)}${path}` : path;
 }
 
 /** Same-origin media path — path style avoids query-string issues in image caches. */

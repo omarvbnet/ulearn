@@ -10,7 +10,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/course_video_cache.dart';
 import 'package:ulearn/core/video/course_cast_service.dart';
 import 'package:ulearn/core/video/media_cache_budget.dart';
-import 'package:ulearn/core/video/video_playback.dart';
+import 'package:ulearn/core/video/video_url_refresh.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
@@ -42,6 +42,7 @@ class CourseInlinePlayer extends StatefulWidget {
     required this.url,
     required this.title,
     this.lessonId,
+    this.courseId,
     this.autoPlay = true,
     this.initiallyCompleted = false,
     this.onCompleted,
@@ -60,6 +61,8 @@ class CourseInlinePlayer extends StatefulWidget {
   final String url;
   final String title;
   final String? lessonId;
+  /// Used to re-fetch a fresh signed lesson URL after a playback failure.
+  final String? courseId;
   final bool autoPlay;
   final bool initiallyCompleted;
   final VoidCallback? onCompleted;
@@ -128,6 +131,26 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       _PlayPhase.main => widget.url,
       _PlayPhase.outro => _outroUrl ?? widget.url,
     };
+  }
+
+  Future<String?> Function()? _refreshForPhase(_PlayPhase phase) {
+    // Only the main lesson has a stable API identity for resigning.
+    if (phase != _PlayPhase.main) return null;
+    final courseId = widget.courseId;
+    final lessonId = widget.lessonId;
+    if (courseId == null ||
+        courseId.isEmpty ||
+        lessonId == null ||
+        lessonId.isEmpty) {
+      return null;
+    }
+    if (!mounted) return null;
+    final api = context.read<ApiClient>();
+    return () => VideoUrlRefresh.storeLesson(
+          api,
+          courseId: courseId,
+          lessonId: lessonId,
+        );
   }
 
   @override
@@ -328,9 +351,12 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       _textureEpoch++;
     });
     MediaCacheBudget.pin(url);
-    final next = await CourseVideoCache.createController(url);
     try {
-      await VideoPlayback.initializeSafely(next, urlForCacheInvalidation: url);
+      final next = await CourseVideoCache.createController(
+        url,
+        initialize: true,
+        refreshUrl: _refreshForPhase(phase),
+      );
       if (!mounted) {
         await next.dispose();
         return;
@@ -340,27 +366,6 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       setState(() => _loading = false);
       CourseVideoCache.cacheAfterPlay(url);
     } catch (_) {
-      await next.dispose();
-      // One network retry after dropping a bad disk cache entry.
-      try {
-        VideoPathIndex.remove(url);
-        final retry = VideoPlayback.create(url);
-        await VideoPlayback.initializeSafely(retry, urlForCacheInvalidation: url);
-        if (!mounted) {
-          await retry.dispose();
-          return;
-        }
-        _controller = retry;
-        retry.addListener(_onControllerTick);
-        setState(() {
-          _loading = false;
-          _error = null;
-        });
-        CourseVideoCache.cacheAfterPlay(url);
-        return;
-      } catch (_) {
-        /* fall through */
-      }
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -410,8 +415,12 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       });
 
     final startUrl = _urlForPhase(_phase);
-    // Start network/file controller while refreshing protection identity.
-    final controllerFuture = CourseVideoCache.createController(startUrl);
+    // HEAD-safe open (fvp GET/Range → refresh → GET-to-disk) while protection boots.
+    final controllerFuture = CourseVideoCache.createController(
+      startUrl,
+      initialize: true,
+      refreshUrl: _refreshForPhase(_phase),
+    );
     await ensureFreshProtectionIdentity(
       auth,
       _protection!,
@@ -419,7 +428,22 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     );
 
     final enableFuture = _protection!.enable();
-    final controller = await controllerFuture;
+    VideoPlayerController? controller;
+    try {
+      controller = await controllerFuture;
+    } catch (_) {
+      await enableFuture;
+      if (_phase == _PlayPhase.intro && mounted) {
+        await _goToMain(fromIntro: true);
+        return;
+      }
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = context.l10n.t('mobile.video.playFailed');
+      });
+      return;
+    }
 
     if (Platform.isAndroid) {
       _castSub ??= CourseCastService.castingStream.listen((casting) {
@@ -428,16 +452,13 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     }
 
     try {
-      await Future.wait([
-        enableFuture,
-        VideoPlayback.initializeSafely(
-          controller,
-          urlForCacheInvalidation: startUrl,
-        ),
-      ]);
+      await enableFuture;
       if (!mounted) {
         await controller.dispose();
         return;
+      }
+      if (!controller.value.isInitialized || controller.value.hasError) {
+        throw StateError(controller.value.errorDescription ?? 'not initialized');
       }
       // Black / empty intro clips (bad codec or corrupt admin upload) — skip to lesson.
       final aspect = controller.value.aspectRatio;
@@ -473,32 +494,6 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       CourseVideoCache.cacheAfterPlay(widget.url);
     } catch (_) {
       await controller.dispose();
-      // Retry main lesson once over network if a cached file poisoned init.
-      if (_phase == _PlayPhase.main && mounted) {
-        try {
-          VideoPathIndex.remove(startUrl);
-          final retry = VideoPlayback.create(startUrl);
-          await VideoPlayback.initializeSafely(
-            retry,
-            urlForCacheInvalidation: startUrl,
-          );
-          if (!mounted) {
-            await retry.dispose();
-            return;
-          }
-          _controller = retry;
-          if (widget.autoPlay) await _controller!.play();
-          _controller!.addListener(_onControllerTick);
-          _startProgressTimer();
-          setState(() {
-            _loading = false;
-            _error = null;
-          });
-          return;
-        } catch (_) {
-          /* fall through */
-        }
-      }
       // Intro failed — fall through to the lesson instead of blocking playback.
       if (_phase == _PlayPhase.intro && mounted) {
         await _goToMain(fromIntro: true);

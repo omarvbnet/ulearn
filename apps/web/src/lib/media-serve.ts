@@ -1,4 +1,4 @@
-import { GetObjectCommand } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { Readable } from "stream";
 import { error } from "@/lib/api";
 import { getDownloadUrl, isR2Configured, r2Bucket, r2Client } from "@/lib/r2";
@@ -84,11 +84,70 @@ async function proxySignedObject(key: string): Promise<Response> {
 }
 
 /**
+ * Serve video/PDF via credentialed R2 (HEAD + Range GET).
+ *
+ * Direct R2 SigV4 URLs are GET-only (HEAD → 403). iOS AVPlayer (App Store
+ * builds without fvp) probes with HEAD first, so we must answer HEAD/Range on
+ * this same-origin gateway instead of 302'ing to a signed URL.
+ */
+async function serveHeavyMedia(safeKey: string, request: Request): Promise<Response> {
+  const method = request.method.toUpperCase();
+
+  if (method === "HEAD") {
+    try {
+      const head = await r2Client.send(
+        new HeadObjectCommand({ Bucket: r2Bucket, Key: safeKey })
+      );
+      const headers = new Headers();
+      headers.set("Content-Type", head.ContentType || guessContentType(safeKey));
+      headers.set("Accept-Ranges", "bytes");
+      headers.set("Cache-Control", "public, max-age=3600");
+      if (head.ContentLength != null) {
+        headers.set("Content-Length", String(head.ContentLength));
+      }
+      if (head.ETag) headers.set("ETag", head.ETag);
+      return new Response(null, { status: 200, headers });
+    } catch {
+      return error("Media not found", 404, "NOT_FOUND");
+    }
+  }
+
+  const range = request.headers.get("range") || undefined;
+  try {
+    const obj = await r2Client.send(
+      new GetObjectCommand({
+        Bucket: r2Bucket,
+        Key: safeKey,
+        ...(range ? { Range: range } : {}),
+      })
+    );
+    if (!obj.Body) {
+      return error("Media not found", 404, "NOT_FOUND");
+    }
+
+    const headers = new Headers();
+    headers.set("Content-Type", obj.ContentType || guessContentType(safeKey));
+    headers.set("Accept-Ranges", "bytes");
+    headers.set("Cache-Control", "public, max-age=3600");
+    if (obj.ContentLength != null) {
+      headers.set("Content-Length", String(obj.ContentLength));
+    }
+    if (obj.ContentRange) headers.set("Content-Range", obj.ContentRange);
+    if (obj.ETag) headers.set("ETag", obj.ETag);
+
+    const status = range && obj.ContentRange ? 206 : 200;
+    return new Response(toWebStream(obj.Body), { status, headers });
+  } catch {
+    return error("Media not found", 404, "NOT_FOUND");
+  }
+}
+
+/**
  * Stream (or redirect) an R2 object by key.
  *
  * Images always stay same-origin (stream or proxy) — Flutter's image cache
  * often fails on cross-host 302 redirects to R2 signed URLs.
- * Large videos may redirect to a signed URL for progressive playback.
+ * Videos stay same-origin too so iOS AVPlayer HEAD probes succeed.
  */
 export async function serveR2Object(key: string, request: Request): Promise<Response> {
   const safeKey = key.trim().replace(/^\/+/, "");
@@ -104,12 +163,7 @@ export async function serveR2Object(key: string, request: Request): Promise<Resp
   const image = isImageKey(safeKey);
 
   if (heavy && !image) {
-    try {
-      const signed = await getDownloadUrl(safeKey, 60 * 60 * 6);
-      return Response.redirect(signed, 302);
-    } catch {
-      return error("Media not found", 404, "NOT_FOUND");
-    }
+    return serveHeavyMedia(safeKey, request);
   }
 
   try {

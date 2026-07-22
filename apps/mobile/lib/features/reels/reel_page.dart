@@ -10,6 +10,7 @@ import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/media_cache_budget.dart';
 import 'package:ulearn/core/video/reel_video_cache.dart';
 import 'package:ulearn/core/video/video_playback.dart';
+import 'package:ulearn/core/video/video_url_refresh.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/core/widgets/glass.dart';
@@ -401,6 +402,8 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
       return;
     }
 
+    final videoId = widget.video['id']?.toString();
+    final api = context.read<ApiClient>();
     final showSkeleton = await ReelVideoCache.shouldShowLoadSkeleton(url);
     if (mounted && gen == _initGeneration && widget.active) {
       setState(() => _showLoadSkeleton = showSkeleton);
@@ -408,35 +411,23 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
 
     VideoPlayerController? c;
     try {
-      c = await ReelVideoCache.createController(url);
+      if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
+        return;
+      }
+      // initialize:true → fvp GET/Range, then refresh signature, then GET-to-disk
+      // (never HEAD — R2 SigV4 URLs return 403 on HEAD).
+      c = await ReelVideoCache.createController(
+        url,
+        initialize: true,
+        refreshUrl: videoId == null || videoId.isEmpty
+            ? null
+            : () => VideoUrlRefresh.shortVideo(api, videoId),
+      );
       if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
         await ReelVideoCache.releaseController(c);
         return;
       }
-
-      if (!c.value.isInitialized) {
-        try {
-          await VideoPlayback.initializeSafely(
-            c,
-            urlForCacheInvalidation: url,
-          );
-        } catch (_) {
-          await ReelVideoCache.releaseController(c);
-          // Retry once over the network (drop bad disk cache).
-          VideoPathIndex.remove(url);
-          c = VideoPlayback.create(url);
-          if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
-            await ReelVideoCache.releaseController(c);
-            return;
-          }
-          await VideoPlayback.initializeSafely(c, urlForCacheInvalidation: url);
-        }
-      }
-      if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
-        await ReelVideoCache.releaseController(c);
-        return;
-      }
-      if (c.value.hasError) {
+      if (!c.value.isInitialized || c.value.hasError) {
         await ReelVideoCache.releaseController(c);
         if (mounted && gen == _initGeneration) {
           setState(() {

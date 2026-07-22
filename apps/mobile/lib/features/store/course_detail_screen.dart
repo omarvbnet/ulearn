@@ -964,6 +964,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         url: ApiClient.absoluteUrl(activeUrl),
         title: active?['title']?.toString() ?? l10n.t('student.videos'),
         lessonId: activeId,
+        courseId: widget.courseId,
         borderRadius: edgeToEdge ? 0 : 14,
         expand: expandPlayer,
         showFullscreen: showFullscreen,

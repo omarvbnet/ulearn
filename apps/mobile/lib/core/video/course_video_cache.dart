@@ -5,6 +5,7 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/video/media_cache_budget.dart';
 import 'package:ulearn/core/video/video_playback.dart';
 import 'package:video_player/video_player.dart';
+import 'dart:io';
 
 /// Disk-cached course lesson playback with progressive start + smart prefetch.
 ///
@@ -81,14 +82,38 @@ class CourseVideoCache {
   }
 
   /// Prefer a cached file when available; otherwise stream immediately.
-  static Future<VideoPlayerController> createController(String url) async {
+  ///
+  /// When [initialize] is true, uses [VideoPlayback.open] (GET/Range + optional
+  /// URL refresh + bounded GET-to-disk). Never probes with HEAD — R2 SigV4
+  /// signed URLs return 403 on HEAD.
+  static Future<VideoPlayerController> createController(
+    String url, {
+    Future<String?> Function()? refreshUrl,
+    bool initialize = false,
+  }) async {
     final playUrl = _playUrl(url);
     final key = _cacheKey(url);
     beginStreaming(url);
 
+    Future<VideoPlayerController?> tryFile(File file) async {
+      final c = VideoPlayback.create(playUrl, file: file);
+      if (!initialize) return c;
+      try {
+        await VideoPlayback.initializeSafely(c, urlForCacheInvalidation: url);
+        return c;
+      } catch (_) {
+        try {
+          await c.dispose();
+        } catch (_) {}
+        VideoPathIndex.remove(url);
+        return null;
+      }
+    }
+
     final indexed = VideoPathIndex.fileFor(url);
     if (indexed != null) {
-      return VideoPlayback.create(playUrl, file: indexed);
+      final hit = await tryFile(indexed);
+      if (hit != null) return hit;
     }
 
     try {
@@ -98,10 +123,19 @@ class CourseVideoCache {
         try {
           await info.file.setLastModified(DateTime.now());
         } catch (_) {}
-        return VideoPlayback.create(playUrl, file: info.file);
+        final hit = await tryFile(info.file);
+        if (hit != null) return hit;
       }
     } catch (_) {}
 
+    if (initialize) {
+      return VideoPlayback.open(
+        playUrl,
+        refreshUrl: refreshUrl,
+        allowDownloadFallback: true,
+        maxDownloadBytes: VideoPlayback.maxDownloadFallbackBytes,
+      );
+    }
     // Progressive network — do NOT full-download this URL in parallel.
     return VideoPlayback.create(playUrl);
   }

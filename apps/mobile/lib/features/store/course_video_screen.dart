@@ -4,7 +4,6 @@ import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/course_video_cache.dart';
-import 'package:ulearn/core/video/video_playback.dart';
 import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/features/video/course_cast_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
@@ -49,21 +48,11 @@ class _CourseVideoScreenState extends State<CourseVideoScreen> {
     await _protection!.enable();
 
     try {
-      _controller = await CourseVideoCache.createController(widget.url);
-      try {
-        await VideoPlayback.initializeSafely(
-          _controller!,
-          urlForCacheInvalidation: widget.url,
-        );
-      } catch (_) {
-        await _controller?.dispose();
-        VideoPathIndex.remove(widget.url);
-        _controller = VideoPlayback.create(widget.url);
-        await VideoPlayback.initializeSafely(
-          _controller!,
-          urlForCacheInvalidation: widget.url,
-        );
-      }
+      // HEAD-safe: fvp GET/Range, then bounded GET-to-disk (R2 HEAD → 403).
+      _controller = await CourseVideoCache.createController(
+        widget.url,
+        initialize: true,
+      );
       if (!mounted) {
         await _controller?.dispose();
         CourseVideoCache.endStreaming(widget.url);
