@@ -649,7 +649,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
                     });
                     _init();
                   },
-                  child: Text(context.l10n.t('common.retry')),
+                  child: Text(context.l10n.t('mobile.error.retry')),
                 ),
               ],
             ),
