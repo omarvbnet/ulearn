@@ -6,7 +6,7 @@ import { CourseCertificateService } from "@/services/course-certificate.service"
 import { CourseRatingService } from "@/services/course-rating.service";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 import { VideoService } from "@/services/video.service";
-import { getDownloadUrl } from "@/lib/r2";
+import { getDownloadUrl, resolvePlaybackUrl } from "@/lib/r2";
 import type { Locale } from "@prisma/client";
 
 /** Course detail — public browse; purchase/progress fields when signed in. */
@@ -141,12 +141,7 @@ export async function GET(
       // fileUrl values (common after admin web uploads) play as a black screen.
       let fileUrl: string | null = null;
       if (canWatch) {
-        if (l.fileKey) {
-          fileUrl = await getDownloadUrl(l.fileKey).catch(() => null);
-        }
-        if (!fileUrl) {
-          fileUrl = l.fileUrl;
-        }
+        fileUrl = await resolvePlaybackUrl(l.fileKey, l.fileUrl);
       }
       let thumbnailUrl = l.thumbnailUrl;
       if (l.thumbnailKey) {
@@ -205,10 +200,9 @@ export async function GET(
 
   const materials = await Promise.all(
     materialRows.map(async (m) => {
-      let fileUrl = m.fileUrl;
-      if (m.fileKey && !fileUrl) {
-        fileUrl = await getDownloadUrl(m.fileKey).catch(() => null);
-      }
+      // Prefer a fresh signed URL whenever a key exists (same as lessons).
+      const fileUrl =
+        (await resolvePlaybackUrl(m.fileKey, m.fileUrl)) ?? m.fileUrl;
       return {
         id: m.id,
         title: m.title,

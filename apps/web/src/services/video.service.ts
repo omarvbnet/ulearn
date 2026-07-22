@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { computeVideoCompletion } from "@/lib/video-progress.util";
-import { getDownloadUrl, mediaProxyPath } from "@/lib/r2";
+import { mediaProxyPath, resolvePlaybackUrl } from "@/lib/r2";
 import { CourseService } from "@/services/course.service";
 
 export class VideoService {
@@ -157,20 +157,10 @@ export class VideoService {
       clip: Awaited<ReturnType<typeof VideoService.getIntroOutro>>["intro"]
     ) => {
       if (!clip) return null;
-      let fileUrl: string | null = null;
-      if (clip.fileKey) {
-        fileUrl = await getDownloadUrl(clip.fileKey, 3 * 3600).catch(() => null);
-      }
-      // Prefer proxy path over stale absolute URLs so mobile can resolve against API origin.
-      if (!fileUrl) {
-        const raw = clip.fileUrl?.trim() || "";
-        if (raw.startsWith("/api/media/") || raw.startsWith("/uploads/")) {
-          fileUrl = raw;
-        } else if (raw.startsWith("http://") || raw.startsWith("https://")) {
-          fileUrl = raw;
-        } else if (clip.fileKey) {
-          fileUrl = mediaProxyPath(clip.fileKey);
-        }
+      let fileUrl = await resolvePlaybackUrl(clip.fileKey, clip.fileUrl);
+      // Prefer proxy path over empty result so mobile can resolve against API origin.
+      if (!fileUrl && clip.fileKey) {
+        fileUrl = mediaProxyPath(clip.fileKey);
       }
       if (!fileUrl) return null;
       return {

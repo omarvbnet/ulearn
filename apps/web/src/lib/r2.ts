@@ -148,13 +148,57 @@ export async function getUploadUrl(params: {
   };
 }
 
-export async function getDownloadUrl(key: string, expiresIn = 3600) {
+/** Default playback signature lifetime (6h) — long enough for a study session. */
+export const PLAYBACK_URL_EXPIRES_SEC = 60 * 60 * 6;
+
+function forceHttpsUrl(url: string): string {
+  if (url.startsWith("http://")) return `https://${url.slice("http://".length)}`;
+  return url;
+}
+
+export async function getDownloadUrl(
+  key: string,
+  expiresIn = PLAYBACK_URL_EXPIRES_SEC
+) {
   const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
   // Keep signed headers minimal so mobile players can Range-request freely.
-  return getSignedUrl(r2, command, {
+  const url = await getSignedUrl(r2, command, {
     expiresIn,
     unhoistableHeaders: new Set(["x-amz-checksum-mode"]),
   });
+  return forceHttpsUrl(url);
+}
+
+/**
+ * Fresh signed HTTPS playback URL for lessons / shorts.
+ * Always resigns from fileKey (or a key recovered from fileUrl). Never returns a
+ * stale DB absolute URL that still has X-Amz-* query params.
+ */
+export async function resolvePlaybackUrl(
+  fileKey?: string | null,
+  fileUrl?: string | null,
+  expiresIn = PLAYBACK_URL_EXPIRES_SEC
+): Promise<string | null> {
+  const key = extractStorageKey(fileUrl, fileKey);
+  if (key && isR2Configured()) {
+    try {
+      return await getDownloadUrl(key, expiresIn);
+    } catch {
+      return mediaProxyPath(key);
+    }
+  }
+
+  const trimmed = fileUrl?.trim() || "";
+  if (!trimmed) return null;
+
+  // Stored absolute signed URLs expire — do not hand them to mobile players.
+  if (/[?&]X-Amz-/i.test(trimmed)) return null;
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return forceHttpsUrl(trimmed);
+  }
+  if (trimmed.startsWith("/")) return trimmed;
+  return trimmed;
 }
 
 /** Same-origin media path — path style avoids query-string issues in image caches. */
@@ -263,14 +307,8 @@ export async function resolveSignedMediaUrl(
   url?: string | null,
   key?: string | null
 ): Promise<string | null> {
-  const storageKey = extractStorageKey(url, key);
-  if (storageKey && isR2Configured()) {
-    try {
-      return await getDownloadUrl(storageKey, 60 * 60 * 6);
-    } catch {
-      return mediaProxyPath(storageKey);
-    }
-  }
+  const signed = await resolvePlaybackUrl(key, url, PLAYBACK_URL_EXPIRES_SEC);
+  if (signed) return signed;
   return resolvePublicMediaUrl(url, key);
 }
 

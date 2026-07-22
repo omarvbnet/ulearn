@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/video/course_video_cache.dart';
 import 'package:ulearn/core/video/image_cache_manager.dart';
 import 'package:ulearn/core/video/reel_video_cache.dart';
@@ -38,12 +37,12 @@ class MediaCacheBudget {
   static DateTime? _lastEnforceAt;
 
   static void pin(String url) {
-    final resolved = ApiClient.absoluteUrl(url);
+    final resolved = VideoPlayback.mediaCacheKey(url);
     if (resolved.isNotEmpty) _pinnedUrls.add(resolved);
   }
 
   static void unpin(String url) {
-    _pinnedUrls.remove(ApiClient.absoluteUrl(url));
+    _pinnedUrls.remove(VideoPlayback.mediaCacheKey(url));
   }
 
   static void pinMany(Iterable<String> urls) {

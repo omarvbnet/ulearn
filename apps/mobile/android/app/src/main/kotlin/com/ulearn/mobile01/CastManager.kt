@@ -1,7 +1,8 @@
-package com.ulearn.mobile
+package com.ulearn.mobile01
 
 import android.app.Activity
 import android.util.Log
+import android.view.ContextThemeWrapper
 import com.google.android.gms.cast.MediaInfo
 import com.google.android.gms.cast.MediaMetadata
 import com.google.android.gms.cast.MediaStatus
@@ -50,11 +51,13 @@ class CastManager(
             onCastingChanged(true)
         }
 
-        override fun onSessionSuspended(session: CastSession, reason: Int) {
+        override fun onSessionResumeFailed(session: CastSession, error: Int) {
             onCastingChanged(false)
         }
 
-        override fun onSessionResumed(session: CastSession, sessionId: String) = Unit
+        override fun onSessionSuspended(session: CastSession, reason: Int) {
+            onCastingChanged(false)
+        }
     }
 
     fun initialize() {
@@ -81,7 +84,8 @@ class CastManager(
     fun showDevicePicker() {
         try {
             val selector = castContext?.mergedSelector ?: return
-            MediaRouteChooserDialog(activity).apply {
+            val themed = ContextThemeWrapper(activity, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
+            MediaRouteChooserDialog(themed).apply {
                 routeSelector = selector
                 show()
             }
@@ -157,7 +161,7 @@ class CastManager(
 
         val customData = JSONObject().apply {
             put("watermark", watermark)
-        }.toString()
+        }
 
         val mediaInfoBuilder = MediaInfo.Builder(url)
             .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)

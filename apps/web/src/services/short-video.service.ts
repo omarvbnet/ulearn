@@ -1,16 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { PUBLIC_SHORT_VIDEO_WHERE } from "@/lib/video-visibility";
-import { extractStorageKey, resolvePublicMediaUrl, resolveSignedMediaUrl } from "@/lib/r2";
+import { resolvePublicMediaUrl, resolvePlaybackUrl } from "@/lib/r2";
 
 async function resolveVideoUrl(fileKey: string | null, fileUrl: string | null) {
-  // Always prefer a fresh signed URL when we can recover a storage key —
-  // absolute http(s) URLs in the DB may be expired R2 signatures.
-  const key = fileKey || extractStorageKey(fileUrl, fileKey);
-  if (key) return resolveSignedMediaUrl(fileUrl, key);
-  if (fileUrl?.startsWith("http://") || fileUrl?.startsWith("https://")) {
-    return fileUrl;
-  }
-  return resolveSignedMediaUrl(fileUrl, fileKey);
+  // Always resign from fileKey / recoverable key — never return a stale DB signature.
+  return resolvePlaybackUrl(fileKey, fileUrl);
 }
 
 const userSelect = {

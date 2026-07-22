@@ -11,7 +11,7 @@
         android:requestLegacyExternalStorage="true">
         <meta-data
             android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
-            android:value="com.ulearn.mobile.CastOptionsProvider" />
+            android:value="com.ulearn.mobile01.CastOptionsProvider" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

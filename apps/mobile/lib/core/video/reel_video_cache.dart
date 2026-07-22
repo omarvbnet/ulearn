@@ -12,14 +12,14 @@ import 'package:video_player/video_player.dart';
 class ReelVideoCache {
   ReelVideoCache._();
 
-  /// Active + next is enough; more decoders stack and leave reels stuck loading.
+  /// Keep at most one warm decoder (the *next* reel).
   static const _maxWarmControllers = 1;
 
   static final CacheManager manager = CacheManager(
     Config(
       'reel_videos',
       stalePeriod: const Duration(days: 7),
-      maxNrOfCacheObjects: 36,
+      maxNrOfCacheObjects: 40,
     ),
   );
 
@@ -28,10 +28,12 @@ class ReelVideoCache {
   static final Map<String, VideoPlayerController> _warm = {};
   static final Map<String, Future<VideoPlayerController>> _inflight = {};
   static final Set<String> _preparing = {};
+  static int _warmEpoch = 0;
 
-  static String _resolve(String url) => ApiClient.absoluteUrl(url);
+  static String _playUrl(String url) => ApiClient.absoluteUrl(url);
+  static String _cacheKey(String url) => VideoPlayback.mediaCacheKey(url);
 
-  /// Resolved URLs currently held in the warm pool (protected from eviction).
+  /// Resolved cache keys currently held in the warm pool.
   static Set<String> get warmUrls => _warm.keys.toSet();
 
   static Future<void> emptyCache() => manager.emptyCache();
@@ -39,27 +41,29 @@ class ReelVideoCache {
   /// Mark a URL as actively streaming so we do not also full-download it
   /// (double bandwidth is the #1 cause of mid-play stutter).
   static void beginStreaming(String url) {
-    _streaming.add(_resolve(url));
+    _streaming.add(_cacheKey(url));
   }
 
   static void endStreaming(String url) {
-    _streaming.remove(_resolve(url));
+    _streaming.remove(_cacheKey(url));
   }
 
+  static bool isStreaming(String url) => _streaming.contains(_cacheKey(url));
+
   static bool isWarmReady(String url) {
-    final resolved = _resolve(url);
-    final c = _warm[resolved];
+    final key = _cacheKey(url);
+    final c = _warm[key];
     return c != null && c.value.isInitialized && !c.value.hasError;
   }
 
   static Future<bool> isFileCached(String url) async {
     if (VideoPathIndex.has(url)) return true;
-    final resolved = _resolve(url);
+    final key = _cacheKey(url);
     try {
-      final info = await manager.getFileFromCache(resolved);
+      final info = await manager.getFileFromCache(key);
       if (info == null) return false;
       final exists = await info.file.exists();
-      if (exists) VideoPathIndex.remember(resolved, info.file);
+      if (exists) VideoPathIndex.remember(url, info.file);
       return exists;
     } catch (_) {
       return false;
@@ -74,69 +78,93 @@ class ReelVideoCache {
 
   /// Full-file disk cache for upcoming reels. Skips URLs currently streaming.
   static Future<void> prefetch(String url) async {
-    final resolved = _resolve(url);
-    if (_prefetching.contains(resolved)) return;
-    if (_streaming.contains(resolved)) return;
-    if (VideoPathIndex.has(resolved)) return;
+    final playUrl = _playUrl(url);
+    final key = _cacheKey(url);
+    if (_prefetching.contains(key)) return;
+    if (_streaming.contains(key)) return;
+    if (VideoPathIndex.has(url)) return;
     if (!await MediaCacheBudget.canPrefetch()) return;
 
-    _prefetching.add(resolved);
+    _prefetching.add(key);
     try {
-      final existing = await manager.getFileFromCache(resolved);
+      final existing = await manager.getFileFromCache(key);
       if (existing != null && await existing.file.exists()) {
-        VideoPathIndex.remember(resolved, existing.file);
+        VideoPathIndex.remember(url, existing.file);
         return;
       }
-      final file = await manager.downloadFile(resolved);
-      VideoPathIndex.remember(resolved, file.file);
+      // Download with the live signed URL, store under the stable object key.
+      final file = await manager.downloadFile(playUrl, key: key);
+      VideoPathIndex.remember(url, file.file);
       await MediaCacheBudget.enforce();
     } catch (_) {
       // Prefetch is best-effort.
     } finally {
-      _prefetching.remove(resolved);
+      _prefetching.remove(key);
     }
   }
 
-  /// Prefetch disk for neighbors; warm-init only the *next* reel.
+  /// Disk-prefetch the next reel only. Decoder warm is owned by [ReelPage]
+  /// keepWarm (paused controllers in the ±1 window) — avoids a second
+  /// network decoder racing the active stream.
   static void prefetchAround(List<String?> urls, int center) {
-    // Disk: previous + next (not current — current is streaming).
-    for (final i in [center - 1, center + 1, center + 2]) {
-      if (i < 0 || i >= urls.length || i == center) continue;
-      final url = urls[i];
-      if (url != null && url.isNotEmpty) unawaited(prefetch(url));
-    }
-    // Decoder warm: only the immediate next for instant swipe.
-    if (center + 1 < urls.length) {
-      final next = urls[center + 1];
-      if (next != null && next.isNotEmpty) prepareWarm(next);
+    _warmEpoch++;
+    final epoch = _warmEpoch;
+
+    if (center + 1 >= urls.length) return;
+    final next = urls[center + 1];
+    if (next == null || next.isEmpty) return;
+
+    unawaited(
+      Future<void>.delayed(const Duration(milliseconds: 500), () async {
+        if (epoch != _warmEpoch) return;
+        await prefetch(next);
+      }),
+    );
+
+    // Also quietly fill previous for swipe-back file hits.
+    if (center - 1 >= 0) {
+      final prev = urls[center - 1];
+      if (prev != null && prev.isNotEmpty) {
+        unawaited(
+          Future<void>.delayed(const Duration(milliseconds: 1200), () async {
+            if (epoch != _warmEpoch) return;
+            await prefetch(prev);
+          }),
+        );
+      }
     }
   }
 
   /// Initialize and stash the next reel so the swipe feels instant.
   static void prepareWarm(String url) {
-    final resolved = _resolve(url);
-    if (_warm.containsKey(resolved) ||
-        _inflight.containsKey(resolved) ||
-        _preparing.contains(resolved) ||
-        _streaming.isNotEmpty) {
-      // Never warm while something is actively streaming — that stacks
-      // decoders and is the main cause of endless loading spinners.
+    final key = _cacheKey(url);
+    if (_warm.containsKey(key) ||
+        _inflight.containsKey(key) ||
+        _preparing.contains(key) ||
+        _streaming.contains(key)) {
       return;
     }
-    _preparing.add(resolved);
+    _preparing.add(key);
     () async {
       try {
-        final c = await _createFresh(resolved, forWarm: true);
-        await VideoPlayback.initializeSafely(c, urlForCacheInvalidation: resolved);
+        // Prefer a fully cached file for warm controllers — avoids another
+        // network stream competing with the active reel.
+        final cached = await isFileCached(url);
+        if (!cached && _streaming.isNotEmpty) {
+          // Active reel is streaming and next isn't on disk yet — skip warm;
+          // disk prefetch will catch up and the next swipe can still stream.
+          return;
+        }
+        final c = await _createFresh(url, forWarm: true);
+        await VideoPlayback.initializeSafely(c, urlForCacheInvalidation: url);
         if (!c.value.isInitialized || c.value.hasError) {
           await releaseController(c);
           return;
         }
-        c.setLooping(true);
+        c.setLooping(false);
         c.setVolume(0);
-        // Decode a few frames into the texture, then pause — first paint is ready.
         await c.play();
-        await Future<void>.delayed(const Duration(milliseconds: 48));
+        await Future<void>.delayed(const Duration(milliseconds: 40));
         await c.pause();
         try {
           await c.seekTo(Duration.zero);
@@ -145,13 +173,13 @@ class ReelVideoCache {
       } catch (_) {
         // Ignore warm failures; playback will retry on demand.
       } finally {
-        _preparing.remove(resolved);
+        _preparing.remove(key);
       }
     }();
   }
 
   static void trimWarm(Set<String> keepUrls) {
-    final keep = keepUrls.map(_resolve).toSet();
+    final keep = keepUrls.map(_cacheKey).toSet();
     final drop = _warm.keys.where((k) => !keep.contains(k)).toList();
     for (final key in drop) {
       final c = _warm.remove(key);
@@ -160,10 +188,10 @@ class ReelVideoCache {
   }
 
   static Future<VideoPlayerController> createController(String url) async {
-    final resolved = _resolve(url);
-    beginStreaming(resolved);
+    final key = _cacheKey(url);
+    beginStreaming(url);
 
-    final warmed = _warm.remove(resolved);
+    final warmed = _warm.remove(key);
     if (warmed != null) {
       if (warmed.value.isInitialized && !warmed.value.hasError) {
         return warmed;
@@ -171,45 +199,46 @@ class ReelVideoCache {
       await releaseController(warmed);
     }
 
-    final pending = _inflight[resolved];
+    final pending = _inflight[key];
     if (pending != null) return pending;
 
-    final future = _createFresh(resolved, forWarm: false);
-    _inflight[resolved] = future;
+    final future = _createFresh(url, forWarm: false);
+    _inflight[key] = future;
     try {
       return await future;
     } finally {
-      _inflight.remove(resolved);
+      _inflight.remove(key);
     }
   }
 
   static Future<VideoPlayerController> _createFresh(
-    String resolved, {
+    String url, {
     required bool forWarm,
   }) async {
-    // Sync path first — zero async gap for first frame.
-    final indexed = VideoPathIndex.fileFor(resolved);
+    final playUrl = _playUrl(url);
+    final key = _cacheKey(url);
+
+    final indexed = VideoPathIndex.fileFor(url);
     if (indexed != null) {
-      return VideoPlayback.create(resolved, file: indexed);
+      return VideoPlayback.create(playUrl, file: indexed);
     }
 
     try {
-      final info = await manager.getFileFromCache(resolved);
+      final info = await manager.getFileFromCache(key);
       if (info != null && await info.file.exists()) {
-        VideoPathIndex.remember(resolved, info.file);
+        VideoPathIndex.remember(url, info.file);
         try {
           await info.file.setLastModified(DateTime.now());
         } catch (_) {}
-        return VideoPlayback.create(resolved, file: info.file);
+        return VideoPlayback.create(playUrl, file: info.file);
       }
     } catch (_) {}
 
-    // Progressive network play. Never full-download the same URL while streaming.
-    // Warm controllers may kick off a quiet disk prefetch for later.
+    // Progressive network — never full-download this URL in parallel.
     if (forWarm) {
-      unawaited(prefetch(resolved));
+      unawaited(prefetch(url));
     }
-    return VideoPlayback.create(resolved);
+    return VideoPlayback.create(playUrl);
   }
 
   static void stash(String url, VideoPlayerController controller) {
@@ -217,9 +246,9 @@ class ReelVideoCache {
       releaseController(controller);
       return;
     }
-    final resolved = _resolve(url);
-    endStreaming(resolved);
-    final previous = _warm.remove(resolved);
+    final key = _cacheKey(url);
+    endStreaming(url);
+    final previous = _warm.remove(key);
     if (previous != null && !identical(previous, controller)) {
       releaseController(previous);
     }
@@ -232,7 +261,7 @@ class ReelVideoCache {
       controller.pause();
       controller.setVolume(0);
     } catch (_) {}
-    _warm[resolved] = controller;
+    _warm[key] = controller;
   }
 
   static Future<void> releaseController(VideoPlayerController? controller) async {
@@ -248,11 +277,14 @@ class ReelVideoCache {
   }
 
   static void releaseWarm() {
+    _warmEpoch++;
     for (final c in _warm.values) {
       releaseController(c);
     }
     _warm.clear();
     _preparing.clear();
     _streaming.clear();
+    _prefetching.clear();
+    _inflight.clear();
   }
 }

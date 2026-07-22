@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "553264472572",
+    "project_id": "u-learn-5eb31",
+    "storage_bucket": "u-learn-5eb31.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:553264472572:android:7236c7275ad0b21c319279",
+        "android_client_info": {
+          "package_name": "com.ulearn.mobile01"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCe0BcN0Fgqss2ujgyxbUJCwy6RshfIerQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

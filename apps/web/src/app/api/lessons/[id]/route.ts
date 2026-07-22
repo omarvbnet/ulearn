@@ -2,7 +2,7 @@ import { CourseService } from "@/services/course.service";
 import { VideoService } from "@/services/video.service";
 import { error, json, requireAuth } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth/session";
-import { getDownloadUrl } from "@/lib/r2";
+import { resolvePlaybackUrl } from "@/lib/r2";
 
 export async function GET(
   _request: Request,
@@ -32,12 +32,7 @@ export async function GET(
   if (result.hasAccess) {
     contents = await Promise.all(
       contents.map(async (c) => {
-        let fileUrl: string | null = null;
-        if (c.fileKey) {
-          fileUrl = await getDownloadUrl(c.fileKey, 3 * 3600).catch(() => null);
-        }
-        // Prefer freshly signed URLs over stale stored fileUrl values.
-        if (!fileUrl) fileUrl = c.fileUrl ?? null;
+        const fileUrl = await resolvePlaybackUrl(c.fileKey, c.fileUrl);
         return { ...c, fileUrl };
       })
     );

@@ -20,6 +20,24 @@ class VideoPlayback {
   /// How long [initialize] may take before we abort and retry.
   static const initTimeout = Duration(seconds: 12);
 
+  /// Stable disk-cache key. R2/S3 signed URLs change query params every
+  /// request — stripping them lets the same object reuse a cached file.
+  static String mediaCacheKey(String url) {
+    final resolved = ApiClient.absoluteUrl(url);
+    final uri = Uri.tryParse(resolved);
+    if (uri == null || !uri.hasScheme) return resolved;
+    final q = uri.queryParameters;
+    final signed = q.containsKey('X-Amz-Signature') ||
+        q.containsKey('X-Amz-Algorithm') ||
+        q.containsKey('x-amz-signature') ||
+        q.containsKey('Signature') ||
+        q.containsKey('X-Amz-Credential');
+    if (signed) {
+      return uri.replace(query: '', fragment: '').toString();
+    }
+    return resolved;
+  }
+
   /// Build an optimized controller. Uses disk path when known/cached.
   ///
   /// Avoid custom HTTP headers on signed R2 URLs — SigV4 URLs only sign
@@ -71,7 +89,6 @@ class VideoPlayback {
     if (lower.contains('.m3u8')) return VideoFormat.hls;
     if (lower.contains('.mpd')) return VideoFormat.dash;
     // Let fvp / ExoPlayer / AVPlayer probe progressive MP4 themselves.
-    // Forcing [VideoFormat.other] previously caused indefinite init hangs.
     return null;
   }
 }
@@ -83,28 +100,30 @@ class VideoPathIndex {
 
   static final Map<String, String> _paths = {};
 
+  static String _key(String url) => VideoPlayback.mediaCacheKey(url);
+
   static void put(String url, String path) {
-    final resolved = ApiClient.absoluteUrl(url);
-    if (resolved.isEmpty || path.isEmpty) return;
-    _paths[resolved] = path;
+    final key = _key(url);
+    if (key.isEmpty || path.isEmpty) return;
+    _paths[key] = path;
   }
 
   static void putFile(String url, File file) => put(url, file.path);
 
   static void remove(String url) {
-    _paths.remove(ApiClient.absoluteUrl(url));
+    _paths.remove(_key(url));
   }
 
   static void clear() => _paths.clear();
 
   static String? pathFor(String url) {
-    final resolved = ApiClient.absoluteUrl(url);
-    final path = _paths[resolved];
+    final key = _key(url);
+    final path = _paths[key];
     if (path == null) return null;
     try {
       if (File(path).existsSync()) return path;
     } catch (_) {}
-    _paths.remove(resolved);
+    _paths.remove(key);
     return null;
   }
 

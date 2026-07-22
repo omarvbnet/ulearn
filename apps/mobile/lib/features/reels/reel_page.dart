@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import 'package:ulearn/core/widgets/skeleton.dart';
 import 'package:ulearn/core/widgets/glass.dart';
 import 'package:ulearn/features/profile/profile_avatar.dart';
 import 'package:video_player/video_player.dart';
+import 'package:fvp/fvp.dart';
 
 /// Single full-screen reel with overlay actions.
 class ReelPage extends StatefulWidget {
@@ -21,6 +23,7 @@ class ReelPage extends StatefulWidget {
     super.key,
     required this.video,
     required this.active,
+    this.keepWarm = false,
     required this.onLike,
     required this.onComment,
     this.onSave,
@@ -31,6 +34,10 @@ class ReelPage extends StatefulWidget {
 
   final Map<String, dynamic> video;
   final bool active;
+
+  /// When true, keep a paused decoder alive for instant swipe-back replay.
+  final bool keepWarm;
+
   final VoidCallback onLike;
   final VoidCallback onComment;
   final VoidCallback? onSave;
@@ -56,6 +63,9 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
   bool _scrubbing = false;
   int _initGeneration = 0;
   bool _disposed = false;
+  DateTime? _bufferingSince;
+  bool _stallRecovering = false;
+  bool _loopingInProgress = false;
 
   Future<void> _recordViewIfNeeded() async {
     if (_viewRecorded || !widget.active || !mounted) return;
@@ -107,11 +117,15 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     if (url != null && url.isNotEmpty) ReelVideoCache.prefetch(url);
   }
 
-  void _resumePlayback() {
+  void _resumePlayback({bool fromStart = false}) {
     final c = _controller;
     if (c == null || !c.value.isInitialized) return;
     try {
       c.setVolume(_muted ? 0 : 1);
+      if (fromStart) {
+        // Accurate seek (fastSeek disabled globally) for clean replay.
+        c.seekTo(Duration.zero);
+      }
       if (!_scrubbing && !_holdPaused) c.play();
     } catch (_) {
       _releaseVideo(stash: false);
@@ -125,10 +139,27 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     }
   }
 
-  void _releaseVideo({bool stash = false}) {
-    _initGeneration++;
+  void _pauseKeepWarm() {
     final c = _controller;
     if (c == null) return;
+    try {
+      c.pause();
+      c.setVolume(0);
+    } catch (_) {}
+    final url = widget.video['fileUrl']?.toString();
+    // Free bandwidth flag so disk cache can fill while paused nearby.
+    if (url != null && url.isNotEmpty) {
+      ReelVideoCache.endStreaming(url);
+      unawaited(ReelVideoCache.prefetch(url));
+    }
+  }
+
+  void _releaseVideo({bool stash = false}) {
+    _initGeneration++;
+    _bufferingSince = null;
+    final c = _controller;
+    if (c == null) return;
+    c.removeListener(_onPlaybackTick);
     final url = widget.video['fileUrl']?.toString();
     _controller = null;
     if (url != null && url.isNotEmpty) {
@@ -136,40 +167,150 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
     }
     if (stash && url != null && url.isNotEmpty && !_disposed) {
       ReelVideoCache.stash(url, c);
+      unawaited(ReelVideoCache.prefetch(url));
     } else {
       ReelVideoCache.releaseController(c);
+    }
+  }
+
+  void _onPlaybackTick() {
+    final c = _controller;
+    if (c == null || !widget.active || _disposed || _stallRecovering) return;
+    final v = c.value;
+    if (!v.isInitialized) return;
+
+    // Manual loop: native setLooping often leaves position at EOF so the
+    // progress bar stays full. Seek to 0 + play resets UI like TikTok/Reels.
+    if (!_scrubbing && !_holdPaused && !_loopingInProgress) {
+      final duration = v.duration;
+      if (duration > Duration.zero) {
+        final atEnd = v.isCompleted ||
+            v.position >= duration - const Duration(milliseconds: 120);
+        if (atEnd) {
+          unawaited(_restartLoop());
+          return;
+        }
+      }
+    }
+
+    if (v.isBuffering && v.isPlaying) {
+      _bufferingSince ??= DateTime.now();
+      final stalled = DateTime.now().difference(_bufferingSince!);
+      // Long buffer stall → recreate over network once (often a bad cache slice).
+      if (stalled > const Duration(seconds: 4)) {
+        _stallRecovering = true;
+        final url = widget.video['fileUrl']?.toString();
+        _releaseVideo(stash: false);
+        if (url != null && url.isNotEmpty) {
+          VideoPathIndex.remove(url);
+        }
+        if (mounted && widget.active) {
+          setState(() {
+            _initializing = true;
+            _showLoadSkeleton = true;
+          });
+          _initVideo().whenComplete(() => _stallRecovering = false);
+        } else {
+          _stallRecovering = false;
+        }
+      }
+      return;
+    }
+    _bufferingSince = null;
+  }
+
+  Future<void> _restartLoop() async {
+    if (_loopingInProgress || _disposed || !widget.active) return;
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) return;
+    _loopingInProgress = true;
+    try {
+      await c.pause();
+      await c.seekTo(Duration.zero);
+      // Ensure listeners / slider see 0 before play resumes.
+      if (mounted) setState(() {});
+      if (_disposed || !widget.active || !_controller!.value.isInitialized) {
+        return;
+      }
+      if (!_scrubbing && !_holdPaused) {
+        c.setVolume(_muted ? 0 : 1);
+        await c.play();
+      }
+    } catch (_) {
+      // If seek/play fails, try a full re-init once.
+      if (mounted && widget.active) {
+        _releaseVideo(stash: false);
+        setState(() {
+          _initializing = true;
+          _showLoadSkeleton = true;
+        });
+        await _initVideo();
+      }
+    } finally {
+      _loopingInProgress = false;
     }
   }
 
   @override
   void didUpdateWidget(ReelPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+
     if (widget.active && !oldWidget.active) {
       _pinActiveUrl();
-      if (_controller == null) {
-        final url = widget.video['fileUrl']?.toString();
+      final url = widget.video['fileUrl']?.toString();
+      if (url != null && url.isNotEmpty) {
+        ReelVideoCache.beginStreaming(url);
+      }
+      if (_controller != null && _controller!.value.isInitialized) {
+        // Instant replay — decoder was kept warm while nearby.
+        final nearEnd = _controller!.value.duration.inMilliseconds > 0 &&
+            _controller!.value.position >=
+                _controller!.value.duration - const Duration(milliseconds: 400);
+        _resumePlayback(fromStart: nearEnd);
+        _recordViewIfNeeded();
+      } else if (_controller == null) {
         setState(() {
           _initializing = true;
           _showLoadSkeleton =
               url != null && url.isNotEmpty && !ReelVideoCache.isWarmReady(url);
         });
         _initVideo();
-      } else {
-        _resumePlayback();
-        _recordViewIfNeeded();
       }
     } else if (!widget.active && oldWidget.active) {
       _unpinUrl(widget.video['fileUrl']?.toString());
       _scrubbing = false;
       _holdPaused = false;
-      _releaseVideo(stash: true);
+      _stallRecovering = false;
+      _loopingInProgress = false;
+      if (widget.keepWarm && _controller != null) {
+        // Stay decoded & paused — swipe-back must not re-buffer.
+        _pauseKeepWarm();
+      } else {
+        _releaseVideo(stash: true);
+      }
       if (mounted) setState(() {});
     }
+
+    // Entered ±1 window while idle — pre-decode from disk only (no 2nd stream).
+    if (widget.keepWarm &&
+        !oldWidget.keepWarm &&
+        !widget.active &&
+        _controller == null) {
+      unawaited(_prewarmFromDisk());
+    }
+
+    // Left the ±1 window — free the decoder.
+    if (!widget.keepWarm && oldWidget.keepWarm && !widget.active) {
+      _releaseVideo(stash: false);
+      if (mounted) setState(() {});
+    }
+
     if (oldWidget.video['id'] != widget.video['id']) {
       _unpinUrl(oldWidget.video['fileUrl']?.toString());
       _viewRecorded = false;
       _scrubbing = false;
       _holdPaused = false;
+      _stallRecovering = false;
       _releaseVideo(stash: false);
       _initializing = widget.active;
       _showLoadSkeleton = false;
@@ -178,8 +319,62 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
         _initVideo();
       } else {
         _prefetchSelf();
+        if (widget.keepWarm) unawaited(_prewarmFromDisk());
         if (mounted) setState(() => _initializing = false);
       }
+    }
+  }
+
+  /// Instant swipe-in when the file is already on disk — never opens a second
+  /// network stream beside the active reel.
+  Future<void> _prewarmFromDisk() async {
+    final gen = _initGeneration;
+    final url = widget.video['fileUrl']?.toString();
+    if (url == null || url.isEmpty) return;
+    if (widget.active || _controller != null || _disposed) return;
+
+    if (!await ReelVideoCache.isFileCached(url)) {
+      unawaited(ReelVideoCache.prefetch(url));
+      return;
+    }
+    if (_disposed || gen != _initGeneration || widget.active || _controller != null) {
+      return;
+    }
+
+    VideoPlayerController? c;
+    try {
+      c = await ReelVideoCache.createController(url);
+      if (_disposed || gen != _initGeneration || widget.active) {
+        await ReelVideoCache.releaseController(c);
+        return;
+      }
+      if (!c.value.isInitialized) {
+        await VideoPlayback.initializeSafely(c, urlForCacheInvalidation: url);
+      }
+      if (_disposed || gen != _initGeneration || widget.active) {
+        await ReelVideoCache.releaseController(c);
+        return;
+      }
+      c.setLooping(false);
+      c.setVolume(0);
+      try {
+        c.setBufferRange(min: 2000, max: 10000, drop: false);
+      } catch (_) {}
+      await c.pause();
+      // Not actively streaming — allow disk cache maintenance.
+      ReelVideoCache.endStreaming(url);
+      if (!mounted || _disposed || widget.active) {
+        await ReelVideoCache.releaseController(c);
+        return;
+      }
+      c.addListener(_onPlaybackTick);
+      setState(() {
+        _controller = c;
+        _initializing = false;
+        _showLoadSkeleton = false;
+      });
+    } catch (_) {
+      if (c != null) await ReelVideoCache.releaseController(c);
     }
   }
 
@@ -252,14 +447,22 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
         return;
       }
 
-      c.setLooping(true);
+      c.setLooping(false);
       c.setVolume(_muted ? 0 : 1);
+      try {
+        await c.setPlaybackSpeed(1.0);
+      } catch (_) {}
+      // Smoother progressive MP4: wait for ~2s buffered, allow up to ~10s.
+      try {
+        c.setBufferRange(min: 2000, max: 10000, drop: false);
+      } catch (_) {}
 
       // Attach surface before play so the first decoded frame paints immediately.
       if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
         await ReelVideoCache.releaseController(c);
         return;
       }
+      c.addListener(_onPlaybackTick);
       setState(() {
         _controller = c;
         _initializing = false;
@@ -267,10 +470,15 @@ class _ReelPageState extends State<ReelPage> with TickerProviderStateMixin {
       });
 
       await c.play();
+      _bufferingSince = null;
       _recordViewIfNeeded();
 
       if (_disposed || !mounted || gen != _initGeneration || !widget.active) {
-        _releaseVideo(stash: false);
+        if (widget.keepWarm) {
+          _pauseKeepWarm();
+        } else {
+          _releaseVideo(stash: false);
+        }
         return;
       }
     } catch (_) {
@@ -737,7 +945,12 @@ class _GlassProgressBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final value = controller.value;
     final duration = value.duration;
-    final position = value.position;
+    var position = value.position;
+    // After EOF, before our manual loop seek lands, don't paint a stuck full bar.
+    if (duration > Duration.zero &&
+        (value.isCompleted || position >= duration)) {
+      position = Duration.zero;
+    }
     final progress = duration.inMilliseconds > 0
         ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
         : 0.0;

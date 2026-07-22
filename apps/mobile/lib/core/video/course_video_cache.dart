@@ -24,22 +24,23 @@ class CourseVideoCache {
   static final Set<String> _prefetching = {};
   static final Set<String> _streaming = {};
 
-  static String _resolve(String url) => ApiClient.absoluteUrl(url);
+  static String _playUrl(String url) => ApiClient.absoluteUrl(url);
+  static String _cacheKey(String url) => VideoPlayback.mediaCacheKey(url);
 
   static Future<void> emptyCache() => manager.emptyCache();
 
-  static void beginStreaming(String url) => _streaming.add(_resolve(url));
+  static void beginStreaming(String url) => _streaming.add(_cacheKey(url));
 
-  static void endStreaming(String url) => _streaming.remove(_resolve(url));
+  static void endStreaming(String url) => _streaming.remove(_cacheKey(url));
 
   static Future<bool> isFileCached(String url) async {
     if (VideoPathIndex.has(url)) return true;
-    final resolved = _resolve(url);
+    final key = _cacheKey(url);
     try {
-      final info = await manager.getFileFromCache(resolved);
+      final info = await manager.getFileFromCache(key);
       if (info == null) return false;
       final exists = await info.file.exists();
-      if (exists) VideoPathIndex.remember(resolved, info.file);
+      if (exists) VideoPathIndex.remember(url, info.file);
       return exists;
     } catch (_) {
       return false;
@@ -48,25 +49,26 @@ class CourseVideoCache {
 
   /// Download to disk without blocking playback. Skips actively streaming URLs.
   static Future<void> prefetch(String url) async {
-    final resolved = _resolve(url);
-    if (_prefetching.contains(resolved)) return;
-    if (_streaming.contains(resolved)) return;
-    if (VideoPathIndex.has(resolved)) return;
+    final playUrl = _playUrl(url);
+    final key = _cacheKey(url);
+    if (_prefetching.contains(key)) return;
+    if (_streaming.contains(key)) return;
+    if (VideoPathIndex.has(url)) return;
     if (!await MediaCacheBudget.canPrefetch()) return;
 
-    _prefetching.add(resolved);
+    _prefetching.add(key);
     try {
-      final existing = await manager.getFileFromCache(resolved);
+      final existing = await manager.getFileFromCache(key);
       if (existing != null && await existing.file.exists()) {
-        VideoPathIndex.remember(resolved, existing.file);
+        VideoPathIndex.remember(url, existing.file);
         return;
       }
-      final file = await manager.downloadFile(resolved);
-      VideoPathIndex.remember(resolved, file.file);
+      final file = await manager.downloadFile(playUrl, key: key);
+      VideoPathIndex.remember(url, file.file);
       await MediaCacheBudget.enforce();
     } catch (_) {
     } finally {
-      _prefetching.remove(resolved);
+      _prefetching.remove(key);
     }
   }
 
@@ -80,39 +82,40 @@ class CourseVideoCache {
 
   /// Prefer a cached file when available; otherwise stream immediately.
   static Future<VideoPlayerController> createController(String url) async {
-    final resolved = _resolve(url);
-    beginStreaming(resolved);
+    final playUrl = _playUrl(url);
+    final key = _cacheKey(url);
+    beginStreaming(url);
 
-    final indexed = VideoPathIndex.fileFor(resolved);
+    final indexed = VideoPathIndex.fileFor(url);
     if (indexed != null) {
-      return VideoPlayback.create(resolved, file: indexed);
+      return VideoPlayback.create(playUrl, file: indexed);
     }
 
     try {
-      final info = await manager.getFileFromCache(resolved);
+      final info = await manager.getFileFromCache(key);
       if (info != null && await info.file.exists()) {
-        VideoPathIndex.remember(resolved, info.file);
+        VideoPathIndex.remember(url, info.file);
         try {
           await info.file.setLastModified(DateTime.now());
         } catch (_) {}
-        return VideoPlayback.create(resolved, file: info.file);
+        return VideoPlayback.create(playUrl, file: info.file);
       }
     } catch (_) {}
 
     // Progressive network — do NOT full-download this URL in parallel.
-    return VideoPlayback.create(resolved);
+    return VideoPlayback.create(playUrl);
   }
 
   /// After playback is healthy, quietly cache this lesson for next open.
   static void cacheAfterPlay(String url) {
-    final resolved = _resolve(url);
+    final key = _cacheKey(url);
     // Defer so we don't compete with the first few seconds of buffering.
     Future<void>.delayed(const Duration(seconds: 8), () {
-      if (_streaming.contains(resolved)) {
+      if (_streaming.contains(key)) {
         // Still on this lesson — wait until they leave, or skip.
         return;
       }
-      unawaited(prefetch(resolved));
+      unawaited(prefetch(url));
     });
   }
 

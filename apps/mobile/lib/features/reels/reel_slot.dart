@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:ulearn/features/reels/reel_page.dart';
 
 /// Isolates reel playback state so swiping does not rebuild the whole feed.
+///
+/// Keeps the previous/next page [keepWarm] so swipe-back replay does not
+/// cold-start the decoder (main cause of “lag when replaying”).
 class ReelSlot extends StatelessWidget {
   const ReelSlot({
     super.key,
@@ -37,9 +40,11 @@ class ReelSlot extends StatelessWidget {
           return ValueListenableBuilder<int>(
             valueListenable: activeIndex,
             builder: (context, current, _) {
+              final distance = (index - current).abs();
               return ReelPage(
                 video: video,
                 active: playing && index == current,
+                keepWarm: distance <= 1,
                 bottomInset: bottomInset,
                 onLike: onLike,
                 onComment: onComment,

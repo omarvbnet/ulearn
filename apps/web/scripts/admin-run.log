@@ -1,0 +1,17 @@
+/Users/omarshakir/Desktop/ulearn/apps/web/node_modules/tsx/dist/cjs/index.cjs:1
+"use strict";var r=require("../register-BLUABhh3.cjs");require("../get-pipe-path-D4YM6rQt.cjs"),require("module"),require("node:path"),require("../temporary-directory-B83uKxJF.cjs"),require("node:os"),require("node:module"),require("node:url"),require("node:fs"),require("fs"),require("os"),require("path"),require("../index-D9F1FXzN.cjs"),require("esbuild"),require("node:crypto"),require("../node-features-CQLdkVE6.cjs"),require("../client-D3mGB526.cjs"),require("node:net"),require("node:util"),require("../index-BWFBUo6r.cjs"),r.register();
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     ^
+
+TypeError: r.register is not a function
+    at Object.<anonymous> (/Users/omarshakir/Desktop/ulearn/apps/web/node_modules/tsx/dist/cjs/index.cjs:1:534)
+    at Module._compile (node:internal/modules/cjs/loader:1529:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1613:10)
+    at Module.load (node:internal/modules/cjs/loader:1275:32)
+    at Module._load (node:internal/modules/cjs/loader:1096:12)
+    at Module.require (node:internal/modules/cjs/loader:1298:19)
+    at require (node:internal/modules/helpers:182:18)
+    at file:///Users/omarshakir/Desktop/ulearn/apps/web/node_modules/tsx/dist/loader.mjs:1:656
+    at ModuleJob.run (node:internal/modules/esm/module_job:263:25)
+    at async ModuleLoader.import (node:internal/modules/esm/loader:540:24)
+
+Node.js v20.19.2

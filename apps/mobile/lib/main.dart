@@ -32,11 +32,11 @@ Future<void> main() async {
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   await PushNotificationService.instance.ensureFirebaseReady();
   // Hardware-accelerated video (libmdk) for course + shorts playback.
-  // Do NOT enable Android surface tunneling — it commonly leaves players
-  // stuck on the loading spinner / black frame on many devices.
+  // fastSeek off: inaccurate keyframe seeks stutter on loop / replay.
+  // tunnel/lowLatency off: caused stuck loading on progressive MP4.
   fvp.registerWith(options: {
     'platforms': ['ios', 'android'],
-    'fastSeek': true,
+    'fastSeek': false,
   });
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(

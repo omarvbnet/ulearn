@@ -527,7 +527,8 @@ class ReelsScreenState extends State<ReelsScreen> {
             controller: _pageCtrl,
             scrollDirection: Axis.vertical,
             physics: const PageScrollPhysics(parent: ClampingScrollPhysics()),
-            allowImplicitScrolling: false,
+            // Prebuild the adjacent page so swipe-in can attach faster.
+            allowImplicitScrolling: true,
             onPageChanged: _onPageChanged,
             itemCount: _videos.length,
             itemBuilder: (context, index) {

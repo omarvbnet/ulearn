@@ -2,6 +2,15 @@ import { S3Client } from "@aws-sdk/client-s3";
 
 export const R2_BUCKET = process.env.R2_BUCKET || "ulearn";
 
+/** Cloudflare R2 must be HTTPS — cleartext endpoints break iOS ATS / store builds. */
+export function normalizeR2Endpoint(raw?: string | null): string | undefined {
+  const e = (raw || "").trim().replace(/\/$/, "");
+  if (!e) return undefined;
+  if (e.startsWith("https://")) return e;
+  if (e.startsWith("http://")) return `https://${e.slice("http://".length)}`;
+  return `https://${e}`;
+}
+
 /**
  * Disable flexible checksums on signed GET URLs.
  * AWS SDK v3 defaults add `x-amz-checksum-mode=ENABLED`, which breaks many
@@ -9,7 +18,7 @@ export const R2_BUCKET = process.env.R2_BUCKET || "ulearn";
  */
 export const r2Client = new S3Client({
   region: "auto",
-  endpoint: process.env.R2_ENDPOINT,
+  endpoint: normalizeR2Endpoint(process.env.R2_ENDPOINT),
   credentials: {
     accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
