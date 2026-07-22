@@ -352,11 +352,7 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     });
     MediaCacheBudget.pin(url);
     try {
-      final next = await CourseVideoCache.createController(
-        url,
-        initialize: true,
-        refreshUrl: _refreshForPhase(phase),
-      );
+      final next = await _openWithRetry(url, phase: phase);
       if (!mounted) {
         await next.dispose();
         return;
@@ -374,6 +370,29 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
     } finally {
       await old?.dispose();
     }
+  }
+
+  /// One automatic retry — first open often races CDN/cold start on large lessons.
+  Future<VideoPlayerController> _openWithRetry(
+    String url, {
+    required _PlayPhase phase,
+  }) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (attempt > 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 600));
+        }
+        return await CourseVideoCache.createController(
+          url,
+          initialize: true,
+          refreshUrl: _refreshForPhase(phase),
+        );
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError ?? StateError('play failed');
   }
 
   void _startProgressTimer() {
@@ -415,12 +434,8 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
       });
 
     final startUrl = _urlForPhase(_phase);
-    // HEAD-safe open (fvp GET/Range → refresh → GET-to-disk) while protection boots.
-    final controllerFuture = CourseVideoCache.createController(
-      startUrl,
-      initialize: true,
-      refreshUrl: _refreshForPhase(_phase),
-    );
+    // Open while protection boots; retry once on cold CDN / large lesson.
+    final controllerFuture = _openWithRetry(startUrl, phase: _phase);
     await ensureFreshProtectionIdentity(
       auth,
       _protection!,
@@ -621,7 +636,23 @@ class _CourseInlinePlayerState extends State<CourseInlinePlayer> {
         child: Container(
           color: Colors.black,
           child: Center(
-            child: Text(_error!, style: const TextStyle(color: Colors.white70)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_error!, style: const TextStyle(color: Colors.white70)),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _loading = true;
+                      _error = null;
+                    });
+                    _init();
+                  },
+                  child: Text(context.l10n.t('common.retry')),
+                ),
+              ],
+            ),
           ),
         ),
       );

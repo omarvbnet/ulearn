@@ -172,9 +172,9 @@ export async function getDownloadUrl(
 /**
  * Fresh HTTPS playback URL for lessons / shorts.
  *
- * Prefer same-origin `/api/media/...` so iOS AVPlayer (TestFlight/App Store
- * when fvp/mdk is unavailable) can HEAD + Range. Direct R2 SigV4 URLs return
- * HEAD 403 and leave the UI stuck on the cover/loading state.
+ * Prefer public CDN when configured; otherwise same-origin `/api/media/...`
+ * (HEAD 200 on gateway, GET/Range 302 → signed R2) so iOS AVPlayer can start
+ * large course lessons without proxying hundreds of MB through Vercel.
  */
 export async function resolvePlaybackUrl(
   fileKey?: string | null,
@@ -183,6 +183,9 @@ export async function resolvePlaybackUrl(
 ): Promise<string | null> {
   const key = extractStorageKey(fileUrl, fileKey);
   if (key && isR2Configured()) {
+    if (PUBLIC_URL) {
+      return forceHttpsUrl(`${PUBLIC_URL}/${key}`);
+    }
     return absoluteMediaUrl(key);
   }
 
@@ -191,7 +194,10 @@ export async function resolvePlaybackUrl(
 
   if (/[?&]X-Amz-/i.test(trimmed)) {
     const recovered = extractStorageKey(trimmed, null);
-    if (recovered && isR2Configured()) return absoluteMediaUrl(recovered);
+    if (recovered && isR2Configured()) {
+      if (PUBLIC_URL) return forceHttpsUrl(`${PUBLIC_URL}/${recovered}`);
+      return absoluteMediaUrl(recovered);
+    }
     return null;
   }
 

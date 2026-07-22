@@ -28,7 +28,8 @@ class VideoPlayback {
   static const maxDownloadFallbackBytes = 12 * 1024 * 1024;
 
   /// How long [initialize] may take before we abort and retry.
-  static const initTimeout = Duration(seconds: 15);
+  /// Large course lessons (~300MB+) need headroom on cellular via /api/media→R2.
+  static const initTimeout = Duration(seconds: 45);
 
   /// Stable disk-cache key. R2/S3 signed URLs change query params every
   /// request — stripping them lets the same object reuse a cached file.
