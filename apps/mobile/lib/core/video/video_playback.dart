@@ -23,12 +23,12 @@ class VideoPlayback {
     allowBackgroundPlayback: false,
   );
 
-  /// How long [initialize] may take before we abort and retry.
-  static const initTimeout = Duration(seconds: 12);
+  /// Soft cap for the GET→file fallback. Keep small so TestFlight never sits
+  /// on "loading" while pulling a 50MB+ lesson through a slow path.
+  static const maxDownloadFallbackBytes = 12 * 1024 * 1024;
 
-  /// Soft cap for the GET→file fallback (reels / short lessons). Larger
-  /// progressive streams should succeed via fvp Range requests instead.
-  static const maxDownloadFallbackBytes = 96 * 1024 * 1024;
+  /// How long [initialize] may take before we abort and retry.
+  static const initTimeout = Duration(seconds: 15);
 
   /// Stable disk-cache key. R2/S3 signed URLs change query params every
   /// request — stripping them lets the same object reuse a cached file.

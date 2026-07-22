@@ -270,11 +270,12 @@ class ReelVideoCache {
     }
 
     if (initialize) {
-      // HEAD-safe open: fvp GET/Range → refresh signature → GET-to-disk.
+      // Progressive network via fvp GET/Range. Skip GET-to-disk fallback for
+      // reels — large downloads through the API hang on "loading" in TestFlight.
       return VideoPlayback.open(
         playUrl,
         refreshUrl: refreshUrl,
-        allowDownloadFallback: true,
+        allowDownloadFallback: false,
       );
     }
     return VideoPlayback.create(playUrl);

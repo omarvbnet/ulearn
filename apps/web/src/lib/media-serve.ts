@@ -113,12 +113,24 @@ async function serveHeavyMedia(safeKey: string, request: Request): Promise<Respo
   }
 
   const range = request.headers.get("range") || undefined;
+
+  // Full-file GET through Vercel hangs mobile players on large MP4s.
+  // Redirect to a signed R2 URL (fvp/ffmpeg follow GET redirects + Range).
+  if (!range) {
+    try {
+      const signed = await getDownloadUrl(safeKey, 60 * 60 * 6);
+      return Response.redirect(signed, 302);
+    } catch {
+      return error("Media not found", 404, "NOT_FOUND");
+    }
+  }
+
   try {
     const obj = await r2Client.send(
       new GetObjectCommand({
         Bucket: r2Bucket,
         Key: safeKey,
-        ...(range ? { Range: range } : {}),
+        Range: range,
       })
     );
     if (!obj.Body) {

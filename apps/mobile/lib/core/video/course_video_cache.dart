@@ -132,8 +132,8 @@ class CourseVideoCache {
       return VideoPlayback.open(
         playUrl,
         refreshUrl: refreshUrl,
-        allowDownloadFallback: true,
-        maxDownloadBytes: VideoPlayback.maxDownloadFallbackBytes,
+        // Large lessons must stream via fvp Range — full GET fallback hangs UI.
+        allowDownloadFallback: false,
       );
     }
     // Progressive network — do NOT full-download this URL in parallel.
