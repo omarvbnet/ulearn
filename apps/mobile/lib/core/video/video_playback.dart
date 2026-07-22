@@ -34,7 +34,7 @@ class VideoPlayback {
   /// request — stripping them lets the same object reuse a cached file.
   /// Never use this string as a playback URL (signature would be missing).
   static String mediaCacheKey(String url) {
-    final resolved = ApiClient.absoluteUrl(url);
+    final resolved = playableUrl(url);
     final uri = Uri.tryParse(resolved);
     if (uri == null || !uri.hasScheme) return resolved;
     final q = uri.queryParameters;
@@ -47,6 +47,45 @@ class VideoPlayback {
       return uri.replace(query: '', fragment: '').toString();
     }
     return resolved;
+  }
+
+  /// Rewrite signed R2 object URLs to the HEAD-safe same-origin media gateway.
+  /// iOS AVPlayer probes with HEAD; SigV4 URLs return 403 and never start.
+  static String playableUrl(String url) {
+    final resolved = ApiClient.absoluteUrl(url);
+    final uri = Uri.tryParse(resolved);
+    if (uri == null || !uri.hasScheme) return resolved;
+
+    final q = uri.queryParameters;
+    final signed = q.containsKey('X-Amz-Signature') ||
+        q.containsKey('X-Amz-Algorithm') ||
+        q.containsKey('x-amz-signature') ||
+        q.containsKey('X-Amz-Credential');
+    if (!signed) return resolved;
+
+    // .../videos/shorts/<id>/delivery.mp4?X-Amz-... → /api/media/videos/shorts/...
+    final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+    if (segments.isEmpty) return resolved;
+    // Drop empty; keep path after host. Known prefixes start at videos/, lessons/, etc.
+    const prefixes = {
+      'videos',
+      'lessons',
+      'intro-outro',
+      'teacher-shorts',
+      'teacher-courses',
+      'teacher-course-pdfs',
+    };
+    var start = 0;
+    for (var i = 0; i < segments.length; i++) {
+      if (prefixes.contains(segments[i])) {
+        start = i;
+        break;
+      }
+    }
+    final key = segments.sublist(start).join('/');
+    if (key.isEmpty) return resolved;
+    final encoded = key.split('/').map(Uri.encodeComponent).join('/');
+    return ApiClient.absoluteUrl('/api/media/$encoded');
   }
 
   static bool isSignedObjectUrl(String url) {
@@ -70,7 +109,7 @@ class VideoPlayback {
   /// `X-Amz-*` query values is preserved (rebuilding via `queryParameters`
   /// can percent-encode `/` and invalidate the signature).
   static VideoPlayerController create(String url, {File? file}) {
-    final resolved = ApiClient.absoluteUrl(url);
+    final resolved = playableUrl(url);
     final local = file ?? VideoPathIndex.fileFor(resolved);
     if (local != null) {
       try {
@@ -120,17 +159,18 @@ class VideoPlayback {
     bool allowDownloadFallback = true,
     int maxDownloadBytes = maxDownloadFallbackBytes,
   }) async {
-    var playUrl = ApiClient.absoluteUrl(url);
+    var playUrl = playableUrl(url);
 
     Future<VideoPlayerController> tryNetwork(String u) async {
+      final resolved = playableUrl(u);
       // Force network — do not re-pick a bad cached file via VideoPathIndex.
       final c = VideoPlayerController.networkUrl(
-        Uri.parse(ApiClient.absoluteUrl(u)),
+        Uri.parse(resolved),
         videoPlayerOptions: videoPlayerOptions,
-        formatHint: _formatHint(ApiClient.absoluteUrl(u)),
+        formatHint: _formatHint(resolved),
       );
       try {
-        await initializeSafely(c, urlForCacheInvalidation: u);
+        await initializeSafely(c, urlForCacheInvalidation: resolved);
         return c;
       } catch (_) {
         try {
@@ -160,12 +200,12 @@ class VideoPlayback {
       }
     }
 
-    // Fresh signature — expired or briefly invalid X-Amz URLs.
+    // Fresh URL — expired signature or briefly invalid gateway.
     if (refreshUrl != null) {
       try {
         final fresh = await refreshUrl();
         if (fresh != null && fresh.trim().isNotEmpty) {
-          playUrl = ApiClient.absoluteUrl(fresh);
+          playUrl = playableUrl(fresh);
           try {
             return await tryNetwork(playUrl);
           } catch (e) {
@@ -185,8 +225,7 @@ class VideoPlayback {
       throw StateError('Video open failed (network)');
     }
 
-    // Last resort: full GET to disk. Works when players probe with HEAD
-    // (403 on SigV4) but GET is authorized.
+    // Last resort: full GET to disk (never HEAD).
     final file = await downloadToCache(
       playUrl,
       maxBytes: maxDownloadBytes,
@@ -201,7 +240,7 @@ class VideoPlayback {
 
   /// Size probe via `GET Range: bytes=0-0` (never HEAD — R2 signed URLs 403).
   static Future<int?> probeContentLength(String url) async {
-    final resolved = ApiClient.absoluteUrl(url);
+    final resolved = playableUrl(url);
     try {
       final res = await http
           .get(
@@ -230,7 +269,7 @@ class VideoPlayback {
     String url, {
     int maxBytes = maxDownloadFallbackBytes,
   }) async {
-    final resolved = ApiClient.absoluteUrl(url);
+    final resolved = playableUrl(url);
     final key = mediaCacheKey(resolved);
     try {
       final len = await probeContentLength(resolved);

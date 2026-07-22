@@ -170,43 +170,28 @@ export async function getDownloadUrl(
 }
 
 /**
- * Fresh signed HTTPS playback URL for lessons / shorts.
- * Always resigns from fileKey (or a key recovered from fileUrl).
+ * Fresh HTTPS playback URL for lessons / shorts.
  *
- * Prefer **direct R2 SigV4 URLs** for progressive MP4 — fvp/libmdk uses GET
- * Range and plays reliably. Same-origin `/api/media` proxy through Vercel can
- * hang mobile players on large files (stuck on loading in TestFlight).
- *
- * Note: R2 SigV4 rejects HEAD (403). Do not use AVPlayer without fvp on iOS.
+ * Prefer same-origin `/api/media/...` so iOS AVPlayer (TestFlight/App Store
+ * when fvp/mdk is unavailable) can HEAD + Range. Direct R2 SigV4 URLs return
+ * HEAD 403 and leave the UI stuck on the cover/loading state.
  */
 export async function resolvePlaybackUrl(
   fileKey?: string | null,
   fileUrl?: string | null,
-  expiresIn = PLAYBACK_URL_EXPIRES_SEC
+  _expiresIn = PLAYBACK_URL_EXPIRES_SEC
 ): Promise<string | null> {
   const key = extractStorageKey(fileUrl, fileKey);
   if (key && isR2Configured()) {
-    try {
-      return await getDownloadUrl(key, expiresIn);
-    } catch {
-      // Last resort — HEAD-safe gateway (images/small); videos may be slow.
-      return absoluteMediaUrl(key);
-    }
+    return absoluteMediaUrl(key);
   }
 
   const trimmed = fileUrl?.trim() || "";
   if (!trimmed) return null;
 
-  // Stored absolute signed URLs expire — resign when we can recover the key.
   if (/[?&]X-Amz-/i.test(trimmed)) {
     const recovered = extractStorageKey(trimmed, null);
-    if (recovered && isR2Configured()) {
-      try {
-        return await getDownloadUrl(recovered, expiresIn);
-      } catch {
-        return absoluteMediaUrl(recovered);
-      }
-    }
+    if (recovered && isR2Configured()) return absoluteMediaUrl(recovered);
     return null;
   }
 
@@ -220,7 +205,7 @@ export async function resolvePlaybackUrl(
   return trimmed;
 }
 
-/** Absolute same-origin media gateway URL (HEAD-safe; prefer for images). */
+/** Absolute same-origin media gateway URL (HEAD + Range safe for AVPlayer). */
 export function absoluteMediaUrl(key: string): string {
   const path = mediaProxyPath(key);
   const base = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");

@@ -31,22 +31,21 @@ Future<void> main() async {
   // Must be registered before runApp so background isolates can handle FCM.
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   await PushNotificationService.instance.ensureFirebaseReady();
-  // Hardware-accelerated video (libmdk) for course + shorts playback.
-  // Critical on iOS App Store: official AVPlayer often probes with HEAD, but
-  // R2 SigV4 URLs are GET-only (HEAD → 403, GET Range → 206). fvp/FFmpeg
-  // uses GET Range, so progressive MP4 signed URLs play. Keep iOS in this list.
-  // fastSeek off: inaccurate keyframe seeks stutter on loop / replay.
-  // tunnel/lowLatency off: caused stuck loading on progressive MP4.
-  fvp.registerWith(options: {
-    'platforms': ['ios', 'android'],
-    'fastSeek': false,
-    'player': {
-      'avio.reconnect': '1',
-      'avio.reconnect_delay_max': '7',
-      // Progressive MP4 over HTTPS — seek via Range, not HEAD probes.
-      'avio.seekable': '1',
-    },
-  });
+  // Hardware decode via fvp/libmdk — Android only.
+  // iOS TestFlight/App Store builds often fail to load mdk, falling back to
+  // AVPlayer which cannot play R2 SigV4 URLs (HEAD → 403). iOS uses stock
+  // AVPlayer with HEAD-safe same-origin /api/media URLs instead.
+  if (!kIsWeb && Platform.isAndroid) {
+    fvp.registerWith(options: {
+      'platforms': ['android'],
+      'fastSeek': false,
+      'player': {
+        'avio.reconnect': '1',
+        'avio.reconnect_delay_max': '7',
+        'avio.seekable': '1',
+      },
+    });
+  }
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
