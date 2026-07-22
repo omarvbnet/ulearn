@@ -31,12 +31,13 @@ Future<void> main() async {
   // Must be registered before runApp so background isolates can handle FCM.
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   await PushNotificationService.instance.ensureFirebaseReady();
-  // Prefer fvp/libmdk when the native lib is present (local + many devices).
-  // Still safe if mdk is missing — video_player falls back to AVPlayer/ExoPlayer.
-  // Playback URLs use /api/media (HEAD 200) then 302 to signed R2 for GET/Range.
-  if (!kIsWeb && (Platform.isIOS || Platform.isAndroid)) {
+  // Hardware decode via fvp/libmdk — Android only.
+  // iOS TestFlight/App Store often cannot load mdk, so stock AVPlayer is used
+  // with HEAD-safe same-origin /api/media URLs (see VideoPlayback.playableUrl).
+  // Re-enabling fvp on iOS in 1.0.15+17 broke TestFlight playback again.
+  if (!kIsWeb && Platform.isAndroid) {
     fvp.registerWith(options: {
-      'platforms': ['ios', 'android'],
+      'platforms': ['android'],
       'fastSeek': false,
       'player': {
         'avio.reconnect': '1',

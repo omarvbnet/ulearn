@@ -214,6 +214,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           'lessons': lessons,
           'materials': materials,
           'favorites': data['favorites'] ?? course['favorites'],
+          'likes': data['likes'] ?? course['likes'] ?? 0,
+          'dislikes': data['dislikes'] ?? course['dislikes'] ?? 0,
+          'myReaction': data['myReaction'] ?? course['myReaction'],
         };
         _purchased = purchased;
         _isOwnCourse = isOwn;
@@ -308,6 +311,42 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     } finally {
       _reacting = false;
     }
+  }
+
+  Widget _buildLikeSaveRow({
+    required int likes,
+    required int dislikes,
+    required String? myReaction,
+    double favoriteSize = 36,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ReactionButton(
+          icon: Icons.thumb_up_outlined,
+          activeIcon: Icons.thumb_up,
+          active: myReaction == 'LIKE',
+          activeColor: AppTheme.accent,
+          count: likes,
+          onTap: _reacting ? () {} : () => _react('LIKE'),
+        ),
+        const SizedBox(width: 12),
+        ReactionButton(
+          icon: Icons.thumb_down_outlined,
+          activeIcon: Icons.thumb_down,
+          active: myReaction == 'DISLIKE',
+          activeColor: Colors.redAccent,
+          count: dislikes,
+          onTap: _reacting ? () {} : () => _react('DISLIKE'),
+        ),
+        const SizedBox(width: 12),
+        FavoriteButton(
+          active: _favorited,
+          onTap: _toggleFavorite,
+          size: favoriteSize,
+        ),
+      ],
+    );
   }
 
   Future<void> _toggleFavorite() async {
@@ -700,9 +739,6 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     required int views,
     required int subscribers,
     required int totalSec,
-    required int likes,
-    required int dislikes,
-    required String? myReaction,
     required String? description,
     required Map<String, dynamic>? teacher,
     required VoidCallback onTeacherTap,
@@ -715,9 +751,6 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         views: views,
         subscribers: subscribers,
         totalSec: totalSec,
-        likes: likes,
-        dislikes: dislikes,
-        myReaction: myReaction,
         description: description,
         lessons: lessons,
         quizzes: _quizzes,
@@ -725,7 +758,6 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         completion: _completion,
         certificate: _certificate,
         courseId: widget.courseId,
-        reacting: _reacting,
         activeLesson: active,
         activeVideoTitle: active != null
             ? _lessonTitle(
@@ -742,7 +774,6 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         completedLessonCount: _completedLessonCount(lessons),
         isOwnCourse: _isOwnCourse,
         onTeacherTap: onTeacherTap,
-        onReact: _react,
         onEvaluate: _showEvaluationSheet,
         l10n: l10n,
       );
@@ -1382,9 +1413,6 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       views: views,
       subscribers: subscribers,
       totalSec: totalSec,
-      likes: likes,
-      dislikes: dislikes,
-      myReaction: myReaction,
       description: description,
       teacher: teacher,
       onTeacherTap: () => _openTeacherProfile(teacher, teacherName),
@@ -1418,10 +1446,10 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                   ),
                 Padding(
                   padding: const EdgeInsets.only(right: 12),
-                  child: FavoriteButton(
-                    active: _favorited,
-                    onTap: _toggleFavorite,
-                    size: 36,
+                  child: _buildLikeSaveRow(
+                    likes: likes,
+                    dislikes: dislikes,
+                    myReaction: myReaction,
                   ),
                 ),
               ],
@@ -1457,10 +1485,11 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                               ),
                             ),
                           ),
-                          FavoriteButton(
-                            active: _favorited,
-                            onTap: _toggleFavorite,
-                            size: 34,
+                          _buildLikeSaveRow(
+                            likes: likes,
+                            dislikes: dislikes,
+                            myReaction: myReaction,
+                            favoriteSize: 34,
                           ),
                           const SizedBox(width: 8),
                         ],
@@ -1790,9 +1819,6 @@ class _CourseDetailsTab extends StatelessWidget {
     required this.views,
     required this.subscribers,
     required this.totalSec,
-    required this.likes,
-    required this.dislikes,
-    required this.myReaction,
     required this.description,
     required this.lessons,
     required this.quizzes,
@@ -1800,13 +1826,11 @@ class _CourseDetailsTab extends StatelessWidget {
     required this.completion,
     required this.certificate,
     required this.courseId,
-    required this.reacting,
     required this.activeLesson,
     required this.activeVideoTitle,
     required this.completedLessonCount,
     required this.isOwnCourse,
     required this.onTeacherTap,
-    required this.onReact,
     required this.onEvaluate,
     required this.l10n,
   });
@@ -1817,9 +1841,6 @@ class _CourseDetailsTab extends StatelessWidget {
   final int views;
   final int subscribers;
   final int totalSec;
-  final int likes;
-  final int dislikes;
-  final String? myReaction;
   final String? description;
   final List<Map<String, dynamic>> lessons;
   final List<Map<String, dynamic>> quizzes;
@@ -1827,13 +1848,11 @@ class _CourseDetailsTab extends StatelessWidget {
   final Map<String, dynamic>? completion;
   final Map<String, dynamic>? certificate;
   final String courseId;
-  final bool reacting;
   final Map<String, dynamic>? activeLesson;
   final String? activeVideoTitle;
   final int completedLessonCount;
   final bool isOwnCourse;
   final VoidCallback onTeacherTap;
-  final void Function(String type) onReact;
   final VoidCallback onEvaluate;
   final dynamic l10n;
 
@@ -2080,28 +2099,6 @@ class _CourseDetailsTab extends StatelessWidget {
                 icon: Icons.bookmark_outline_rounded,
                 label: '$favorites',
               ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            ReactionButton(
-              icon: Icons.thumb_up_outlined,
-              activeIcon: Icons.thumb_up,
-              active: myReaction == 'LIKE',
-              activeColor: AppTheme.accent,
-              count: likes,
-              onTap: reacting ? () {} : () => onReact('LIKE'),
-            ),
-            const SizedBox(width: 18),
-            ReactionButton(
-              icon: Icons.thumb_down_outlined,
-              activeIcon: Icons.thumb_down,
-              active: myReaction == 'DISLIKE',
-              activeColor: Colors.redAccent,
-              count: dislikes,
-              onTap: reacting ? () {} : () => onReact('DISLIKE'),
-            ),
           ],
         ),
         const SizedBox(height: 18),

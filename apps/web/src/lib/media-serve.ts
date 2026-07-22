@@ -86,10 +86,12 @@ async function proxySignedObject(key: string): Promise<Response> {
 /**
  * Serve video/PDF via credentialed R2.
  *
- * iOS AVPlayer sends HEAD first (must succeed here), then GET/Range.
- * We answer HEAD with HeadObject metadata, then 302 GET/Range to a signed
- * R2 URL. Proxying multi‑hundred‑MB lessons through Vercel causes
- * "Could not play this video" on TestFlight.
+ * iOS AVPlayer (TestFlight) probes with HEAD, then Range GET on the *same*
+ * host. SigV4 R2 URLs reject HEAD (403), and AVPlayer also breaks if we 302
+ * Range requests to those URLs. So:
+ * - HEAD → HeadObject 200 (same-origin)
+ * - Range GET → proxy GetObject Range (same-origin 206) — required for AVPlayer
+ * - Full GET (no Range) → 302 to signed R2 (avoids pulling whole files via Vercel)
  */
 async function serveHeavyMedia(safeKey: string, request: Request): Promise<Response> {
   const method = request.method.toUpperCase();
@@ -102,7 +104,6 @@ async function serveHeavyMedia(safeKey: string, request: Request): Promise<Respo
       const headers = new Headers();
       headers.set("Content-Type", head.ContentType || guessContentType(safeKey));
       headers.set("Accept-Ranges", "bytes");
-      // Do not cache HEAD across CDN — length/etag must stay fresh per object.
       headers.set("Cache-Control", "private, no-store");
       if (head.ContentLength != null) {
         headers.set("Content-Length", String(head.ContentLength));
@@ -114,14 +115,43 @@ async function serveHeavyMedia(safeKey: string, request: Request): Promise<Respo
     }
   }
 
-  // GET or Range: redirect to SigV4 URL (player follows redirect + Range on R2).
+  const range = request.headers.get("range") || undefined;
+
+  // Full-file GET through Vercel times out on large lessons — redirect once.
+  // AVPlayer almost always sends Range, so this path is rare for iOS playback.
+  if (!range) {
+    try {
+      const signed = await getDownloadUrl(safeKey, 60 * 60 * 6);
+      return Response.redirect(signed, 302);
+    } catch {
+      return error("Media not found", 404, "NOT_FOUND");
+    }
+  }
+
   try {
-    const signed = await getDownloadUrl(safeKey, 60 * 60 * 6);
-    const headers = new Headers({
-      Location: signed,
-      "Cache-Control": "private, no-store",
-    });
-    return new Response(null, { status: 302, headers });
+    const obj = await r2Client.send(
+      new GetObjectCommand({
+        Bucket: r2Bucket,
+        Key: safeKey,
+        Range: range,
+      })
+    );
+    if (!obj.Body) {
+      return error("Media not found", 404, "NOT_FOUND");
+    }
+
+    const headers = new Headers();
+    headers.set("Content-Type", obj.ContentType || guessContentType(safeKey));
+    headers.set("Accept-Ranges", "bytes");
+    headers.set("Cache-Control", "private, no-store");
+    if (obj.ContentLength != null) {
+      headers.set("Content-Length", String(obj.ContentLength));
+    }
+    if (obj.ContentRange) headers.set("Content-Range", obj.ContentRange);
+    if (obj.ETag) headers.set("ETag", obj.ETag);
+
+    const status = obj.ContentRange ? 206 : 200;
+    return new Response(toWebStream(obj.Body), { status, headers });
   } catch {
     return error("Media not found", 404, "NOT_FOUND");
   }

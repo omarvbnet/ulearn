@@ -48,8 +48,17 @@ export async function GET(
   });
 
   const lessonIds = course.lessons.map((l) => l.id);
-  const [purchased, myFavorite, favoriteCount, likeGroups, myLikes, favGroups, myLessonFavs] =
-    await Promise.all([
+  const [
+    purchased,
+    myFavorite,
+    favoriteCount,
+    likeGroups,
+    myLikes,
+    favGroups,
+    myLessonFavs,
+    reactionGroups,
+    myCourseReaction,
+  ] = await Promise.all([
       userId ? TeacherCourseService.hasPurchased(id, userId) : Promise.resolve(false),
       userId
         ? prisma.courseFavorite.findUnique({
@@ -79,12 +88,27 @@ export async function GET(
             select: { lessonId: true },
           })
         : Promise.resolve([] as { lessonId: string }[]),
+      prisma.courseReaction.groupBy({
+        by: ["type"],
+        where: { courseId: id },
+        _count: true,
+      }),
+      userId
+        ? prisma.courseReaction.findUnique({
+            where: { courseId_userId: { courseId: id, userId } },
+            select: { type: true },
+          })
+        : Promise.resolve(null),
     ]);
 
   const likeCounts = new Map(likeGroups.map((g) => [g.lessonId, g._count]));
   const likedSet = new Set(myLikes.map((l) => l.lessonId));
   const favCounts = new Map(favGroups.map((g) => [g.lessonId, g._count]));
   const favSet = new Set(myLessonFavs.map((f) => f.lessonId));
+  const courseLikes = reactionGroups.find((g) => g.type === "LIKE")?._count ?? 0;
+  const courseDislikes =
+    reactionGroups.find((g) => g.type === "DISLIKE")?._count ?? 0;
+  const myReaction = myCourseReaction?.type ?? null;
 
   const isOwnCourse = Boolean(userId && course.teacher.userId === userId);
   const hasAccess = purchased || isOwnCourse || course.price <= 0;
@@ -257,6 +281,9 @@ export async function GET(
       accessMonths: course.accessMonths,
       appleProductId: course.appleProductId,
       googleProductId: course.googleProductId,
+      likes: courseLikes,
+      dislikes: courseDislikes,
+      myReaction,
     },
     quizzes: quizzesWithStatus,
     completion,
@@ -266,6 +293,9 @@ export async function GET(
     isOwnCourse,
     favorites: favoriteCount,
     favoritedByMe: Boolean(myFavorite),
+    likes: courseLikes,
+    dislikes: courseDislikes,
+    myReaction,
     introOutro,
   });
 }
