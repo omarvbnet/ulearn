@@ -206,54 +206,61 @@ export function CourseReviewClient() {
       return;
     }
     // Course Videos panel loads its own lesson list — do not treat the tab id as CourseStatus.
-    if (tab === "COURSE_VIDEOS") {
-      return;
-    }
-    const qs = tab === "PURCHASES" ? "" : `?status=${tab}`;
-    if (tab !== "PURCHASES") {
-      fetch(`/api/admin/teacher-courses${qs}`)
+    if (tab === "COURSE_VIDEOS" || tab === "PURCHASES") {
+      if (tab === "COURSE_VIDEOS") return;
+    } else {
+      // Only real CourseStatus values may be sent to the API.
+      const courseStatuses = new Set([
+        "DRAFT",
+        "PENDING_REVIEW",
+        "APPROVED",
+        "REJECTED",
+        "CLOSED",
+      ]);
+      if (!courseStatuses.has(tab)) return;
+      fetch(`/api/admin/teacher-courses?status=${encodeURIComponent(tab)}`)
         .then((r) => (r.ok ? r.json() : { courses: [] }))
         .then((d) => setCourses(d.courses || []));
-    } else {
-      Promise.all([
-        fetch(`/api/admin/course-purchases?status=${purchaseFilter}`).then((r) =>
-          r.ok ? r.json() : { purchases: [] }
-        ),
-        fetch(`/api/admin/course-group-purchases?status=${purchaseFilter}`).then(
-          (r) => (r.ok ? r.json() : { purchases: [] })
-        ),
-      ]).then(([courseData, groupData]) => {
-        const coursePurchases: Purchase[] = (courseData.purchases || []).map(
-          (p: Purchase) => ({ ...p, kind: "course" as const })
-        );
-        const groupPurchases: Purchase[] = (groupData.purchases || []).map(
-          (p: {
-            id: string;
-            price: number;
-            currency: string;
-            status: string;
-            createdAt: string;
-            user: Purchase["user"];
-            group: Purchase["group"];
-          }) => ({
-            id: p.id,
-            price: p.price,
-            currency: p.currency,
-            status: p.status,
-            createdAt: p.createdAt,
-            user: p.user,
-            group: p.group,
-            kind: "group" as const,
-          })
-        );
-        setPurchases(
-          [...groupPurchases, ...coursePurchases].sort(
-            (a, b) =>
-              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          )
-        );
-      });
+      return;
     }
+    Promise.all([
+      fetch(`/api/admin/course-purchases?status=${purchaseFilter}`).then((r) =>
+        r.ok ? r.json() : { purchases: [] }
+      ),
+      fetch(`/api/admin/course-group-purchases?status=${purchaseFilter}`).then(
+        (r) => (r.ok ? r.json() : { purchases: [] })
+      ),
+    ]).then(([courseData, groupData]) => {
+      const coursePurchases: Purchase[] = (courseData.purchases || []).map(
+        (p: Purchase) => ({ ...p, kind: "course" as const })
+      );
+      const groupPurchases: Purchase[] = (groupData.purchases || []).map(
+        (p: {
+          id: string;
+          price: number;
+          currency: string;
+          status: string;
+          createdAt: string;
+          user: Purchase["user"];
+          group: Purchase["group"];
+        }) => ({
+          id: p.id,
+          price: p.price,
+          currency: p.currency,
+          status: p.status,
+          createdAt: p.createdAt,
+          user: p.user,
+          group: p.group,
+          kind: "group" as const,
+        })
+      );
+      setPurchases(
+        [...groupPurchases, ...coursePurchases].sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        )
+      );
+    });
   }, [tab, purchaseFilter]);
 
   useEffect(loadCourses, [loadCourses]);

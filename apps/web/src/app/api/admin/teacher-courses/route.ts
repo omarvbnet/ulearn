@@ -1,4 +1,4 @@
-import { error, json, requireAuth } from "@/lib/api";
+import { json, requireAuth } from "@/lib/api";
 import { ADMIN_ROLES } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import type { CourseStatus } from "@prisma/client";
@@ -18,10 +18,15 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const statusParam = searchParams.get("status");
-  if (statusParam && !COURSE_STATUSES.has(statusParam as CourseStatus)) {
-    return error("Invalid course status", 422, "VALIDATION");
+  // Tab ids like COURSE_VIDEOS / VIDEO_UPDATES / PURCHASES must never hit Prisma.
+  const status =
+    statusParam && COURSE_STATUSES.has(statusParam as CourseStatus)
+      ? (statusParam as CourseStatus)
+      : null;
+
+  if (statusParam && !status) {
+    return json({ courses: [] });
   }
-  const status = statusParam as CourseStatus | null;
 
   const courses = await prisma.course.findMany({
     where: { deletedAt: null, ...(status ? { status } : {}) },
