@@ -6,7 +6,11 @@ export COPYFILE_DISABLE=1
 APP="${TARGET_BUILD_DIR}/${WRAPPER_NAME}"
 ROOT="${SRCROOT}/.."
 BUILD_DIR="${ROOT}/build"
-CACHE="${HOME}/Library/Caches/ulearn-mobile-build"
+if [ -d /Volumes/ULearnBuild ]; then
+  CACHE="/Volumes/ULearnBuild/mobile-build"
+else
+  CACHE="${HOME}/Library/Caches/ulearn-mobile-build"
+fi
 
 # Ensure build stays off Desktop before signing native assets / app.
 /bin/sh "${ROOT}/scripts/setup_ios_build.sh" 2>/dev/null || true

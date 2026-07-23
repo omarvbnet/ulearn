@@ -1,0 +1,750 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
+import 'package:record/record.dart';
+import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/features/whiteboard/domain/board_state.dart';
+import 'package:ulearn/features/whiteboard/domain/event_engine.dart';
+import 'package:ulearn/features/whiteboard/domain/package.dart';
+import 'package:ulearn/features/whiteboard/domain/smoothing.dart';
+import 'package:ulearn/features/whiteboard/domain/types.dart';
+import 'package:ulearn/features/whiteboard/ui/whiteboard_painter.dart';
+import 'package:uuid/uuid.dart';
+
+/// Teacher Whiteboard Studio — records mic + vector events into a .ubrd package.
+class WhiteboardStudioScreen extends StatefulWidget {
+  const WhiteboardStudioScreen({
+    super.key,
+    required this.courseId,
+    required this.courseTitle,
+    this.initialTitle,
+  });
+
+  final String courseId;
+  final String courseTitle;
+  final String? initialTitle;
+
+  @override
+  State<WhiteboardStudioScreen> createState() => _WhiteboardStudioScreenState();
+}
+
+class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
+  final _engine = EventEngine();
+  final _board = BoardState();
+  final _recorder = AudioRecorder();
+  final _uuid = const Uuid();
+  final _titleCtrl = TextEditingController();
+
+  WhiteboardTool _tool = WhiteboardTool.pen;
+  String _color = '#111827';
+  bool _recording = false;
+  bool _saving = false;
+  String? _audioPath;
+  BoardStroke? _activeStroke;
+  String? _shapeId;
+  Offset? _shapeStart;
+  Timer? _autosaveTimer;
+  final List<UbrdPdfAsset> _pdfs = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _titleCtrl.text = widget.initialTitle ?? 'Whiteboard lesson';
+    _board.theme = WhiteboardThemeId.white;
+    _autosaveTimer = Timer.periodic(const Duration(seconds: 20), (_) => _autosaveDraft());
+    _restoreDraftIfAny();
+  }
+
+  Future<void> _restoreDraftIfAny() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final draft = File('${dir.path}/wb_draft_${widget.courseId}.json');
+      if (!await draft.exists()) return;
+      final raw = jsonDecode(await draft.readAsString()) as Map<String, dynamic>;
+      final events = ((raw['events'] as List?) ?? [])
+          .map((e) => UbrdEvent.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+      if (events.isEmpty || !mounted) return;
+      final restore = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Recover draft?'),
+          content: Text('Found a whiteboard draft from ${raw['savedAt'] ?? 'earlier'}.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Discard')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Restore')),
+          ],
+        ),
+      );
+      if (restore != true || !mounted) {
+        if (restore == false) await draft.delete();
+        return;
+      }
+      _engine.load(events);
+      _board.reset();
+      _board.applyEvents(events);
+      if (raw['title'] is String) _titleCtrl.text = raw['title'] as String;
+      if (raw['theme'] is String) {
+        _board.theme = WhiteboardThemeIdX.parse(raw['theme'] as String);
+      }
+      setState(() {});
+    } catch (_) {}
+  }
+
+  Future<void> _attachCoursePdf() async {
+    try {
+      final api = context.read<ApiClient>();
+      final res = await api.get('/api/teacher/courses/${widget.courseId}/documents');
+      final docs = ((res['documents'] as List?) ?? (res['materials'] as List?) ?? [])
+          .cast<Map<String, dynamic>>()
+          .where((d) => (d['type']?.toString() ?? 'PDF') == 'PDF')
+          .toList();
+      if (docs.isEmpty || !mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No course PDFs found — upload a document first')),
+        );
+        return;
+      }
+      final chosen = await showModalBottomSheet<Map<String, dynamic>>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final d in docs)
+                ListTile(
+                  leading: const Icon(Icons.picture_as_pdf),
+                  title: Text(d['title']?.toString() ?? 'PDF'),
+                  onTap: () => Navigator.pop(ctx, d),
+                ),
+            ],
+          ),
+        ),
+      );
+      if (chosen == null || !mounted) return;
+      final assetId = 'pdf_${chosen['id']}';
+      _pdfs.removeWhere((p) => p.assetId == assetId);
+      _pdfs.add(UbrdPdfAsset(
+        assetId: assetId,
+        materialId: chosen['id']?.toString(),
+        fileKey: chosen['fileKey']?.toString(),
+        title: chosen['title']?.toString() ?? 'PDF',
+      ));
+      final pageId = 'page_${_uuid.v4()}';
+      _board.addBlankPage(pageId);
+      final page = _board.currentPage;
+      if (page != null) {
+        page.kind = 'pdf';
+        page.pdfAssetId = assetId;
+        page.pdfPage = 1;
+      }
+      if (_recording) {
+        _engine.push('pdf_open', {'assetId': assetId, 'title': chosen['title']});
+        _engine.push('page_add', {
+          'pageId': pageId,
+          'index': _board.pages.length - 1,
+          'kind': 'pdf',
+          'pdfAssetId': assetId,
+          'pdfPage': 1,
+        });
+        _engine.push('page_select', {'pageId': pageId});
+      }
+      setState(() {});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF attach failed: $e')));
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _autosaveTimer?.cancel();
+    _titleCtrl.dispose();
+    _recorder.dispose();
+    super.dispose();
+  }
+
+  Color get _chromeBg =>
+      _board.theme == WhiteboardThemeId.black ? const Color(0xFF111827) : const Color(0xFFEEF2F7);
+  Color get _chromeFg =>
+      _board.theme == WhiteboardThemeId.black ? Colors.white : const Color(0xFF0F172A);
+
+  Future<void> _toggleTheme() async {
+    setState(() {
+      _board.theme = _board.theme == WhiteboardThemeId.white
+          ? WhiteboardThemeId.black
+          : WhiteboardThemeId.white;
+      _color = _board.theme == WhiteboardThemeId.black ? '#F8FAFC' : '#111827';
+    });
+    if (_recording) {
+      _engine.push('theme_change', {'theme': _board.theme.wire});
+      _engine.push('color_change', {'color': _color});
+    }
+  }
+
+  Future<void> _startRecording() async {
+    final ok = await _recorder.hasPermission();
+    if (!ok) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Microphone permission required')),
+        );
+      }
+      return;
+    }
+    final dir = await getTemporaryDirectory();
+    _audioPath = '${dir.path}/wb_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    await _recorder.start(
+      const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 128000, sampleRate: 44100),
+      path: _audioPath!,
+    );
+    _engine.start();
+    _engine.push('session_start', {
+      'theme': _board.theme.wire,
+      'boardWidth': kLogicalBoardWidth,
+      'boardHeight': kLogicalBoardHeight,
+    });
+    _engine.push('page_select', {'pageId': _board.currentPageId});
+    setState(() => _recording = true);
+  }
+
+  Future<void> _stopAndPublish() async {
+    if (!_recording || _saving) return;
+    setState(() => _saving = true);
+    try {
+      final path = await _recorder.stop();
+      final durationMs = _engine.stop();
+      final audioFile = File(path ?? _audioPath ?? '');
+      if (!await audioFile.exists()) {
+        throw StateError('AUDIO_MISSING');
+      }
+      final audioBytes = await audioFile.readAsBytes();
+      final packageBytes = await buildUbrdPackage(
+        engine: _engine,
+        audioBytes: Uint8List.fromList(audioBytes),
+        theme: _board.theme,
+        pageCount: _board.pages.length,
+        durationMs: durationMs,
+        pdfs: _pdfs,
+      );
+
+      final api = context.read<ApiClient>();
+      final upload = await api.post('/api/whiteboards/upload-url', {
+        'courseId': widget.courseId,
+        'filename': 'lesson.ubrd',
+        'contentType': 'application/octet-stream',
+        'size': packageBytes.length,
+        'theme': _board.theme.wire,
+      });
+      final uploadUrl = upload['uploadUrl'] as String;
+      final whiteboardId = upload['whiteboardId'] as String;
+      final objectKey = upload['objectKey'] as String?;
+
+      await api.putBytes(
+        uploadUrl,
+        packageBytes,
+        'application/octet-stream',
+      );
+
+      await api.post('/api/whiteboards/complete', {
+        'whiteboardId': whiteboardId,
+        'size': packageBytes.length,
+        'durationSec': (durationMs / 1000).ceil(),
+        'theme': _board.theme.wire,
+        'schemaVersion': kUbrdSchemaVersion,
+      });
+
+      await api.post('/api/teacher/courses/${widget.courseId}/lessons', {
+        'title': _titleCtrl.text.trim().isEmpty ? 'Whiteboard lesson' : _titleCtrl.text.trim(),
+        'lessonType': 'WHITEBOARD',
+        'whiteboardAssetId': whiteboardId,
+        'durationSec': (durationMs / 1000).ceil(),
+        if (objectKey != null) 'fileKey': objectKey,
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Whiteboard lesson published')),
+        );
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Save failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() {
+        _recording = false;
+        _saving = false;
+      });
+    }
+  }
+
+  Future<void> _autosaveDraft() async {
+    if (!_recording || _engine.length == 0) return;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final draft = File('${dir.path}/wb_draft_${widget.courseId}.json');
+      await draft.writeAsString(jsonEncode({
+        'events': _engine.all.map((e) => e.toJson()).toList(),
+        'theme': _board.theme.wire,
+        'title': _titleCtrl.text,
+        'savedAt': DateTime.now().toIso8601String(),
+      }));
+    } catch (_) {}
+  }
+
+  void _selectTool(WhiteboardTool tool) {
+    setState(() => _tool = tool);
+    _board.tool = tool;
+    if (_recording) _engine.push('tool_change', {'tool': tool.wire});
+  }
+
+  void _onPointerDown(PointerDownEvent e, Size size) {
+    final logical = logicalFromLocal(e.localPosition, size, kLogicalBoardWidth, kLogicalBoardHeight);
+    if (logical == null) return;
+    final pageId = _board.currentPageId ?? 'page_0';
+
+    if (_tool == WhiteboardTool.laser) {
+      _board.laser = BoardLaser(pageId: pageId, x: logical.dx, y: logical.dy);
+      if (_recording) {
+        _engine.push('laser_move', {
+          'pageId': pageId,
+          'x': logical.dx,
+          'y': logical.dy,
+          'visible': true,
+        });
+      }
+      setState(() {});
+      return;
+    }
+
+    if (_tool == WhiteboardTool.text) {
+      _promptText(logical, pageId);
+      return;
+    }
+
+    if ({WhiteboardTool.rect, WhiteboardTool.circle, WhiteboardTool.line, WhiteboardTool.arrow}
+        .contains(_tool)) {
+      _shapeId = _uuid.v4();
+      _shapeStart = logical;
+      return;
+    }
+
+    if (_tool == WhiteboardTool.eraser) {
+      _eraseNear(logical, pageId);
+      return;
+    }
+
+    final strokeId = _uuid.v4();
+    _activeStroke = BoardStroke(
+      id: strokeId,
+      pageId: pageId,
+      tool: _tool,
+      color: _color,
+      opacity: defaultOpacityForTool(_tool),
+      width: defaultWidthForTool(_tool) * (0.5 + (e.pressure.clamp(0.0, 1.0) * 0.8)),
+      points: [StrokePoint(x: logical.dx, y: logical.dy, p: e.pressure)],
+    );
+    if (_recording) {
+      _engine.push('stroke_begin', {
+        'strokeId': strokeId,
+        'pageId': pageId,
+        'tool': _tool.wire,
+        'color': _color,
+        'opacity': _activeStroke!.opacity,
+        'width': _activeStroke!.width,
+      });
+    }
+    setState(() {});
+  }
+
+  void _onPointerMove(PointerMoveEvent e, Size size) {
+    final logical = logicalFromLocal(e.localPosition, size, kLogicalBoardWidth, kLogicalBoardHeight);
+    if (logical == null) return;
+    final pageId = _board.currentPageId ?? 'page_0';
+
+    if (_tool == WhiteboardTool.laser) {
+      _board.laser = BoardLaser(pageId: pageId, x: logical.dx, y: logical.dy);
+      if (_recording) {
+        _engine.push('laser_move', {
+          'pageId': pageId,
+          'x': logical.dx,
+          'y': logical.dy,
+          'visible': true,
+        });
+      }
+      setState(() {});
+      return;
+    }
+
+    if (_activeStroke == null) return;
+    _activeStroke!.points.add(StrokePoint(x: logical.dx, y: logical.dy, p: e.pressure));
+    if (_recording) {
+      _engine.push('stroke_point', {
+        'strokeId': _activeStroke!.id,
+        'x': logical.dx,
+        'y': logical.dy,
+        'p': e.pressure,
+      });
+    }
+    setState(() {});
+  }
+
+  void _onPointerUp(PointerUpEvent e, Size size) {
+    final logical = logicalFromLocal(e.localPosition, size, kLogicalBoardWidth, kLogicalBoardHeight);
+    final pageId = _board.currentPageId ?? 'page_0';
+
+    if (_shapeId != null && _shapeStart != null && logical != null) {
+      final kind = _tool.wire;
+      if (_recording) {
+        _engine.push('shape_add', {
+          'shapeId': _shapeId,
+          'pageId': pageId,
+          'kind': kind,
+          'x1': _shapeStart!.dx,
+          'y1': _shapeStart!.dy,
+          'x2': logical.dx,
+          'y2': logical.dy,
+          'color': _color,
+          'width': 2.5,
+        });
+      }
+      _board.apply(UbrdEvent(
+        id: _uuid.v4(),
+        t: _engine.now(),
+        type: 'shape_add',
+        payload: {
+          'shapeId': _shapeId,
+          'pageId': pageId,
+          'kind': kind,
+          'x1': _shapeStart!.dx,
+          'y1': _shapeStart!.dy,
+          'x2': logical.dx,
+          'y2': logical.dy,
+          'color': _color,
+          'width': 2.5,
+        },
+      ));
+      _shapeId = null;
+      _shapeStart = null;
+      setState(() {});
+      return;
+    }
+
+    if (_activeStroke == null) return;
+    final stroke = _activeStroke!;
+    stroke.points = smoothStrokePoints(stroke.points);
+    final page = _board.currentPage;
+    page?.strokes.add(stroke);
+    if (_recording) {
+      _engine.push('stroke_end', {
+        'strokeId': stroke.id,
+        'pageId': stroke.pageId,
+        'points': stroke.points.map((p) => p.toJson()).toList(),
+      });
+    }
+    _activeStroke = null;
+    setState(() {});
+  }
+
+  void _eraseNear(Offset logical, String pageId) {
+    final page = _board.currentPage;
+    if (page == null) return;
+    final hit = <String>[];
+    for (final s in page.strokes) {
+      for (final p in s.points) {
+        final dx = p.x - logical.dx;
+        final dy = p.y - logical.dy;
+        if (dx * dx + dy * dy < 400) {
+          hit.add(s.id);
+          break;
+        }
+      }
+    }
+    if (hit.isEmpty) return;
+    page.strokes.removeWhere((s) => hit.contains(s.id));
+    if (_recording) {
+      _engine.push('erase', {'pageId': pageId, 'strokeIds': hit});
+    }
+    setState(() {});
+  }
+
+  Future<void> _promptText(Offset logical, String pageId) async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Insert text'),
+        content: TextField(controller: ctrl, autofocus: true),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add')),
+        ],
+      ),
+    );
+    if (ok != true || ctrl.text.trim().isEmpty) return;
+    final id = _uuid.v4();
+    final payload = {
+      'textId': id,
+      'pageId': pageId,
+      'x': logical.dx,
+      'y': logical.dy,
+      'text': ctrl.text.trim(),
+      'color': _color,
+      'fontSize': 28.0,
+    };
+    _board.apply(UbrdEvent(id: id, t: _engine.now(), type: 'text_insert', payload: payload));
+    if (_recording) _engine.push('text_insert', payload);
+    setState(() {});
+  }
+
+  void _addPage() {
+    final id = 'page_${_uuid.v4()}';
+    _board.addBlankPage(id);
+    if (_recording) {
+      _engine.push('page_add', {'pageId': id, 'index': _board.pages.length - 1, 'kind': 'blank'});
+      _engine.push('page_select', {'pageId': id});
+    }
+    setState(() {});
+  }
+
+  void _duplicatePage() {
+    final src = _board.currentPage;
+    if (src == null) return;
+    final id = 'page_${_uuid.v4()}';
+    if (_recording) {
+      _engine.push('page_duplicate', {
+        'pageId': src.id,
+        'newPageId': id,
+        'index': _board.pages.indexOf(src) + 1,
+      });
+    }
+    _board.apply(UbrdEvent(
+      id: _uuid.v4(),
+      t: _engine.now(),
+      type: 'page_duplicate',
+      payload: {
+        'pageId': src.id,
+        'newPageId': id,
+        'index': _board.pages.indexOf(src) + 1,
+      },
+    ));
+    setState(() {});
+  }
+
+  void _deletePage() {
+    if (_board.pages.length <= 1) return;
+    final id = _board.currentPageId;
+    if (id == null) return;
+    if (_recording) _engine.push('page_delete', {'pageId': id});
+    _board.apply(UbrdEvent(id: _uuid.v4(), t: _engine.now(), type: 'page_delete', payload: {'pageId': id}));
+    setState(() {});
+  }
+
+  void _clearPage() {
+    final id = _board.currentPageId;
+    if (id == null) return;
+    if (_recording) _engine.push('page_clear', {'pageId': id});
+    _board.apply(UbrdEvent(id: _uuid.v4(), t: _engine.now(), type: 'page_clear', payload: {'pageId': id}));
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shortest = MediaQuery.sizeOf(context).shortestSide;
+    final iconSize = shortest < 600 ? 20.0 : 24.0;
+
+    return Scaffold(
+      backgroundColor: _chromeBg,
+      appBar: AppBar(
+        backgroundColor: _chromeBg,
+        foregroundColor: _chromeFg,
+        title: TextField(
+          controller: _titleCtrl,
+          style: TextStyle(color: _chromeFg, fontWeight: FontWeight.w600),
+          decoration: const InputDecoration(border: InputBorder.none, hintText: 'Lesson title'),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Board theme',
+            onPressed: _toggleTheme,
+            icon: Icon(_board.theme == WhiteboardThemeId.black ? Icons.dark_mode : Icons.light_mode),
+          ),
+          if (!_recording)
+            TextButton(
+              onPressed: _saving ? null : _startRecording,
+              child: const Text('Start Recording'),
+            )
+          else
+            TextButton(
+              onPressed: _saving ? null : _stopAndPublish,
+              child: Text(_saving ? 'Saving…' : 'Stop & Publish'),
+            ),
+        ],
+      ),
+      body: Column(
+        children: [
+          _toolRail(iconSize),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final size = Size(constraints.maxWidth, constraints.maxHeight);
+                return Listener(
+                  onPointerDown: (e) => _onPointerDown(e, size),
+                  onPointerMove: (e) => _onPointerMove(e, size),
+                  onPointerUp: (e) => _onPointerUp(e, size),
+                  child: CustomPaint(
+                    painter: WhiteboardPainter(
+                      state: _board,
+                      boardWidth: kLogicalBoardWidth,
+                      boardHeight: kLogicalBoardHeight,
+                      activeStroke: _activeStroke,
+                    ),
+                    size: Size.infinite,
+                  ),
+                );
+              },
+            ),
+          ),
+          _pageStrip(),
+        ],
+      ),
+    );
+  }
+
+  Widget _toolRail(double iconSize) {
+    final tools = [
+      (WhiteboardTool.pen, Icons.edit),
+      (WhiteboardTool.pencil, Icons.edit_outlined),
+      (WhiteboardTool.highlighter, Icons.highlight),
+      (WhiteboardTool.eraser, Icons.auto_fix_off),
+      (WhiteboardTool.text, Icons.text_fields),
+      (WhiteboardTool.laser, Icons.highlight_alt),
+      (WhiteboardTool.rect, Icons.crop_square),
+      (WhiteboardTool.circle, Icons.circle_outlined),
+      (WhiteboardTool.line, Icons.show_chart),
+      (WhiteboardTool.arrow, Icons.arrow_right_alt),
+      (WhiteboardTool.select, Icons.near_me),
+    ];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: Row(
+        children: [
+          ...tools.map((t) {
+            final selected = _tool == t.$1;
+            return Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: InkWell(
+                onTap: () => _selectTool(t.$1),
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  padding: EdgeInsets.all(iconSize * 0.35),
+                  decoration: BoxDecoration(
+                    color: selected ? const Color(0xFF2563EB) : Colors.black12,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(t.$2, size: iconSize, color: selected ? Colors.white : _chromeFg),
+                ),
+              ),
+            );
+          }),
+          const SizedBox(width: 8),
+          ...['#111827', '#EF4444', '#2563EB', '#22C55E', '#F59E0B', '#F8FAFC'].map((c) {
+            return GestureDetector(
+              onTap: () {
+                setState(() => _color = c);
+                if (_recording) _engine.push('color_change', {'color': c});
+              },
+              child: Container(
+                width: iconSize,
+                height: iconSize,
+                margin: const EdgeInsets.only(right: 4),
+                decoration: BoxDecoration(
+                  color: Color(int.parse('FF${c.substring(1)}', radix: 16)),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: _color == c ? const Color(0xFF2563EB) : Colors.black26,
+                    width: 2,
+                  ),
+                ),
+              ),
+            );
+          }),
+          IconButton(
+            tooltip: 'Clear page',
+            onPressed: _clearPage,
+            icon: Icon(Icons.cleaning_services, color: _chromeFg, size: iconSize),
+          ),
+          IconButton(
+            tooltip: 'Open course PDF',
+            onPressed: _attachCoursePdf,
+            icon: Icon(Icons.picture_as_pdf, color: _chromeFg, size: iconSize),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _pageStrip() {
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          IconButton(onPressed: _addPage, icon: Icon(Icons.add, color: _chromeFg)),
+          IconButton(onPressed: _duplicatePage, icon: Icon(Icons.copy, color: _chromeFg)),
+          IconButton(onPressed: _deletePage, icon: Icon(Icons.delete_outline, color: _chromeFg)),
+          Expanded(
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: _board.pages.length,
+              itemBuilder: (context, i) {
+                final p = _board.pages[i];
+                final selected = p.id == _board.currentPageId;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                  child: ChoiceChip(
+                    label: Text('P${i + 1}'),
+                    selected: selected,
+                    onSelected: (_) {
+                      setState(() => _board.currentPageId = p.id);
+                      if (_recording) _engine.push('page_select', {'pageId': p.id});
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+          if (_recording)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.fiber_manual_record, color: Colors.red, size: 14),
+                  const SizedBox(width: 4),
+                  Text(_formatMs(_engine.now()), style: TextStyle(color: _chromeFg)),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _formatMs(int ms) {
+    final s = ms ~/ 1000;
+    final m = s ~/ 60;
+    final r = s % 60;
+    return '${m.toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
+  }
+}

@@ -108,6 +108,18 @@ enum VideoProcessingStatus {
   FAILED
 }
 
+/// Store-course lesson modality. Default VIDEO preserves all existing rows.
+/// Future values (LIVE, QUIZ, DOCUMENT, INTERACTIVE) can be added without redesign.
+enum CourseLessonType {
+  VIDEO
+  WHITEBOARD
+}
+
+enum WhiteboardTheme {
+  WHITE
+  BLACK
+}
+
 // ─────────────────────────────────────────────
 // Geography
 // ─────────────────────────────────────────────
@@ -239,6 +251,7 @@ model User {
   adLikes              AdLike[]
   stageChangeRequests  StageChangeRequest[]  @relation("StageRequests")
   videoAssets          VideoAsset[]
+  whiteboardAssets     WhiteboardAsset[]
   aiConversations      AiConversation[]
   aiUsageLogs          AiUsageLog[]
   studentAiMemory      StudentAiMemory?
@@ -418,9 +431,12 @@ model CourseLesson {
   id            String   @id @default(cuid())
   courseId      String
   title         String
+  /// VIDEO (default) keeps the existing upload/player pipeline unchanged.
+  lessonType    CourseLessonType @default(VIDEO)
   fileKey       String?
   fileUrl       String?
   videoAssetId  String?  @unique
+  whiteboardAssetId String? @unique
   thumbnailKey  String?
   thumbnailUrl  String?
   durationSec   Int?
@@ -434,8 +450,9 @@ model CourseLesson {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  course     Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  videoAsset VideoAsset? @relation(fields: [videoAssetId], references: [id], onDelete: SetNull)
+  course          Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  videoAsset      VideoAsset?      @relation(fields: [videoAssetId], references: [id], onDelete: SetNull)
+  whiteboardAsset WhiteboardAsset? @relation(fields: [whiteboardAssetId], references: [id], onDelete: SetNull)
   likes     CourseLessonLike[]
   favorites CourseLessonFavorite[]
   questions CourseLessonQuestion[]
@@ -447,6 +464,35 @@ model CourseLesson {
   @@index([courseId])
   @@index([deletedAt])
   @@index([isHidden])
+  @@index([lessonType])
+}
+
+/// Direct-upload whiteboard lesson package (.ubrd). Binary data lives only in R2.
+/// Never store stroke points here — only package metadata.
+model WhiteboardAsset {
+  id               String                 @id @default(cuid())
+  courseId         String?
+  courseLessonId   String?
+  uploadedById     String
+  objectKey        String
+  sourceFilename   String?
+  fileSize         BigInt?
+  durationSec      Int?
+  thumbnailKey     String?
+  theme            WhiteboardTheme        @default(WHITE)
+  schemaVersion    Int                    @default(1)
+  processingStatus VideoProcessingStatus  @default(PENDING_UPLOAD)
+  processingError  String?
+  uploadedAt       DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  uploadedBy   User          @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  courseLesson CourseLesson?
+
+  @@index([courseId])
+  @@index([processingStatus])
+  @@index([uploadedById])
 }
 
 /// Direct-upload video metadata. Binary data lives only in Cloudflare R2.
@@ -571,6 +617,9 @@ model CourseLessonUpdateRequest {
   thumbnailKey String?
   thumbnailUrl String?
   durationSec  Int?
+  /// Proposed whiteboard package for WHITEBOARD lessons (admin review queue).
+  whiteboardAssetId String?
+  previousWhiteboardAssetId String?
   /// Snapshot of the live lesson before this proposed change.
   previousTitle        String?
   previousFileKey      String?
@@ -578,7 +627,7 @@ model CourseLessonUpdateRequest {
   previousThumbnailKey String?
   previousThumbnailUrl String?
   previousDurationSec  Int?
-  /// Comma-separated change tags, e.g. "title,video,thumbnail".
+  /// Comma-separated change tags, e.g. "title,video,thumbnail,whiteboard".
   changeSummary String?
   status       LessonUpdateStatus @default(PENDING)
   reviewNotes  String?

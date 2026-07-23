@@ -22,6 +22,7 @@ import 'package:ulearn/features/store/lesson_qa_section.dart';
 import 'package:ulearn/features/store/teacher_studio_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
 import 'package:ulearn/core/widgets/glass.dart';
+import 'package:ulearn/features/whiteboard/ui/whiteboard_player_screen.dart';
 
 enum _PlayerStage { playing, quiz, documents }
 
@@ -135,7 +136,19 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     setState(() => _qaComposerFocused = focused);
   }
 
+  bool _isWhiteboard(Map<String, dynamic> lesson) =>
+      lesson['lessonType']?.toString() == 'WHITEBOARD';
+
   bool _canWatch(Map<String, dynamic> lesson, bool unlocked) {
+    if (_isWhiteboard(lesson)) {
+      final hasPackage = lesson['packageUrl'] != null ||
+          lesson['whiteboardId'] != null ||
+          lesson['whiteboardAssetId'] != null;
+      if (lesson['canWatch'] == true && hasPackage) return true;
+      final isPreview = lesson['isFreePreview'] == true;
+      final timed = (lesson['freePreviewSec'] as num?)?.toInt() ?? 0;
+      return (unlocked || isPreview || timed > 0) && hasPackage;
+    }
     if (lesson['canWatch'] == true && lesson['fileUrl'] != null) return true;
     final isPreview = lesson['isFreePreview'] == true;
     final timed = (lesson['freePreviewSec'] as num?)?.toInt() ?? 0;
@@ -513,7 +526,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     final lessons =
         ((_course?['lessons'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
     final idx = lessons.indexWhere((l) => l['id'] == lesson['id']);
-    if (idx >= 0) {
+    if (idx >= 0 && !_isWhiteboard(lesson)) {
       CourseVideoCache.prefetchAround(
         lessons.map((l) => l['fileUrl']?.toString()).toList(),
         idx,
@@ -982,6 +995,41 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           final lesson = _activeLesson;
           if (lesson == null) return;
           _advanceAfterLesson(lesson);
+        },
+      );
+    }
+
+    if (active != null && _isWhiteboard(active)) {
+      final packageUrl = active['packageUrl']?.toString();
+      final whiteboardId =
+          active['whiteboardId']?.toString() ?? active['whiteboardAssetId']?.toString();
+      return WhiteboardPlayerScreen(
+        key: ValueKey('wb_${activeId}_${active['watchPositionSec']}'),
+        lessonId: activeId ?? '',
+        title: active['title']?.toString() ?? l10n.t('student.videos'),
+        packageUrl: packageUrl,
+        whiteboardId: whiteboardId,
+        durationSec: (active['durationSec'] as num?)?.toInt(),
+        initialPositionSec: (active['watchPositionSec'] as num?) != null &&
+                !_isLessonCompleted(active)
+            ? (active['watchPositionSec'] as num).toInt()
+            : 0,
+        freePreviewSec: !unlocked &&
+                active['previewOnly'] == true &&
+                (active['freePreviewSec'] as num?) != null
+            ? (active['freePreviewSec'] as num).toInt()
+            : null,
+        onProgress: (pos, dur, completed) async {
+          try {
+            final api = context.read<ApiClient>();
+            await api.post('/api/store/lessons/${activeId}/progress', {
+              'positionSec': pos,
+              'durationSec': dur,
+              'completionPct': dur > 0 ? (pos / dur * 100).clamp(0, 100) : 0,
+              'isCompleted': completed,
+            });
+            if (completed) _onLessonCompleted(active);
+          } catch (_) {}
         },
       );
     }

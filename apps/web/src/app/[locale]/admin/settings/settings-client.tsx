@@ -40,6 +40,7 @@ export function SettingsClient() {
   const [demoLoginEnabled, setDemoLoginEnabled] = useState(false);
   const [demoLoginPhone, setDemoLoginPhone] = useState("");
   const [demoLoginOtp, setDemoLoginOtp] = useState("");
+  const [whiteboardLessonsEnabled, setWhiteboardLessonsEnabled] = useState(true);
 
   useEffect(() => {
     fetch("/api/admin/settings").then(async (r) => {
@@ -79,6 +80,16 @@ export function SettingsClient() {
         }
         if (map.demo_login_otp !== undefined && map.demo_login_otp !== null) {
           setDemoLoginOtp(String(map.demo_login_otp));
+        }
+        if (map.whiteboard_lessons_enabled !== undefined) {
+          setWhiteboardLessonsEnabled(
+            map.whiteboard_lessons_enabled === true ||
+              map.whiteboard_lessons_enabled === "true" ||
+              map.whiteboard_lessons_enabled === 1 ||
+              map.whiteboard_lessons_enabled === "1"
+          );
+        } else {
+          setWhiteboardLessonsEnabled(true);
         }
       }
       setLoading(false);
@@ -289,6 +300,34 @@ export function SettingsClient() {
           }}
         >
           Save Demo Login
+        </Button>
+      </Card>
+
+      <Card className="space-y-4">
+        <div>
+          <h3 className="font-semibold">Whiteboard Lessons</h3>
+          <p className="mt-1 text-sm text-muted">
+            Allow teachers to create Whiteboard Lesson Studio recordings (mic + vector board). When
+            off, teachers cannot create or upload new whiteboard lessons. Existing whiteboard
+            lessons remain playable for students.
+          </p>
+        </div>
+        <label className="flex items-center gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={whiteboardLessonsEnabled}
+            onChange={(e) => setWhiteboardLessonsEnabled(e.target.checked)}
+            className="h-4 w-4 accent-[var(--accent)]"
+          />
+          Enable Whiteboard Lesson Studio
+        </label>
+        <Button
+          disabled={saving === "whiteboard_lessons_enabled"}
+          onClick={() =>
+            save("whiteboard_lessons_enabled", whiteboardLessonsEnabled, "Whiteboard lessons")
+          }
+        >
+          {saving === "whiteboard_lessons_enabled" ? "Saving…" : "Save Whiteboard Setting"}
         </Button>
       </Card>
 

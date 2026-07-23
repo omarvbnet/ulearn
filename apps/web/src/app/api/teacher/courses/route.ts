@@ -1,5 +1,6 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { isWhiteboardLessonsEnabled } from "@/lib/whiteboard-feature";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 import { z } from "zod";
 
@@ -20,7 +21,7 @@ export async function GET() {
 
   const isCert = profile.teachingTrack === "CERTIFICATE";
 
-  const [courses, earnings, stages] = await Promise.all([
+  const [courses, earnings, stages, whiteboardLessonsEnabled] = await Promise.all([
     TeacherCourseService.listTeacherCourses(profile.id),
     TeacherCourseService.teacherEarnings(profile.id),
     prisma.educationalStage.findMany({
@@ -40,6 +41,7 @@ export async function GET() {
         isCertificateTrack: true,
       },
     }),
+    isWhiteboardLessonsEnabled(),
   ]);
 
   return json({
@@ -50,6 +52,9 @@ export async function GET() {
     teachingTrack: profile.teachingTrack,
     subjects: profile.subjects.map((s) => s.subject),
     stages,
+    features: {
+      whiteboardLessonsEnabled,
+    },
   });
 }
 

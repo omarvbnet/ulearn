@@ -6,7 +6,11 @@ export COPYFILE_DISABLE=1
 
 ROOT="${SRCROOT}/.."
 BUILD_DIR="${ROOT}/build"
-CACHE="${HOME}/Library/Caches/ulearn-mobile-build"
+if [ -d /Volumes/ULearnBuild ]; then
+  CACHE="/Volumes/ULearnBuild/mobile-build"
+else
+  CACHE="${HOME}/Library/Caches/ulearn-mobile-build"
+fi
 
 # Always keep build/ off Desktop/iCloud (real dirs get FinderInfo and fail codesign).
 /bin/sh "${ROOT}/scripts/setup_ios_build.sh" || true

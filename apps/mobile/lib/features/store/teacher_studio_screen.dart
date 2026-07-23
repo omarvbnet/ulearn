@@ -110,6 +110,7 @@ class TeacherStudioScreen extends StatefulWidget {
 class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
   List<Map<String, dynamic>> _courses = [];
   List<Map<String, dynamic>> _shorts = [];
+  bool _whiteboardLessonsEnabled = true;
   String? _courseId;
   final _titleCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
@@ -240,6 +241,10 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
             .cast<Map<String, dynamic>>();
         _shorts = ((results[1]['videos'] as List<dynamic>?) ?? [])
             .cast<Map<String, dynamic>>();
+        final features = results[0]['features'];
+        if (features is Map) {
+          _whiteboardLessonsEnabled = features['whiteboardLessonsEnabled'] != false;
+        }
         _courseId ??= _courses.isNotEmpty
             ? _courses.first['id']?.toString()
             : null;
@@ -257,6 +262,10 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
       setState(() {
         _courses = ((data['courses'] as List<dynamic>?) ?? [])
             .cast<Map<String, dynamic>>();
+        final features = data['features'];
+        if (features is Map) {
+          _whiteboardLessonsEnabled = features['whiteboardLessonsEnabled'] != false;
+        }
         if (_courseId != null &&
             !_courses.any((c) => c['id']?.toString() == _courseId)) {
           _courseId = _courses.isNotEmpty ? _courses.first['id']?.toString() : null;
@@ -755,6 +764,7 @@ class _TeacherStudioScreenState extends State<TeacherStudioScreen> {
                     TeacherCoursesTab(
                       courses: _courses,
                       onRefresh: _refreshCourses,
+                      whiteboardLessonsEnabled: _whiteboardLessonsEnabled,
                     ),
                     TeacherQuizTab(
                       courses: _courses,

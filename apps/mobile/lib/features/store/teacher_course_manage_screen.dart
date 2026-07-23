@@ -16,12 +16,18 @@ import 'package:ulearn/features/store/teacher_course_wizard_screen.dart';
 import 'package:ulearn/features/store/teacher_lesson_upload_screen.dart';
 import 'package:ulearn/features/store/widgets/free_minute_picker.dart';
 import 'package:ulearn/core/widgets/glass.dart';
+import 'package:ulearn/features/whiteboard/ui/whiteboard_studio_screen.dart';
 
 /// Teacher: edit course metadata, reorder/rename/replace lessons, quizzes, documents.
 class TeacherCourseManageScreen extends StatefulWidget {
-  const TeacherCourseManageScreen({super.key, required this.courseId});
+  const TeacherCourseManageScreen({
+    super.key,
+    required this.courseId,
+    this.whiteboardLessonsEnabled = true,
+  });
 
   final String courseId;
+  final bool whiteboardLessonsEnabled;
 
   @override
   State<TeacherCourseManageScreen> createState() => _TeacherCourseManageScreenState();
@@ -864,14 +870,49 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
                             final title = _titleCtrl.text.trim().isEmpty
                                 ? l10n.t('mobile.teacher.manageCourse')
                                 : _titleCtrl.text.trim();
-                            await Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => TeacherLessonUploadScreen(
-                                  courseId: widget.courseId,
-                                  courseTitle: title,
+                            String? choice = 'VIDEO';
+                            if (widget.whiteboardLessonsEnabled) {
+                              choice = await showModalBottomSheet<String>(
+                                context: context,
+                                builder: (ctx) => SafeArea(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      ListTile(
+                                        leading: const Icon(Icons.videocam_outlined),
+                                        title: const Text('Video Lesson'),
+                                        onTap: () => Navigator.pop(ctx, 'VIDEO'),
+                                      ),
+                                      ListTile(
+                                        leading: const Icon(Icons.draw_outlined),
+                                        title: const Text('Whiteboard Lesson'),
+                                        onTap: () => Navigator.pop(ctx, 'WHITEBOARD'),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            );
+                              );
+                            }
+                            if (choice == null || !mounted) return;
+                            if (choice == 'WHITEBOARD') {
+                              await Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => WhiteboardStudioScreen(
+                                    courseId: widget.courseId,
+                                    courseTitle: title,
+                                  ),
+                                ),
+                              );
+                            } else {
+                              await Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => TeacherLessonUploadScreen(
+                                    courseId: widget.courseId,
+                                    courseTitle: title,
+                                  ),
+                                ),
+                              );
+                            }
                             _load();
                           },
                           icon: const Icon(Icons.upload_rounded),

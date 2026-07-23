@@ -1,11 +1,17 @@
 #!/bin/bash
-# Keep Flutter's build/ off Desktop/iCloud so codesign doesn't fail with:
+# Keep Flutter's build/ off Desktop/iCloud/exFAT so codesign doesn't fail with:
 #   "resource fork, Finder information, or similar detritus not allowed"
+# Prefer the APFS sparse image when mounted; fall back to ~/Library/Caches.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CACHE="${HOME}/Library/Caches/ulearn-mobile-build"
 LINK="${ROOT}/build"
+
+if [ -d /Volumes/ULearnBuild ]; then
+  CACHE="/Volumes/ULearnBuild/mobile-build"
+else
+  CACHE="${HOME}/Library/Caches/ulearn-mobile-build"
+fi
 
 mkdir -p "${CACHE}"
 export COPYFILE_DISABLE=1

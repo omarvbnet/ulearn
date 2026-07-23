@@ -695,6 +695,7 @@ async function main() {
     { key: "global_subscription_expiry", value: new Date(new Date().getFullYear(), 6, 15).toISOString() },
     { key: "exclude_certificate_from_global_expiry", value: true },
     { key: "inactivity_days", value: 30 },
+    { key: "whiteboard_lessons_enabled", value: true },
   ];
   for (const s of settings) {
     const existing = await prisma.systemSetting.findFirst({

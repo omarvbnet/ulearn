@@ -528,6 +528,7 @@ export class TeacherCourseService {
         id: true,
         isFreePreview: true,
         isInterview: true,
+        lessonType: true,
         fileKey: true,
         fileUrl: true,
         videoAssetId: true,
@@ -536,7 +537,8 @@ export class TeacherCourseService {
     });
 
     const videoLessons = lessons.filter(
-      (l) => l.fileKey || l.fileUrl || l.videoAssetId
+      (l) =>
+        l.lessonType === "VIDEO" && (l.fileKey || l.fileUrl || l.videoAssetId)
     );
     if (videoLessons.some((l) => l.isInterview && l.isFreePreview)) {
       return { promoted: false as const };
@@ -586,9 +588,12 @@ export class TeacherCourseService {
             isFreePreview: true,
             isInterview: true,
             freePreviewSec: true,
+            lessonType: true,
             fileKey: true,
             fileUrl: true,
             videoAssetId: true,
+            whiteboardAssetId: true,
+            whiteboardAsset: { select: { processingStatus: true } },
           },
         },
         materials: {
@@ -615,7 +620,8 @@ export class TeacherCourseService {
     }
 
     const videoLessons = course.lessons.filter(
-      (l) => l.fileKey || l.fileUrl || l.videoAssetId
+      (l) =>
+        l.lessonType === "VIDEO" && (l.fileKey || l.fileUrl || l.videoAssetId)
     );
     const freeVideos = videoLessons.filter((l) => l.isFreePreview).length;
     const hasInterview = videoLessons.some((l) => l.isInterview && l.isFreePreview);

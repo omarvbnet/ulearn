@@ -35,6 +35,7 @@ export const R2_KEY_PREFIXES = [
   "professor-artifacts/",
   "ai-creative/",
   "videos/",
+  "whiteboards/",
 ] as const;
 
 const ALLOWED_MIME: Record<string, string[]> = {

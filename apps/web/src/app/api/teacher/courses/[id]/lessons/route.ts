@@ -1,5 +1,6 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { isWhiteboardLessonsEnabled } from "@/lib/whiteboard-feature";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 import {
   findEditableCourse,
@@ -10,6 +11,7 @@ import { z } from "zod";
 
 const lessonSchema = z.object({
   title: z.string().min(1),
+  lessonType: z.enum(["VIDEO", "WHITEBOARD"]).optional().default("VIDEO"),
   fileKey: z.string().optional(),
   fileUrl: z.string().optional(),
   thumbnailKey: z.string().optional(),
@@ -25,6 +27,17 @@ const lessonSchema = z.object({
   pdfMimeType: z.string().optional(),
   pdfFileSize: z.number().int().positive().optional(),
   videoAssetId: z.string().optional(),
+  whiteboardAssetId: z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (data.lessonType === "WHITEBOARD") {
+    if (!data.whiteboardAssetId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "whiteboardAssetId is required for WHITEBOARD lessons",
+        path: ["whiteboardAssetId"],
+      });
+    }
+  }
 });
 
 /** Teacher: add a lesson to own course. */
@@ -69,6 +82,15 @@ export async function POST(
     });
   }
 
+  const lessonType = parsed.data.lessonType ?? "VIDEO";
+  if (lessonType === "WHITEBOARD" && !(await isWhiteboardLessonsEnabled())) {
+    return error("Whiteboard lessons are disabled by admin", 403, "FEATURE_DISABLED");
+  }
+  // Interview is video-only.
+  if (isInterview && lessonType === "WHITEBOARD") {
+    return error("Interview lessons must be VIDEO", 400, "INVALID_LESSON_TYPE");
+  }
+
   const maxSort = await prisma.courseLesson.aggregate({
     where: { courseId: id, deletedAt: null },
     _max: { sortOrder: true },
@@ -78,6 +100,7 @@ export async function POST(
     data: {
       courseId: id,
       title: parsed.data.title,
+      lessonType,
       fileKey: parsed.data.fileKey,
       fileUrl: parsed.data.fileUrl,
       thumbnailKey: parsed.data.thumbnailKey,
@@ -87,7 +110,9 @@ export async function POST(
       isFreePreview,
       freePreviewSec,
       isInterview,
-      videoAssetId: parsed.data.videoAssetId,
+      videoAssetId: lessonType === "VIDEO" ? parsed.data.videoAssetId : undefined,
+      whiteboardAssetId:
+        lessonType === "WHITEBOARD" ? parsed.data.whiteboardAssetId : undefined,
     },
   });
 
@@ -99,9 +124,16 @@ export async function POST(
     });
   }
 
-  if (parsed.data.videoAssetId) {
+  if (parsed.data.videoAssetId && lessonType === "VIDEO") {
     await prisma.videoAsset.update({
       where: { id: parsed.data.videoAssetId },
+      data: { courseLessonId: lesson.id, courseId: id },
+    });
+  }
+
+  if (parsed.data.whiteboardAssetId && lessonType === "WHITEBOARD") {
+    await prisma.whiteboardAsset.update({
+      where: { id: parsed.data.whiteboardAssetId },
       data: { courseLessonId: lesson.id, courseId: id },
     });
   }

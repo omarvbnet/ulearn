@@ -1,6 +1,7 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { TeacherCourseService } from "@/services/teacher-course.service";
+import { isWhiteboardLessonsEnabled } from "@/lib/whiteboard-feature";
 import {
   findEditableCourse,
   isAdminRole,
@@ -10,9 +11,11 @@ import { z } from "zod";
 
 const schema = z.object({
   title: z.string().min(1).optional(),
+  lessonType: z.enum(["VIDEO", "WHITEBOARD"]).optional(),
   fileKey: z.string().optional(),
   fileUrl: z.string().optional(),
   videoAssetId: z.string().optional(),
+  whiteboardAssetId: z.string().optional(),
   thumbnailKey: z.string().optional(),
   thumbnailUrl: z.string().optional(),
   durationSec: z.number().int().optional(),
@@ -63,8 +66,18 @@ export async function PATCH(
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
   const data = parsed.data;
+  if (
+    (data.lessonType === "WHITEBOARD" || data.whiteboardAssetId) &&
+    !(await isWhiteboardLessonsEnabled())
+  ) {
+    return error("Whiteboard lessons are disabled by admin", 403, "FEATURE_DISABLED");
+  }
   const hasMediaChange = Boolean(
-    data.fileKey || data.fileUrl || data.thumbnailUrl || data.videoAssetId
+    data.fileKey ||
+      data.fileUrl ||
+      data.thumbnailUrl ||
+      data.videoAssetId ||
+      data.whiteboardAssetId
   );
   const { pdfTitle, pdfFileKey, pdfFileUrl, pdfMimeType, pdfFileSize, removePdf, ...lessonPatch } =
     data;
@@ -138,6 +151,7 @@ export async function PATCH(
     const changeTags: string[] = [];
     if (data.title != null && data.title !== lesson.title) changeTags.push("title");
     if (data.fileKey || data.fileUrl || data.videoAssetId) changeTags.push("video");
+    if (data.whiteboardAssetId) changeTags.push("whiteboard");
     if (data.thumbnailKey || data.thumbnailUrl) changeTags.push("thumbnail");
     if (data.durationSec != null && data.durationSec !== lesson.durationSec) {
       changeTags.push("duration");
@@ -153,13 +167,15 @@ export async function PATCH(
         thumbnailKey: data.thumbnailKey,
         thumbnailUrl: data.thumbnailUrl,
         durationSec: data.durationSec,
+        whiteboardAssetId: data.whiteboardAssetId,
+        previousWhiteboardAssetId: lesson.whiteboardAssetId,
         previousTitle: lesson.title,
         previousFileKey: lesson.fileKey,
         previousFileUrl: lesson.fileUrl,
         previousThumbnailKey: lesson.thumbnailKey,
         previousThumbnailUrl: lesson.thumbnailUrl,
         previousDurationSec: lesson.durationSec,
-        changeSummary: changeTags.join(",") || "video",
+        changeSummary: changeTags.join(",") || (data.whiteboardAssetId ? "whiteboard" : "video"),
         status: "PENDING",
       },
     });
@@ -178,6 +194,13 @@ export async function PATCH(
   if (data.videoAssetId) {
     await prisma.videoAsset.update({
       where: { id: data.videoAssetId },
+      data: { courseLessonId: lessonId, courseId },
+    });
+  }
+
+  if (data.whiteboardAssetId) {
+    await prisma.whiteboardAsset.update({
+      where: { id: data.whiteboardAssetId },
       data: { courseLessonId: lessonId, courseId },
     });
   }

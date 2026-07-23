@@ -7,6 +7,12 @@ import { captureVideoThumbnail } from "@/lib/video-thumbnail";
 import { fetchWatermarkConfig, processVideoForUpload, uploadVideoDirect } from "@/lib/video-process";
 import { CourseWizard } from "./course-wizard";
 import { useCallback, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+
+const WhiteboardStudio = dynamic(
+  () => import("@/components/whiteboard/whiteboard-studio"),
+  { ssr: false, loading: () => <p className="text-sm text-muted">Loading whiteboard studio…</p> }
+);
 
 type Lesson = {
   id: string;
@@ -14,6 +20,7 @@ type Lesson = {
   durationSec: number | null;
   isFreePreview: boolean;
   isInterview?: boolean;
+  lessonType?: "VIDEO" | "WHITEBOARD";
 };
 
 type Course = {
@@ -44,6 +51,7 @@ type Meta = {
     platformRevenue: number;
     currency: string;
   };
+  whiteboardLessonsEnabled?: boolean;
 };
 
 const STATUS_BADGE: Record<string, string> = {
@@ -76,6 +84,7 @@ export default function TeacherCoursesPage() {
           subjects: d.subjects || [],
           stages: d.stages || [],
           earnings: d.earnings,
+          whiteboardLessonsEnabled: d.features?.whiteboardLessonsEnabled !== false,
         });
       });
   }, []);
@@ -270,6 +279,7 @@ export default function TeacherCoursesPage() {
       {lessonsFor && (
         <LessonsModal
           course={lessonsFor}
+          whiteboardLessonsEnabled={meta?.whiteboardLessonsEnabled !== false}
           onClose={() => setLessonsFor(null)}
           onChanged={load}
           toast={toast}
@@ -502,14 +512,17 @@ function EditCourseModal({ course, onClose, onDone, toast }: {
   );
 }
 
-function LessonsModal({ course, onClose, onChanged, toast }: {
+function LessonsModal({ course, whiteboardLessonsEnabled = true, onClose, onChanged, toast }: {
   course: Course;
+  whiteboardLessonsEnabled?: boolean;
   onClose: () => void;
   onChanged: () => void;
   toast: (msg: string, type?: "success" | "error" | "info") => void;
 }) {
   const [lessons, setLessons] = useState<Lesson[]>(course.lessons);
   const [title, setTitle] = useState("");
+  const [lessonType, setLessonType] = useState<"VIDEO" | "WHITEBOARD">("VIDEO");
+  const [showWbStudio, setShowWbStudio] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [preview, setPreview] = useState(false);
@@ -579,6 +592,14 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
   async function addLesson(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
+    if (lessonType === "WHITEBOARD") {
+      if (!whiteboardLessonsEnabled) {
+        toast("Whiteboard lessons are disabled by admin", "error");
+        return;
+      }
+      setShowWbStudio(true);
+      return;
+    }
     setUploading(true);
     setProgress(0);
 
@@ -793,6 +814,9 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
               >
                 <span>
                   {i + 1}. {l.title}
+                  {l.lessonType === "WHITEBOARD" && (
+                    <span className="ms-2 text-xs text-accent">whiteboard</span>
+                  )}
                   {l.isInterview && (
                     <span className="ms-2 text-xs text-accent">interview</span>
                   )}
@@ -855,6 +879,20 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
           </ul>
         )}
 
+        {showWbStudio ? (
+          <WhiteboardStudio
+            courseId={course.id}
+            initialTitle={title.trim() || "Whiteboard lesson"}
+            onCancel={() => setShowWbStudio(false)}
+            onPublished={() => {
+              setShowWbStudio(false);
+              setTitle("");
+              toast("Whiteboard lesson published", "success");
+              onChanged();
+              onClose();
+            }}
+          />
+        ) : (
         <form onSubmit={addLesson} className="space-y-3 border-t border-card-border pt-4">
           <Input
             label="Lesson title"
@@ -862,6 +900,35 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
             onChange={(e) => setTitle(e.target.value)}
             required
           />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setLessonType("VIDEO")}
+              className={cn(
+                "flex-1 rounded-lg border px-3 py-2 text-sm",
+                lessonType === "VIDEO" ? "border-accent bg-accent/10 text-accent" : "border-card-border"
+              )}
+            >
+              Video Lesson
+            </button>
+            {whiteboardLessonsEnabled && (
+              <button
+                type="button"
+                onClick={() => {
+                  setLessonType("WHITEBOARD");
+                  setAsInterview(false);
+                }}
+                className={cn(
+                  "flex-1 rounded-lg border px-3 py-2 text-sm",
+                  lessonType === "WHITEBOARD" ? "border-accent bg-accent/10 text-accent" : "border-card-border"
+                )}
+              >
+                Whiteboard Lesson
+              </button>
+            )}
+          </div>
+          {lessonType === "VIDEO" && (
+            <>
           <input
             type="file"
             accept="video/*"
@@ -887,6 +954,13 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
             />
             Interview video (free preview, first position)
           </label>
+            </>
+          )}
+          {lessonType === "WHITEBOARD" && (
+            <p className="text-xs text-muted">
+              Opens Whiteboard Studio to record mic + drawings into a synchronized lesson package.
+            </p>
+          )}
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -906,9 +980,14 @@ function LessonsModal({ course, onClose, onChanged, toast }: {
             </div>
           )}
           <Button type="submit" disabled={uploading || !!replacingId} className="w-full">
-            {uploading ? `Uploading… ${progress}%` : "Add Lesson"}
+            {uploading
+              ? `Uploading… ${progress}%`
+              : lessonType === "WHITEBOARD"
+                ? "Open Whiteboard Studio"
+                : "Add Lesson"}
           </Button>
         </form>
+        )}
       </div>
     </Modal>
   );

@@ -26,7 +26,7 @@ export async function GET(
       },
       stage: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
       subject: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
-      lessons: { orderBy: { sortOrder: "asc" }, where: PUBLIC_LESSON_WHERE },
+      lessons: { orderBy: { sortOrder: "asc" }, where: PUBLIC_LESSON_WHERE, include: { whiteboardAsset: true, videoAsset: true } },
     },
   });
   if (!course) return error("Course not found", 404, "NOT_FOUND");
@@ -164,23 +164,43 @@ export async function GET(
       // Always prefer a fresh signed URL from fileKey. Stale absolute/proxy
       // fileUrl values (common after admin web uploads) play as a black screen.
       let fileUrl: string | null = null;
+      let packageUrl: string | null = null;
+      let whiteboardId: string | null = null;
       if (canWatch) {
-        fileUrl = await resolvePlaybackUrl(l.fileKey, l.fileUrl);
+        if (l.lessonType === "WHITEBOARD") {
+          const key = l.whiteboardAsset?.objectKey ?? l.fileKey;
+          if (key && l.whiteboardAsset?.processingStatus !== "PENDING_UPLOAD") {
+            packageUrl = await getDownloadUrl(key).catch(() => null);
+          }
+          whiteboardId = l.whiteboardAsset?.id ?? null;
+        } else {
+          fileUrl = await resolvePlaybackUrl(l.fileKey, l.fileUrl);
+        }
       }
       let thumbnailUrl = l.thumbnailUrl;
       if (l.thumbnailKey) {
         thumbnailUrl =
           (await getDownloadUrl(l.thumbnailKey).catch(() => null)) ?? thumbnailUrl;
       }
-      const durationSec = l.durationSec ?? watchedDuration.get(l.id) ?? null;
+      const durationSec =
+        l.durationSec ??
+        l.whiteboardAsset?.durationSec ??
+        watchedDuration.get(l.id) ??
+        null;
+      const { whiteboardAsset: _wa, videoAsset: _va, ...lessonRest } = l;
       return {
-        ...l,
+        ...lessonRest,
+        lessonType: l.lessonType,
         durationSec,
         freePreviewSec,
         previewOnly,
         fileKey: undefined,
         thumbnailKey: undefined,
+        whiteboardAssetId: l.whiteboardAssetId,
+        whiteboardId,
+        whiteboardTheme: l.whiteboardAsset?.theme ?? null,
         fileUrl,
+        packageUrl,
         thumbnailUrl,
         canWatch,
         likes: likeCounts.get(l.id) ?? 0,

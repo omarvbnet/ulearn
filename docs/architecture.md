@@ -102,6 +102,10 @@ Middleware and `requireAuth(roles)` enforce permissions on APIs.
 - iOS: screenshot detection → black overlay
 - Casting (TV / AirPlay / HDMI / mirroring): dynamic moving watermark with name, national ID, phone, datetime
 
+## Whiteboard Lessons (Store courses)
+
+Isolated modality alongside VIDEO on `CourseLesson` (`lessonType`). Teachers record mic + vector board events into a `.ubrd` package uploaded to R2 (`whiteboards/…`). Students play via Whiteboard Player (Flutter + Web). Spec: [`docs/whiteboard/UBRD_SPEC.md`](whiteboard/UBRD_SPEC.md). Video pipeline is unchanged. Admins can enable/disable creation via System Setting `whiteboard_lessons_enabled` on the Admin Settings page (existing lessons remain playable when off).
+
 ## Scalability Notes
 
 - Soft deletes (`deletedAt`) on core entities

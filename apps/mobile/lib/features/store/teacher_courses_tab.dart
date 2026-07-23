@@ -8,6 +8,7 @@ import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/store/teacher_course_manage_screen.dart';
 import 'package:ulearn/features/store/teacher_course_wizard_screen.dart';
 import 'package:ulearn/features/store/teacher_lesson_upload_screen.dart';
+import 'package:ulearn/features/whiteboard/ui/whiteboard_studio_screen.dart';
 
 /// Professional courses hub for Teacher Studio (replaces the old Videos tab).
 class TeacherCoursesTab extends StatefulWidget {
@@ -15,10 +16,12 @@ class TeacherCoursesTab extends StatefulWidget {
     super.key,
     required this.courses,
     required this.onRefresh,
+    this.whiteboardLessonsEnabled = true,
   });
 
   final List<Map<String, dynamic>> courses;
   final Future<void> Function() onRefresh;
+  final bool whiteboardLessonsEnabled;
 
   @override
   State<TeacherCoursesTab> createState() => _TeacherCoursesTabState();
@@ -52,7 +55,10 @@ class _TeacherCoursesTabState extends State<TeacherCoursesTab> {
   Future<void> _openManage(String courseId) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => TeacherCourseManageScreen(courseId: courseId),
+        builder: (_) => TeacherCourseManageScreen(
+          courseId: courseId,
+          whiteboardLessonsEnabled: widget.whiteboardLessonsEnabled,
+        ),
       ),
     );
     await widget.onRefresh();
@@ -64,14 +70,54 @@ class _TeacherCoursesTabState extends State<TeacherCoursesTab> {
     final title = course['titleEn']?.toString() ??
         course['title']?.toString() ??
         context.l10n.t('mobile.teacher.manageCourse');
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => TeacherLessonUploadScreen(
-          courseId: id,
-          courseTitle: title,
+
+    String? choice = 'VIDEO';
+    if (widget.whiteboardLessonsEnabled) {
+      choice = await showModalBottomSheet<String>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.videocam_outlined),
+                title: const Text('Video Lesson'),
+                subtitle: const Text('Upload a recorded video'),
+                onTap: () => Navigator.pop(ctx, 'VIDEO'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.draw_outlined),
+                title: const Text('Whiteboard Lesson'),
+                subtitle: const Text('Speak, draw, and annotate PDFs'),
+                onTap: () => Navigator.pop(ctx, 'WHITEBOARD'),
+              ),
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    }
+    if (choice == null || !mounted) return;
+
+    if (choice == 'WHITEBOARD') {
+      if (!widget.whiteboardLessonsEnabled) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => WhiteboardStudioScreen(
+            courseId: id,
+            courseTitle: title,
+          ),
+        ),
+      );
+    } else {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => TeacherLessonUploadScreen(
+            courseId: id,
+            courseTitle: title,
+          ),
+        ),
+      );
+    }
     await widget.onRefresh();
   }
 
