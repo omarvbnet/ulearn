@@ -1,6 +1,15 @@
-import { json, requireAuth } from "@/lib/api";
+import { error, json, requireAuth } from "@/lib/api";
 import { ADMIN_ROLES } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import type { CourseStatus } from "@prisma/client";
+
+const COURSE_STATUSES = new Set<CourseStatus>([
+  "DRAFT",
+  "PENDING_REVIEW",
+  "APPROVED",
+  "REJECTED",
+  "CLOSED",
+]);
 
 /** Admin: list teacher courses for review, filterable by status. */
 export async function GET(request: Request) {
@@ -8,10 +17,14 @@ export async function GET(request: Request) {
   if (auth.error) return auth.error;
 
   const { searchParams } = new URL(request.url);
-  const status = searchParams.get("status");
+  const statusParam = searchParams.get("status");
+  if (statusParam && !COURSE_STATUSES.has(statusParam as CourseStatus)) {
+    return error("Invalid course status", 422, "VALIDATION");
+  }
+  const status = statusParam as CourseStatus | null;
 
   const courses = await prisma.course.findMany({
-    where: { deletedAt: null, ...(status ? { status: status as never } : {}) },
+    where: { deletedAt: null, ...(status ? { status } : {}) },
     orderBy: { createdAt: "desc" },
     take: 200,
     include: {

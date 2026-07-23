@@ -205,6 +205,10 @@ export function CourseReviewClient() {
         .then((d) => setLessonUpdates(d.requests || []));
       return;
     }
+    // Course Videos panel loads its own lesson list — do not treat the tab id as CourseStatus.
+    if (tab === "COURSE_VIDEOS") {
+      return;
+    }
     const qs = tab === "PURCHASES" ? "" : `?status=${tab}`;
     if (tab !== "PURCHASES") {
       fetch(`/api/admin/teacher-courses${qs}`)

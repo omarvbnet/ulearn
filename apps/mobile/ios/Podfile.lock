@@ -133,6 +133,8 @@ PODS:
   - printing (1.0.0):
     - Flutter
   - PromisesObjC (2.4.1)
+  - record_ios (1.2.1):
+    - Flutter
   - screen_protector (1.5.1):
     - Flutter
     - ScreenProtectorKit (= 1.5.1)
@@ -175,6 +177,7 @@ DEPENDENCIES:
   - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
   - pdfx (from `.symlinks/plugins/pdfx/ios`)
   - printing (from `.symlinks/plugins/printing/ios`)
+  - record_ios (from `.symlinks/plugins/record_ios/ios`)
   - screen_protector (from `.symlinks/plugins/screen_protector/ios`)
   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
   - sqflite_darwin (from `.symlinks/plugins/sqflite_darwin/darwin`)
@@ -235,6 +238,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/pdfx/ios"
   printing:
     :path: ".symlinks/plugins/printing/ios"
+  record_ios:
+    :path: ".symlinks/plugins/record_ios/ios"
   screen_protector:
     :path: ".symlinks/plugins/screen_protector/ios"
   shared_preferences_foundation:
@@ -282,6 +287,7 @@ SPEC CHECKSUMS:
   pdfx: 7b876b09de8b7a0bf444a4f82b439ffcff4ee1ec
   printing: 233e1b73bd1f4a05615548e9b5a324c98588640b
   PromisesObjC: 752c3227f599e3467650e47ea36f433eeb10c273
+  record_ios: 3b171007ae5de51221a3a76d2b379a7105ca98b5
   screen_protector: 585e4a9744efa35ec4ba9a6877b22e46b8d48987
   ScreenProtectorKit: 6ceb3e0808341a9bc15d175bff40dfdd4b32da71
   SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
