@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession, type SessionPayload } from "@/lib/auth/session";
+import { prisma } from "@/lib/prisma";
 import type { UserRole } from "@prisma/client";
 
 /** JSON.stringify cannot serialize BigInt (Prisma VideoAsset.fileSize, raw COUNT, etc.). */
@@ -47,10 +48,19 @@ export async function requireAuth(
   if (roles && !roles.includes(session.role)) {
     return { error: error("Forbidden", 403, "FORBIDDEN") };
   }
-  if (options?.requireApproved && session.status !== "APPROVED") {
-    return {
-      error: error("Account pending approval", 403, "ACCOUNT_PENDING"),
-    };
+  if (options?.requireApproved) {
+    // JWT status can be stale after admin approval — prefer live DB status.
+    const user = await prisma.user.findFirst({
+      where: { id: session.userId, deletedAt: null },
+      select: { status: true },
+    });
+    const liveStatus = user?.status ?? session.status;
+    if (liveStatus !== "APPROVED") {
+      return {
+        error: error("Account pending approval", 403, "ACCOUNT_PENDING"),
+      };
+    }
+    return { session: { ...session, status: liveStatus } };
   }
   return { session };
 }

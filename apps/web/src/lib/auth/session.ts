@@ -1,5 +1,5 @@
 import { SignJWT, jwtVerify } from "jose";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import type { UserRole, UserStatus } from "@prisma/client";
 
@@ -16,6 +16,15 @@ export interface SessionPayload {
   role: UserRole;
   status: UserStatus;
   sessionId: string;
+}
+
+async function verifyToken(token: string): Promise<SessionPayload | null> {
+  try {
+    const { payload } = await jwtVerify(token, getSecret());
+    return payload as unknown as SessionPayload;
+  } catch {
+    return null;
+  }
 }
 
 export async function createSession(
@@ -63,15 +72,21 @@ export async function createSession(
 
 export async function getSession(): Promise<SessionPayload | null> {
   const cookieStore = await cookies();
-  const token = cookieStore.get(COOKIE_NAME)?.value;
-  if (!token) return null;
-
-  try {
-    const { payload } = await jwtVerify(token, getSecret());
-    return payload as unknown as SessionPayload;
-  } catch {
-    return null;
+  const cookieToken = cookieStore.get(COOKIE_NAME)?.value;
+  if (cookieToken) {
+    const fromCookie = await verifyToken(cookieToken);
+    if (fromCookie) return fromCookie;
   }
+
+  // Flutter / non-browser clients send Bearer (Cookie can be dropped by some proxies).
+  const headerStore = await headers();
+  const auth = headerStore.get("authorization");
+  if (auth?.toLowerCase().startsWith("bearer ")) {
+    const bearer = auth.slice(7).trim();
+    if (bearer) return verifyToken(bearer);
+  }
+
+  return null;
 }
 
 export async function getCurrentUser() {
