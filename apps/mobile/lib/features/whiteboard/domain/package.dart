@@ -11,12 +11,14 @@ class UbrdPdfAsset {
     required this.title,
     this.materialId,
     this.fileKey,
+    this.fileUrl,
     this.pageCount,
   });
   final String assetId;
   final String title;
   final String? materialId;
   final String? fileKey;
+  final String? fileUrl;
   final int? pageCount;
 
   Map<String, dynamic> toJson() => {
@@ -24,6 +26,7 @@ class UbrdPdfAsset {
         'title': title,
         if (materialId != null) 'materialId': materialId,
         if (fileKey != null) 'fileKey': fileKey,
+        if (fileUrl != null) 'fileUrl': fileUrl,
         if (pageCount != null) 'pageCount': pageCount,
       };
 
@@ -32,6 +35,7 @@ class UbrdPdfAsset {
         title: j['title'] as String? ?? 'PDF',
         materialId: j['materialId'] as String?,
         fileKey: j['fileKey'] as String?,
+        fileUrl: j['fileUrl'] as String?,
         pageCount: (j['pageCount'] as num?)?.toInt(),
       );
 }

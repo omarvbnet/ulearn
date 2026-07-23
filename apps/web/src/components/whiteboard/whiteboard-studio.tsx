@@ -56,7 +56,9 @@ export default function WhiteboardStudio({ courseId, initialTitle, onPublished, 
   const activeStrokeRef = useRef<{ id: string; points: { x: number; y: number; p?: number }[] } | null>(null);
   const shapeStartRef = useRef<{ x: number; y: number; id: string } | null>(null);
   const draftTimer = useRef<number | null>(null);
-  const pdfsRef = useRef<{ assetId: string; materialId?: string; fileKey?: string; title: string }[]>([]);
+  const pdfsRef = useRef<
+    { assetId: string; materialId?: string; fileKey?: string; fileUrl?: string; title: string }[]
+  >([]);
 
   const [title, setTitle] = useState(initialTitle || "Whiteboard lesson");
   const [theme, setTheme] = useState<WhiteboardThemeId>("WHITE");
@@ -467,6 +469,7 @@ export default function WhiteboardStudio({ courseId, initialTitle, onPublished, 
         title: string;
         type?: string;
         fileKey?: string;
+        fileUrl?: string;
       }[];
       const pdfs = docs.filter((d) => (d.type ?? "PDF") === "PDF");
       if (!pdfs.length) {
@@ -481,7 +484,13 @@ export default function WhiteboardStudio({ courseId, initialTitle, onPublished, 
       const assetId = `pdf_${chosen.id}`;
       pdfsRef.current = [
         ...pdfsRef.current.filter((p) => p.assetId !== assetId),
-        { assetId, materialId: chosen.id, fileKey: chosen.fileKey, title: chosen.title },
+        {
+          assetId,
+          materialId: chosen.id,
+          fileKey: chosen.fileKey,
+          fileUrl: chosen.fileUrl,
+          title: chosen.title,
+        },
       ];
       const pageId = `page_${uid()}`;
       boardRef.current.addBlankPage(pageId);

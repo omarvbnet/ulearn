@@ -159,15 +159,19 @@ class BoardState {
         if (p['opacity'] is num) opacity = (p['opacity'] as num).toDouble();
         break;
       case 'page_add':
-        final page = addBlankPage(
-          p['pageId'].toString(),
-          index: p['index'] is num ? (p['index'] as num).toInt() : null,
-        );
+        final pageId = p['pageId'].toString();
+        final existing = pages.where((pg) => pg.id == pageId).firstOrNull;
+        final page = existing ??
+            addBlankPage(
+              pageId,
+              index: p['index'] is num ? (p['index'] as num).toInt() : null,
+            );
         if (p['kind'] == 'pdf') {
           page.kind = 'pdf';
           page.pdfAssetId = p['pdfAssetId'] as String?;
           page.pdfPage = p['pdfPage'] is num ? (p['pdfPage'] as num).toInt() : 1;
         }
+        currentPageId = page.id;
         break;
       case 'page_select':
         currentPageId = p['pageId']?.toString();
@@ -327,10 +331,18 @@ class BoardState {
       case 'pdf_open':
       case 'pdf_close':
       case 'pdf_switch':
-      case 'pdf_page':
       case 'pdf_zoom':
       case 'pdf_rotate':
-        // Stored in timeline for player PDF underlay; board state tracks page refs via page_add.
+        break;
+      case 'pdf_page':
+        final assetId = p['assetId']?.toString();
+        final pageNum = p['page'] is num ? (p['page'] as num).toInt() : null;
+        if (assetId == null || pageNum == null) break;
+        for (final page in pages) {
+          if (page.pdfAssetId == assetId) {
+            page.pdfPage = pageNum;
+          }
+        }
         break;
       default:
         break;

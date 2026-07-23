@@ -250,3 +250,70 @@ export async function notifySubscribersLessonUpdated(params: {
     ).catch(() => {});
   }
 }
+
+/** New lesson(s) published on a course the student already purchased. */
+export async function notifySubscribersNewLesson(params: {
+  userIds: string[];
+  courseTitle: string;
+  lessonTitle: string;
+  courseId: string;
+  lessonId?: string;
+  extraCount?: number;
+}) {
+  const extra = params.extraCount && params.extraCount > 0 ? params.extraCount : 0;
+  const moreEn = extra > 0 ? ` (+${extra} more)` : "";
+  const moreAr = extra > 0 ? ` (+${extra} أخرى)` : "";
+  const moreKu = extra > 0 ? ` (+${extra}ی تر)` : "";
+  const moreTr = extra > 0 ? ` (+${extra} daha)` : "";
+
+  for (const userId of params.userIds) {
+    await NotificationService.notifyUser(
+      userId,
+      {
+        titleEn: "New lesson available",
+        titleAr: "درس جديد متاح",
+        titleKu: "وانەی نوێ بەردەستە",
+        titleTr: "Yeni ders hazır",
+        bodyEn: `"${params.lessonTitle}"${moreEn} was added to "${params.courseTitle}".`,
+        bodyAr: `تمت إضافة "${params.lessonTitle}"${moreAr} إلى "${params.courseTitle}".`,
+        bodyKu: `"${params.lessonTitle}"${moreKu} زیادکرا بۆ "${params.courseTitle}".`,
+        bodyTr: `"${params.lessonTitle}"${moreTr}, "${params.courseTitle}" kursuna eklendi.`,
+      },
+      {
+        type: "lesson",
+        courseId: params.courseId,
+        lessonId: params.lessonId,
+        screen: "course",
+      }
+    ).catch(() => {});
+  }
+}
+
+/** Teacher published a brand-new course (admin approved) — notify fans of their other courses. */
+export async function notifySubscribersNewCourse(params: {
+  userIds: string[];
+  courseTitle: string;
+  courseId: string;
+  teacherName: string;
+}) {
+  for (const userId of params.userIds) {
+    await NotificationService.notifyUser(
+      userId,
+      {
+        titleEn: "New course from your teacher",
+        titleAr: "دورة جديدة من معلمك",
+        titleKu: "کۆرسی نوێ لە مامۆستاکەت",
+        titleTr: "Öğretmeninizden yeni kurs",
+        bodyEn: `${params.teacherName} published "${params.courseTitle}". Tap to explore.`,
+        bodyAr: `${params.teacherName} نشر "${params.courseTitle}". اضغط للاستكشاف.`,
+        bodyKu: `${params.teacherName} "${params.courseTitle}" بڵاوکردەوە. دەستی پێ بکە.`,
+        bodyTr: `${params.teacherName}, "${params.courseTitle}" yayınladı. Keşfetmek için dokunun.`,
+      },
+      {
+        type: "course",
+        courseId: params.courseId,
+        screen: "course",
+      }
+    ).catch(() => {});
+  }
+}

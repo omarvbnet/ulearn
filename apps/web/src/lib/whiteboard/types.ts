@@ -88,6 +88,7 @@ export type UbrdPdfAsset = {
   assetId: string;
   materialId?: string;
   fileKey?: string;
+  fileUrl?: string;
   title: string;
   pageCount?: number;
 };

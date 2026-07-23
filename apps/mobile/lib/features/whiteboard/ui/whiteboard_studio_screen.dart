@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -13,6 +14,7 @@ import 'package:ulearn/features/whiteboard/domain/event_engine.dart';
 import 'package:ulearn/features/whiteboard/domain/package.dart';
 import 'package:ulearn/features/whiteboard/domain/smoothing.dart';
 import 'package:ulearn/features/whiteboard/domain/types.dart';
+import 'package:ulearn/features/whiteboard/ui/pdf_underlay.dart';
 import 'package:ulearn/features/whiteboard/ui/whiteboard_painter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -50,6 +52,9 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
   Offset? _shapeStart;
   Timer? _autosaveTimer;
   final List<UbrdPdfAsset> _pdfs = [];
+  final _pdfCache = PdfUnderlayCache();
+  ui.Image? _pdfUnderlay;
+  bool _pdfLoading = false;
 
   @override
   void initState() {
@@ -102,7 +107,11 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
       final res = await api.get('/api/teacher/courses/${widget.courseId}/documents');
       final docs = ((res['documents'] as List?) ?? (res['materials'] as List?) ?? [])
           .cast<Map<String, dynamic>>()
-          .where((d) => (d['type']?.toString() ?? 'PDF') == 'PDF')
+          .where((d) {
+            final type = (d['type']?.toString() ?? 'PDF').toUpperCase();
+            final mime = (d['mimeType']?.toString() ?? '').toLowerCase();
+            return type == 'PDF' || mime.contains('pdf');
+          })
           .toList();
       if (docs.isEmpty || !mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -128,12 +137,29 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
       );
       if (chosen == null || !mounted) return;
       final assetId = 'pdf_${chosen['id']}';
-      _pdfs.removeWhere((p) => p.assetId == assetId);
-      _pdfs.add(UbrdPdfAsset(
+      final asset = UbrdPdfAsset(
         assetId: assetId,
         materialId: chosen['id']?.toString(),
         fileKey: chosen['fileKey']?.toString(),
+        fileUrl: chosen['fileUrl']?.toString(),
         title: chosen['title']?.toString() ?? 'PDF',
+      );
+      if (resolveUbrdPdfUrl(asset) == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('This PDF has no downloadable file URL')),
+        );
+        return;
+      }
+      setState(() => _pdfLoading = true);
+      await _pdfCache.preload(asset);
+      _pdfs.removeWhere((p) => p.assetId == assetId);
+      _pdfs.add(UbrdPdfAsset(
+        assetId: asset.assetId,
+        materialId: asset.materialId,
+        fileKey: asset.fileKey,
+        fileUrl: asset.fileUrl,
+        title: asset.title,
+        pageCount: _pdfCache.pageCount(assetId),
       ));
       final pageId = 'page_${_uuid.v4()}';
       _board.addBlankPage(pageId);
@@ -154,12 +180,43 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         });
         _engine.push('page_select', {'pageId': pageId});
       }
-      setState(() {});
+      await _refreshPdfUnderlay();
+      if (mounted) {
+        setState(() => _pdfLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PDF opened: ${asset.title}')),
+        );
+      }
     } catch (e) {
       if (mounted) {
+        setState(() => _pdfLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF attach failed: $e')));
       }
     }
+  }
+
+  Future<void> _refreshPdfUnderlay() async {
+    final page = _board.currentPage;
+    if (page == null || page.kind != 'pdf' || page.pdfAssetId == null) {
+      if (mounted) setState(() => _pdfUnderlay = null);
+      return;
+    }
+    final img = await _pdfCache.imageFor(page.pdfAssetId!, page.pdfPage ?? 1);
+    if (!mounted) return;
+    setState(() => _pdfUnderlay = img);
+  }
+
+  Future<void> _shiftPdfPage(int delta) async {
+    final page = _board.currentPage;
+    if (page == null || page.kind != 'pdf' || page.pdfAssetId == null) return;
+    final total = _pdfCache.pageCount(page.pdfAssetId!) ?? 1;
+    final next = ((page.pdfPage ?? 1) + delta).clamp(1, total);
+    if (next == page.pdfPage) return;
+    page.pdfPage = next;
+    if (_recording) {
+      _engine.push('pdf_page', {'assetId': page.pdfAssetId, 'page': next});
+    }
+    await _refreshPdfUnderlay();
   }
 
   @override
@@ -167,6 +224,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
     _autosaveTimer?.cancel();
     _titleCtrl.dispose();
     _recorder.dispose();
+    unawaited(_pdfCache.dispose());
     super.dispose();
   }
 
@@ -210,8 +268,39 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
       'boardWidth': kLogicalBoardWidth,
       'boardHeight': kLogicalBoardHeight,
     });
+    // Capture pages/PDFs attached before recording so drawing over them is replayed.
+    for (final pdf in _pdfs) {
+      _engine.push('pdf_open', {'assetId': pdf.assetId, 'title': pdf.title});
+    }
+    for (var i = 0; i < _board.pages.length; i++) {
+      final page = _board.pages[i];
+      // Default blank page_0 already exists on playback reset — skip recreating it.
+      if (page.id == 'page_0' && page.kind == 'blank') continue;
+      _engine.push('page_add', {
+        'pageId': page.id,
+        'index': i,
+        'kind': page.kind,
+        if (page.pdfAssetId != null) 'pdfAssetId': page.pdfAssetId,
+        if (page.pdfPage != null) 'pdfPage': page.pdfPage,
+      });
+    }
     _engine.push('page_select', {'pageId': _board.currentPageId});
+    final current = _board.currentPage;
+    if (current?.kind == 'pdf' && current?.pdfAssetId != null) {
+      _engine.push('pdf_page', {
+        'assetId': current!.pdfAssetId,
+        'page': current.pdfPage ?? 1,
+      });
+    }
     setState(() => _recording = true);
+    if (mounted && _board.currentPage?.kind == 'pdf') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Recording — draw or highlight on the PDF to explain'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   Future<void> _stopAndPublish() async {
@@ -303,9 +392,20 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
   }
 
   void _selectTool(WhiteboardTool tool) {
-    setState(() => _tool = tool);
-    _board.tool = tool;
-    if (_recording) _engine.push('tool_change', {'tool': tool.wire});
+    setState(() {
+      _tool = tool;
+      _board.tool = tool;
+      if (tool == WhiteboardTool.highlighter &&
+          (_color == '#111827' || _color == '#F8FAFC')) {
+        _color = '#FACC15';
+      }
+    });
+    if (_recording) {
+      _engine.push('tool_change', {'tool': tool.wire});
+      if (tool == WhiteboardTool.highlighter) {
+        _engine.push('color_change', {'color': _color});
+      }
+    }
   }
 
   void _onPointerDown(PointerDownEvent e, Size size) {
@@ -595,24 +695,35 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         children: [
           _toolRail(iconSize),
           Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final size = Size(constraints.maxWidth, constraints.maxHeight);
-                return Listener(
-                  onPointerDown: (e) => _onPointerDown(e, size),
-                  onPointerMove: (e) => _onPointerMove(e, size),
-                  onPointerUp: (e) => _onPointerUp(e, size),
-                  child: CustomPaint(
-                    painter: WhiteboardPainter(
-                      state: _board,
-                      boardWidth: kLogicalBoardWidth,
-                      boardHeight: kLogicalBoardHeight,
-                      activeStroke: _activeStroke,
-                    ),
-                    size: Size.infinite,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final size = Size(constraints.maxWidth, constraints.maxHeight);
+                    return Listener(
+                      onPointerDown: (e) => _onPointerDown(e, size),
+                      onPointerMove: (e) => _onPointerMove(e, size),
+                      onPointerUp: (e) => _onPointerUp(e, size),
+                      child: CustomPaint(
+                        painter: WhiteboardPainter(
+                          state: _board,
+                          boardWidth: kLogicalBoardWidth,
+                          boardHeight: kLogicalBoardHeight,
+                          activeStroke: _activeStroke,
+                          pdfUnderlay: _pdfUnderlay,
+                        ),
+                        size: Size.infinite,
+                      ),
+                    );
+                  },
+                ),
+                if (_pdfLoading)
+                  const ColoredBox(
+                    color: Color(0x66000000),
+                    child: Center(child: CircularProgressIndicator()),
                   ),
-                );
-              },
+              ],
             ),
           ),
           _pageStrip(),
@@ -696,6 +807,9 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
   }
 
   Widget _pageStrip() {
+    final pdfPage = _board.currentPage;
+    final isPdf = pdfPage?.kind == 'pdf' && pdfPage?.pdfAssetId != null;
+    final pdfTotal = isPdf ? (_pdfCache.pageCount(pdfPage!.pdfAssetId!) ?? 1) : 1;
     return Container(
       height: 56,
       padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -704,6 +818,22 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
           IconButton(onPressed: _addPage, icon: Icon(Icons.add, color: _chromeFg)),
           IconButton(onPressed: _duplicatePage, icon: Icon(Icons.copy, color: _chromeFg)),
           IconButton(onPressed: _deletePage, icon: Icon(Icons.delete_outline, color: _chromeFg)),
+          if (isPdf) ...[
+            IconButton(
+              tooltip: 'Previous PDF page',
+              onPressed: () => _shiftPdfPage(-1),
+              icon: Icon(Icons.chevron_left, color: _chromeFg),
+            ),
+            Text(
+              'PDF ${(pdfPage!.pdfPage ?? 1)}/$pdfTotal',
+              style: TextStyle(color: _chromeFg, fontSize: 12),
+            ),
+            IconButton(
+              tooltip: 'Next PDF page',
+              onPressed: () => _shiftPdfPage(1),
+              icon: Icon(Icons.chevron_right, color: _chromeFg),
+            ),
+          ],
           Expanded(
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
@@ -714,11 +844,12 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                   child: ChoiceChip(
-                    label: Text('P${i + 1}'),
+                    label: Text(p.kind == 'pdf' ? 'PDF${i + 1}' : 'P${i + 1}'),
                     selected: selected,
-                    onSelected: (_) {
+                    onSelected: (_) async {
                       setState(() => _board.currentPageId = p.id);
                       if (_recording) _engine.push('page_select', {'pageId': p.id});
+                      await _refreshPdfUnderlay();
                     },
                   ),
                 );

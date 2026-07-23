@@ -1018,9 +1018,20 @@ export class TeacherCourseService {
   ) {
     const course = await prisma.course.findFirst({
       where: { id: courseId, deletedAt: null },
-      include: { teacher: true },
+      include: {
+        teacher: {
+          include: { user: { select: { id: true, fullLegalName: true } } },
+        },
+      },
     });
     if (!course) return { success: false as const, error: "NOT_FOUND" };
+
+    const previousSnapshot = course.lastApprovedSnapshot;
+    const pendingSummary = course.pendingChangeSummary as {
+      firstReview?: boolean;
+      addedLessons?: { id: string; title?: string }[];
+      changedLessons?: { id: string; title?: string; videoChanged?: boolean }[];
+    } | null;
 
     // A blocked teacher or a "needs improvement" level cannot go live.
     let status: CourseStatus = decision;
@@ -1115,7 +1126,141 @@ export class TeacherCourseService {
           : notes || `"${course.titleEn}" onaylanmadı.`,
     }).catch(() => {});
 
+    if (decision === "APPROVED" && status === "APPROVED") {
+      void this.notifySubscribersAfterApproval({
+        courseId,
+        courseTitle: course.titleEn,
+        teacherId: course.teacherId,
+        teacherUserId: course.teacher.userId,
+        teacherName: course.teacher.user.fullLegalName || "Your teacher",
+        previousSnapshot,
+        pendingSummary,
+      }).catch(() => {});
+    }
+
     return { success: true as const, course: updated };
+  }
+
+  /** Notify students when a course goes live or gains new lessons after admin approval. */
+  private static async notifySubscribersAfterApproval(params: {
+    courseId: string;
+    courseTitle: string;
+    teacherId: string;
+    teacherUserId: string;
+    teacherName: string;
+    previousSnapshot: unknown;
+    pendingSummary: {
+      firstReview?: boolean;
+      addedLessons?: { id: string; title?: string }[];
+      changedLessons?: { id: string; title?: string; videoChanged?: boolean }[];
+    } | null;
+  }) {
+    const {
+      notifySubscribersNewCourse,
+      notifySubscribersNewLesson,
+      notifySubscribersLessonUpdated,
+    } = await import("@/services/engagement-notifications.service");
+
+    const isFirstPublish = !params.previousSnapshot;
+
+    if (isFirstPublish) {
+      const fanIds = await this.paidSubscriberUserIdsForTeacher(params.teacherId, {
+        excludeCourseId: params.courseId,
+        excludeUserId: params.teacherUserId,
+      });
+      if (fanIds.length === 0) return;
+      await notifySubscribersNewCourse({
+        userIds: fanIds,
+        courseTitle: params.courseTitle,
+        courseId: params.courseId,
+        teacherName: params.teacherName,
+      });
+      return;
+    }
+
+    const addedFromPending = params.pendingSummary?.addedLessons ?? [];
+    let added = addedFromPending;
+    if (added.length === 0 && params.previousSnapshot) {
+      const snap = params.previousSnapshot as { lessonIds?: string[] };
+      const current = await this.buildApprovedSnapshot(params.courseId);
+      if (current) {
+        const prev = new Set(snap.lessonIds ?? []);
+        added = current.lessonIds
+          .filter((id) => !prev.has(id))
+          .map((id) => ({
+            id,
+            title: current.lessonMeta[id]?.title,
+          }));
+      }
+    }
+
+    const courseBuyerIds = await this.paidSubscriberUserIdsForCourse(params.courseId, {
+      excludeUserId: params.teacherUserId,
+    });
+    if (courseBuyerIds.length === 0) return;
+
+    if (added.length > 0) {
+      const primary = added[0]!;
+      await notifySubscribersNewLesson({
+        userIds: courseBuyerIds,
+        courseTitle: params.courseTitle,
+        lessonTitle: primary.title || "New lesson",
+        courseId: params.courseId,
+        lessonId: primary.id,
+        extraCount: Math.max(0, added.length - 1),
+      });
+      return;
+    }
+
+    const changed =
+      params.pendingSummary?.changedLessons?.filter((l) => l.videoChanged) ?? [];
+    if (changed.length > 0) {
+      const primary = changed[0]!;
+      await notifySubscribersLessonUpdated({
+        userIds: courseBuyerIds,
+        courseTitle: params.courseTitle,
+        lessonTitle: primary.title || "Lesson",
+        courseId: params.courseId,
+        lessonId: primary.id,
+      });
+    }
+  }
+
+  static async paidSubscriberUserIdsForCourse(
+    courseId: string,
+    options?: { excludeUserId?: string }
+  ): Promise<string[]> {
+    const rows = await prisma.coursePurchase.findMany({
+      where: { courseId, status: "PAID" },
+      select: { userId: true },
+      distinct: ["userId"],
+    });
+    const ids = rows.map((r) => r.userId);
+    if (!options?.excludeUserId) return ids;
+    return ids.filter((id) => id !== options.excludeUserId);
+  }
+
+  static async paidSubscriberUserIdsForTeacher(
+    teacherId: string,
+    options?: { excludeCourseId?: string; excludeUserId?: string }
+  ): Promise<string[]> {
+    const rows = await prisma.coursePurchase.findMany({
+      where: {
+        status: "PAID",
+        course: {
+          teacherId,
+          deletedAt: null,
+          ...(options?.excludeCourseId
+            ? { id: { not: options.excludeCourseId } }
+            : {}),
+        },
+      },
+      select: { userId: true },
+      distinct: ["userId"],
+    });
+    const ids = rows.map((r) => r.userId);
+    if (!options?.excludeUserId) return ids;
+    return ids.filter((id) => id !== options.excludeUserId);
   }
 
   // ── Student browse & purchase ───────────────────────────────

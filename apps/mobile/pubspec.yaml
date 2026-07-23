@@ -1,7 +1,7 @@
 name: ulearn
 description: U Learn – Educational platform for students and professionals.
 publish_to: "none"
-version: 1.0.17+19
+version: 1.0.18+20
 
 environment:
   sdk: ^3.11.1
@@ -40,6 +40,7 @@ dependencies:
   in_app_purchase: ^3.2.1
   in_app_purchase_storekit: ^0.4.0
   url_launcher: ^6.3.2
+  connectivity_plus: ^6.1.4
   record: ^6.2.1
   archive: ^4.0.9
   path: ^1.9.1

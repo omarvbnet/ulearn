@@ -1,6 +1,9 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:ulearn/features/whiteboard/domain/board_state.dart';
 import 'package:ulearn/features/whiteboard/domain/types.dart';
+import 'package:ulearn/features/whiteboard/ui/pdf_underlay.dart';
 
 Color _parseColor(String hex, {double opacity = 1}) {
   var h = hex.replaceAll('#', '');
@@ -15,12 +18,14 @@ class WhiteboardPainter extends CustomPainter {
     required this.boardWidth,
     required this.boardHeight,
     this.activeStroke,
+    this.pdfUnderlay,
   });
 
   final BoardState state;
   final double boardWidth;
   final double boardHeight;
   final BoardStroke? activeStroke;
+  final ui.Image? pdfUnderlay;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -43,6 +48,14 @@ class WhiteboardPainter extends CustomPainter {
     if (page == null) {
       canvas.restore();
       return;
+    }
+
+    if (page.kind == 'pdf' && pdfUnderlay != null) {
+      paintPdfContain(
+        canvas,
+        pdfUnderlay!,
+        Rect.fromLTWH(0, 0, boardWidth, boardHeight),
+      );
     }
 
     for (final shape in page.shapes) {

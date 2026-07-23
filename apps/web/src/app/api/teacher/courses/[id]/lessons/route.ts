@@ -152,6 +152,30 @@ export async function POST(
     await TeacherCourseService.markCoursePendingReview(id);
   }
 
+  // Admin can publish a lesson onto a live course without re-review — notify buyers now.
+  if (course.status === "APPROVED" && isAdmin) {
+    void (async () => {
+      const { notifySubscribersNewLesson } = await import(
+        "@/services/engagement-notifications.service"
+      );
+      const teacher = await prisma.teacherProfile.findFirst({
+        where: { id: course.teacherId },
+        select: { userId: true },
+      });
+      const userIds = await TeacherCourseService.paidSubscriberUserIdsForCourse(id, {
+        excludeUserId: teacher?.userId,
+      });
+      if (userIds.length === 0) return;
+      await notifySubscribersNewLesson({
+        userIds,
+        courseTitle: course.titleEn,
+        lessonTitle: lesson.title,
+        courseId: id,
+        lessonId: lesson.id,
+      });
+    })().catch(() => {});
+  }
+
   if (!course.thumbnail && parsed.data.thumbnailUrl) {
     await prisma.course.update({
       where: { id },

@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/auth/require_auth.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
+import 'package:ulearn/core/network/network_status.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/video/course_video_cache.dart';
 import 'package:ulearn/core/widgets/lesson_cover.dart';
@@ -22,6 +25,7 @@ import 'package:ulearn/features/store/lesson_qa_section.dart';
 import 'package:ulearn/features/store/teacher_studio_screen.dart';
 import 'package:ulearn/features/video/video_protection.dart';
 import 'package:ulearn/core/widgets/glass.dart';
+import 'package:ulearn/features/whiteboard/domain/offline_store.dart';
 import 'package:ulearn/features/whiteboard/ui/whiteboard_player_screen.dart';
 
 enum _PlayerStage { playing, quiz, documents }
@@ -84,6 +88,14 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   String? _outroUrl;
   VideoProtectionController? _captureGuard;
   bool _captureBlocked = false;
+  bool _online = true;
+  final Set<String> _offlineBoardLessons = {};
+  String? _savingOfflineLessonId;
+  StreamSubscription<bool>? _netSub;
+  /// Preserves the active stage player across portrait ↔ landscape rebuilds.
+  final GlobalKey _stagePlayerHostKey = GlobalKey(debugLabel: 'courseStagePlayerHost');
+  GlobalKey? _whiteboardPlayerKey;
+  String? _whiteboardPlayerLessonId;
 
   static const double _minPlayerZoom = 1.0;
   static const double _maxPlayerZoom = 2.15;
@@ -94,15 +106,81 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     _course = widget.summary != null ? Map.of(widget.summary!) : null;
     _load();
     _countView();
+    _refreshOfflineBoardIndex();
+    _netSub = NetworkStatus.onOnlineChanged().listen((online) {
+      if (mounted) setState(() => _online = online);
+    });
+    NetworkStatus.isOnline().then((v) {
+      if (mounted) setState(() => _online = v);
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _enableCaptureGuard());
   }
 
   @override
   void dispose() {
+    _netSub?.cancel();
     _captureGuard?.removeListener(_onCaptureGuardChanged);
     _captureGuard?.disable();
     VideoProtectionController.disableScreenHardening();
     super.dispose();
+  }
+
+  Future<void> _refreshOfflineBoardIndex() async {
+    final items = await WhiteboardOfflineStore.list();
+    if (!mounted) return;
+    setState(() {
+      _offlineBoardLessons
+        ..clear()
+        ..addAll(items.map((e) => e.lessonId));
+    });
+  }
+
+  Future<void> _toggleOfflineBoardLesson(Map<String, dynamic> lesson) async {
+    final id = lesson['id']?.toString();
+    if (id == null || _savingOfflineLessonId != null) return;
+    setState(() => _savingOfflineLessonId = id);
+    try {
+      if (_offlineBoardLessons.contains(id)) {
+        await WhiteboardOfflineStore.remove(id);
+        if (!mounted) return;
+        setState(() {
+          _offlineBoardLessons.remove(id);
+          _savingOfflineLessonId = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Removed offline board lesson')),
+        );
+        return;
+      }
+      if (!await NetworkStatus.isOnline()) {
+        throw StateError('Connect to the internet to download');
+      }
+      final api = context.read<ApiClient>();
+      await WhiteboardOfflineStore.saveLesson(
+        api: api,
+        lessonId: id,
+        courseId: widget.courseId,
+        title: lesson['title']?.toString() ?? 'Whiteboard',
+        packageUrl: lesson['packageUrl']?.toString(),
+        whiteboardId: lesson['whiteboardId']?.toString() ??
+            lesson['whiteboardAssetId']?.toString(),
+        durationSec: (lesson['durationSec'] as num?)?.toInt(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _offlineBoardLessons.add(id);
+        _savingOfflineLessonId = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Board lesson saved for offline')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _savingOfflineLessonId = null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Offline save failed: $e')),
+      );
+    }
   }
 
   Future<void> _enableCaptureGuard() async {
@@ -141,9 +219,13 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
 
   bool _canWatch(Map<String, dynamic> lesson, bool unlocked) {
     if (_isWhiteboard(lesson)) {
+      final id = lesson['id']?.toString();
+      final savedOffline = id != null && _offlineBoardLessons.contains(id);
       final hasPackage = lesson['packageUrl'] != null ||
           lesson['whiteboardId'] != null ||
-          lesson['whiteboardAssetId'] != null;
+          lesson['whiteboardAssetId'] != null ||
+          savedOffline;
+      if (savedOffline) return true;
       if (lesson['canWatch'] == true && hasPackage) return true;
       final isPreview = lesson['isFreePreview'] == true;
       final timed = (lesson['freePreviewSec'] as num?)?.toInt() ?? 0;
@@ -273,11 +355,56 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       _maybeShowEvaluation();
     } on ApiException catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.message);
+      final usedOffline = await _loadOfflineFallback();
+      if (!usedOffline) setState(() => _error = e.message);
     } catch (_) {
       if (!mounted) return;
-      setState(() => _error = context.l10n.t('mobile.error.generic'));
+      final usedOffline = await _loadOfflineFallback();
+      if (!usedOffline) {
+        setState(() => _error = context.l10n.t('mobile.error.generic'));
+      }
     }
+  }
+
+  /// When the course API is unreachable, still open saved board lessons for this course.
+  Future<bool> _loadOfflineFallback() async {
+    await _refreshOfflineBoardIndex();
+    final offline = (await WhiteboardOfflineStore.list())
+        .where((e) => e.courseId == widget.courseId)
+        .toList();
+    if (offline.isEmpty || !mounted) return false;
+    final lessons = offline
+        .map(
+          (e) => <String, dynamic>{
+            'id': e.lessonId,
+            'title': e.title,
+            'lessonType': 'WHITEBOARD',
+            'durationSec': e.durationSec,
+            'whiteboardId': e.whiteboardId,
+            'canWatch': true,
+            'isCompleted': false,
+            'progressPct': 0,
+          },
+        )
+        .toList();
+    setState(() {
+      _course = {
+        ...?widget.summary,
+        'id': widget.courseId,
+        'title': widget.summary?['title'] ?? 'Offline boards',
+        'lessons': lessons,
+        'price': 0,
+        'purchaseStatus': 'PAID',
+      };
+      _purchased = true;
+      _error = null;
+      _online = false;
+      _activeLesson = lessons.first;
+      _offlineBoardLessons
+        ..clear()
+        ..addAll(offline.map((e) => e.lessonId));
+    });
+    return true;
   }
 
   Future<void> _react(String type) async {
@@ -523,6 +650,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       _stageQuiz = null;
       _stageDocs = [];
     });
+    unawaited(_refreshOfflineBoardIndex());
     final lessons =
         ((_course?['lessons'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
     final idx = lessons.indexWhere((l) => l['id'] == lesson['id']);
@@ -1003,34 +1131,46 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       final packageUrl = active['packageUrl']?.toString();
       final whiteboardId =
           active['whiteboardId']?.toString() ?? active['whiteboardAssetId']?.toString();
-      return WhiteboardPlayerScreen(
-        key: ValueKey('wb_${activeId}_${active['watchPositionSec']}'),
-        lessonId: activeId ?? '',
-        title: active['title']?.toString() ?? l10n.t('student.videos'),
-        packageUrl: packageUrl,
-        whiteboardId: whiteboardId,
-        durationSec: (active['durationSec'] as num?)?.toInt(),
-        initialPositionSec: (active['watchPositionSec'] as num?) != null &&
-                !_isLessonCompleted(active)
-            ? (active['watchPositionSec'] as num).toInt()
-            : 0,
-        freePreviewSec: !unlocked &&
-                active['previewOnly'] == true &&
-                (active['freePreviewSec'] as num?) != null
-            ? (active['freePreviewSec'] as num).toInt()
-            : null,
-        onProgress: (pos, dur, completed) async {
-          try {
-            final api = context.read<ApiClient>();
-            await api.post('/api/store/lessons/${activeId}/progress', {
-              'positionSec': pos,
-              'durationSec': dur,
-              'completionPct': dur > 0 ? (pos / dur * 100).clamp(0, 100) : 0,
-              'isCompleted': completed,
-            });
-            if (completed) _onLessonCompleted(active);
-          } catch (_) {}
-        },
+      final lessonKey = activeId ?? '';
+      if (_whiteboardPlayerLessonId != lessonKey) {
+        _whiteboardPlayerLessonId = lessonKey;
+        _whiteboardPlayerKey = GlobalKey(debugLabel: 'wbPlayer-$lessonKey');
+      }
+      return KeyedSubtree(
+        key: _stagePlayerHostKey,
+        child: WhiteboardPlayerScreen(
+          key: _whiteboardPlayerKey,
+          lessonId: lessonKey,
+          title: active['title']?.toString() ?? l10n.t('student.videos'),
+          packageUrl: packageUrl,
+          whiteboardId: whiteboardId,
+          courseId: widget.courseId,
+          durationSec: (active['durationSec'] as num?)?.toInt(),
+          initialPositionSec: (active['watchPositionSec'] as num?) != null &&
+                  !_isLessonCompleted(active)
+              ? (active['watchPositionSec'] as num).toInt()
+              : 0,
+          freePreviewSec: !unlocked &&
+                  active['previewOnly'] == true &&
+                  (active['freePreviewSec'] as num?) != null
+              ? (active['freePreviewSec'] as num).toInt()
+              : null,
+          embedded: true,
+          autoPlay: true,
+          allowOfflineSave: unlocked || active['isFreePreview'] == true,
+          onProgress: (pos, dur, completed) async {
+            try {
+              final api = context.read<ApiClient>();
+              await api.post('/api/store/lessons/${activeId}/progress', {
+                'positionSec': pos,
+                'durationSec': dur,
+                'completionPct': dur > 0 ? (pos / dur * 100).clamp(0, 100) : 0,
+                'isCompleted': completed,
+              });
+              if (completed) _onLessonCompleted(active);
+            } catch (_) {}
+          },
+        ),
       );
     }
 
@@ -1377,7 +1517,13 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           isCompleted: isCompleted,
           progressPct: progressPct,
           duration: duration,
+          isWhiteboard: _isWhiteboard(lesson),
+          savedOffline: _offlineBoardLessons.contains(lesson['id']?.toString()),
+          savingOffline: _savingOfflineLessonId == lesson['id']?.toString(),
           onTap: () => _selectLesson(lesson, unlocked),
+          onToggleOffline: canWatch && _isWhiteboard(lesson)
+              ? () => _toggleOfflineBoardLesson(lesson)
+              : null,
         ),
       );
     }).toList();
@@ -1562,6 +1708,30 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
             )
           : Column(
               children: [
+                if (!_online)
+                  Material(
+                    color: const Color(0xFF1E293B),
+                    child: SafeArea(
+                      bottom: false,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.wifi_off_rounded, color: Colors.white70, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _offlineBoardLessons.isEmpty
+                                    ? 'Offline — save board lessons while online to watch later'
+                                    : 'Offline mode — playing saved board lessons',
+                                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 // Edge-to-edge YouTube-style stage (video / quiz / docs)
                 _buildPlayerStage(
                   lessons: lessons,
@@ -3075,6 +3245,10 @@ class _LessonVideoCard extends StatelessWidget {
     required this.progressPct,
     required this.duration,
     required this.onTap,
+    this.isWhiteboard = false,
+    this.savedOffline = false,
+    this.savingOffline = false,
+    this.onToggleOffline,
   });
 
   final int index;
@@ -3088,6 +3262,10 @@ class _LessonVideoCard extends StatelessWidget {
   final double progressPct;
   final int duration;
   final VoidCallback onTap;
+  final bool isWhiteboard;
+  final bool savedOffline;
+  final bool savingOffline;
+  final VoidCallback? onToggleOffline;
 
   @override
   Widget build(BuildContext context) {
@@ -3107,10 +3285,12 @@ class _LessonVideoCard extends StatelessWidget {
     };
 
     final metaParts = <String>[
+      if (isWhiteboard) 'Board',
       durationLabel,
       l10n.homeLikes(likes),
       statusLabel,
       if (showFreeBadge) l10n.t('common.free'),
+      if (savedOffline) 'Offline',
     ];
 
     return SizedBox(
@@ -3169,6 +3349,25 @@ class _LessonVideoCard extends StatelessWidget {
                       ],
                     ),
                   ),
+                  if (onToggleOffline != null)
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      tooltip: savedOffline ? 'Remove offline' : 'Save offline',
+                      onPressed: savingOffline ? null : onToggleOffline,
+                      icon: savingOffline
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              savedOffline
+                                  ? Icons.download_done_rounded
+                                  : Icons.download_rounded,
+                              size: 20,
+                              color: savedOffline ? Colors.greenAccent : AppTheme.accent,
+                            ),
+                    ),
                 ],
               ),
             ),
