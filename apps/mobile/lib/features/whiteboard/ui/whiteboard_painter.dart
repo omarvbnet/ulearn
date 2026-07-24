@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -18,6 +19,7 @@ class WhiteboardPainter extends CustomPainter {
     required this.boardWidth,
     required this.boardHeight,
     this.activeStroke,
+    this.activeShape,
     this.pdfUnderlay,
   });
 
@@ -25,6 +27,8 @@ class WhiteboardPainter extends CustomPainter {
   final double boardWidth;
   final double boardHeight;
   final BoardStroke? activeStroke;
+  /// Live shape draft while the teacher is still dragging.
+  final BoardShape? activeShape;
   final ui.Image? pdfUnderlay;
 
   @override
@@ -51,18 +55,32 @@ class WhiteboardPainter extends CustomPainter {
     }
 
     if (page.kind == 'pdf' && pdfUnderlay != null) {
+      final zoom = page.pdfZoom.clamp(0.5, 5.0);
+      canvas.save();
+      canvas.translate(boardWidth / 2, boardHeight / 2);
+      canvas.scale(zoom);
+      canvas.translate(-boardWidth / 2, -boardHeight / 2);
       paintPdfContain(
         canvas,
         pdfUnderlay!,
         Rect.fromLTWH(0, 0, boardWidth, boardHeight),
       );
+      canvas.restore();
     }
 
     for (final shape in page.shapes) {
       _paintShape(canvas, shape);
     }
+    if (activeShape != null && activeShape!.pageId == page.id) {
+      _paintShape(canvas, activeShape!, preview: true);
+    }
+
     for (final stroke in page.strokes) {
       _paintStroke(canvas, stroke);
+    }
+    // Progressive playback: show in-progress strokes as points arrive.
+    for (final stroke in state.openStrokes.values) {
+      if (stroke.pageId == page.id) _paintStroke(canvas, stroke);
     }
     if (activeStroke != null && activeStroke!.pageId == page.id) {
       _paintStroke(canvas, activeStroke!);
@@ -98,14 +116,9 @@ class WhiteboardPainter extends CustomPainter {
 
   void _paintStroke(Canvas canvas, BoardStroke stroke) {
     if (stroke.points.isEmpty) return;
-    final path = Path();
-    path.moveTo(stroke.points.first.x, stroke.points.first.y);
-    for (var i = 1; i < stroke.points.length; i++) {
-      final p = stroke.points[i];
-      path.lineTo(p.x, p.y);
-    }
+    final color = _parseColor(stroke.color, opacity: stroke.opacity);
     final paint = Paint()
-      ..color = _parseColor(stroke.color, opacity: stroke.opacity)
+      ..color = color
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
@@ -117,15 +130,36 @@ class WhiteboardPainter extends CustomPainter {
       paint.blendMode = BlendMode.clear;
       paint.color = const Color(0xFFFFFFFF);
     }
+
+    // Tap / single sample → visible round dot (same as press start).
+    if (stroke.points.length == 1) {
+      final p = stroke.points.first;
+      canvas.drawCircle(
+        Offset(p.x, p.y),
+        math.max(stroke.width / 2, 2.5),
+        paint..style = PaintingStyle.fill,
+      );
+      return;
+    }
+
+    final path = Path();
+    path.moveTo(stroke.points.first.x, stroke.points.first.y);
+    for (var i = 1; i < stroke.points.length; i++) {
+      final p = stroke.points[i];
+      path.lineTo(p.x, p.y);
+    }
     canvas.drawPath(path, paint);
   }
 
-  void _paintShape(Canvas canvas, BoardShape shape) {
+  void _paintShape(Canvas canvas, BoardShape shape, {bool preview = false}) {
     final paint = Paint()
-      ..color = _parseColor(shape.color)
+      ..color = _parseColor(shape.color, opacity: preview ? 0.85 : 1)
       ..style = PaintingStyle.stroke
       ..strokeWidth = shape.width
       ..strokeCap = StrokeCap.round;
+    if (preview) {
+      paint.strokeWidth = shape.width;
+    }
     final rect = Rect.fromPoints(Offset(shape.x1, shape.y1), Offset(shape.x2, shape.y2));
     switch (shape.kind) {
       case 'circle':
@@ -135,11 +169,40 @@ class WhiteboardPainter extends CustomPainter {
       case 'arrow':
         canvas.drawLine(Offset(shape.x1, shape.y1), Offset(shape.x2, shape.y2), paint);
         if (shape.kind == 'arrow') {
-          canvas.drawCircle(Offset(shape.x2, shape.y2), shape.width * 1.2, paint..style = PaintingStyle.fill);
+          canvas.drawCircle(
+            Offset(shape.x2, shape.y2),
+            shape.width * 1.2,
+            Paint()
+              ..color = paint.color
+              ..style = PaintingStyle.fill,
+          );
         }
         break;
       default:
         canvas.drawRect(rect, paint);
+    }
+
+    if (preview) {
+      final w = (shape.x2 - shape.x1).abs();
+      final h = (shape.y2 - shape.y1).abs();
+      final label = shape.kind == 'line' || shape.kind == 'arrow'
+          ? '${math.sqrt(w * w + h * h).round()} px'
+          : '${w.round()} × ${h.round()}';
+      final tp = TextPainter(
+        text: TextSpan(
+          text: label,
+          style: TextStyle(
+            color: _parseColor(shape.color),
+            fontSize: 22,
+            fontWeight: FontWeight.w600,
+            backgroundColor: const Color(0xCCFFFFFF),
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final lx = math.max(shape.x1, shape.x2) + 8;
+      final ly = math.min(shape.y1, shape.y2) - 8;
+      tp.paint(canvas, Offset(lx.clamp(0, boardWidth - tp.width), ly.clamp(0, boardHeight - tp.height)));
     }
   }
 

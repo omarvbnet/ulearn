@@ -105,6 +105,8 @@ Each line is a JSON object:
 
 **Stroke compaction:** Writers MAY emit many `stroke_point` events live, then replace the span with a single `stroke_end` that includes the full `points` array when finalizing the package (players must accept both styles).
 
+**Progressive playback (required):** Players MUST paint strokes from `openStrokes` while applying `stroke_point` events (not only after `stroke_end`), so students see ink appear from press → release exactly as the teacher drew. A single-point stroke (tap) MUST render as a filled round **dot**. Shape tools SHOULD emit `shape_add` on press and `shape_update` while dragging so dimensions are visible before release. `pdf_zoom` adjusts PDF underlay scale on that page.
+
 ### `timeline.json`
 
 Seek index for O(log n) playback:

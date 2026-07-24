@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -21,6 +22,13 @@ import 'package:ulearn/features/whiteboard/domain/types.dart';
 import 'package:ulearn/features/whiteboard/ui/pdf_underlay.dart';
 import 'package:ulearn/features/whiteboard/ui/whiteboard_painter.dart';
 import 'package:uuid/uuid.dart';
+
+/// Undoable teacher action (local + recorded as erase/shape_delete/re-add).
+class _UndoItem {
+  _UndoItem({required this.kind, required this.payload});
+  final String kind; // stroke | shape | text | erase
+  final Map<String, dynamic> payload;
+}
 
 /// Teacher Whiteboard Studio — records mic + vector events into a .ubrd package.
 class WhiteboardStudioScreen extends StatefulWidget {
@@ -62,6 +70,9 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
   BoardStroke? _activeStroke;
   String? _shapeId;
   Offset? _shapeStart;
+  BoardShape? _draftShape;
+  final List<_UndoItem> _undoStack = [];
+  final List<_UndoItem> _redoStack = [];
   Timer? _autosaveTimer;
   final List<UbrdPdfAsset> _pdfs = [];
   final _pdfCache = PdfUnderlayCache();
@@ -181,6 +192,103 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
     } catch (_) {}
   }
 
+  Future<void> _attachPdfMenu() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.folder_open),
+              title: const Text('Course PDF'),
+              subtitle: const Text('Pick a document already on this course'),
+              onTap: () => Navigator.pop(ctx, 'course'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.upload_file),
+              title: const Text('Import from device'),
+              subtitle: const Text('Upload a PDF from this phone/tablet'),
+              onTap: () => Navigator.pop(ctx, 'device'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == 'course') {
+      await _attachCoursePdf();
+    } else if (choice == 'device') {
+      await _importDevicePdf();
+    }
+  }
+
+  Future<void> _importDevicePdf() async {
+    try {
+      final pick = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['pdf'],
+        withData: true,
+      );
+      if (pick == null || pick.files.isEmpty) return;
+      final file = pick.files.first;
+      final bytes = file.bytes ??
+          (file.path != null ? await File(file.path!).readAsBytes() : null);
+      if (bytes == null || bytes.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not read that PDF file')),
+          );
+        }
+        return;
+      }
+      setState(() => _pdfLoading = true);
+      final api = context.read<ApiClient>();
+      final title = (file.name).trim().isEmpty ? 'Board PDF' : file.name;
+      final presign = await api.post('/api/admin/uploads', {
+        'filename': title.endsWith('.pdf') ? title : '$title.pdf',
+        'contentType': 'application/pdf',
+        'folder': 'course-materials',
+      });
+      final uploadUrl = presign['uploadUrl']?.toString();
+      final key = (presign['key'] ?? presign['fileKey'])?.toString();
+      final publicUrl = (presign['publicUrl'] ?? presign['url'])?.toString();
+      if (uploadUrl == null || key == null) {
+        throw StateError('Upload URL missing');
+      }
+      await api.putBytes(uploadUrl, bytes, 'application/pdf');
+      final docRes = await api.post('/api/teacher/courses/${widget.courseId}/documents', {
+        'title': title.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), ''),
+        'fileKey': key,
+        'fileUrl': publicUrl ?? '/api/media/${key.split('/').map(Uri.encodeComponent).join('/')}',
+        'mimeType': 'application/pdf',
+        'fileSize': bytes.length,
+        'type': 'PDF',
+      });
+      final doc = (docRes['document'] as Map?)?.cast<String, dynamic>() ??
+          <String, dynamic>{
+            'id': key,
+            'title': title,
+            'fileKey': key,
+            'fileUrl': publicUrl,
+          };
+      await _openPdfAsset(
+        assetId: 'pdf_${doc['id'] ?? _uuid.v4()}',
+        materialId: doc['id']?.toString(),
+        fileKey: doc['fileKey']?.toString() ?? key,
+        fileUrl: doc['fileUrl']?.toString() ?? publicUrl,
+        title: doc['title']?.toString() ?? title,
+        localBytes: bytes,
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _pdfLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PDF import failed: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _attachCoursePdf() async {
     try {
       final api = context.read<ApiClient>();
@@ -195,7 +303,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
           .toList();
       if (docs.isEmpty || !mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No course PDFs found — upload a document first')),
+          const SnackBar(content: Text('No course PDFs found — import one from your device')),
         );
         return;
       }
@@ -216,57 +324,14 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         ),
       );
       if (chosen == null || !mounted) return;
-      final assetId = 'pdf_${chosen['id']}';
-      final asset = UbrdPdfAsset(
-        assetId: assetId,
+      setState(() => _pdfLoading = true);
+      await _openPdfAsset(
+        assetId: 'pdf_${chosen['id']}',
         materialId: chosen['id']?.toString(),
         fileKey: chosen['fileKey']?.toString(),
         fileUrl: chosen['fileUrl']?.toString(),
         title: chosen['title']?.toString() ?? 'PDF',
       );
-      if (resolveUbrdPdfUrl(asset) == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('This PDF has no downloadable file URL')),
-        );
-        return;
-      }
-      setState(() => _pdfLoading = true);
-      await _pdfCache.preload(asset);
-      _pdfs.removeWhere((p) => p.assetId == assetId);
-      _pdfs.add(UbrdPdfAsset(
-        assetId: asset.assetId,
-        materialId: asset.materialId,
-        fileKey: asset.fileKey,
-        fileUrl: asset.fileUrl,
-        title: asset.title,
-        pageCount: _pdfCache.pageCount(assetId),
-      ));
-      final pageId = 'page_${_uuid.v4()}';
-      _board.addBlankPage(pageId);
-      final page = _board.currentPage;
-      if (page != null) {
-        page.kind = 'pdf';
-        page.pdfAssetId = assetId;
-        page.pdfPage = 1;
-      }
-      if (_recording) {
-        _engine.push('pdf_open', {'assetId': assetId, 'title': chosen['title']});
-        _engine.push('page_add', {
-          'pageId': pageId,
-          'index': _board.pages.length - 1,
-          'kind': 'pdf',
-          'pdfAssetId': assetId,
-          'pdfPage': 1,
-        });
-        _engine.push('page_select', {'pageId': pageId});
-      }
-      await _refreshPdfUnderlay();
-      if (mounted) {
-        setState(() => _pdfLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('PDF opened: ${asset.title}')),
-        );
-      }
     } catch (e) {
       if (mounted) {
         setState(() => _pdfLoading = false);
@@ -275,15 +340,269 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
     }
   }
 
-  Future<void> _refreshPdfUnderlay() async {
-    final page = _board.currentPage;
-    if (page == null || page.kind != 'pdf' || page.pdfAssetId == null) {
-      if (mounted) setState(() => _pdfUnderlay = null);
-      return;
+  Future<void> _openPdfAsset({
+    required String assetId,
+    String? materialId,
+    String? fileKey,
+    String? fileUrl,
+    required String title,
+    Uint8List? localBytes,
+  }) async {
+    final asset = UbrdPdfAsset(
+      assetId: assetId,
+      materialId: materialId,
+      fileKey: fileKey,
+      fileUrl: fileUrl,
+      title: title,
+    );
+    if (localBytes != null) {
+      await _pdfCache.preloadBytes(assetId, localBytes);
+    } else {
+      if (resolveUbrdPdfUrl(asset) == null) {
+        if (mounted) {
+          setState(() => _pdfLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('This PDF has no downloadable file URL')),
+          );
+        }
+        return;
+      }
+      await _pdfCache.preload(asset);
     }
-    final img = await _pdfCache.imageFor(page.pdfAssetId!, page.pdfPage ?? 1);
-    if (!mounted) return;
-    setState(() => _pdfUnderlay = img);
+    _pdfs.removeWhere((p) => p.assetId == assetId);
+    _pdfs.add(UbrdPdfAsset(
+      assetId: asset.assetId,
+      materialId: asset.materialId,
+      fileKey: asset.fileKey,
+      fileUrl: asset.fileUrl,
+      title: asset.title,
+      pageCount: _pdfCache.pageCount(assetId),
+    ));
+    final pageId = 'page_${_uuid.v4()}';
+    _board.addBlankPage(pageId);
+    final page = _board.currentPage;
+    if (page != null) {
+      page.kind = 'pdf';
+      page.pdfAssetId = assetId;
+      page.pdfPage = 1;
+      page.pdfZoom = 1;
+    }
+    if (_recording) {
+      _engine.push('pdf_open', {'assetId': assetId, 'title': title});
+      _engine.push('page_add', {
+        'pageId': pageId,
+        'index': _board.pages.length - 1,
+        'kind': 'pdf',
+        'pdfAssetId': assetId,
+        'pdfPage': 1,
+      });
+      _engine.push('page_select', {'pageId': pageId});
+    }
+    await _refreshPdfUnderlay();
+    if (mounted) {
+      setState(() => _pdfLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('PDF opened: $title')),
+      );
+    }
+  }
+
+  void _nudgePdfZoom(double factor) {
+    final page = _board.currentPage;
+    if (page == null || page.kind != 'pdf' || page.pdfAssetId == null) return;
+    final next = (page.pdfZoom * factor).clamp(0.5, 5.0);
+    page.pdfZoom = next;
+    if (_recording) {
+      _engine.push('pdf_zoom', {'assetId': page.pdfAssetId, 'zoom': next});
+    }
+    setState(() {});
+  }
+
+  void _pushUndo(_UndoItem item) {
+    _undoStack.add(item);
+    _redoStack.clear();
+  }
+
+  void _undo() {
+    if (_undoStack.isEmpty) return;
+    final item = _undoStack.removeLast();
+    final page = _board.currentPage;
+    if (item.kind == 'stroke') {
+      final id = item.payload['strokeId']?.toString();
+      final pageId = item.payload['pageId']?.toString();
+      BoardStroke? stroke;
+      for (final s in page?.strokes ?? const <BoardStroke>[]) {
+        if (s.id == id) stroke = s;
+      }
+      final snapshot = stroke == null
+          ? null
+          : {
+              'strokeId': stroke.id,
+              'pageId': stroke.pageId,
+              'tool': stroke.tool.wire,
+              'color': stroke.color,
+              'opacity': stroke.opacity,
+              'width': stroke.width,
+              'points': stroke.points.map((p) => p.toJson()).toList(),
+            };
+      page?.strokes.removeWhere((s) => s.id == id);
+      if (_recording && id != null) {
+        _engine.push('erase', {
+          'pageId': pageId ?? page?.id,
+          'strokeIds': [id],
+        });
+      }
+      if (snapshot != null) {
+        _redoStack.add(_UndoItem(kind: 'stroke', payload: snapshot));
+      }
+    } else if (item.kind == 'shape') {
+      final id = item.payload['shapeId']?.toString();
+      BoardShape? shape;
+      for (final p in _board.pages) {
+        for (final s in p.shapes) {
+          if (s.id == id) shape = s;
+        }
+      }
+      final snapshot = shape == null
+          ? null
+          : {
+              'shapeId': shape.id,
+              'pageId': shape.pageId,
+              'kind': shape.kind,
+              'x1': shape.x1,
+              'y1': shape.y1,
+              'x2': shape.x2,
+              'y2': shape.y2,
+              'color': shape.color,
+              'width': shape.width,
+            };
+      for (final p in _board.pages) {
+        p.shapes.removeWhere((s) => s.id == id);
+      }
+      if (_recording && id != null) {
+        _engine.push('shape_delete', {'shapeId': id});
+      }
+      if (snapshot != null) {
+        _redoStack.add(_UndoItem(kind: 'shape', payload: snapshot));
+      }
+    } else if (item.kind == 'text') {
+      final id = item.payload['textId']?.toString();
+      BoardText? text;
+      for (final p in _board.pages) {
+        for (final t in p.texts) {
+          if (t.id == id) text = t;
+        }
+      }
+      final snapshot = text == null
+          ? null
+          : {
+              'textId': text.id,
+              'pageId': text.pageId,
+              'x': text.x,
+              'y': text.y,
+              'text': text.text,
+              'color': text.color,
+              'fontSize': text.fontSize,
+            };
+      for (final p in _board.pages) {
+        p.texts.removeWhere((t) => t.id == id);
+      }
+      if (_recording && id != null) {
+        _engine.push('text_delete', {'textId': id});
+      }
+      if (snapshot != null) {
+        _redoStack.add(_UndoItem(kind: 'text', payload: snapshot));
+      }
+    }
+    setState(() {});
+  }
+
+  void _redo() {
+    if (_redoStack.isEmpty) return;
+    final item = _redoStack.removeLast();
+    if (item.kind == 'stroke') {
+      final p = item.payload;
+      final stroke = BoardStroke(
+        id: p['strokeId'].toString(),
+        pageId: p['pageId'].toString(),
+        tool: WhiteboardToolX.parse(p['tool'] as String?),
+        color: p['color']?.toString() ?? _color,
+        opacity: p['opacity'] is num ? (p['opacity'] as num).toDouble() : 1,
+        width: p['width'] is num ? (p['width'] as num).toDouble() : 3.5,
+        points: ((p['points'] as List?) ?? [])
+            .map((e) => StrokePoint.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList(),
+      );
+      BoardPage? page;
+      for (final pg in _board.pages) {
+        if (pg.id == stroke.pageId) page = pg;
+      }
+      page ??= _board.currentPage;
+      page?.strokes.removeWhere((s) => s.id == stroke.id);
+      page?.strokes.add(stroke);
+      if (_recording) {
+        _engine.push('stroke_begin', {
+          'strokeId': stroke.id,
+          'pageId': stroke.pageId,
+          'tool': stroke.tool.wire,
+          'color': stroke.color,
+          'opacity': stroke.opacity,
+          'width': stroke.width,
+        });
+        _engine.push('stroke_end', {
+          'strokeId': stroke.id,
+          'pageId': stroke.pageId,
+          'points': stroke.points.map((pt) => pt.toJson()).toList(),
+        });
+      }
+      _undoStack.add(_UndoItem(kind: 'stroke', payload: {
+        'strokeId': stroke.id,
+        'pageId': stroke.pageId,
+      }));
+    } else if (item.kind == 'shape') {
+      final p = item.payload;
+      _board.apply(UbrdEvent(
+        id: _uuid.v4(),
+        t: _engine.now(),
+        type: 'shape_add',
+        payload: p,
+      ));
+      if (_recording) _engine.push('shape_add', p);
+      _undoStack.add(_UndoItem(kind: 'shape', payload: {
+        'shapeId': p['shapeId'],
+        'pageId': p['pageId'],
+      }));
+    } else if (item.kind == 'text') {
+      final p = item.payload;
+      _board.apply(UbrdEvent(
+        id: _uuid.v4(),
+        t: _engine.now(),
+        type: 'text_insert',
+        payload: p,
+      ));
+      if (_recording) _engine.push('text_insert', p);
+      _undoStack.add(_UndoItem(kind: 'text', payload: {
+        'textId': p['textId'],
+        'pageId': p['pageId'],
+      }));
+    }
+    setState(() {});
+  }
+
+  Future<void> _refreshPdfUnderlay() async {
+    try {
+      final page = _board.currentPage;
+      if (page == null || page.kind != 'pdf' || page.pdfAssetId == null) {
+        if (mounted) setState(() => _pdfUnderlay = null);
+        return;
+      }
+      final img = await _pdfCache.imageFor(page.pdfAssetId!, page.pdfPage ?? 1);
+      if (!mounted) return;
+      setState(() => _pdfUnderlay = img);
+    } catch (e) {
+      debugPrint('WhiteboardStudio PDF underlay: $e');
+      if (mounted) setState(() => _pdfUnderlay = null);
+    }
   }
 
   Future<void> _shiftPdfPage(int delta) async {
@@ -760,6 +1079,32 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         .contains(_tool)) {
       _shapeId = _uuid.v4();
       _shapeStart = logical;
+      _draftShape = BoardShape(
+        id: _shapeId!,
+        pageId: pageId,
+        kind: _tool.wire,
+        x1: logical.dx,
+        y1: logical.dy,
+        x2: logical.dx,
+        y2: logical.dy,
+        color: _color,
+        width: 2.5,
+      );
+      // Students see the shape grow from press → release.
+      if (_recording) {
+        _engine.push('shape_add', {
+          'shapeId': _shapeId,
+          'pageId': pageId,
+          'kind': _tool.wire,
+          'x1': logical.dx,
+          'y1': logical.dy,
+          'x2': logical.dx,
+          'y2': logical.dy,
+          'color': _color,
+          'width': 2.5,
+        });
+      }
+      setState(() {});
       return;
     }
 
@@ -769,6 +1114,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
     }
 
     final strokeId = _uuid.v4();
+    final first = StrokePoint(x: logical.dx, y: logical.dy, p: e.pressure);
     _activeStroke = BoardStroke(
       id: strokeId,
       pageId: pageId,
@@ -776,7 +1122,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
       color: _color,
       opacity: defaultOpacityForTool(_tool),
       width: defaultWidthForTool(_tool) * (0.5 + (e.pressure.clamp(0.0, 1.0) * 0.8)),
-      points: [StrokePoint(x: logical.dx, y: logical.dy, p: e.pressure)],
+      points: [first],
     );
     if (_recording) {
       _engine.push('stroke_begin', {
@@ -786,6 +1132,13 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         'color': _color,
         'opacity': _activeStroke!.opacity,
         'width': _activeStroke!.width,
+      });
+      // First sample so playback shows a tap-dot immediately.
+      _engine.push('stroke_point', {
+        'strokeId': strokeId,
+        'x': logical.dx,
+        'y': logical.dy,
+        'p': e.pressure,
       });
     }
     setState(() {});
@@ -810,6 +1163,23 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
       return;
     }
 
+    if (_draftShape != null && _shapeStart != null) {
+      _draftShape!
+        ..x2 = logical.dx
+        ..y2 = logical.dy;
+      if (_recording && _shapeId != null) {
+        _engine.push('shape_update', {
+          'shapeId': _shapeId,
+          'x1': _shapeStart!.dx,
+          'y1': _shapeStart!.dy,
+          'x2': logical.dx,
+          'y2': logical.dy,
+        });
+      }
+      setState(() {});
+      return;
+    }
+
     if (_activeStroke == null) return;
     _activeStroke!.points.add(StrokePoint(x: logical.dx, y: logical.dy, p: e.pressure));
     if (_recording) {
@@ -827,46 +1197,46 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
     final logical = logicalFromLocal(e.localPosition, size, kLogicalBoardWidth, kLogicalBoardHeight);
     final pageId = _board.currentPageId ?? 'page_0';
 
-    if (_shapeId != null && _shapeStart != null && logical != null) {
+    if (_shapeId != null && _shapeStart != null) {
+      final end = logical ?? _shapeStart!;
       final kind = _tool.wire;
+      final payload = {
+        'shapeId': _shapeId,
+        'pageId': pageId,
+        'kind': kind,
+        'x1': _shapeStart!.dx,
+        'y1': _shapeStart!.dy,
+        'x2': end.dx,
+        'y2': end.dy,
+        'color': _color,
+        'width': 2.5,
+      };
       if (_recording) {
-        _engine.push('shape_add', {
-          'shapeId': _shapeId,
-          'pageId': pageId,
-          'kind': kind,
-          'x1': _shapeStart!.dx,
-          'y1': _shapeStart!.dy,
-          'x2': logical.dx,
-          'y2': logical.dy,
-          'color': _color,
-          'width': 2.5,
-        });
+        _engine.push('shape_update', payload);
       }
       _board.apply(UbrdEvent(
         id: _uuid.v4(),
         t: _engine.now(),
         type: 'shape_add',
-        payload: {
-          'shapeId': _shapeId,
-          'pageId': pageId,
-          'kind': kind,
-          'x1': _shapeStart!.dx,
-          'y1': _shapeStart!.dy,
-          'x2': logical.dx,
-          'y2': logical.dy,
-          'color': _color,
-          'width': 2.5,
-        },
+        payload: payload,
       ));
+      _pushUndo(_UndoItem(kind: 'shape', payload: {
+        'shapeId': _shapeId,
+        'pageId': pageId,
+      }));
       _shapeId = null;
       _shapeStart = null;
+      _draftShape = null;
       setState(() {});
       return;
     }
 
     if (_activeStroke == null) return;
     final stroke = _activeStroke!;
-    stroke.points = smoothStrokePoints(stroke.points);
+    // Keep a single tap as one point (dot); only smooth longer strokes.
+    if (stroke.points.length > 1) {
+      stroke.points = smoothStrokePoints(stroke.points);
+    }
     final page = _board.currentPage;
     page?.strokes.add(stroke);
     if (_recording) {
@@ -876,6 +1246,10 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         'points': stroke.points.map((p) => p.toJson()).toList(),
       });
     }
+    _pushUndo(_UndoItem(kind: 'stroke', payload: {
+      'strokeId': stroke.id,
+      'pageId': stroke.pageId,
+    }));
     _activeStroke = null;
     setState(() {});
   }
@@ -928,6 +1302,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
     };
     _board.apply(UbrdEvent(id: id, t: _engine.now(), type: 'text_insert', payload: payload));
     if (_recording) _engine.push('text_insert', payload);
+    _pushUndo(_UndoItem(kind: 'text', payload: {'textId': id, 'pageId': pageId}));
     setState(() {});
   }
 
@@ -1048,6 +1423,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
                           boardWidth: kLogicalBoardWidth,
                           boardHeight: kLogicalBoardHeight,
                           activeStroke: _activeStroke,
+                          activeShape: _draftShape,
                           pdfUnderlay: _pdfUnderlay,
                         ),
                         size: Size.infinite,
@@ -1207,14 +1583,34 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
             );
           }),
           IconButton(
+            tooltip: 'Undo',
+            onPressed: _undoStack.isEmpty ? null : _undo,
+            icon: Icon(Icons.undo, color: _chromeFg, size: iconSize),
+          ),
+          IconButton(
+            tooltip: 'Redo',
+            onPressed: _redoStack.isEmpty ? null : _redo,
+            icon: Icon(Icons.redo, color: _chromeFg, size: iconSize),
+          ),
+          IconButton(
             tooltip: 'Clear page',
             onPressed: _clearPage,
             icon: Icon(Icons.cleaning_services, color: _chromeFg, size: iconSize),
           ),
           IconButton(
-            tooltip: 'Open course PDF',
-            onPressed: _attachCoursePdf,
+            tooltip: 'Add PDF',
+            onPressed: _attachPdfMenu,
             icon: Icon(Icons.picture_as_pdf, color: _chromeFg, size: iconSize),
+          ),
+          IconButton(
+            tooltip: 'Zoom PDF out',
+            onPressed: () => _nudgePdfZoom(1 / 1.25),
+            icon: Icon(Icons.zoom_out, color: _chromeFg, size: iconSize),
+          ),
+          IconButton(
+            tooltip: 'Zoom PDF in',
+            onPressed: () => _nudgePdfZoom(1.25),
+            icon: Icon(Icons.zoom_in, color: _chromeFg, size: iconSize),
           ),
         ],
       ),

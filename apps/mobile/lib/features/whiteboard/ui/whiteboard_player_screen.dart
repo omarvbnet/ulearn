@@ -16,6 +16,7 @@ import 'package:ulearn/features/whiteboard/domain/package.dart';
 import 'package:ulearn/features/whiteboard/domain/types.dart';
 import 'package:ulearn/features/whiteboard/domain/whiteboard_audio.dart';
 import 'package:ulearn/features/whiteboard/ui/pdf_underlay.dart';
+import 'package:ulearn/features/whiteboard/ui/whiteboard_brand_intro.dart';
 import 'package:ulearn/features/whiteboard/ui/whiteboard_painter.dart';
 
 /// Student/teacher viewer — reconstructs a recorded whiteboard lesson.
@@ -86,6 +87,8 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
   bool _savingOffline = false;
   bool _online = true;
   bool _inFullscreen = false;
+  /// Animated brand intro before first playback (skipped when resuming mid-lesson).
+  bool _showBrandIntro = false;
   double _speed = 1;
   double _zoom = 1;
   int _playheadMs = 0;
@@ -522,56 +525,58 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
       _board.reset();
       _board.theme = pkg.manifest.theme;
 
+      // PDF underlay is optional — never block strokes/audio on Android PdfRenderer.
       for (final pdf in pkg.pdfs) {
-        try {
-          await _pdfCache.preload(pdf, localFilePath: localPdfs[pdf.assetId]);
-        } catch (_) {
-          // PDF underlay is best-effort; strokes still play.
-        }
+        await _pdfCache.preload(pdf, localFilePath: localPdfs[pdf.assetId]);
       }
 
-      final audioFile = await writeWhiteboardAudioFile(
-        lessonId: widget.lessonId,
-        audioFileName: pkg.audioFileName,
-        audioBytes: pkg.audioBytes,
-      );
       await _audioPosSub?.cancel();
       await _audioStateSub?.cancel();
       await _audio.stop();
 
-      Future<void> loadPath(String path) => _audio.setFilePath(path);
+      final hasAudio = pkg.audioBytes.isNotEmpty;
+      if (hasAudio) {
+        final audioFile = await writeWhiteboardAudioFile(
+          lessonId: widget.lessonId,
+          audioFileName: pkg.audioFileName,
+          audioBytes: pkg.audioBytes,
+        );
 
-      try {
-        // Web-studio boards ship Opus/WebM; transcode on Android first for reliability.
-        if (Platform.isAndroid &&
-            whiteboardAudioLikelyNeedsTranscode(
-              pkg.audioFileName,
-              codec: pkg.manifest.audioCodec,
-            )) {
-          final aac = await transcodeWhiteboardAudioToAac(audioFile);
-          await loadPath(aac.path);
-        } else {
-          await loadPath(audioFile.path);
+        Future<void> loadPath(String path) =>
+            _audio.setFilePath(path, preload: true);
+
+        try {
+          // Web-studio boards ship Opus/WebM; transcode on Android first.
+          if (Platform.isAndroid &&
+              whiteboardAudioLikelyNeedsTranscode(
+                pkg.audioFileName,
+                codec: pkg.manifest.audioCodec,
+              )) {
+            final aac = await transcodeWhiteboardAudioToAac(audioFile);
+            await loadPath(aac.path);
+          } else {
+            await loadPath(audioFile.path);
+          }
+        } catch (_) {
+          if (Platform.isAndroid) {
+            final aac = await transcodeWhiteboardAudioToAac(audioFile);
+            await loadPath(aac.path);
+          } else {
+            rethrow;
+          }
         }
-      } catch (_) {
-        if (Platform.isAndroid) {
-          final aac = await transcodeWhiteboardAudioToAac(audioFile);
-          await loadPath(aac.path);
-        } else {
-          rethrow;
-        }
+        await _audio.setSpeed(_speed);
+        _audioPosSub = _audio.positionStream.listen((pos) {
+          _onAudioPosition(pos.inMilliseconds);
+        });
+        _audioStateSub = _audio.playerStateStream.listen((state) {
+          if (state.processingState == ProcessingState.completed) {
+            _onAudioPosition(_durationMs);
+            if (mounted) setState(() => _playing = false);
+            _emitProgress();
+          }
+        });
       }
-      await _audio.setSpeed(_speed);
-      _audioPosSub = _audio.positionStream.listen((pos) {
-        _onAudioPosition(pos.inMilliseconds);
-      });
-      _audioStateSub = _audio.playerStateStream.listen((state) {
-        if (state.processingState == ProcessingState.completed) {
-          _onAudioPosition(_durationMs);
-          if (mounted) setState(() => _playing = false);
-          _emitProgress();
-        }
-      });
 
       _pkg = pkg;
       _durationMs = pkg.manifest.durationMs > 0
@@ -585,23 +590,48 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
       await _refreshPdfUnderlay();
       _progressTimer = Timer.periodic(const Duration(seconds: 5), (_) => _emitProgress());
       if (!mounted) return;
-      setState(() => _loading = false);
-      if (widget.autoPlay) {
-        await _play();
-        _scheduleHideControls();
-      } else {
-        setState(() => _showControls = true);
+      final showIntro = widget.initialPositionSec < 3;
+      setState(() {
+        _loading = false;
+        _showBrandIntro = showIntro;
+      });
+      if (!showIntro) {
+        if (widget.autoPlay) {
+          await _play();
+          _scheduleHideControls();
+        } else {
+          setState(() => _showControls = true);
+        }
       }
     } catch (e) {
       if (!mounted) return;
+      final raw = e.toString();
       setState(() {
         _loading = false;
-        _error = e.toString().contains('OFFLINE_NOT_SAVED')
+        // pdfx release builds surface R8 names like PlatformException(d, h5.d: Unknown error…)
+        final isPdfNative = raw.contains('PlatformException') &&
+            (raw.contains('Unknown error') || raw.contains('pdf_renderer'));
+        _error = raw.contains('OFFLINE_NOT_SAVED')
             ? 'No internet — save this board lesson while online to watch offline'
-            : e.toString().contains('AUDIO_') || e.toString().contains('media open')
-                ? 'Could not play board audio on this device'
-                : e.toString();
+            : isPdfNative
+                ? 'Could not load the PDF background on this device — try again or re-save the lesson'
+                : raw.contains('AUDIO_') ||
+                        raw.contains('media open') ||
+                        raw.contains('PlayerException')
+                    ? 'Could not play board audio on this device'
+                    : raw;
       });
+    }
+  }
+
+  Future<void> _onBrandIntroFinished() async {
+    if (!mounted || !_showBrandIntro) return;
+    setState(() => _showBrandIntro = false);
+    if (widget.autoPlay) {
+      await _play();
+      _scheduleHideControls();
+    } else if (mounted) {
+      setState(() => _showControls = true);
     }
   }
 
@@ -652,14 +682,20 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
   }
 
   Future<void> _refreshPdfUnderlay() async {
-    final page = _board.currentPage;
-    if (page == null || page.kind != 'pdf' || page.pdfAssetId == null) {
+    try {
+      final page = _board.currentPage;
+      if (page == null || page.kind != 'pdf' || page.pdfAssetId == null) {
+        if (mounted) setState(() => _pdfUnderlay = null);
+        return;
+      }
+      final img = await _pdfCache.imageFor(page.pdfAssetId!, page.pdfPage ?? 1);
+      if (!mounted) return;
+      setState(() => _pdfUnderlay = img);
+    } catch (e) {
+      // Never fail playback for underlay — Android PdfRenderer is fragile.
+      debugPrint('WhiteboardPlayer PDF underlay: $e');
       if (mounted) setState(() => _pdfUnderlay = null);
-      return;
     }
-    final img = await _pdfCache.imageFor(page.pdfAssetId!, page.pdfPage ?? 1);
-    if (!mounted) return;
-    setState(() => _pdfUnderlay = img);
   }
 
   void _onAudioPosition(int ms) {
@@ -706,7 +742,11 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
 
   Future<void> _seekTo(int ms) async {
     final clamped = ms.clamp(0, _durationMs);
-    await _audio.seek(Duration(milliseconds: clamped));
+    try {
+      if (_audio.audioSource != null) {
+        await _audio.seek(Duration(milliseconds: clamped));
+      }
+    } catch (_) {}
     _playheadMs = clamped;
     _applyUntil(clamped);
     await _refreshPdfUnderlay();
@@ -714,12 +754,34 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
   }
 
   Future<void> _play() async {
-    await _audio.play();
+    try {
+      if (_audio.audioSource != null) {
+        await _audio.play();
+      } else if (_durationMs > 0) {
+        // Silent board (no audio track) — advance via ticker.
+        _tick?.cancel();
+        _tick = Timer.periodic(const Duration(milliseconds: 50), (_) {
+          if (!_playing) return;
+          final next = (_playheadMs + 50).clamp(0, _durationMs);
+          _onAudioPosition(next);
+          if (next >= _durationMs) {
+            _tick?.cancel();
+            if (mounted) setState(() => _playing = false);
+            _emitProgress();
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('WhiteboardPlayer play: $e');
+    }
     if (mounted) setState(() => _playing = true);
   }
 
   Future<void> _pause() async {
-    await _audio.pause();
+    _tick?.cancel();
+    try {
+      if (_audio.audioSource != null) await _audio.pause();
+    } catch (_) {}
     if (mounted) setState(() => _playing = false);
     _emitProgress();
   }
@@ -888,7 +950,22 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
       );
     }
 
-    return _wrapShell(child: board, showAppBar: !widget.embedded);
+    final content = _showBrandIntro
+        ? Stack(
+            fit: StackFit.expand,
+            children: [
+              board,
+              Positioned.fill(
+                child: WhiteboardBrandIntro(
+                  lessonTitle: widget.title,
+                  onFinished: () => unawaited(_onBrandIntroFinished()),
+                ),
+              ),
+            ],
+          )
+        : board;
+
+    return _wrapShell(child: content, showAppBar: !widget.embedded);
   }
 
   Widget _wrapShell({required Widget child, bool showAppBar = false}) {

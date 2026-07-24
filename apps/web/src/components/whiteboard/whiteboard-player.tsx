@@ -9,6 +9,7 @@ import {
   LOGICAL_BOARD_WIDTH,
   type ParsedUbrdPackage,
 } from "@/lib/whiteboard/types";
+import { WhiteboardBrandIntro } from "@/components/whiteboard/whiteboard-brand-intro";
 
 type Props = {
   packageUrl?: string | null;
@@ -50,6 +51,7 @@ export default function WhiteboardPlayer({
   const [playheadMs, setPlayheadMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
   const [speed, setSpeed] = useState(1);
+  const [showIntro, setShowIntro] = useState(false);
   const [, bump] = useState(0);
 
   const paint = useCallback(() => {
@@ -104,20 +106,31 @@ export default function WhiteboardPlayer({
         }
         ctx.stroke();
       }
-      for (const stroke of page.strokes) {
-        if (!stroke.points.length) continue;
+      const paintStroke = (stroke: (typeof page.strokes)[number]) => {
+        if (!stroke.points.length) return;
         ctx.beginPath();
         ctx.strokeStyle = stroke.color;
+        ctx.fillStyle = stroke.color;
         ctx.globalAlpha = stroke.opacity;
         ctx.lineWidth = stroke.width;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
-        ctx.moveTo(stroke.points[0]!.x, stroke.points[0]!.y);
-        for (let i = 1; i < stroke.points.length; i++) {
-          ctx.lineTo(stroke.points[i]!.x, stroke.points[i]!.y);
+        if (stroke.points.length === 1) {
+          const p0 = stroke.points[0]!;
+          ctx.arc(p0.x, p0.y, Math.max(stroke.width / 2, 2.5), 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.moveTo(stroke.points[0]!.x, stroke.points[0]!.y);
+          for (let i = 1; i < stroke.points.length; i++) {
+            ctx.lineTo(stroke.points[i]!.x, stroke.points[i]!.y);
+          }
+          ctx.stroke();
         }
-        ctx.stroke();
         ctx.globalAlpha = 1;
+      };
+      for (const stroke of page.strokes) paintStroke(stroke);
+      for (const stroke of board.getOpenStrokes()) {
+        if (stroke.pageId === page.id) paintStroke(stroke);
       }
       for (const text of page.texts) {
         ctx.fillStyle = text.color;
@@ -184,6 +197,9 @@ export default function WhiteboardPlayer({
         setDurationMs(parsed.manifest.durationMs);
         setLoading(false);
         const clipStart = startMs != null ? startMs : initialPositionSec * 1000;
+        // Full lesson opens: brand intro. Clip/admin review & mid-resume: skip.
+        const wantIntro = !compact && startMs == null && initialPositionSec < 3;
+        setShowIntro(wantIntro);
         requestAnimationFrame(() => {
           if (audioRef.current) {
             audioRef.current.src = objectUrl;
@@ -195,7 +211,7 @@ export default function WhiteboardPlayer({
             } else {
               applyUntil(0);
             }
-            if (autoPlay) {
+            if (autoPlay && !wantIntro) {
               void audioRef.current.play().then(() => setPlaying(true)).catch(() => {});
             }
           }
@@ -211,7 +227,16 @@ export default function WhiteboardPlayer({
       cancelled = true;
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
     };
-  }, [packageUrl, whiteboardId, initialPositionSec, startMs, autoPlay, applyUntil]);
+  }, [packageUrl, whiteboardId, initialPositionSec, startMs, autoPlay, applyUntil, compact]);
+
+  const finishIntro = useCallback(() => {
+    setShowIntro(false);
+    if (!autoPlay) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.playbackRate = speed;
+    void audio.play().then(() => setPlaying(true)).catch(() => {});
+  }, [autoPlay, speed]);
 
   useEffect(() => {
     paint();
@@ -270,6 +295,9 @@ export default function WhiteboardPlayer({
       <div className={`relative w-full bg-black/5 ${compact ? "aspect-video max-h-56" : "aspect-video"}`}>
         <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
         <audio ref={audioRef} className="hidden" />
+        {showIntro && (
+          <WhiteboardBrandIntro lessonTitle={title} onFinished={finishIntro} />
+        )}
       </div>
       {!compact ? (
       <div className="space-y-2 p-3">

@@ -65,11 +65,14 @@ class BoardPage {
     this.kind = 'blank',
     this.pdfAssetId,
     this.pdfPage,
+    this.pdfZoom = 1,
   });
   final String id;
   String kind;
   String? pdfAssetId;
   int? pdfPage;
+  /// PDF underlay zoom (1 = fit). Applied during studio + playback.
+  double pdfZoom;
   final List<BoardStroke> strokes = [];
   final List<BoardText> texts = [];
   final List<BoardShape> shapes = [];
@@ -303,17 +306,43 @@ class BoardState {
       case 'shape_add':
         final shapePage = _pageById(p['pageId']);
         if (shapePage == null) break;
-        shapePage.shapes.add(BoardShape(
-          id: p['shapeId'].toString(),
-          pageId: shapePage.id,
-          kind: p['kind']?.toString() ?? 'rect',
-          x1: (p['x1'] as num).toDouble(),
-          y1: (p['y1'] as num).toDouble(),
-          x2: (p['x2'] as num).toDouble(),
-          y2: (p['y2'] as num).toDouble(),
-          color: (p['color'] as String?) ?? color,
-          width: p['width'] is num ? (p['width'] as num).toDouble() : 2,
-        ));
+        final existing = shapePage.shapes.where((s) => s.id == p['shapeId']).toList();
+        if (existing.isNotEmpty) {
+          final shape = existing.first;
+          shape.kind = p['kind']?.toString() ?? shape.kind;
+          if (p['x1'] is num) shape.x1 = (p['x1'] as num).toDouble();
+          if (p['y1'] is num) shape.y1 = (p['y1'] as num).toDouble();
+          if (p['x2'] is num) shape.x2 = (p['x2'] as num).toDouble();
+          if (p['y2'] is num) shape.y2 = (p['y2'] as num).toDouble();
+          if (p['color'] is String) shape.color = p['color'] as String;
+          if (p['width'] is num) shape.width = (p['width'] as num).toDouble();
+        } else {
+          shapePage.shapes.add(BoardShape(
+            id: p['shapeId'].toString(),
+            pageId: shapePage.id,
+            kind: p['kind']?.toString() ?? 'rect',
+            x1: (p['x1'] as num).toDouble(),
+            y1: (p['y1'] as num).toDouble(),
+            x2: (p['x2'] as num).toDouble(),
+            y2: (p['y2'] as num).toDouble(),
+            color: (p['color'] as String?) ?? color,
+            width: p['width'] is num ? (p['width'] as num).toDouble() : 2,
+          ));
+        }
+        break;
+      case 'shape_update':
+        for (final page in pages) {
+          for (final shape in page.shapes) {
+            if (shape.id != p['shapeId']) continue;
+            if (p['x1'] is num) shape.x1 = (p['x1'] as num).toDouble();
+            if (p['y1'] is num) shape.y1 = (p['y1'] as num).toDouble();
+            if (p['x2'] is num) shape.x2 = (p['x2'] as num).toDouble();
+            if (p['y2'] is num) shape.y2 = (p['y2'] as num).toDouble();
+            if (p['color'] is String) shape.color = p['color'] as String;
+            if (p['kind'] is String) shape.kind = p['kind'] as String;
+            if (p['width'] is num) shape.width = (p['width'] as num).toDouble();
+          }
+        }
         break;
       case 'shape_delete':
         for (final page in pages) {
@@ -331,8 +360,17 @@ class BoardState {
       case 'pdf_open':
       case 'pdf_close':
       case 'pdf_switch':
-      case 'pdf_zoom':
       case 'pdf_rotate':
+        break;
+      case 'pdf_zoom':
+        final zoomAsset = p['assetId']?.toString();
+        final zoom = p['zoom'] is num ? (p['zoom'] as num).toDouble() : null;
+        if (zoom == null) break;
+        for (final page in pages) {
+          if (zoomAsset == null || page.pdfAssetId == zoomAsset) {
+            page.pdfZoom = zoom.clamp(0.5, 5.0);
+          }
+        }
         break;
       case 'pdf_page':
         final assetId = p['assetId']?.toString();

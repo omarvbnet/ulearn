@@ -43,6 +43,7 @@ export type BoardPage = {
   kind: "blank" | "pdf";
   pdfAssetId?: string;
   pdfPage?: number;
+  pdfZoom?: number;
   strokes: BoardStroke[];
   texts: BoardText[];
   shapes: BoardShape[];
@@ -66,6 +67,11 @@ export class BoardState {
   laser: BoardLaser | null = null;
   private undoStack: UbrdEvent[][] = [];
   private openStrokes = new Map<string, BoardStroke>();
+
+  /** In-progress strokes (for progressive playback). */
+  getOpenStrokes(): BoardStroke[] {
+    return Array.from(this.openStrokes.values());
+  }
 
   constructor() {
     this.addBlankPage("page_0");
@@ -259,17 +265,28 @@ export class BoardState {
       case "shape_add": {
         const page = this.pages.find((pg) => pg.id === p.pageId);
         if (!page) break;
-        page.shapes.push({
-          id: String(p.shapeId),
-          pageId: page.id,
-          kind: String(p.kind),
-          x1: Number(p.x1),
-          y1: Number(p.y1),
-          x2: Number(p.x2),
-          y2: Number(p.y2),
-          color: String(p.color ?? this.color),
-          width: typeof p.width === "number" ? p.width : 2,
-        });
+        const existing = page.shapes.find((s) => s.id === p.shapeId);
+        if (existing) {
+          if (typeof p.kind === "string") existing.kind = p.kind;
+          if (typeof p.x1 === "number") existing.x1 = p.x1;
+          if (typeof p.y1 === "number") existing.y1 = p.y1;
+          if (typeof p.x2 === "number") existing.x2 = p.x2;
+          if (typeof p.y2 === "number") existing.y2 = p.y2;
+          if (typeof p.color === "string") existing.color = p.color;
+          if (typeof p.width === "number") existing.width = p.width;
+        } else {
+          page.shapes.push({
+            id: String(p.shapeId),
+            pageId: page.id,
+            kind: String(p.kind),
+            x1: Number(p.x1),
+            y1: Number(p.y1),
+            x2: Number(p.x2),
+            y2: Number(p.y2),
+            color: String(p.color ?? this.color),
+            width: typeof p.width === "number" ? p.width : 2,
+          });
+        }
         break;
       }
       case "shape_update": {
@@ -298,6 +315,17 @@ export class BoardState {
           visible: p.visible !== false,
         };
         break;
+      case "pdf_zoom": {
+        const zoom = typeof p.zoom === "number" ? p.zoom : null;
+        if (zoom == null) break;
+        const assetId = typeof p.assetId === "string" ? p.assetId : null;
+        for (const page of this.pages) {
+          if (!assetId || page.pdfAssetId === assetId) {
+            page.pdfZoom = Math.min(5, Math.max(0.5, zoom));
+          }
+        }
+        break;
+      }
       default:
         break;
     }

@@ -75,6 +75,20 @@ export default function WhiteboardStudio({
   const streamRef = useRef<MediaStream | null>(null);
   const activeStrokeRef = useRef<{ id: string; points: { x: number; y: number; p?: number }[] } | null>(null);
   const shapeStartRef = useRef<{ x: number; y: number; id: string } | null>(null);
+  const draftShapeRef = useRef<{
+    id: string;
+    pageId: string;
+    kind: string;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    color: string;
+    width: number;
+  } | null>(null);
+  const undoStackRef = useRef<{ kind: string; payload: Record<string, unknown> }[]>([]);
+  const redoStackRef = useRef<{ kind: string; payload: Record<string, unknown> }[]>([]);
+  const [historyTick, setHistoryTick] = useState(0);
   const draftTimer = useRef<number | null>(null);
   const pdfsRef = useRef<
     { assetId: string; materialId?: string; fileKey?: string; fileUrl?: string; title: string }[]
@@ -244,8 +258,20 @@ export default function WhiteboardStudio({
     const board = boardRef.current;
     const page = board.currentPage;
     if (page) {
-      for (const shape of page.shapes) {
+      const drawShape = (
+        shape: {
+          kind: string;
+          x1: number;
+          y1: number;
+          x2: number;
+          y2: number;
+          color: string;
+          width: number;
+        },
+        preview = false
+      ) => {
         ctx.strokeStyle = shape.color;
+        ctx.globalAlpha = preview ? 0.85 : 1;
         ctx.lineWidth = shape.width;
         ctx.beginPath();
         if (shape.kind === "circle") {
@@ -265,22 +291,46 @@ export default function WhiteboardStudio({
           ctx.rect(shape.x1, shape.y1, shape.x2 - shape.x1, shape.y2 - shape.y1);
         }
         ctx.stroke();
+        if (preview) {
+          const w = Math.abs(shape.x2 - shape.x1);
+          const h = Math.abs(shape.y2 - shape.y1);
+          const label =
+            shape.kind === "line" || shape.kind === "arrow"
+              ? `${Math.round(Math.hypot(w, h))} px`
+              : `${Math.round(w)} × ${Math.round(h)}`;
+          ctx.font = "600 22px system-ui, sans-serif";
+          ctx.fillStyle = shape.color;
+          ctx.fillText(label, Math.max(shape.x1, shape.x2) + 8, Math.min(shape.y1, shape.y2) - 8);
+        }
+        ctx.globalAlpha = 1;
+      };
+      for (const shape of page.shapes) drawShape(shape);
+      if (draftShapeRef.current && draftShapeRef.current.pageId === page.id) {
+        drawShape(draftShapeRef.current, true);
       }
-      for (const stroke of page.strokes) {
-        if (!stroke.points.length) continue;
+      const paintStroke = (stroke: (typeof page.strokes)[number]) => {
+        if (!stroke.points.length) return;
         ctx.beginPath();
         ctx.strokeStyle = stroke.color;
+        ctx.fillStyle = stroke.color;
         ctx.globalAlpha = stroke.opacity;
         ctx.lineWidth = stroke.width;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
-        ctx.moveTo(stroke.points[0]!.x, stroke.points[0]!.y);
-        for (let i = 1; i < stroke.points.length; i++) {
-          ctx.lineTo(stroke.points[i]!.x, stroke.points[i]!.y);
+        if (stroke.points.length === 1) {
+          const p0 = stroke.points[0]!;
+          ctx.arc(p0.x, p0.y, Math.max(stroke.width / 2, 2.5), 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.moveTo(stroke.points[0]!.x, stroke.points[0]!.y);
+          for (let i = 1; i < stroke.points.length; i++) {
+            ctx.lineTo(stroke.points[i]!.x, stroke.points[i]!.y);
+          }
+          ctx.stroke();
         }
-        ctx.stroke();
         ctx.globalAlpha = 1;
-      }
+      };
+      for (const stroke of page.strokes) paintStroke(stroke);
       for (const text of page.texts) {
         ctx.fillStyle = text.color;
         ctx.font = `${text.fontSize}px system-ui, sans-serif`;
@@ -543,7 +593,31 @@ export default function WhiteboardStudio({
       return;
     }
     if (tool === "rect" || tool === "circle" || tool === "line" || tool === "arrow") {
-      shapeStartRef.current = { x: pt.x, y: pt.y, id: uid() };
+      const id = uid();
+      shapeStartRef.current = { x: pt.x, y: pt.y, id };
+      draftShapeRef.current = {
+        id,
+        pageId,
+        kind: tool === "rect" ? "rect" : tool,
+        x1: pt.x,
+        y1: pt.y,
+        x2: pt.x,
+        y2: pt.y,
+        color,
+        width: 3,
+      };
+      emitEvent("shape_add", {
+        shapeId: id,
+        pageId,
+        kind: tool === "rect" ? "rect" : tool,
+        x1: pt.x,
+        y1: pt.y,
+        x2: pt.x,
+        y2: pt.y,
+        color,
+        width: 3,
+      });
+      redraw();
       return;
     }
     if (tool === "eraser") {
@@ -569,6 +643,20 @@ export default function WhiteboardStudio({
       opacity: defaultOpacityForTool(tool),
       width: defaultWidthForTool(tool),
     });
+    emitEvent("stroke_point", { strokeId, x: pt.x, y: pt.y, p: pt.p });
+    const page = boardRef.current.currentPage;
+    if (page) {
+      page.strokes.push({
+        id: strokeId,
+        pageId,
+        tool,
+        color,
+        opacity: defaultOpacityForTool(tool),
+        width: defaultWidthForTool(tool),
+        points: [{ x: pt.x, y: pt.y, p: pt.p }],
+      });
+    }
+    redraw();
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -578,6 +666,21 @@ export default function WhiteboardStudio({
     if (tool === "laser") {
       boardRef.current.laser = { pageId, x: pt.x, y: pt.y, visible: true };
       emitEvent("laser_move", { pageId, x: pt.x, y: pt.y, visible: true });
+      redraw();
+      return;
+    }
+    const draft = draftShapeRef.current;
+    const shapeStart = shapeStartRef.current;
+    if (draft && shapeStart) {
+      draft.x2 = pt.x;
+      draft.y2 = pt.y;
+      emitEvent("shape_update", {
+        shapeId: draft.id,
+        x1: shapeStart.x,
+        y1: shapeStart.y,
+        x2: pt.x,
+        y2: pt.y,
+      });
       redraw();
       return;
     }
@@ -622,20 +725,28 @@ export default function WhiteboardStudio({
       };
       const t = recording ? engineRef.current.now() : playheadMs;
       boardRef.current.apply({ id: shape.id, t, type: "shape_add", payload: fixed });
-      emitEvent("shape_add", fixed);
+      emitEvent("shape_update", fixed);
+      undoStackRef.current.push({ kind: "shape", payload: { shapeId: shape.id, pageId } });
+      redoStackRef.current = [];
+      setHistoryTick((n) => n + 1);
       shapeStartRef.current = null;
+      draftShapeRef.current = null;
       redraw();
       return;
     }
     const active = activeStrokeRef.current;
     if (!active) return;
-    const points = smoothStrokePoints(active.points);
+    const points =
+      active.points.length > 1 ? smoothStrokePoints(active.points) : active.points;
     const page = boardRef.current.currentPage;
     if (page) {
       const existing = page.strokes.find((s) => s.id === active.id);
       if (existing) existing.points = points;
     }
     emitEvent("stroke_end", { strokeId: active.id, pageId, points });
+    undoStackRef.current.push({ kind: "stroke", payload: { strokeId: active.id, pageId } });
+    redoStackRef.current = [];
+    setHistoryTick((n) => n + 1);
     activeStrokeRef.current = null;
     redraw();
   };
@@ -698,6 +809,188 @@ export default function WhiteboardStudio({
     } catch (e) {
       alert(e instanceof Error ? e.message : "Could not attach PDF");
     }
+  };
+
+  const importDevicePdf = async () => {
+    try {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "application/pdf,.pdf";
+      const file = await new Promise<File | null>((resolve) => {
+        input.onchange = () => resolve(input.files?.[0] ?? null);
+        input.click();
+      });
+      if (!file) return;
+      const presignRes = await fetch("/api/admin/uploads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name.endsWith(".pdf") ? file.name : `${file.name}.pdf`,
+          contentType: "application/pdf",
+          folder: "course-materials",
+        }),
+      });
+      if (!presignRes.ok) throw new Error("PRESIGN_FAILED");
+      const presign = await presignRes.json();
+      const uploadUrl = String(presign.uploadUrl ?? "");
+      const key = String(presign.key ?? presign.fileKey ?? "");
+      const publicUrl = String(presign.publicUrl ?? presign.url ?? "");
+      if (!uploadUrl || !key) throw new Error("Upload URL missing");
+      const put = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: file,
+      });
+      if (!put.ok) throw new Error("UPLOAD_FAILED");
+      const docRes = await fetch(`/api/teacher/courses/${courseId}/documents`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: file.name.replace(/\.pdf$/i, ""),
+          fileKey: key,
+          fileUrl: publicUrl || `/api/media/${key.split("/").map(encodeURIComponent).join("/")}`,
+          mimeType: "application/pdf",
+          fileSize: file.size,
+          type: "PDF",
+        }),
+      });
+      if (!docRes.ok) throw new Error("DOCUMENT_SAVE_FAILED");
+      const docJson = await docRes.json();
+      const doc = docJson.document ?? {};
+      const assetId = `pdf_${doc.id ?? uid()}`;
+      pdfsRef.current = [
+        ...pdfsRef.current.filter((p) => p.assetId !== assetId),
+        {
+          assetId,
+          materialId: doc.id,
+          fileKey: doc.fileKey ?? key,
+          fileUrl: doc.fileUrl ?? publicUrl,
+          title: doc.title ?? file.name,
+        },
+      ];
+      const pageId = `page_${uid()}`;
+      boardRef.current.addBlankPage(pageId);
+      const page = boardRef.current.currentPage;
+      if (page) {
+        page.kind = "pdf";
+        page.pdfAssetId = assetId;
+        page.pdfPage = 1;
+        page.pdfZoom = 1;
+      }
+      setPageIds(boardRef.current.pages.map((p) => p.id));
+      setCurrentPageId(pageId);
+      if (recording || editMode) {
+        emitEvent("pdf_open", { assetId, title: doc.title ?? file.name });
+        emitEvent("page_add", {
+          pageId,
+          index: boardRef.current.pages.length - 1,
+          kind: "pdf",
+          pdfAssetId: assetId,
+          pdfPage: 1,
+        });
+        emitEvent("page_select", { pageId });
+      }
+      redraw();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "PDF import failed");
+    }
+  };
+
+  const nudgePdfZoom = (factor: number) => {
+    const page = boardRef.current.currentPage;
+    if (!page || page.kind !== "pdf" || !page.pdfAssetId) return;
+    const next = Math.min(5, Math.max(0.5, (page.pdfZoom ?? 1) * factor));
+    page.pdfZoom = next;
+    if (recording || editMode) {
+      emitEvent("pdf_zoom", { assetId: page.pdfAssetId, zoom: next });
+    }
+    redraw();
+  };
+
+  const undo = () => {
+    const item = undoStackRef.current.pop();
+    if (!item) return;
+    if (item.kind === "stroke") {
+      const id = String(item.payload.strokeId ?? "");
+      const pageId = String(item.payload.pageId ?? "");
+      const page = boardRef.current.pages.find((p) => p.id === pageId) ?? boardRef.current.currentPage;
+      const stroke = page?.strokes.find((s) => s.id === id);
+      if (stroke) {
+        redoStackRef.current.push({
+          kind: "stroke",
+          payload: {
+            strokeId: stroke.id,
+            pageId: stroke.pageId,
+            tool: stroke.tool,
+            color: stroke.color,
+            opacity: stroke.opacity,
+            width: stroke.width,
+            points: stroke.points,
+          },
+        });
+      }
+      if (page) page.strokes = page.strokes.filter((s) => s.id !== id);
+      emitEvent("erase", { pageId, strokeIds: [id] });
+    } else if (item.kind === "shape") {
+      const id = String(item.payload.shapeId ?? "");
+      let snapshot: Record<string, unknown> | null = null;
+      for (const page of boardRef.current.pages) {
+        const shape = page.shapes.find((s) => s.id === id);
+        if (shape) {
+          snapshot = { ...shape, shapeId: shape.id };
+          page.shapes = page.shapes.filter((s) => s.id !== id);
+        }
+      }
+      if (snapshot) redoStackRef.current.push({ kind: "shape", payload: snapshot });
+      emitEvent("shape_delete", { shapeId: id });
+    }
+    setHistoryTick((n) => n + 1);
+    redraw();
+  };
+
+  const redo = () => {
+    const item = redoStackRef.current.pop();
+    if (!item) return;
+    if (item.kind === "stroke") {
+      const p = item.payload;
+      const page =
+        boardRef.current.pages.find((pg) => pg.id === p.pageId) ?? boardRef.current.currentPage;
+      if (page) {
+        page.strokes.push({
+          id: String(p.strokeId),
+          pageId: String(p.pageId),
+          tool: String(p.tool ?? tool) as WhiteboardTool,
+          color: String(p.color ?? color),
+          opacity: typeof p.opacity === "number" ? p.opacity : 1,
+          width: typeof p.width === "number" ? p.width : 3.5,
+          points: Array.isArray(p.points) ? (p.points as { x: number; y: number; p?: number }[]) : [],
+        });
+      }
+      emitEvent("stroke_begin", {
+        strokeId: p.strokeId,
+        pageId: p.pageId,
+        tool: p.tool,
+        color: p.color,
+        opacity: p.opacity,
+        width: p.width,
+      });
+      emitEvent("stroke_end", { strokeId: p.strokeId, pageId: p.pageId, points: p.points });
+      undoStackRef.current.push({
+        kind: "stroke",
+        payload: { strokeId: p.strokeId, pageId: p.pageId },
+      });
+    } else if (item.kind === "shape") {
+      const p = item.payload;
+      const t = recording ? engineRef.current.now() : playheadMs;
+      boardRef.current.apply({ id: String(p.shapeId), t, type: "shape_add", payload: p });
+      emitEvent("shape_add", p);
+      undoStackRef.current.push({
+        kind: "shape",
+        payload: { shapeId: p.shapeId, pageId: p.pageId },
+      });
+    }
+    setHistoryTick((n) => n + 1);
+    redraw();
   };
 
   const addPage = () => {
@@ -869,12 +1162,29 @@ export default function WhiteboardStudio({
             style={{ background: c, borderColor: color === c ? "#2563EB" : "transparent" }}
           />
         ))}
+        <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={undo} disabled={undoStackRef.current.length === 0}>
+          Undo
+        </button>
+        <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={redo} disabled={redoStackRef.current.length === 0}>
+          Redo
+        </button>
         <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={clearPage}>
           Clear page
         </button>
         <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={() => void attachCoursePdf()}>
-          Open course PDF
+          Course PDF
         </button>
+        <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={() => void importDevicePdf()}>
+          Import PDF
+        </button>
+        <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={() => nudgePdfZoom(1 / 1.25)}>
+          Zoom −
+        </button>
+        <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={() => nudgePdfZoom(1.25)}>
+          Zoom +
+        </button>
+        {/* keep historyTick referenced so undo/redo buttons re-enable */}
+        <span className="sr-only">{historyTick}</span>
       </div>
 
       <div className="relative min-h-0 flex-1">
