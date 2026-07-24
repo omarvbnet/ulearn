@@ -5,7 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/network/network_status.dart';
@@ -14,9 +14,9 @@ import 'package:ulearn/features/whiteboard/domain/event_engine.dart';
 import 'package:ulearn/features/whiteboard/domain/offline_store.dart';
 import 'package:ulearn/features/whiteboard/domain/package.dart';
 import 'package:ulearn/features/whiteboard/domain/types.dart';
+import 'package:ulearn/features/whiteboard/domain/whiteboard_audio.dart';
 import 'package:ulearn/features/whiteboard/ui/pdf_underlay.dart';
 import 'package:ulearn/features/whiteboard/ui/whiteboard_painter.dart';
-import 'package:video_player/video_player.dart';
 
 /// Student/teacher viewer — reconstructs a recorded whiteboard lesson.
 class WhiteboardPlayerScreen extends StatefulWidget {
@@ -70,7 +70,11 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
   final _engine = EventEngine();
   final _pdfCache = PdfUnderlayCache();
   final _transform = TransformationController();
-  VideoPlayerController? _audio;
+  /// Dedicated audio player — do not use video_player/fvp (fails on Android
+  /// for audio-only .m4a/.webm from whiteboard packages).
+  final AudioPlayer _audio = AudioPlayer();
+  StreamSubscription<Duration>? _audioPosSub;
+  StreamSubscription<PlayerState>? _audioStateSub;
   ParsedUbrdPackage? _pkg;
   ui.Image? _pdfUnderlay;
   bool _loading = true;
@@ -126,7 +130,9 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     _fsTransform.removeListener(_onFsTransformChanged);
     _transform.dispose();
     _fsTransform.dispose();
-    _audio?.dispose();
+    unawaited(_audioPosSub?.cancel());
+    unawaited(_audioStateSub?.cancel());
+    unawaited(_audio.dispose());
     unawaited(_pdfCache.dispose());
     super.dispose();
   }
@@ -179,7 +185,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
   }
 
   Future<void> _enterFullscreen() async {
-    if (_audio == null || _pkg == null || _inFullscreen) return;
+    if (_pkg == null || _inFullscreen) return;
     final overlay = Overlay.maybeOf(context, rootOverlay: true);
     if (overlay == null) return;
 
@@ -435,7 +441,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
                                   initialValue: _speed,
                                   onSelected: (v) async {
                                     _speed = v;
-                                    await _audio?.setPlaybackSpeed(v);
+                                    await _audio.setSpeed(v);
                                     if (mounted) setState(() {});
                                     _scheduleFsHideControls();
                                     _fullscreenEntry?.markNeedsBuild();
@@ -486,8 +492,9 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
       Map<String, String> localPdfs = {};
 
       if (offline != null) {
-        packageBytes = await File(offline.packagePath).readAsBytes();
-        localPdfs = offline.pdfPaths;
+        final pkgPath = await WhiteboardOfflineStore.resolvedPackagePath(offline);
+        packageBytes = await File(pkgPath).readAsBytes();
+        localPdfs = await WhiteboardOfflineStore.resolvedPdfPaths(offline);
         _offlineSource = true;
       } else {
         final online = await NetworkStatus.isOnline();
@@ -523,17 +530,53 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
         }
       }
 
-      final dir = await getTemporaryDirectory();
-      final audioFile = File('${dir.path}/wb_play_${widget.lessonId}_${pkg.audioFileName}');
-      await audioFile.writeAsBytes(pkg.audioBytes, flush: true);
-      final audio = VideoPlayerController.file(audioFile);
-      await audio.initialize();
-      audio.setPlaybackSpeed(_speed);
-      audio.addListener(_onAudioTick);
+      final audioFile = await writeWhiteboardAudioFile(
+        lessonId: widget.lessonId,
+        audioFileName: pkg.audioFileName,
+        audioBytes: pkg.audioBytes,
+      );
+      await _audioPosSub?.cancel();
+      await _audioStateSub?.cancel();
+      await _audio.stop();
+
+      Future<void> loadPath(String path) => _audio.setFilePath(path);
+
+      try {
+        // Web-studio boards ship Opus/WebM; transcode on Android first for reliability.
+        if (Platform.isAndroid &&
+            whiteboardAudioLikelyNeedsTranscode(
+              pkg.audioFileName,
+              codec: pkg.manifest.audioCodec,
+            )) {
+          final aac = await transcodeWhiteboardAudioToAac(audioFile);
+          await loadPath(aac.path);
+        } else {
+          await loadPath(audioFile.path);
+        }
+      } catch (_) {
+        if (Platform.isAndroid) {
+          final aac = await transcodeWhiteboardAudioToAac(audioFile);
+          await loadPath(aac.path);
+        } else {
+          rethrow;
+        }
+      }
+      await _audio.setSpeed(_speed);
+      _audioPosSub = _audio.positionStream.listen((pos) {
+        _onAudioPosition(pos.inMilliseconds);
+      });
+      _audioStateSub = _audio.playerStateStream.listen((state) {
+        if (state.processingState == ProcessingState.completed) {
+          _onAudioPosition(_durationMs);
+          if (mounted) setState(() => _playing = false);
+          _emitProgress();
+        }
+      });
 
       _pkg = pkg;
-      _audio = audio;
-      _durationMs = pkg.manifest.durationMs;
+      _durationMs = pkg.manifest.durationMs > 0
+          ? pkg.manifest.durationMs
+          : (_audio.duration?.inMilliseconds ?? 0);
       if (widget.initialPositionSec > 0) {
         await _seekTo(widget.initialPositionSec * 1000);
       } else {
@@ -555,7 +598,9 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
         _loading = false;
         _error = e.toString().contains('OFFLINE_NOT_SAVED')
             ? 'No internet — save this board lesson while online to watch offline'
-            : e.toString();
+            : e.toString().contains('AUDIO_') || e.toString().contains('media open')
+                ? 'Could not play board audio on this device'
+                : e.toString();
       });
     }
   }
@@ -617,10 +662,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     setState(() => _pdfUnderlay = img);
   }
 
-  void _onAudioTick() {
-    final audio = _audio;
-    if (audio == null || !audio.value.isInitialized) return;
-    final ms = audio.value.position.inMilliseconds;
+  void _onAudioPosition(int ms) {
     if (ms == _playheadMs) return;
     final prevPageId = _board.currentPageId;
     final prevPdfPage = _board.currentPage?.pdfPage;
@@ -628,7 +670,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     _applyForward(ms);
     final preview = widget.freePreviewSec;
     if (preview != null && preview > 0 && ms >= preview * 1000) {
-      _pause();
+      unawaited(_pause());
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Free preview ended — purchase to continue')),
@@ -664,7 +706,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
 
   Future<void> _seekTo(int ms) async {
     final clamped = ms.clamp(0, _durationMs);
-    await _audio?.seekTo(Duration(milliseconds: clamped));
+    await _audio.seek(Duration(milliseconds: clamped));
     _playheadMs = clamped;
     _applyUntil(clamped);
     await _refreshPdfUnderlay();
@@ -672,12 +714,12 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
   }
 
   Future<void> _play() async {
-    await _audio?.play();
+    await _audio.play();
     if (mounted) setState(() => _playing = true);
   }
 
   Future<void> _pause() async {
-    await _audio?.pause();
+    await _audio.pause();
     if (mounted) setState(() => _playing = false);
     _emitProgress();
   }
@@ -863,7 +905,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
                   initialValue: _speed,
                   onSelected: (v) async {
                     _speed = v;
-                    await _audio?.setPlaybackSpeed(v);
+                    await _audio.setSpeed(v);
                     setState(() {});
                     _scheduleHideControls();
                   },
@@ -988,7 +1030,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
                     initialValue: _speed,
                     onSelected: (v) async {
                       _speed = v;
-                      await _audio?.setPlaybackSpeed(v);
+                      await _audio.setSpeed(v);
                       setState(() {});
                       _scheduleHideControls();
                     },

@@ -34,6 +34,47 @@ class EventEngine {
     return ev;
   }
 
+  UbrdEvent pushAt(int t, String type, Map<String, dynamic> payload, {String? id}) {
+    final ev = UbrdEvent(
+      id: id ?? 'e_${_rand.nextInt(1 << 32).toRadixString(16)}_$t',
+      t: t < 0 ? 0 : t,
+      type: type,
+      payload: payload,
+    );
+    _events.add(ev);
+    _events.sort((a, b) {
+      final c = a.t.compareTo(b.t);
+      return c != 0 ? c : a.id.compareTo(b.id);
+    });
+    return ev;
+  }
+
+  void resumeAt(int elapsedMs, [DateTime? wall]) {
+    final w = wall ?? DateTime.now();
+    _startedAt = w.subtract(Duration(milliseconds: elapsedMs.clamp(0, 1 << 31)));
+  }
+
+  /// Remove events in [startMs, endMs) and shift later events. Returns cut length.
+  int cutRange(int startMs, int endMs) {
+    final lo = startMs < endMs ? startMs : endMs;
+    final hi = startMs < endMs ? endMs : startMs;
+    final removed = (hi - lo).clamp(0, 1 << 31);
+    if (removed <= 0) return 0;
+    final kept = <UbrdEvent>[];
+    for (final e in _events) {
+      if (e.t >= lo && e.t < hi) continue;
+      if (e.t >= hi) {
+        kept.add(UbrdEvent(id: e.id, t: e.t - removed, type: e.type, payload: e.payload));
+      } else {
+        kept.add(e);
+      }
+    }
+    _events
+      ..clear()
+      ..addAll(kept);
+    return removed;
+  }
+
   void load(List<UbrdEvent> events) {
     _startedAt = null;
     _events

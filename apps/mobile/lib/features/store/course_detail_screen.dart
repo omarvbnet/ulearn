@@ -81,6 +81,11 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   _PlayerStage _playerStage = _PlayerStage.playing;
   Map<String, dynamic>? _stageQuiz;
   List<Map<String, dynamic>> _stageDocs = [];
+  /// Prevents duplicate auto-advance when completion fires more than once.
+  final Set<String> _completionHandledLessonIds = {};
+  /// Only auto-continue when the student finishes a lesson that was incomplete
+  /// at the moment they opened it (avoids jumping on rewatch).
+  String? _autoAdvanceLessonId;
   /// Portrait: pinch zooms the whole player stage (content below moves).
   double _playerZoom = 1.0;
   double _playerZoomAtScaleStart = 1.0;
@@ -161,6 +166,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         lessonId: id,
         courseId: widget.courseId,
         title: lesson['title']?.toString() ?? 'Whiteboard',
+        courseTitle: _course != null
+            ? localizedText(_course!, context.localeCode)
+            : widget.summary?['title']?.toString(),
         packageUrl: lesson['packageUrl']?.toString(),
         whiteboardId: lesson['whiteboardId']?.toString() ??
             lesson['whiteboardAssetId']?.toString(),
@@ -241,12 +249,14 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     for (final l in lessons) {
       if (_canWatch(l, unlocked) && !_isLessonCompleted(l)) {
         _activeLesson = l;
+        _autoAdvanceLessonId = l['id']?.toString();
         return;
       }
     }
     for (final l in lessons) {
       if (_canWatch(l, unlocked)) {
         _activeLesson = l;
+        _autoAdvanceLessonId = null;
         return;
       }
     }
@@ -263,6 +273,11 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   Future<void> _load() async {
+    // Cold-start / airplane mode: open saved boards without waiting on API timeout.
+    if (!await NetworkStatus.isOnline()) {
+      final usedOffline = await _loadOfflineFallback();
+      if (usedOffline) return;
+    }
     try {
       final data =
           await context.read<ApiClient>().get('/api/store/courses/${widget.courseId}');
@@ -334,7 +349,11 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                 (l) => l?['id']?.toString() == deepLessonId,
                 orElse: () => null,
               );
-          if (match != null) _activeLesson = match;
+          if (match != null) {
+            _activeLesson = match;
+            _autoAdvanceLessonId =
+                !_isLessonCompleted(match) ? match['id']?.toString() : null;
+          }
         }
         if (widget.openQa ||
             (widget.initialQuestionId?.isNotEmpty == true) ||
@@ -353,6 +372,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         }
       }
       _maybeShowEvaluation();
+      unawaited(_backfillOfflineCourseTitle(course));
     } on ApiException catch (e) {
       if (!mounted) return;
       final usedOffline = await _loadOfflineFallback();
@@ -391,7 +411,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       _course = {
         ...?widget.summary,
         'id': widget.courseId,
-        'title': widget.summary?['title'] ?? 'Offline boards',
+        'title': offline.first.courseTitle ??
+            widget.summary?['title'] ??
+            'Offline boards',
+        'titleEn': offline.first.courseTitle ??
+            widget.summary?['title'] ??
+            'Offline boards',
         'lessons': lessons,
         'price': 0,
         'purchaseStatus': 'PAID',
@@ -405,6 +430,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         ..addAll(offline.map((e) => e.lessonId));
     });
     return true;
+  }
+
+  Future<void> _backfillOfflineCourseTitle(Map<String, dynamic> course) async {
+    final title = localizedText(course, context.localeCode).trim();
+    if (title.isEmpty) return;
+    await WhiteboardOfflineStore.touchCourseTitle(widget.courseId, title);
   }
 
   Future<void> _react(String type) async {
@@ -644,11 +675,14 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       );
       return;
     }
+    final lessonId = lesson['id']?.toString();
     setState(() {
       _activeLesson = lesson;
       _playerStage = _PlayerStage.playing;
       _stageQuiz = null;
       _stageDocs = [];
+      _autoAdvanceLessonId =
+          (lessonId != null && !_isLessonCompleted(lesson)) ? lessonId : null;
     });
     unawaited(_refreshOfflineBoardIndex());
     final lessons =
@@ -680,9 +714,36 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         _stageDocs = docs;
         _stageQuiz = null;
       });
+      // Keep continuous play: after a short beat, move on unless the user is reading.
+      Future.delayed(const Duration(seconds: 4), () {
+        if (!mounted) return;
+        if (_playerStage != _PlayerStage.documents) return;
+        if (_activeLesson?['id']?.toString() != lesson['id']?.toString()) return;
+        _advanceAfterLesson(lesson);
+      });
       return;
     }
     _advanceAfterLesson(lesson);
+  }
+
+  void _showInlineQuiz(Map<String, dynamic> quiz) {
+    setState(() {
+      _playerStage = _PlayerStage.quiz;
+      _stageQuiz = quiz;
+      _stageDocs = [];
+      _playerZoom = 1.0;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          context.l10n.storeReadyForQuiz(
+            localizedText(quiz, context.localeCode),
+          ),
+        ),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   void _advanceAfterLesson(Map<String, dynamic> lesson) {
@@ -692,8 +753,15 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         _course?['purchaseStatus'] == 'PAID' ||
         ((_course?['price'] as num?)?.toDouble() ?? 0) <= 0 ||
         _isOwnCourse;
-    final next = _nextWatchableLesson(lessons, unlocked, current: lesson);
-    if (next == null) {
+
+    // End-of-course quizzes (no afterLessonId) after the last watchable lesson.
+    final nextLesson = _nextWatchableLesson(lessons, unlocked, current: lesson);
+    if (nextLesson == null) {
+      final endQuiz = _nextUnpassedEndQuiz();
+      if (endQuiz != null) {
+        _showInlineQuiz(endQuiz);
+        return;
+      }
       setState(() {
         _playerStage = _PlayerStage.playing;
         _stageQuiz = null;
@@ -705,19 +773,37 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       });
       return;
     }
+
+    final nextId = nextLesson['id']?.toString();
     setState(() {
-      _activeLesson = next;
+      _activeLesson = nextLesson;
       _playerStage = _PlayerStage.playing;
       _stageQuiz = null;
       _stageDocs = [];
+      _playerZoom = 1.0;
+      _autoAdvanceLessonId =
+          (nextId != null && !_isLessonCompleted(nextLesson)) ? nextId : null;
     });
+    if (nextId != null) _completionHandledLessonIds.remove(nextId);
+
+    final kind = _isWhiteboard(nextLesson) ? 'board' : 'video';
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(context.l10n.storeUpNext(next['title']?.toString() ?? '')),
+        content: Text(context.l10n.storeUpNext(nextLesson['title']?.toString() ?? kind)),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
       ),
     );
+
+    if (!_isWhiteboard(nextLesson)) {
+      final idx = lessons.indexWhere((l) => l['id'] == nextLesson['id']);
+      if (idx >= 0) {
+        CourseVideoCache.prefetchAround(
+          lessons.map((l) => l['fileUrl']?.toString()).toList(),
+          idx,
+        );
+      }
+    }
   }
 
   Map<String, dynamic>? _nextWatchableLesson(
@@ -737,9 +823,76 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   Map<String, dynamic>? _quizAfterLesson(String? lessonId) {
     if (lessonId == null) return null;
     for (final q in _quizzes) {
-      if (q['afterLessonId']?.toString() == lessonId) return q;
+      if (q['afterLessonId']?.toString() == lessonId && q['passedByMe'] != true) {
+        return q;
+      }
     }
     return null;
+  }
+
+  Map<String, dynamic>? _nextUnpassedEndQuiz() {
+    for (final q in _quizzes) {
+      final after = q['afterLessonId']?.toString();
+      if ((after == null || after.isEmpty) && q['passedByMe'] != true) {
+        return q;
+      }
+    }
+    return null;
+  }
+
+  /// Continuous play: lesson → quiz → documents → next lesson (video or board).
+  void _onLessonCompleted(Map<String, dynamic> lesson) {
+    final lessonId = lesson['id']?.toString();
+    if (lessonId == null) return;
+    if (_completionHandledLessonIds.contains(lessonId)) return;
+    _completionHandledLessonIds.add(lessonId);
+
+    final shouldAutoAdvance = _autoAdvanceLessonId == lessonId;
+
+    setState(() {
+      lesson['isCompleted'] = true;
+      lesson['completed'] = true;
+      lesson['progressPct'] = 100;
+      if (shouldAutoAdvance) _autoAdvanceLessonId = null;
+    });
+
+    if (!shouldAutoAdvance) return;
+
+    Future.delayed(const Duration(milliseconds: 700), () {
+      if (!mounted) return;
+      if (_activeLesson?['id']?.toString() != lessonId) return;
+
+      final quiz = _quizAfterLesson(lessonId);
+      if (quiz != null) {
+        _showInlineQuiz(quiz);
+        return;
+      }
+      _enterDocumentsOrAdvance(lesson);
+    });
+  }
+
+  void _onInlineQuizFinished({required bool passed}) {
+    final quiz = _stageQuiz;
+    final lesson = _activeLesson;
+    if (quiz != null && passed) {
+      setState(() => quiz['passedByMe'] = true);
+    }
+    if (lesson == null) {
+      // End-course quiz with no active lesson — try next end quiz or refresh.
+      final nextEnd = _nextUnpassedEndQuiz();
+      if (nextEnd != null && nextEnd['id'] != quiz?['id']) {
+        _showInlineQuiz(nextEnd);
+        return;
+      }
+      setState(() {
+        _playerStage = _PlayerStage.playing;
+        _stageQuiz = null;
+        _stageDocs = [];
+      });
+      unawaited(_load());
+      return;
+    }
+    _enterDocumentsOrAdvance(lesson);
   }
 
   void _maybeShowEvaluation() {
@@ -816,28 +969,6 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       items.add((isQuiz: true, data: q, lessonIndex: null));
     }
     return items;
-  }
-
-  void _onLessonCompleted(Map<String, dynamic> lesson) {
-    setState(() {
-      lesson['isCompleted'] = true;
-      lesson['completed'] = true;
-      lesson['progressPct'] = 100;
-    });
-
-    final quiz = _quizAfterLesson(lesson['id']?.toString());
-    if (quiz != null && quiz['passedByMe'] != true) {
-      Future.delayed(const Duration(milliseconds: 600), () {
-        if (!mounted) return;
-        _openQuiz(quiz);
-      });
-      return;
-    }
-
-    Future.delayed(const Duration(milliseconds: 600), () {
-      if (!mounted) return;
-      _enterDocumentsOrAdvance(lesson);
-    });
   }
 
   bool _isLessonCompleted(Map<String, dynamic> lesson) {
@@ -1093,11 +1224,8 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         quizId: _stageQuiz!['id'].toString(),
         title: localizedText(_stageQuiz!, context.localeCode),
         embedded: true,
-        onFinished: () {
-          final lesson = _activeLesson;
-          if (lesson == null) return;
-          setState(() => _stageQuiz!['passedByMe'] = true);
-          _enterDocumentsOrAdvance(lesson);
+        onFinished: ({required bool passed}) {
+          _onInlineQuizFinished(passed: passed);
         },
       );
     }

@@ -1,7 +1,6 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { notifySubscribersLessonUpdated } from "@/services/engagement-notifications.service";
-import { z } from "zod";
 
 /** Admin: approve or reject a pending lesson update. */
 export async function POST(
@@ -46,6 +45,12 @@ export async function POST(
     return json({ success: true, status: "REJECTED" });
   }
 
+  const lessonType = req.whiteboardAssetId
+    ? "WHITEBOARD"
+    : req.fileKey || req.fileUrl
+      ? "VIDEO"
+      : undefined;
+
   await prisma.courseLesson.update({
     where: { id: req.lessonId },
     data: {
@@ -55,8 +60,39 @@ export async function POST(
       ...(req.thumbnailKey ? { thumbnailKey: req.thumbnailKey } : {}),
       ...(req.thumbnailUrl ? { thumbnailUrl: req.thumbnailUrl } : {}),
       ...(req.durationSec != null ? { durationSec: req.durationSec } : {}),
+      ...(req.whiteboardAssetId
+        ? {
+            whiteboardAssetId: req.whiteboardAssetId,
+            lessonType: "WHITEBOARD" as const,
+            fileKey: req.fileKey ?? undefined,
+          }
+        : {}),
+      ...(lessonType === "VIDEO" ? { lessonType: "VIDEO" as const } : {}),
     },
   });
+
+  if (req.whiteboardAssetId) {
+    // Bind new asset; unbind previous if different.
+    await prisma.whiteboardAsset.update({
+      where: { id: req.whiteboardAssetId },
+      data: {
+        courseLessonId: req.lessonId,
+        courseId: req.lesson.courseId,
+      },
+    });
+    if (
+      req.previousWhiteboardAssetId &&
+      req.previousWhiteboardAssetId !== req.whiteboardAssetId
+    ) {
+      await prisma.whiteboardAsset.updateMany({
+        where: {
+          id: req.previousWhiteboardAssetId,
+          courseLessonId: req.lessonId,
+        },
+        data: { courseLessonId: null },
+      });
+    }
+  }
 
   await prisma.courseLessonUpdateRequest.update({
     where: { id },
@@ -76,6 +112,7 @@ export async function POST(
       lessonTitle: req.title ?? req.lesson.title,
       courseId: req.lesson.courseId,
       lessonId: req.lessonId,
+      isWhiteboard: Boolean(req.whiteboardAssetId),
     });
   }
 

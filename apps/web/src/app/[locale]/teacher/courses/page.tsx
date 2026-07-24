@@ -21,6 +21,7 @@ type Lesson = {
   isFreePreview: boolean;
   isInterview?: boolean;
   lessonType?: "VIDEO" | "WHITEBOARD";
+  whiteboardAssetId?: string | null;
 };
 
 type Course = {
@@ -523,6 +524,9 @@ function LessonsModal({ course, whiteboardLessonsEnabled = true, onClose, onChan
   const [title, setTitle] = useState("");
   const [lessonType, setLessonType] = useState<"VIDEO" | "WHITEBOARD">("VIDEO");
   const [showWbStudio, setShowWbStudio] = useState(false);
+  const [editWb, setEditWb] = useState<{ lessonId: string; whiteboardId: string; title: string } | null>(
+    null
+  );
   const [file, setFile] = useState<File | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [preview, setPreview] = useState(false);
@@ -856,6 +860,21 @@ function LessonsModal({ course, whiteboardLessonsEnabled = true, onClose, onChan
                   <button className="text-xs text-muted hover:underline" onClick={() => renameLesson(l)}>
                     Rename
                   </button>
+                  {l.lessonType === "WHITEBOARD" && l.whiteboardAssetId && (
+                    <button
+                      className="text-xs text-accent hover:underline"
+                      onClick={() =>
+                        setEditWb({
+                          lessonId: l.id,
+                          whiteboardId: l.whiteboardAssetId!,
+                          title: l.title,
+                        })
+                      }
+                    >
+                      Edit board
+                    </button>
+                  )}
+                  {l.lessonType !== "WHITEBOARD" && (
                   <label className="cursor-pointer text-xs text-accent hover:underline">
                     {replacingId === l.id ? `Replacing… ${progress}%` : "Replace video"}
                     <input
@@ -870,6 +889,7 @@ function LessonsModal({ course, whiteboardLessonsEnabled = true, onClose, onChan
                       }}
                     />
                   </label>
+                  )}
                   <button className="text-danger hover:underline" onClick={() => removeLesson(l.id)}>
                     Remove
                   </button>
@@ -879,7 +899,25 @@ function LessonsModal({ course, whiteboardLessonsEnabled = true, onClose, onChan
           </ul>
         )}
 
-        {showWbStudio ? (
+        {editWb ? (
+          <WhiteboardStudio
+            courseId={course.id}
+            lessonId={editWb.lessonId}
+            whiteboardId={editWb.whiteboardId}
+            initialTitle={editWb.title}
+            onCancel={() => setEditWb(null)}
+            onPublished={(result) => {
+              setEditWb(null);
+              toast(
+                result?.pendingReview
+                  ? "Whiteboard edit submitted for admin review"
+                  : "Whiteboard lesson updated",
+                "success"
+              );
+              onChanged();
+            }}
+          />
+        ) : showWbStudio ? (
           <WhiteboardStudio
             courseId={course.id}
             initialTitle={title.trim() || "Whiteboard lesson"}

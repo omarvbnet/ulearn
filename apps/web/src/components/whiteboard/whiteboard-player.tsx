@@ -16,6 +16,11 @@ type Props = {
   title?: string;
   initialPositionSec?: number;
   freePreviewSec?: number | null;
+  /** Clip playback for admin review of edited ranges. */
+  startMs?: number;
+  endMs?: number;
+  autoPlay?: boolean;
+  compact?: boolean;
   onProgress?: (positionSec: number, durationSec: number, completed: boolean) => void;
 };
 
@@ -25,6 +30,10 @@ export default function WhiteboardPlayer({
   title,
   initialPositionSec = 0,
   freePreviewSec,
+  startMs,
+  endMs,
+  autoPlay = false,
+  compact = false,
   onProgress,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -174,15 +183,20 @@ export default function WhiteboardPlayer({
         setPkg(parsed);
         setDurationMs(parsed.manifest.durationMs);
         setLoading(false);
+        const clipStart = startMs != null ? startMs : initialPositionSec * 1000;
         requestAnimationFrame(() => {
           if (audioRef.current) {
             audioRef.current.src = objectUrl;
             audioRef.current.load();
-            if (initialPositionSec > 0) {
-              audioRef.current.currentTime = initialPositionSec;
-              applyUntil(initialPositionSec * 1000);
+            if (clipStart > 0) {
+              audioRef.current.currentTime = clipStart / 1000;
+              applyUntil(clipStart);
+              setPlayheadMs(clipStart);
             } else {
               applyUntil(0);
+            }
+            if (autoPlay) {
+              void audioRef.current.play().then(() => setPlaying(true)).catch(() => {});
             }
           }
         });
@@ -197,7 +211,7 @@ export default function WhiteboardPlayer({
       cancelled = true;
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
     };
-  }, [packageUrl, whiteboardId, initialPositionSec, applyUntil]);
+  }, [packageUrl, whiteboardId, initialPositionSec, startMs, autoPlay, applyUntil]);
 
   useEffect(() => {
     paint();
@@ -210,6 +224,11 @@ export default function WhiteboardPlayer({
       const ms = Math.floor(audio.currentTime * 1000);
       setPlayheadMs(ms);
       applyForward(ms);
+      if (endMs != null && ms >= endMs) {
+        audio.pause();
+        setPlaying(false);
+        setPlayheadMs(endMs);
+      }
       if (freePreviewSec && freePreviewSec > 0 && ms >= freePreviewSec * 1000) {
         audio.pause();
         setPlaying(false);
@@ -219,7 +238,7 @@ export default function WhiteboardPlayer({
       onProgress?.(pos, dur, pos >= dur * 0.9);
     }, 100);
     return () => window.clearInterval(id);
-  }, [pkg, applyForward, freePreviewSec, durationMs, onProgress]);
+  }, [pkg, applyForward, freePreviewSec, durationMs, onProgress, endMs]);
 
   const seek = async (ms: number) => {
     const audio = audioRef.current;
@@ -248,10 +267,11 @@ export default function WhiteboardPlayer({
   return (
     <div className="flex flex-col overflow-hidden rounded-xl border border-card-border bg-card">
       {title && <div className="border-b border-card-border px-3 py-2 text-sm font-semibold">{title}</div>}
-      <div className="relative aspect-video w-full bg-black/5">
+      <div className={`relative w-full bg-black/5 ${compact ? "aspect-video max-h-56" : "aspect-video"}`}>
         <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
         <audio ref={audioRef} className="hidden" />
       </div>
+      {!compact ? (
       <div className="space-y-2 p-3">
         <input
           type="range"
@@ -312,6 +332,32 @@ export default function WhiteboardPlayer({
           <span className="ml-auto text-xs text-muted">{label}</span>
         </div>
       </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-[11px] text-muted">
+          <button
+            type="button"
+            className="rounded bg-blue-600 px-2 py-0.5 text-white"
+            onClick={async () => {
+              const audio = audioRef.current;
+              if (!audio) return;
+              if (playing) {
+                audio.pause();
+                setPlaying(false);
+              } else {
+                if (startMs != null) {
+                  audio.currentTime = startMs / 1000;
+                  applyUntil(startMs);
+                }
+                await audio.play();
+                setPlaying(true);
+              }
+            }}
+          >
+            {playing ? "Pause" : "Play clip"}
+          </button>
+          <span>{label}</span>
+        </div>
+      )}
     </div>
   );
 }

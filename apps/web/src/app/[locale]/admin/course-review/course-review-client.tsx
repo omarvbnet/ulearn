@@ -4,7 +4,13 @@ import { Badge, Button, Card, Input, PageHeader, Textarea } from "@/components/u
 import { EmptyState, Modal, SkeletonRows, Tabs, useToast } from "@/components/overlay";
 import { AdminCourseEditor } from "@/components/admin-course-editor";
 import { CourseVideosPanel } from "./course-videos-panel";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
+
+const WhiteboardPlayer = dynamic(
+  () => import("@/components/whiteboard/whiteboard-player"),
+  { ssr: false }
+);
 
 type Course = {
   id: string;
@@ -149,6 +155,16 @@ type LessonUpdate = {
   newThumbnailUrl?: string | null;
   newDurationSec?: number | null;
   changeTags?: string[];
+  isWhiteboard?: boolean;
+  editDiff?: {
+    ranges: { id: string; startMs: number; endMs: number; kind: string; removedMs?: number }[];
+    previousDurationMs?: number;
+    newDurationMs?: number;
+  } | null;
+  previousWhiteboardPackageUrl?: string | null;
+  newWhiteboardPackageUrl?: string | null;
+  previousWhiteboardDurationSec?: number | null;
+  newWhiteboardDurationSec?: number | null;
   lesson: {
     id: string;
     title: string;
@@ -404,7 +420,7 @@ export function CourseReviewClient() {
       <Tabs
         tabs={[
           { id: "PENDING_REVIEW", label: "Pending Review" },
-          { id: "VIDEO_UPDATES", label: "Video Updates" },
+          { id: "VIDEO_UPDATES", label: "Media Updates" },
           { id: "COURSE_VIDEOS", label: "Course Videos" },
           { id: "APPROVED", label: "Live" },
           { id: "REJECTED", label: "Rejected" },
@@ -422,7 +438,7 @@ export function CourseReviewClient() {
           lessonUpdates === null ? (
             <SkeletonRows rows={3} />
           ) : lessonUpdates.length === 0 ? (
-            <EmptyState title="No pending video updates" />
+            <EmptyState title="No pending media updates" />
           ) : (
             <div className="stagger space-y-3">
               {lessonUpdates.map((u) => (
@@ -437,11 +453,20 @@ export function CourseReviewClient() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="font-semibold">
-                        {u.title ?? u.lesson.title}
+                        {u.newTitle ?? u.title ?? u.lesson.title}
+                        {u.isWhiteboard && (
+                          <span className="ms-2 text-xs font-medium text-accent">whiteboard</span>
+                        )}
                       </p>
                       <p className="mt-1 text-sm text-muted">
-                        {u.lesson.course.titleEn} · was &quot;{u.lesson.title}&quot;
+                        {u.lesson.course.titleEn} · was &quot;{u.currentTitle ?? u.lesson.title}&quot;
                       </p>
+                      {u.isWhiteboard && (u.editDiff?.ranges?.length ?? 0) > 0 && (
+                        <p className="mt-1 text-xs text-accent">
+                          {u.editDiff!.ranges.length} edited segment
+                          {u.editDiff!.ranges.length === 1 ? "" : "s"} for review
+                        </p>
+                      )}
                     </div>
                     <Badge status="PENDING">Pending</Badge>
                   </div>
@@ -710,6 +735,101 @@ export function CourseReviewClient() {
               </div>
             </div>
 
+            {selectedUpdate.isWhiteboard ? (
+              <div className="space-y-4">
+                <p className="text-sm text-muted">
+                  Review only the edited time ranges (before vs after). Full lesson is not required.
+                </p>
+                {(selectedUpdate.editDiff?.ranges?.length ?? 0) === 0 ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <p className="mb-2 text-xs font-semibold text-muted">Before</p>
+                      {selectedUpdate.previousWhiteboardPackageUrl ? (
+                        <WhiteboardPlayer
+                          packageUrl={selectedUpdate.previousWhiteboardPackageUrl}
+                          compact
+                          title="Before"
+                        />
+                      ) : (
+                        <div className="flex aspect-video items-center justify-center rounded-xl border border-card-border text-sm text-muted">
+                          No previous package
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <p className="mb-2 text-xs font-semibold text-accent">After</p>
+                      {selectedUpdate.newWhiteboardPackageUrl ? (
+                        <WhiteboardPlayer
+                          packageUrl={selectedUpdate.newWhiteboardPackageUrl}
+                          compact
+                          title="After"
+                        />
+                      ) : (
+                        <div className="flex aspect-video items-center justify-center rounded-xl border border-card-border text-sm text-muted">
+                          No new package
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  selectedUpdate.editDiff!.ranges.map((range) => {
+                    const end =
+                      range.endMs > range.startMs
+                        ? range.endMs
+                        : range.startMs + Math.max(3000, range.removedMs ?? 3000);
+                    const fmt = (ms: number) => {
+                      const s = Math.floor(ms / 1000);
+                      return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+                    };
+                    return (
+                      <div
+                        key={range.id}
+                        className="space-y-2 rounded-xl border border-card-border p-3"
+                      >
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                          {range.kind} · {fmt(range.startMs)}–{fmt(end)}
+                          {range.removedMs ? ` · removed ${fmt(range.removedMs)}` : ""}
+                        </p>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div>
+                            <p className="mb-1 text-xs text-muted">Before</p>
+                            {selectedUpdate.previousWhiteboardPackageUrl ? (
+                              <WhiteboardPlayer
+                                key={`before-${range.id}-${selectedUpdate.id}`}
+                                packageUrl={selectedUpdate.previousWhiteboardPackageUrl}
+                                startMs={range.startMs}
+                                endMs={end}
+                                compact
+                              />
+                            ) : (
+                              <div className="flex h-40 items-center justify-center rounded-xl border border-card-border text-xs text-muted">
+                                Missing before package
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <p className="mb-1 text-xs text-accent">After</p>
+                            {selectedUpdate.newWhiteboardPackageUrl ? (
+                              <WhiteboardPlayer
+                                key={`after-${range.id}-${selectedUpdate.id}`}
+                                packageUrl={selectedUpdate.newWhiteboardPackageUrl}
+                                startMs={range.startMs}
+                                endMs={end}
+                                compact
+                              />
+                            ) : (
+                              <div className="flex h-40 items-center justify-center rounded-xl border border-card-border text-xs text-muted">
+                                Missing after package
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <p className="mb-2 text-xs font-semibold text-muted">Current video</p>
@@ -769,6 +889,7 @@ export function CourseReviewClient() {
                 )}
               </div>
             </div>
+            )}
 
             <Textarea
               label="Review notes (optional)"

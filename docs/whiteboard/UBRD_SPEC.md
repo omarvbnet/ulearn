@@ -139,6 +139,28 @@ Seek index for O(log n) playback:
 
 PDF bytes are fetched from R2 via existing material/signed URLs. Never embed PDF files in `.ubrd`.
 
+## Edit & admin review (lesson updates)
+
+Teachers may **reopen** a published whiteboard in Studio to continue recording, annotate at the playhead, and **trim/cut** timeline ranges. Publishing an edit on a live (`APPROVED`) course creates a `CourseLessonUpdateRequest` with:
+
+- `whiteboardAssetId` / `previousWhiteboardAssetId`
+- `editDiffJson`: dirty time ranges for admin review
+
+```json
+{
+  "ranges": [
+    { "id": "r1", "startMs": 12000, "endMs": 28000, "kind": "redraw" },
+    { "id": "r2", "startMs": 61000, "endMs": 61000, "kind": "trim", "removedMs": 4500 }
+  ],
+  "previousDurationMs": 125000,
+  "newDurationMs": 118000
+}
+```
+
+Admins review **only those ranges** (before/after clips), not the full lesson. Approving applies the new `whiteboardAssetId` to the live `CourseLesson`.
+
+`editDiffJson` lives on the update request (Postgres), not inside the `.ubrd` package. The published package remains a full self-contained `.ubrd`.
+
 ## Recording contract
 
 From **Start Recording** until **Stop Recording**, one session clock stamps every mic sample and every board interaction. Finalizing builds the zip and uploads once to R2.

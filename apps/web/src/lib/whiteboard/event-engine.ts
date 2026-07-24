@@ -39,6 +39,24 @@ export class EventEngine {
     return ev;
   }
 
+  /** Insert an event at an absolute timeline position (edit mode). */
+  pushAt(
+    t: number,
+    type: UbrdEvent["type"],
+    payload: Record<string, unknown>,
+    id?: string
+  ): UbrdEvent {
+    const ev: UbrdEvent = {
+      id: id ?? `e_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`,
+      t: Math.max(0, Math.round(t)),
+      type,
+      payload,
+    };
+    this.events.push(ev);
+    this.events.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id));
+    return ev;
+  }
+
   /** Load a finalized event list (playback / crash recovery). */
   load(events: UbrdEvent[]) {
     this.startedAt = null;
@@ -91,6 +109,27 @@ export class EventEngine {
 
   toNdjson(): string {
     return this.events.map((e) => JSON.stringify(e)).join("\n") + (this.events.length ? "\n" : "");
+  }
+
+  /**
+   * Remove events in [startMs, endMs) and shift later events left by removed duration.
+   * Returns the cut length in ms.
+   */
+  cutRange(startMs: number, endMs: number): number {
+    const lo = Math.max(0, Math.min(startMs, endMs));
+    const hi = Math.max(startMs, endMs);
+    const removed = Math.max(0, hi - lo);
+    if (removed <= 0) return 0;
+    const kept = this.events
+      .filter((e) => e.t < lo || e.t >= hi)
+      .map((e) => (e.t >= hi ? { ...e, t: e.t - removed } : e));
+    this.events = kept.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id));
+    return removed;
+  }
+
+  /** Resume recording clock as if `elapsedMs` have already passed (edit mode). */
+  resumeAt(elapsedMs: number, wall = Date.now()) {
+    this.startedAt = wall - Math.max(0, elapsedMs);
   }
 
   static parseNdjson(text: string): UbrdEvent[] {

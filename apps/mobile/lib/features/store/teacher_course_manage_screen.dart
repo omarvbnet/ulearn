@@ -991,36 +991,66 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
                                   onSelected: (v) {
                                     if (v == 'rename') _renameLesson(lesson);
                                     if (v == 'replace') _replaceVideo(lesson);
+                                    if (v == 'editBoard') {
+                                      final wbId = lesson['whiteboardAssetId']?.toString() ??
+                                          lesson['whiteboardId']?.toString();
+                                      if (wbId == null || wbId.isEmpty) return;
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => WhiteboardStudioScreen(
+                                            courseId: widget.courseId,
+                                            courseTitle: _titleCtrl.text.trim().isEmpty
+                                                ? widget.courseId
+                                                : _titleCtrl.text.trim(),
+                                            initialTitle: lesson['title']?.toString(),
+                                            lessonId: lesson['id']?.toString(),
+                                            whiteboardId: wbId,
+                                          ),
+                                        ),
+                                      ).then((ok) {
+                                        if (ok == true) _load();
+                                      });
+                                    }
                                     if (v == 'pdf') _editLessonPdf(lesson);
                                     if (v == 'minutes') _setFreeMinutes(lesson);
                                     if (v == 'delete') _deleteLesson(lesson['id'].toString());
                                   },
-                                  itemBuilder: (_) => [
-                                    PopupMenuItem(
-                                      value: 'rename',
-                                      child: Text(l10n.t('mobile.teacher.rename')),
-                                    ),
-                                    PopupMenuItem(
-                                      value: 'replace',
-                                      child: Text(l10n.t('mobile.teacher.replaceVideo')),
-                                    ),
-                                    if (!interview)
+                                  itemBuilder: (_) {
+                                    final isBoard =
+                                        lesson['lessonType']?.toString() == 'WHITEBOARD';
+                                    return [
                                       PopupMenuItem(
-                                        value: 'minutes',
-                                        child: Text(l10n.t('mobile.teacher.setFreeMinutes')),
+                                        value: 'rename',
+                                        child: Text(l10n.t('mobile.teacher.rename')),
                                       ),
-                                    PopupMenuItem(
-                                      value: 'pdf',
-                                      child: Text(l10n.t('mobile.teacher.editAttachPdf')),
-                                    ),
-                                    PopupMenuItem(
-                                      value: 'delete',
-                                      child: Text(
-                                        l10n.t('common.delete'),
-                                        style: const TextStyle(color: Colors.redAccent),
+                                      if (isBoard)
+                                        const PopupMenuItem(
+                                          value: 'editBoard',
+                                          child: Text('Edit board'),
+                                        )
+                                      else
+                                        PopupMenuItem(
+                                          value: 'replace',
+                                          child: Text(l10n.t('mobile.teacher.replaceVideo')),
+                                        ),
+                                      if (!interview)
+                                        PopupMenuItem(
+                                          value: 'minutes',
+                                          child: Text(l10n.t('mobile.teacher.setFreeMinutes')),
+                                        ),
+                                      PopupMenuItem(
+                                        value: 'pdf',
+                                        child: Text(l10n.t('mobile.teacher.editAttachPdf')),
                                       ),
-                                    ),
-                                  ],
+                                      PopupMenuItem(
+                                        value: 'delete',
+                                        child: Text(
+                                          l10n.t('common.delete'),
+                                          style: const TextStyle(color: Colors.redAccent),
+                                        ),
+                                      ),
+                                    ];
+                                  },
                                 ),
                               ),
                             );

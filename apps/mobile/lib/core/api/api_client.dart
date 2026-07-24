@@ -140,6 +140,7 @@ class ApiClient {
   }
 
   /// Raw binary PUT used for presigned/direct file uploads (small payloads).
+  /// Bytes are streamed in chunks so [onProgress] reports real percentages.
   Future<void> putBytes(
     String url,
     Uint8List bytes,
@@ -150,9 +151,21 @@ class ApiClient {
       url: url,
       contentType: contentType,
       contentLength: bytes.length,
-      openBody: () => Stream.value(bytes),
+      openBody: () => _chunkedBytes(bytes),
       onProgress: onProgress,
     );
+  }
+
+  /// Yields [bytes] in ~64KB pieces so upload progress can update smoothly.
+  Stream<List<int>> _chunkedBytes(Uint8List bytes, {int chunkSize = 64 * 1024}) async* {
+    if (bytes.isEmpty) {
+      yield bytes;
+      return;
+    }
+    for (var offset = 0; offset < bytes.length; offset += chunkSize) {
+      final end = math.min(offset + chunkSize, bytes.length);
+      yield bytes.sublist(offset, end);
+    }
   }
 
   /// Stream a file to a presigned/direct upload URL (videos & large files).

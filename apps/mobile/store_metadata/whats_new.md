@@ -1,6 +1,6 @@
 # U Learn — What's New
 
-**Version:** 1.0.18 (build 20)  
+**Version:** 1.0.19 (build 21)  
 **Date:** 2026-07-24
 
 Use the localized text below for App Store Connect / Google Play “What’s New”.
@@ -9,33 +9,31 @@ Use the localized text below for App Store Connect / Google Play “What’s New
 
 ## English (en-US)
 
-Whiteboard lessons got a big upgrade. Open course PDFs on the board and draw or highlight while you teach. Students can save board lessons for offline viewing, play them full screen, and pinch to zoom. Course buyers are notified when you publish a new course or add new lessons after admin approval. Also fixed teacher course creation when your account was recently approved.
+Whiteboard lessons work offline after you reopen the app. Teachers see upload progress with percentages when publishing a finished board lesson. Also includes PDF annotate on boards, fullscreen zoom playback, and subscriber alerts when new courses or lessons go live.
 
 ---
 
 ## Arabic (ar-SA)
 
-تحديث كبير لدروس السبورة. افتح ملفات PDF على اللوحة وارسم أو ظلل أثناء الشرح. يمكن للطلاب حفظ دروس اللوحة للمشاهدة دون إنترنت، وعرضها بملء الشاشة والتكبير. يتم إشعار مشتركي الدورة عند نشر دورة جديدة أو إضافة دروس بعد موافقة المشرف. كما تم إصلاح إنشاء الدورات للمعلمين بعد الموافقة على الحساب.
+دروس السبورة تعمل دون إنترنت حتى بعد إعادة فتح التطبيق. يرى المعلمون نسبة مئوية لتقدّم الرفع عند نشر درس اللوحة. يشمل أيضاً الرسم على PDF، والعرض بملء الشاشة مع التكبير، وإشعارات المشتركين عند نشر دورات أو دروس جديدة.
 
 ---
 
 ## Kurdish (ku)
 
-نوێکاری گەورە بۆ وانەکانی تەختە سپی. PDF لەسەر تەختە بکەرەوە و بکێشە یان هایلایت بکە کاتێک فێر دەکەیت. خوێندکاران دەتوانن وانەکانی تەختە بۆ ئۆفلاین پاشەکەوت بکەن، بە شاشەی تەواو سەیری بکەن و زووم بکەن. کڕیارانی کۆرس ئاگادار دەکرێنەوە کاتێک کۆرسی نوێ بڵاو دەکەیتەوە یان وانەی نوێ زیاد دەکەیت دوای پەسەندکردنی بەڕێوەبەر. هەروەها دروستکردنی کۆرس بۆ مامۆستایان دوای پەسەندکردنی هەژمار چاککرا.
+وانەکانی تەختە سپی دوای دووبارە کردنەوەی ئەپەکەش ئۆفلاین کاردەکەن. مامۆستایان لە کاتی بڵاوکردنەوەی وانەی تەختە ڕێژەی سەدی بارکردن دەبینن. هەروەها کێشان لەسەر PDF، بینینی شاشەی تەواو لەگەڵ زووم، و ئاگادارکردنەوەی کڕیاران لە کۆرس/وانەی نوێ.
 
 ---
 
 ## Turkish (tr)
 
-Tahta dersleri için büyük güncelleme. Tahtada PDF açıp anlatırken çizebilir veya vurgulayabilirsiniz. Öğrenciler tahta derslerini çevrimdışı kaydedebilir, tam ekran izleyebilir ve yakınlaştırabilir. Yeni kurs yayınladığınızda veya yönetici onayından sonra yeni ders eklediğinizde aboneler bilgilendirilir. Ayrıca hesabı yeni onaylanan öğretmenlerde kurs oluşturma sorunu giderildi.
+Tahta dersleri uygulamayı yeniden açtıktan sonra da çevrimdışı çalışır. Öğretmenler bitmiş tahta dersini yayınlarken yüzde olarak yükleme ilerlemesini görür. PDF üzerine çizim, tam ekran yakınlaştırma ve yeni kurs/ders bildirimleri de dahildir.
 
 ---
 
 ## Changelog (internal)
 
-- Whiteboard: PDF underlay with draw/highlight annotation while recording
-- Whiteboard: offline download & playback for board lessons
-- Whiteboard: fullscreen viewer with pinch/button zoom
-- Whiteboard: fix duplicate player when rotating / entering fullscreen
-- Notifications: alert teacher subscribers on new course approval and new lessons
-- Auth: fix teacher course create 403 from stale JWT approval status
+- Bump CFBundleShortVersionString to 1.0.19 (build 21) for App Store
+- Offline boards survive app relaunch (cached session + relative paths + My Courses fallback)
+- Teacher whiteboard publish: percentage upload progress overlay
+- putBytes streams chunks so upload % updates smoothly

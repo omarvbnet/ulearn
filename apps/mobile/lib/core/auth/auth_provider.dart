@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/iap/iap_fulfillment.dart';
 import 'package:ulearn/core/l10n/locale_provider.dart';
+import 'package:ulearn/core/network/network_status.dart';
 import 'package:ulearn/core/notifications/push_notification_service.dart';
 
 class StageModel {
@@ -146,6 +149,8 @@ class AuthProvider extends ChangeNotifier {
   AuthProvider(this._api);
 
   final ApiClient _api;
+  final _userCache = const FlutterSecureStorage();
+  static const _userCacheKey = 'session_user_json';
   LocaleProvider? _locale;
   UserModel? user;
   bool loading = true;
@@ -157,16 +162,65 @@ class AuthProvider extends ChangeNotifier {
     _locale = locale;
   }
 
+  Future<UserModel?> _loadCachedUser() async {
+    try {
+      final raw = await _userCache.read(key: _userCacheKey);
+      if (raw == null || raw.isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      return UserModel.fromJson(Map<String, dynamic>.from(decoded));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _saveCachedUser(Map<String, dynamic> json) async {
+    try {
+      await _userCache.write(key: _userCacheKey, value: jsonEncode(json));
+    } catch (_) {}
+  }
+
+  Future<void> _clearCachedUser() async {
+    try {
+      await _userCache.delete(key: _userCacheKey);
+    } catch (_) {}
+  }
+
   Future<void> bootstrap() async {
     await _api.loadToken();
+    final cached = await _loadCachedUser();
+    // Restore immediately so cold-start offline can open My Courses / saved boards.
+    if (cached != null) {
+      user = cached;
+      await _locale?.syncFromUser(user?.locale);
+    }
     try {
-      final data = await _api.get('/api/auth/me');
-      user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
+      final data = await _api
+          .get('/api/auth/me')
+          .timeout(const Duration(seconds: 8));
+      final userJson = data['user'] as Map<String, dynamic>;
+      user = UserModel.fromJson(userJson);
+      await _saveCachedUser(userJson);
       await _locale?.syncFromUser(user?.locale);
       unawaited(PushNotificationService.instance.onUserLoggedIn());
       unawaited(IapFulfillment.bind(_api));
-    } catch (_) {
-      user = null;
+    } catch (e) {
+      final status = e is ApiException ? e.statusCode : null;
+      final authRejected = status == 401 || status == 403;
+      if (authRejected) {
+        user = null;
+        await _api.setToken(null);
+        await _clearCachedUser();
+      } else if (user == null) {
+        // Network/offline with no cache — stay logged out.
+        user = null;
+      } else {
+        // Keep cached session for offline reopen; bind side-services when online.
+        if (await NetworkStatus.isOnline()) {
+          unawaited(PushNotificationService.instance.onUserLoggedIn());
+          unawaited(IapFulfillment.bind(_api));
+        }
+      }
     }
     loading = false;
     notifyListeners();
@@ -210,7 +264,9 @@ class AuthProvider extends ChangeNotifier {
     }
 
     if (data['user'] != null) {
-      user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
+      final userJson = data['user'] as Map<String, dynamic>;
+      user = UserModel.fromJson(userJson);
+      await _saveCachedUser(userJson);
       await _locale?.syncFromUser(user?.locale);
       unawaited(PushNotificationService.instance.onUserLoggedIn());
       unawaited(IapFulfillment.bind(_api));
@@ -226,6 +282,7 @@ class AuthProvider extends ChangeNotifier {
       await _api.post('/api/auth/logout', {});
     } catch (_) {}
     await _api.setToken(null);
+    await _clearCachedUser();
     user = null;
     notifyListeners();
   }
@@ -238,6 +295,7 @@ class AuthProvider extends ChangeNotifier {
     if (!requiresAdmin) {
       await PushNotificationService.instance.onUserLoggedOut();
       await _api.setToken(null);
+      await _clearCachedUser();
       user = null;
       notifyListeners();
     }
@@ -246,6 +304,7 @@ class AuthProvider extends ChangeNotifier {
 
   void applyUser(Map<String, dynamic> json) {
     user = UserModel.fromJson(json);
+    unawaited(_saveCachedUser(json));
     _locale?.syncFromUser(user?.locale);
     notifyListeners();
     unawaited(PushNotificationService.instance.onUserLoggedIn());

@@ -3,11 +3,30 @@ import { prisma } from "@/lib/prisma";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 import { isWhiteboardLessonsEnabled } from "@/lib/whiteboard-feature";
 import {
-  findEditableCourse,
   isAdminRole,
   TEACHER_COURSE_ROLES,
 } from "@/lib/teacher-course-access";
+import { normalizeEditDiff } from "@/lib/whiteboard/edit-diff";
 import { z } from "zod";
+
+const editDiffSchema = z
+  .object({
+    ranges: z
+      .array(
+        z.object({
+          id: z.string(),
+          startMs: z.number(),
+          endMs: z.number(),
+          kind: z.enum(["redraw", "trim", "audio", "splice"]).optional(),
+          removedMs: z.number().optional(),
+          label: z.string().optional(),
+        })
+      )
+      .default([]),
+    previousDurationMs: z.number().optional(),
+    newDurationMs: z.number().optional(),
+  })
+  .optional();
 
 const schema = z.object({
   title: z.string().min(1).optional(),
@@ -29,6 +48,7 @@ const schema = z.object({
   pdfMimeType: z.string().optional(),
   pdfFileSize: z.number().int().positive().optional(),
   removePdf: z.boolean().optional(),
+  editDiff: editDiffSchema,
 });
 
 /** Teacher: update a lesson. Live courses queue media changes for admin review. */
@@ -79,8 +99,9 @@ export async function PATCH(
       data.videoAssetId ||
       data.whiteboardAssetId
   );
-  const { pdfTitle, pdfFileKey, pdfFileUrl, pdfMimeType, pdfFileSize, removePdf, ...lessonPatch } =
+  const { pdfTitle, pdfFileKey, pdfFileUrl, pdfMimeType, pdfFileSize, removePdf, editDiff, ...lessonPatch } =
     data;
+  const normalizedEditDiff = normalizeEditDiff(editDiff ?? null);
 
   if (lessonPatch.isInterview) {
     lessonPatch.isFreePreview = true;
@@ -176,6 +197,7 @@ export async function PATCH(
         previousThumbnailUrl: lesson.thumbnailUrl,
         previousDurationSec: lesson.durationSec,
         changeSummary: changeTags.join(",") || (data.whiteboardAssetId ? "whiteboard" : "video"),
+        editDiffJson: normalizedEditDiff ?? undefined,
         status: "PENDING",
       },
     });

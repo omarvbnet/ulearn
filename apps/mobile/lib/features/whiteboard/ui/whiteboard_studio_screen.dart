@@ -9,6 +9,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 import 'package:ulearn/core/api/api_client.dart';
+import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+import 'package:http/http.dart' as http;
+import 'package:ulearn/features/whiteboard/domain/edit_diff.dart';
 import 'package:ulearn/features/whiteboard/domain/board_state.dart';
 import 'package:ulearn/features/whiteboard/domain/event_engine.dart';
 import 'package:ulearn/features/whiteboard/domain/package.dart';
@@ -25,11 +29,16 @@ class WhiteboardStudioScreen extends StatefulWidget {
     required this.courseId,
     required this.courseTitle,
     this.initialTitle,
+    this.lessonId,
+    this.whiteboardId,
   });
 
   final String courseId;
   final String courseTitle;
   final String? initialTitle;
+  /// When set with [whiteboardId], opens edit mode for an existing lesson.
+  final String? lessonId;
+  final String? whiteboardId;
 
   @override
   State<WhiteboardStudioScreen> createState() => _WhiteboardStudioScreenState();
@@ -46,6 +55,9 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
   String _color = '#111827';
   bool _recording = false;
   bool _saving = false;
+  /// 0–100 overall publish progress while finishing a board lesson.
+  int _publishPercent = 0;
+  String _publishPhase = '';
   String? _audioPath;
   BoardStroke? _activeStroke;
   String? _shapeId;
@@ -55,6 +67,30 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
   final _pdfCache = PdfUnderlayCache();
   ui.Image? _pdfUnderlay;
   bool _pdfLoading = false;
+  bool get _editMode =>
+      widget.lessonId != null &&
+      widget.lessonId!.isNotEmpty &&
+      widget.whiteboardId != null &&
+      widget.whiteboardId!.isNotEmpty;
+  List<WhiteboardEditRange> _dirtyRanges = [];
+  int _previousDurationMs = 0;
+  bool _loadingEdit = false;
+  String? _baseAudioPath;
+
+  void _markDirty(int startMs, int endMs, {String kind = 'redraw'}) {
+    if (!_editMode) return;
+    setState(() {
+      _dirtyRanges = markDirtyRange(_dirtyRanges, startMs, endMs, kind: kind);
+    });
+  }
+
+  void _setPublishProgress(int percent, String phase) {
+    if (!mounted) return;
+    setState(() {
+      _publishPercent = percent.clamp(0, 100);
+      _publishPhase = phase;
+    });
+  }
 
   @override
   void initState() {
@@ -62,7 +98,51 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
     _titleCtrl.text = widget.initialTitle ?? 'Whiteboard lesson';
     _board.theme = WhiteboardThemeId.white;
     _autosaveTimer = Timer.periodic(const Duration(seconds: 20), (_) => _autosaveDraft());
-    _restoreDraftIfAny();
+    if (_editMode) {
+      _loadingEdit = true;
+      unawaited(_loadExistingPackage());
+    } else {
+      _restoreDraftIfAny();
+    }
+  }
+
+  Future<void> _loadExistingPackage() async {
+    try {
+      final api = context.read<ApiClient>();
+      final res = await api.get('/api/whiteboards/${widget.whiteboardId}');
+      final url = (res['playback'] as Map?)?['packageUrl']?.toString();
+      if (url == null || url.isEmpty) throw StateError('NO_PACKAGE_URL');
+      final bin = await http.get(Uri.parse(ApiClient.absoluteUrl(url)));
+      if (bin.statusCode < 200 || bin.statusCode >= 300) {
+        throw StateError('PACKAGE_DOWNLOAD_${bin.statusCode}');
+      }
+      final parsed = parseUbrdPackage(Uint8List.fromList(bin.bodyBytes));
+      _engine.load(parsed.events);
+      _board.reset();
+      _board.theme = parsed.manifest.theme;
+      _board.applyEvents(parsed.events);
+      _pdfs
+        ..clear()
+        ..addAll(parsed.pdfs);
+      _previousDurationMs = parsed.manifest.durationMs;
+      final dir = await getApplicationDocumentsDirectory();
+      final audioPath =
+          '${dir.path}/wb_edit_${widget.lessonId}_${parsed.audioFileName}';
+      await File(audioPath).writeAsBytes(parsed.audioBytes, flush: true);
+      _audioPath = audioPath;
+      _baseAudioPath = audioPath;
+      if (!mounted) return;
+      setState(() {
+        _loadingEdit = false;
+        _tool = WhiteboardTool.pen;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingEdit = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not load board for edit: $e')),
+      );
+    }
   }
 
   Future<void> _restoreDraftIfAny() async {
@@ -262,35 +342,40 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
       const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 128000, sampleRate: 44100),
       path: _audioPath!,
     );
-    _engine.start();
-    _engine.push('session_start', {
-      'theme': _board.theme.wire,
-      'boardWidth': kLogicalBoardWidth,
-      'boardHeight': kLogicalBoardHeight,
-    });
-    // Capture pages/PDFs attached before recording so drawing over them is replayed.
-    for (final pdf in _pdfs) {
-      _engine.push('pdf_open', {'assetId': pdf.assetId, 'title': pdf.title});
-    }
-    for (var i = 0; i < _board.pages.length; i++) {
-      final page = _board.pages[i];
-      // Default blank page_0 already exists on playback reset — skip recreating it.
-      if (page.id == 'page_0' && page.kind == 'blank') continue;
-      _engine.push('page_add', {
-        'pageId': page.id,
-        'index': i,
-        'kind': page.kind,
-        if (page.pdfAssetId != null) 'pdfAssetId': page.pdfAssetId,
-        if (page.pdfPage != null) 'pdfPage': page.pdfPage,
+    if (_editMode && _engine.length > 0) {
+      _engine.resumeAt(_previousDurationMs);
+      _markDirty(_previousDurationMs, _previousDurationMs + 1, kind: 'audio');
+    } else {
+      _engine.start();
+      _engine.push('session_start', {
+        'theme': _board.theme.wire,
+        'boardWidth': kLogicalBoardWidth,
+        'boardHeight': kLogicalBoardHeight,
       });
-    }
-    _engine.push('page_select', {'pageId': _board.currentPageId});
-    final current = _board.currentPage;
-    if (current?.kind == 'pdf' && current?.pdfAssetId != null) {
-      _engine.push('pdf_page', {
-        'assetId': current!.pdfAssetId,
-        'page': current.pdfPage ?? 1,
-      });
+      // Capture pages/PDFs attached before recording so drawing over them is replayed.
+      for (final pdf in _pdfs) {
+        _engine.push('pdf_open', {'assetId': pdf.assetId, 'title': pdf.title});
+      }
+      for (var i = 0; i < _board.pages.length; i++) {
+        final page = _board.pages[i];
+        // Default blank page_0 already exists on playback reset — skip recreating it.
+        if (page.id == 'page_0' && page.kind == 'blank') continue;
+        _engine.push('page_add', {
+          'pageId': page.id,
+          'index': i,
+          'kind': page.kind,
+          if (page.pdfAssetId != null) 'pdfAssetId': page.pdfAssetId,
+          if (page.pdfPage != null) 'pdfPage': page.pdfPage,
+        });
+      }
+      _engine.push('page_select', {'pageId': _board.currentPageId});
+      final current = _board.currentPage;
+      if (current?.kind == 'pdf' && current?.pdfAssetId != null) {
+        _engine.push('pdf_page', {
+          'assetId': current!.pdfAssetId,
+          'page': current.pdfPage ?? 1,
+        });
+      }
     }
     setState(() => _recording = true);
     if (mounted && _board.currentPage?.kind == 'pdf') {
@@ -303,26 +388,218 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
     }
   }
 
+  Future<void> _cutTimeRangeDialog() async {
+    if (!_editMode || _baseAudioPath == null) return;
+    final startCtrl = TextEditingController(text: '0');
+    final endCtrl = TextEditingController(
+      text: (_previousDurationMs / 1000).round().toString(),
+    );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cut time range'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: startCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Start (seconds)'),
+            ),
+            TextField(
+              controller: endCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'End (seconds)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Cut')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final lo = ((double.tryParse(startCtrl.text) ?? 0) * 1000).round();
+    final hi = ((double.tryParse(endCtrl.text) ?? 0) * 1000).round();
+    if (hi - lo < 100) return;
+    final removed = _engine.cutRange(lo, hi);
+    final dir = await getTemporaryDirectory();
+    final outPath = '${dir.path}/wb_cut_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    final inPath = _baseAudioPath!;
+    final session = await FFmpegKit.execute(
+      "-y -i '${inPath.replaceAll("'", r"'\''")}' "
+      "-af \"aselect='not(between(t\\,${lo / 1000}\\,${hi / 1000}))',asetpts=N/SR/TB\" "
+      "-c:a aac -b:a 128k '${outPath.replaceAll("'", r"'\''")}'",
+    );
+    final code = await session.getReturnCode();
+    if (ReturnCode.isSuccess(code) && await File(outPath).exists()) {
+      _baseAudioPath = outPath;
+      _audioPath = outPath;
+    }
+    _previousDurationMs = (_previousDurationMs - removed).clamp(0, 1 << 30);
+    setState(() {
+      _dirtyRanges = markDirtyRange(_dirtyRanges, lo, lo, kind: 'trim')
+          .map((r) => r.kind == 'trim' && (r.startMs - lo).abs() < 2000
+              ? WhiteboardEditRange(
+                  id: r.id,
+                  startMs: r.startMs,
+                  endMs: r.endMs,
+                  kind: 'trim',
+                  removedMs: removed,
+                )
+              : r)
+          .toList();
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Cut ${removed}ms — publish to submit for review')),
+      );
+    }
+  }
+
+  Future<void> _publishEditPackage() async {
+    if (!_editMode || _recording || _saving || _dirtyRanges.isEmpty) return;
+    setState(() {
+      _saving = true;
+      _publishPercent = 0;
+      _publishPhase = 'Packaging edit…';
+    });
+    try {
+      final audioPath = _baseAudioPath ?? _audioPath;
+      if (audioPath == null || !await File(audioPath).exists()) {
+        throw StateError('AUDIO_MISSING');
+      }
+      final durationMs = _previousDurationMs > 0
+          ? _previousDurationMs
+          : (_engine.all.isNotEmpty ? _engine.all.last.t : 0);
+      final audioBytes = Uint8List.fromList(await File(audioPath).readAsBytes());
+      final packageBytes = await buildUbrdPackage(
+        engine: _engine,
+        audioBytes: audioBytes,
+        theme: _board.theme,
+        pageCount: _board.pages.length,
+        durationMs: durationMs,
+        pdfs: _pdfs,
+      );
+      final api = context.read<ApiClient>();
+      _setPublishProgress(22, 'Preparing upload…');
+      final upload = await api.post('/api/whiteboards/upload-url', {
+        'courseId': widget.courseId,
+        'filename': 'lesson.ubrd',
+        'contentType': 'application/octet-stream',
+        'size': packageBytes.length,
+        'theme': _board.theme.wire,
+      });
+      final uploadUrl = upload['uploadUrl'] as String;
+      final whiteboardId = upload['whiteboardId'] as String;
+      final objectKey = upload['objectKey'] as String?;
+      _setPublishProgress(28, 'Uploading…');
+      await api.putBytes(
+        uploadUrl,
+        packageBytes,
+        'application/octet-stream',
+        onProgress: (sent, total) {
+          if (total <= 0) return;
+          final uploadPct = (sent / total).clamp(0.0, 1.0);
+          _setPublishProgress((28 + uploadPct * 60).round(), 'Uploading…');
+        },
+      );
+      await api.post('/api/whiteboards/complete', {
+        'whiteboardId': whiteboardId,
+        'size': packageBytes.length,
+        'durationSec': (durationMs / 1000).ceil(),
+        'theme': _board.theme.wire,
+        'schemaVersion': kUbrdSchemaVersion,
+      });
+      final patch = await api.patch(
+        '/api/teacher/courses/${widget.courseId}/lessons/${widget.lessonId}',
+        {
+          'whiteboardAssetId': whiteboardId,
+          'durationSec': (durationMs / 1000).ceil(),
+          if (objectKey != null) 'fileKey': objectKey,
+          'editDiff': {
+            'ranges': _dirtyRanges.map((e) => e.toJson()).toList(),
+            'previousDurationMs': _previousDurationMs,
+            'newDurationMs': durationMs,
+          },
+        },
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              patch['pendingReview'] == true
+                  ? 'Whiteboard edit submitted for admin review'
+                  : 'Whiteboard lesson updated',
+            ),
+          ),
+        );
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Save failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _publishPercent = 0;
+          _publishPhase = '';
+        });
+      }
+    }
+  }
+
   Future<void> _stopAndPublish() async {
     if (!_recording || _saving) return;
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _publishPercent = 0;
+      _publishPhase = 'Packaging lesson…';
+    });
     try {
+      _setPublishProgress(5, 'Stopping recording…');
       final path = await _recorder.stop();
       final durationMs = _engine.stop();
       final audioFile = File(path ?? _audioPath ?? '');
       if (!await audioFile.exists()) {
         throw StateError('AUDIO_MISSING');
       }
-      final audioBytes = await audioFile.readAsBytes();
+      _setPublishProgress(12, 'Building board package…');
+      var audioBytes = Uint8List.fromList(await audioFile.readAsBytes());
+      // Edit continue-recording: properly concatenate AAC with FFmpeg.
+      if (_editMode &&
+          _baseAudioPath != null &&
+          _baseAudioPath != audioFile.path &&
+          await File(_baseAudioPath!).exists()) {
+        final dir = await getTemporaryDirectory();
+        final outPath =
+            '${dir.path}/wb_concat_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        final session = await FFmpegKit.execute(
+          "-y -i '${_baseAudioPath!.replaceAll("'", r"'\''")}' "
+          "-i '${audioFile.path.replaceAll("'", r"'\''")}' "
+          "-filter_complex '[0:a][1:a]concat=n=2:v=0:a=1[a]' -map '[a]' -c:a aac -b:a 128k "
+          "'${outPath.replaceAll("'", r"'\''")}'",
+        );
+        final code = await session.getReturnCode();
+        if (ReturnCode.isSuccess(code) && await File(outPath).exists()) {
+          audioBytes = Uint8List.fromList(await File(outPath).readAsBytes());
+        }
+      }
       final packageBytes = await buildUbrdPackage(
         engine: _engine,
-        audioBytes: Uint8List.fromList(audioBytes),
+        audioBytes: audioBytes,
         theme: _board.theme,
         pageCount: _board.pages.length,
         durationMs: durationMs,
         pdfs: _pdfs,
       );
 
+      _setPublishProgress(22, 'Preparing upload…');
       final api = context.read<ApiClient>();
       final upload = await api.post('/api/whiteboards/upload-url', {
         'courseId': widget.courseId,
@@ -335,12 +612,22 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
       final whiteboardId = upload['whiteboardId'] as String;
       final objectKey = upload['objectKey'] as String?;
 
+      _setPublishProgress(28, 'Uploading board… 0%');
       await api.putBytes(
         uploadUrl,
         packageBytes,
         'application/octet-stream',
+        onProgress: (sent, total) {
+          if (total <= 0) return;
+          // Map byte upload into 28% → 88% of the overall bar.
+          final uploadPct = (sent / total).clamp(0.0, 1.0);
+          final overall = (28 + (uploadPct * 60)).round();
+          final uploadOnly = (uploadPct * 100).round();
+          _setPublishProgress(overall, 'Uploading board… $uploadOnly%');
+        },
       );
 
+      _setPublishProgress(90, 'Finalizing upload…');
       await api.post('/api/whiteboards/complete', {
         'whiteboardId': whiteboardId,
         'size': packageBytes.length,
@@ -348,6 +635,38 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         'theme': _board.theme.wire,
         'schemaVersion': kUbrdSchemaVersion,
       });
+
+      _setPublishProgress(95, _editMode ? 'Submitting edit…' : 'Creating lesson…');
+      if (_editMode) {
+        final patch = await api.patch(
+          '/api/teacher/courses/${widget.courseId}/lessons/${widget.lessonId}',
+          {
+            'whiteboardAssetId': whiteboardId,
+            'durationSec': (durationMs / 1000).ceil(),
+            if (objectKey != null) 'fileKey': objectKey,
+            'editDiff': {
+              'ranges': _dirtyRanges.map((e) => e.toJson()).toList(),
+              'previousDurationMs': _previousDurationMs,
+              'newDurationMs': durationMs,
+            },
+          },
+        );
+        _setPublishProgress(100, 'Submitted');
+        if (mounted) {
+          final pending = patch['pendingReview'] == true;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                pending
+                    ? 'Whiteboard edit submitted for admin review'
+                    : 'Whiteboard lesson updated',
+              ),
+            ),
+          );
+          Navigator.of(context).pop(true);
+        }
+        return;
+      }
 
       await api.post('/api/teacher/courses/${widget.courseId}/lessons', {
         'title': _titleCtrl.text.trim().isEmpty ? 'Whiteboard lesson' : _titleCtrl.text.trim(),
@@ -357,6 +676,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         if (objectKey != null) 'fileKey': objectKey,
       });
 
+      _setPublishProgress(100, 'Published');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Whiteboard lesson published')),
@@ -370,10 +690,14 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() {
-        _recording = false;
-        _saving = false;
-      });
+      if (mounted) {
+        setState(() {
+          _recording = false;
+          _saving = false;
+          _publishPercent = 0;
+          _publishPhase = '';
+        });
+      }
     }
   }
 
@@ -679,15 +1003,28 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
             onPressed: _toggleTheme,
             icon: Icon(_board.theme == WhiteboardThemeId.black ? Icons.dark_mode : Icons.light_mode),
           ),
+          if (_editMode && !_recording)
+            IconButton(
+              tooltip: 'Cut time range',
+              onPressed: _saving || _loadingEdit ? null : _cutTimeRangeDialog,
+              icon: const Icon(Icons.content_cut),
+            ),
+          if (_editMode && !_recording)
+            TextButton(
+              onPressed: (_saving || _loadingEdit || _dirtyRanges.isEmpty)
+                  ? null
+                  : _publishEditPackage,
+              child: Text(_saving ? '$_publishPercent%' : 'Publish edit'),
+            ),
           if (!_recording)
             TextButton(
-              onPressed: _saving ? null : _startRecording,
-              child: const Text('Start Recording'),
+              onPressed: (_saving || _loadingEdit) ? null : _startRecording,
+              child: Text(_editMode ? 'Continue recording' : 'Start Recording'),
             )
           else
             TextButton(
               onPressed: _saving ? null : _stopAndPublish,
-              child: Text(_saving ? 'Saving…' : 'Stop & Publish'),
+              child: Text(_saving ? '$_publishPercent%' : (_editMode ? 'Stop & Publish edit' : 'Stop & Publish')),
             ),
         ],
       ),
@@ -723,11 +1060,89 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
                     color: Color(0x66000000),
                     child: Center(child: CircularProgressIndicator()),
                   ),
+                if (_saving) _publishOverlay(),
               ],
             ),
           ),
           _pageStrip(),
         ],
+      ),
+    );
+  }
+
+  Widget _publishOverlay() {
+    final pct = _publishPercent.clamp(0, 100);
+    return ColoredBox(
+      color: const Color(0xCC0F172A),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: Material(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(22, 24, 22, 22),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 64,
+                    height: 64,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        CircularProgressIndicator(
+                          value: pct > 0 ? pct / 100 : null,
+                          strokeWidth: 5,
+                          color: const Color(0xFF38BDF8),
+                          backgroundColor: const Color(0xFF334155),
+                        ),
+                        Text(
+                          '$pct%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Publishing whiteboard lesson',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _publishPhase.isEmpty ? 'Please wait…' : _publishPhase,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFFCBD5E1),
+                      fontSize: 13,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      value: pct > 0 ? pct / 100 : null,
+                      minHeight: 8,
+                      color: const Color(0xFF38BDF8),
+                      backgroundColor: const Color(0xFF334155),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

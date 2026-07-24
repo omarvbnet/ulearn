@@ -227,15 +227,17 @@ export async function notifySubscribersLessonUpdated(params: {
   lessonTitle: string;
   courseId?: string;
   lessonId?: string;
+  isWhiteboard?: boolean;
 }) {
+  const isBoard = params.isWhiteboard === true;
   for (const userId of params.userIds) {
     await NotificationService.notifyUser(
       userId,
       {
-        titleEn: "Course video updated",
-        titleAr: "تم تحديث فيديو الدورة",
-        titleKu: "ڤیدیۆی کۆرس نوێکرایەوە",
-        titleTr: "Kurs videosu güncellendi",
+        titleEn: isBoard ? "Whiteboard lesson updated" : "Course video updated",
+        titleAr: isBoard ? "تم تحديث درس السبورة" : "تم تحديث فيديو الدورة",
+        titleKu: isBoard ? "وانەی تەختە سپی نوێکرایەوە" : "ڤیدیۆی کۆرس نوێکرایەوە",
+        titleTr: isBoard ? "Tahta dersi güncellendi" : "Kurs videosu güncellendi",
         bodyEn: `"${params.lessonTitle}" in "${params.courseTitle}" has new content.`,
         bodyAr: `"${params.lessonTitle}" في "${params.courseTitle}" تم تحديثه.`,
         bodyKu: `"${params.lessonTitle}" لە "${params.courseTitle}" نوێکرایەوە.`,

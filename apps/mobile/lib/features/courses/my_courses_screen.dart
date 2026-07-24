@@ -5,6 +5,7 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/auth/require_auth.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
+import 'package:ulearn/core/network/network_status.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
@@ -13,6 +14,7 @@ import 'package:ulearn/features/home/home_feed.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
 import 'package:ulearn/features/store/teacher_studio_screen.dart';
 import 'package:ulearn/features/video/video_player_screen.dart';
+import 'package:ulearn/features/whiteboard/domain/offline_store.dart';
 
 /// Subscribed and purchased courses with completion progress and search filters.
 class MyCoursesScreen extends StatefulWidget {
@@ -49,7 +51,17 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
       return;
     }
     setState(() => _loading = true);
+    final api = context.read<ApiClient>();
     try {
+      if (!await NetworkStatus.isOnline()) {
+        final offline = await WhiteboardOfflineStore.libraryCourseCards();
+        if (!mounted) return;
+        setState(() {
+          _courses = offline;
+          _loading = false;
+        });
+        return;
+      }
       final q = _search.trim();
       final params = <String, String>{
         'sort': _sort,
@@ -57,14 +69,28 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
         if (_minProgress > 0) 'minProgress': '$_minProgress',
       };
       final query = params.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&');
-      final data = await context.read<ApiClient>().get('/api/my-courses?$query');
+      final data = await api.get('/api/my-courses?$query');
       if (!mounted) return;
+      final online =
+          ((data['courses'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+      // Merge any offline-only board courses not already in the API list.
+      final offline = await WhiteboardOfflineStore.libraryCourseCards();
+      final onlineIds = online.map((c) => c['id']?.toString()).whereType<String>().toSet();
+      final merged = [
+        ...online,
+        ...offline.where((c) => !onlineIds.contains(c['id']?.toString())),
+      ];
       setState(() {
-        _courses = ((data['courses'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+        _courses = merged;
         _loading = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      final offline = await WhiteboardOfflineStore.libraryCourseCards();
+      if (!mounted) return;
+      setState(() {
+        _courses = offline;
+        _loading = false;
+      });
     }
   }
 
@@ -295,7 +321,7 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                                           bottom: 12,
                                           child: _ProgressBadge(pct: progress),
                                         ),
-                                        if (type == 'curriculum')
+                                          if (type == 'curriculum')
                                           Positioned(
                                             left: 12,
                                             top: 12,
@@ -308,6 +334,27 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                                               ),
                                               child: Text(
                                                 l10n.authCertificate,
+                                                style: TextStyle(
+                                                  color: AppTheme.accent,
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        if (c['offlineOnly'] == true)
+                                          Positioned(
+                                            left: 12,
+                                            top: 12,
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                  horizontal: 8, vertical: 4),
+                                              decoration: BoxDecoration(
+                                                color: Colors.black54,
+                                                borderRadius: BorderRadius.circular(8),
+                                              ),
+                                              child: const Text(
+                                                'Offline',
                                                 style: TextStyle(
                                                   color: AppTheme.accent,
                                                   fontSize: 11,

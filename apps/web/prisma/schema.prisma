@@ -629,6 +629,9 @@ model CourseLessonUpdateRequest {
   previousDurationSec  Int?
   /// Comma-separated change tags, e.g. "title,video,thumbnail,whiteboard".
   changeSummary String?
+  /// Whiteboard edit ranges for admin review (dirty segments before/after).
+  /// Shape: { ranges: [{ id, startMs, endMs, kind, removedMs? }], previousDurationMs?, newDurationMs? }
+  editDiffJson Json?
   status       LessonUpdateStatus @default(PENDING)
   reviewNotes  String?
   reviewedById String?

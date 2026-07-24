@@ -21,7 +21,7 @@ class QuizInlinePanel extends StatefulWidget {
 
   final String quizId;
   final String title;
-  final VoidCallback onFinished;
+  final void Function({required bool passed}) onFinished;
 
   /// When true, fills a fixed player stage (no outer border / min height).
   final bool embedded;
@@ -178,7 +178,8 @@ class _QuizInlinePanelState extends State<QuizInlinePanel> {
                     style: TextStyle(color: AppTheme.muted)),
                 const SizedBox(height: 12),
                 OutlinedButton(
-                    onPressed: widget.onFinished, child: Text(l10n.next)),
+                    onPressed: () => widget.onFinished(passed: false),
+                    child: Text(l10n.next)),
               ],
             ),
           )
@@ -190,7 +191,8 @@ class _QuizInlinePanelState extends State<QuizInlinePanel> {
             : _result != null
                 ? _InlineResult(
                     result: _result!,
-                    onContinue: widget.onFinished,
+                    onContinue: () =>
+                        widget.onFinished(passed: _result!['passed'] == true),
                   )
                 : !_started
                     ? _InlineIntro(

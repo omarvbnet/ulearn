@@ -9,6 +9,25 @@
       "client_info": {
         "mobilesdk_app_id": "1:553264472572:android:7236c7275ad0b21c319279",
         "android_client_info": {
+          "package_name": "com.ulearn.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCe0BcN0Fgqss2ujgyxbUJCwy6RshfIerQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:553264472572:android:e956d161cda7a104319279",
+        "android_client_info": {
           "package_name": "com.ulearn.mobile01"
         }
       },
