@@ -268,5 +268,36 @@
     "maleFemale": "Erkek / Kadın",
     "registrations": "Kayıt Eğilimleri",
     "byProvince": "İle Göre"
+  },
+  "landing": {
+    "subtitle": "Okul ve üniversite öğrencileri ile deneyim sertifikası arayan profesyoneller için kurumsal öğrenme — kayıtlı kurslar, quizler, sıralamalar ve doğrulanmış sertifikalar.",
+    "ctaLogin": "Başla",
+    "features": {
+      "otpTitle": "WhatsApp OTP",
+      "otpDesc": "Güvenli telefon doğrulaması",
+      "countryTitle": "Çok Ülkeli",
+      "countryDesc": "Ülkeye özel müfredat ve paketler",
+      "langTitle": "4 Dil",
+      "langDesc": "Arapça, Kürtçe, Türkçe, İngilizce",
+      "certTitle": "Sertifikalar",
+      "certDesc": "Doğrulanmış dijital deneyim sertifikaları"
+    },
+    "ubrdEyebrow": "Tahta teknolojisi",
+    "ubrdTitle": "UBRD — U Learn Tahta Kaydı",
+    "ubrdLead": "Kayıtlı dersi canlı gibi hissettiren profesyonel bir ders formatı.",
+    "ubrdBody": "UBRD (.ubrd) paketleri vektör çizgileri, lazeri, şekilleri ve PDF sayfa geçişlerini öğretmenin sesiyle aynı milisaniye zaman çizelgesinde birleştirir. Çizimler her yakınlaştırmada net kalır, dosyalar çevrimdışı oynatma için hafiftir ve her darbe öğretmenin yazdığı gibi — ilk basıştan son bırakışa — yeniden oynatılır.",
+    "ubrdPoints": {
+      "vectorTitle": "Gerçek vektör mürekkep",
+      "vectorDesc": "Darbeler video pikseli değil geometri olarak kaydedilir — her ekranda net.",
+      "syncTitle": "Tek zaman çizelgesi",
+      "syncDesc": "Ses ve tahta olayları aynı saati paylaşır; ses ile yazı hizalı kalır.",
+      "pdfTitle": "PDF ile öğretim",
+      "pdfDesc": "Kurs PDF’lerini pakete kopyalamadan işaretleyin — hafif ve güvenli referanslar.",
+      "playTitle": "Stüdyodan oynatıcıya",
+      "playDesc": "Öğretmenler Tahta Stüdyosu’nda kaydeder; öğrenciler mürekkebi, şekilleri ve yakınlaştırmayı web ve mobilde adım adım izler."
+    },
+    "footerSupport": "Destek",
+    "footerPrivacy": "Gizlilik Politikası",
+    "footerTerms": "Kullanım Şartları"
   }
 }

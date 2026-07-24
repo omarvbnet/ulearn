@@ -268,5 +268,36 @@
     "maleFemale": "Male / Female",
     "registrations": "Registration Trends",
     "byProvince": "By Province"
+  },
+  "landing": {
+    "subtitle": "Enterprise-grade learning for school & university students and professionals seeking experience certificates — pre-recorded courses, quizzes, rankings, and verified certificates.",
+    "ctaLogin": "Get started",
+    "features": {
+      "otpTitle": "WhatsApp OTP",
+      "otpDesc": "Secure phone-based authentication",
+      "countryTitle": "Multi-Country",
+      "countryDesc": "Country-specific curriculum & packages",
+      "langTitle": "4 Languages",
+      "langDesc": "Arabic, Kurdish, Turkish, English",
+      "certTitle": "Certificates",
+      "certDesc": "Verified digital experience certificates"
+    },
+    "ubrdEyebrow": "Whiteboard technology",
+    "ubrdTitle": "UBRD — U Learn Board Recording",
+    "ubrdLead": "A professional lesson format built for teaching that feels live — even when it is recorded.",
+    "ubrdBody": "UBRD (.ubrd) packages vector strokes, laser pointers, shapes, and PDF page turns on one millisecond timeline with the teacher’s voice. Drawings stay sharp at any zoom, files stay small for offline playback, and every stroke replays exactly as the teacher wrote it — from the first press to the last release.",
+    "ubrdPoints": {
+      "vectorTitle": "True vector ink",
+      "vectorDesc": "Strokes are recorded as geometry, not video pixels — crisp on every screen.",
+      "syncTitle": "One shared timeline",
+      "syncDesc": "Audio and board events share the same clock so voice and writing stay perfectly aligned.",
+      "pdfTitle": "PDF-aware teaching",
+      "pdfDesc": "Annotate course PDFs without stuffing copies into the package — references stay light and secure.",
+      "playTitle": "Studio to player",
+      "playDesc": "Teachers record in Whiteboard Studio; students watch progressive ink, shapes, and zoom on web and mobile."
+    },
+    "footerSupport": "Support",
+    "footerPrivacy": "Privacy Policy",
+    "footerTerms": "Terms of Use"
   }
 }

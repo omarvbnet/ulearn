@@ -18,6 +18,7 @@ import 'package:ulearn/features/whiteboard/domain/whiteboard_audio.dart';
 import 'package:ulearn/features/whiteboard/ui/pdf_underlay.dart';
 import 'package:ulearn/features/whiteboard/ui/whiteboard_brand_intro.dart';
 import 'package:ulearn/features/whiteboard/ui/whiteboard_painter.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 /// Student/teacher viewer — reconstructs a recorded whiteboard lesson.
 class WhiteboardPlayerScreen extends StatefulWidget {
@@ -137,7 +138,18 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     unawaited(_audioStateSub?.cancel());
     unawaited(_audio.dispose());
     unawaited(_pdfCache.dispose());
+    unawaited(WakelockPlus.disable());
     super.dispose();
+  }
+
+  Future<void> _setKeepAwake(bool enabled) async {
+    try {
+      if (enabled) {
+        await WakelockPlus.enable();
+      } else {
+        await WakelockPlus.disable();
+      }
+    } catch (_) {}
   }
 
   void _onTransformChanged() {
@@ -573,6 +585,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
           if (state.processingState == ProcessingState.completed) {
             _onAudioPosition(_durationMs);
             if (mounted) setState(() => _playing = false);
+            unawaited(_setKeepAwake(false));
             _emitProgress();
           }
         });
@@ -767,6 +780,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
           if (next >= _durationMs) {
             _tick?.cancel();
             if (mounted) setState(() => _playing = false);
+            unawaited(_setKeepAwake(false));
             _emitProgress();
           }
         });
@@ -775,6 +789,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
       debugPrint('WhiteboardPlayer play: $e');
     }
     if (mounted) setState(() => _playing = true);
+    unawaited(_setKeepAwake(true));
   }
 
   Future<void> _pause() async {
@@ -783,6 +798,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
       if (_audio.audioSource != null) await _audio.pause();
     } catch (_) {}
     if (mounted) setState(() => _playing = false);
+    unawaited(_setKeepAwake(false));
     _emitProgress();
   }
 

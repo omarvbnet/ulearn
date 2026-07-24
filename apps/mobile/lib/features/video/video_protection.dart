@@ -8,8 +8,8 @@ import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 
 /// When false, screenshots/recordings are not blacked out (needed for App Review).
-/// Re-enable before production if content protection is required again.
-const bool kEnableScreenshotHardening = false;
+/// Production course playback must keep this true to block capture on device.
+const bool kEnableScreenshotHardening = true;
 
 /// Video protection: screen capture hardening, casting awareness, and a
 /// moving viewer watermark (name + national ID) during playback and casting.

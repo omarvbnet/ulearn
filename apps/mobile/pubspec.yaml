@@ -46,6 +46,7 @@ dependencies:
   path: ^1.9.1
   uuid: ^4.6.0
   just_audio: ^0.10.6
+  wakelock_plus: ^1.2.8
 
 dev_dependencies:
   flutter_test:
