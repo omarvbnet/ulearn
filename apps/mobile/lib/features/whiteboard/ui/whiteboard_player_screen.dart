@@ -773,9 +773,9 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
       } else if (_durationMs > 0) {
         // Silent board (no audio track) — advance via ticker.
         _tick?.cancel();
-        _tick = Timer.periodic(const Duration(milliseconds: 50), (_) {
+        _tick = Timer.periodic(const Duration(milliseconds: 16), (_) {
           if (!_playing) return;
-          final next = (_playheadMs + 50).clamp(0, _durationMs);
+          final next = (_playheadMs + 16).clamp(0, _durationMs);
           _onAudioPosition(next);
           if (next >= _durationMs) {
             _tick?.cancel();

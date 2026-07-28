@@ -25,6 +25,46 @@ type Props = {
   onProgress?: (positionSec: number, durationSec: number, completed: boolean) => void;
 };
 
+function paintSmoothStroke(
+  ctx: CanvasRenderingContext2D,
+  stroke: {
+    points: { x: number; y: number }[];
+    color: string;
+    opacity: number;
+    width: number;
+  }
+) {
+  if (!stroke.points.length) return;
+  ctx.beginPath();
+  ctx.strokeStyle = stroke.color;
+  ctx.fillStyle = stroke.color;
+  ctx.globalAlpha = stroke.opacity;
+  ctx.lineWidth = stroke.width;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  const pts = stroke.points;
+  if (pts.length === 1) {
+    const p0 = pts[0]!;
+    ctx.arc(p0.x, p0.y, Math.max(stroke.width / 2, 2.5), 0, Math.PI * 2);
+    ctx.fill();
+  } else if (pts.length === 2) {
+    ctx.moveTo(pts[0]!.x, pts[0]!.y);
+    ctx.lineTo(pts[1]!.x, pts[1]!.y);
+    ctx.stroke();
+  } else {
+    ctx.moveTo(pts[0]!.x, pts[0]!.y);
+    for (let i = 1; i < pts.length - 1; i++) {
+      const midX = (pts[i]!.x + pts[i + 1]!.x) / 2;
+      const midY = (pts[i]!.y + pts[i + 1]!.y) / 2;
+      ctx.quadraticCurveTo(pts[i]!.x, pts[i]!.y, midX, midY);
+    }
+    const last = pts[pts.length - 1]!;
+    ctx.lineTo(last.x, last.y);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
 export default function WhiteboardPlayer({
   packageUrl,
   whiteboardId,
@@ -43,6 +83,9 @@ export default function WhiteboardPlayer({
   const engineRef = useRef(new EventEngine());
   const eventIndexRef = useRef(0);
   const audioUrlRef = useRef<string | null>(null);
+  const playingRef = useRef(false);
+  const lastPaintRev = useRef(-1);
+  const viewZoomRef = useRef(1);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +95,17 @@ export default function WhiteboardPlayer({
   const [durationMs, setDurationMs] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [showIntro, setShowIntro] = useState(false);
+  const [viewZoom, setViewZoom] = useState(1);
   const [, bump] = useState(0);
+
+  useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
+
+  useEffect(() => {
+    viewZoomRef.current = viewZoom;
+    bump((n) => n + 1);
+  }, [viewZoom]);
 
   const paint = useCallback(() => {
     const canvas = canvasRef.current;
@@ -62,13 +115,19 @@ export default function WhiteboardPlayer({
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
-    canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-    canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    const nextW = Math.max(1, Math.floor(rect.width * dpr));
+    const nextH = Math.max(1, Math.floor(rect.height * dpr));
+    if (canvas.width !== nextW || canvas.height !== nextH) {
+      canvas.width = nextW;
+      canvas.height = nextH;
+    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const bw = parsed.manifest.boardWidth || LOGICAL_BOARD_WIDTH;
     const bh = parsed.manifest.boardHeight || LOGICAL_BOARD_HEIGHT;
-    const scale = Math.min(rect.width / bw, rect.height / bh);
+    const zoom = viewZoomRef.current;
+    const fit = Math.min(rect.width / bw, rect.height / bh);
+    const scale = fit * zoom;
     const dx = (rect.width - bw * scale) / 2;
     const dy = (rect.height - bh * scale) / 2;
     const board = boardRef.current;
@@ -87,6 +146,8 @@ export default function WhiteboardPlayer({
       for (const shape of page.shapes) {
         ctx.strokeStyle = shape.color;
         ctx.lineWidth = shape.width;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
         ctx.beginPath();
         if (shape.kind === "circle") {
           ctx.ellipse(
@@ -106,31 +167,9 @@ export default function WhiteboardPlayer({
         }
         ctx.stroke();
       }
-      const paintStroke = (stroke: (typeof page.strokes)[number]) => {
-        if (!stroke.points.length) return;
-        ctx.beginPath();
-        ctx.strokeStyle = stroke.color;
-        ctx.fillStyle = stroke.color;
-        ctx.globalAlpha = stroke.opacity;
-        ctx.lineWidth = stroke.width;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        if (stroke.points.length === 1) {
-          const p0 = stroke.points[0]!;
-          ctx.arc(p0.x, p0.y, Math.max(stroke.width / 2, 2.5), 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          ctx.moveTo(stroke.points[0]!.x, stroke.points[0]!.y);
-          for (let i = 1; i < stroke.points.length; i++) {
-            ctx.lineTo(stroke.points[i]!.x, stroke.points[i]!.y);
-          }
-          ctx.stroke();
-        }
-        ctx.globalAlpha = 1;
-      };
-      for (const stroke of page.strokes) paintStroke(stroke);
+      for (const stroke of page.strokes) paintSmoothStroke(ctx, stroke);
       for (const stroke of board.getOpenStrokes()) {
-        if (stroke.pageId === page.id) paintStroke(stroke);
+        if (stroke.pageId === page.id) paintSmoothStroke(ctx, stroke);
       }
       for (const text of page.texts) {
         ctx.fillStyle = text.color;
@@ -138,34 +177,53 @@ export default function WhiteboardPlayer({
         ctx.fillText(text.text, text.x, text.y);
       }
       if (board.laser?.visible && board.laser.pageId === page.id) {
+        const g = ctx.createRadialGradient(
+          board.laser.x,
+          board.laser.y,
+          0,
+          board.laser.x,
+          board.laser.y,
+          14
+        );
+        g.addColorStop(0, "rgba(255,107,107,0.95)");
+        g.addColorStop(1, "rgba(239,68,68,0)");
         ctx.beginPath();
-        ctx.fillStyle = "rgba(239,68,68,0.85)";
-        ctx.arc(board.laser.x, board.laser.y, 8, 0, Math.PI * 2);
+        ctx.fillStyle = g;
+        ctx.arc(board.laser.x, board.laser.y, 14, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(239,68,68,0.95)";
+        ctx.arc(board.laser.x, board.laser.y, 4, 0, Math.PI * 2);
         ctx.fill();
       }
     }
     ctx.restore();
+    lastPaintRev.current = board.revision;
   }, [pkg]);
 
-  const applyUntil = useCallback((ms: number) => {
-    boardRef.current.reset();
-    if (pkg) boardRef.current.theme = pkg.manifest.theme;
-    eventIndexRef.current = 0;
-    const events = engineRef.current.all;
-    while (eventIndexRef.current < events.length && events[eventIndexRef.current]!.t <= ms) {
-      boardRef.current.apply(events[eventIndexRef.current]!);
-      eventIndexRef.current++;
-    }
-    bump((n) => n + 1);
-  }, [pkg]);
+  const applyUntil = useCallback(
+    (ms: number) => {
+      boardRef.current.reset();
+      if (pkg) boardRef.current.theme = pkg.manifest.theme;
+      eventIndexRef.current = 0;
+      const events = engineRef.current.all;
+      while (eventIndexRef.current < events.length && events[eventIndexRef.current]!.t <= ms) {
+        boardRef.current.apply(events[eventIndexRef.current]!);
+        eventIndexRef.current++;
+      }
+    },
+    [pkg]
+  );
 
   const applyForward = useCallback((ms: number) => {
     const events = engineRef.current.all;
+    let applied = false;
     while (eventIndexRef.current < events.length && events[eventIndexRef.current]!.t <= ms) {
       boardRef.current.apply(events[eventIndexRef.current]!);
       eventIndexRef.current++;
+      applied = true;
     }
-    bump((n) => n + 1);
+    return applied;
   }, []);
 
   useEffect(() => {
@@ -197,7 +255,6 @@ export default function WhiteboardPlayer({
         setDurationMs(parsed.manifest.durationMs);
         setLoading(false);
         const clipStart = startMs != null ? startMs : initialPositionSec * 1000;
-        // Full lesson opens: brand intro. Clip/admin review & mid-resume: skip.
         const wantIntro = !compact && startMs == null && initialPositionSec < 3;
         setShowIntro(wantIntro);
         requestAnimationFrame(() => {
@@ -211,6 +268,7 @@ export default function WhiteboardPlayer({
             } else {
               applyUntil(0);
             }
+            paint();
             if (autoPlay && !wantIntro) {
               void audioRef.current.play().then(() => setPlaying(true)).catch(() => {});
             }
@@ -227,7 +285,7 @@ export default function WhiteboardPlayer({
       cancelled = true;
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
     };
-  }, [packageUrl, whiteboardId, initialPositionSec, startMs, autoPlay, applyUntil, compact]);
+  }, [packageUrl, whiteboardId, initialPositionSec, startMs, autoPlay, applyUntil, compact, paint]);
 
   const finishIntro = useCallback(() => {
     setShowIntro(false);
@@ -242,28 +300,40 @@ export default function WhiteboardPlayer({
     paint();
   });
 
+  // Audio-synced rAF clock (~60fps) instead of 100ms polling.
   useEffect(() => {
-    const id = window.setInterval(() => {
+    let raf = 0;
+    let lastProgressAt = 0;
+    const tick = () => {
       const audio = audioRef.current;
-      if (!audio || !pkg) return;
-      const ms = Math.floor(audio.currentTime * 1000);
-      setPlayheadMs(ms);
-      applyForward(ms);
-      if (endMs != null && ms >= endMs) {
-        audio.pause();
-        setPlaying(false);
-        setPlayheadMs(endMs);
+      if (audio && pkg) {
+        const ms = Math.floor(audio.currentTime * 1000);
+        setPlayheadMs(ms);
+        applyForward(ms);
+        if (boardRef.current.revision !== lastPaintRev.current) {
+          paint();
+        }
+        if (endMs != null && ms >= endMs) {
+          audio.pause();
+          setPlaying(false);
+          setPlayheadMs(endMs);
+        }
+        if (freePreviewSec && freePreviewSec > 0 && ms >= freePreviewSec * 1000) {
+          audio.pause();
+          setPlaying(false);
+        }
+        if (playingRef.current && ms - lastProgressAt >= 1000) {
+          lastProgressAt = ms;
+          const dur = Math.max(1, Math.round(durationMs / 1000));
+          const pos = Math.round(ms / 1000);
+          onProgress?.(pos, dur, pos >= dur * 0.9);
+        }
       }
-      if (freePreviewSec && freePreviewSec > 0 && ms >= freePreviewSec * 1000) {
-        audio.pause();
-        setPlaying(false);
-      }
-      const dur = Math.max(1, Math.round(durationMs / 1000));
-      const pos = Math.round(ms / 1000);
-      onProgress?.(pos, dur, pos >= dur * 0.9);
-    }, 100);
-    return () => window.clearInterval(id);
-  }, [pkg, applyForward, freePreviewSec, durationMs, onProgress, endMs]);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [pkg, applyForward, freePreviewSec, durationMs, onProgress, endMs, paint]);
 
   const seek = async (ms: number) => {
     const audio = audioRef.current;
@@ -272,6 +342,11 @@ export default function WhiteboardPlayer({
     audio.currentTime = clamped / 1000;
     setPlayheadMs(clamped);
     applyUntil(clamped);
+    paint();
+  };
+
+  const nudgeZoom = (factor: number) => {
+    setViewZoom((z) => Math.min(5, Math.max(1, Number((z * factor).toFixed(2)))));
   };
 
   const label = useMemo(() => {
@@ -297,6 +372,15 @@ export default function WhiteboardPlayer({
         <audio ref={audioRef} className="hidden" />
         {showIntro && (
           <WhiteboardBrandIntro lessonTitle={title} onFinished={finishIntro} />
+        )}
+        {!compact && viewZoom > 1.05 && (
+          <button
+            type="button"
+            className="absolute right-2 top-2 rounded-full bg-black/55 px-2.5 py-1 text-[11px] text-white"
+            onClick={() => setViewZoom(1)}
+          >
+            {viewZoom.toFixed(1)}× Reset
+          </button>
         )}
       </div>
       {!compact ? (
@@ -342,6 +426,20 @@ export default function WhiteboardPlayer({
           >
             +10s
           </button>
+          <button
+            type="button"
+            className="rounded-lg bg-black/10 px-2 py-1 text-xs"
+            onClick={() => nudgeZoom(1 / 1.35)}
+          >
+            Zoom −
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-black/10 px-2 py-1 text-xs"
+            onClick={() => nudgeZoom(1.35)}
+          >
+            Zoom +
+          </button>
           <select
             className="rounded-lg border border-card-border bg-transparent px-2 py-1 text-xs"
             value={speed}
@@ -375,6 +473,7 @@ export default function WhiteboardPlayer({
                 if (startMs != null) {
                   audio.currentTime = startMs / 1000;
                   applyUntil(startMs);
+                  paint();
                 }
                 await audio.play();
                 setPlaying(true);

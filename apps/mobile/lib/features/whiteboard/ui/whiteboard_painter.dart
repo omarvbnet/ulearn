@@ -131,6 +131,8 @@ class WhiteboardPainter extends CustomPainter {
       paint.color = const Color(0xFFFFFFFF);
     }
 
+    paint.isAntiAlias = true;
+
     // Tap / single sample → visible round dot (same as press start).
     if (stroke.points.length == 1) {
       final p = stroke.points.first;
@@ -142,11 +144,20 @@ class WhiteboardPainter extends CustomPainter {
       return;
     }
 
-    final path = Path();
-    path.moveTo(stroke.points.first.x, stroke.points.first.y);
-    for (var i = 1; i < stroke.points.length; i++) {
-      final p = stroke.points[i];
-      path.lineTo(p.x, p.y);
+    // Quadratic midpoints → smoother ink than raw polyline segments.
+    final pts = stroke.points;
+    final path = Path()..moveTo(pts.first.x, pts.first.y);
+    if (pts.length == 2) {
+      path.lineTo(pts[1].x, pts[1].y);
+    } else {
+      for (var i = 1; i < pts.length - 1; i++) {
+        final mid = Offset(
+          (pts[i].x + pts[i + 1].x) / 2,
+          (pts[i].y + pts[i + 1].y) / 2,
+        );
+        path.quadraticBezierTo(pts[i].x, pts[i].y, mid.dx, mid.dy);
+      }
+      path.lineTo(pts.last.x, pts.last.y);
     }
     canvas.drawPath(path, paint);
   }
@@ -207,7 +218,20 @@ class WhiteboardPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant WhiteboardPainter oldDelegate) => true;
+  bool shouldRepaint(covariant WhiteboardPainter oldDelegate) {
+    // Live drawing mutates stroke/shape in place — always refresh while active.
+    if (activeStroke != null ||
+        oldDelegate.activeStroke != null ||
+        activeShape != null ||
+        oldDelegate.activeShape != null) {
+      return true;
+    }
+    return oldDelegate.state.revision != state.revision ||
+        oldDelegate.pdfUnderlay != pdfUnderlay ||
+        oldDelegate.boardWidth != boardWidth ||
+        oldDelegate.boardHeight != boardHeight ||
+        oldDelegate.state.openStrokes.length != state.openStrokes.length;
+  }
 }
 
 /// Maps a local pointer position into logical board coordinates.

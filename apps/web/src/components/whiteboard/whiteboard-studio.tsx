@@ -22,7 +22,7 @@ import {
   type WhiteboardThemeId,
   type WhiteboardTool,
 } from "@/lib/whiteboard/types";
-import { defaultOpacityForTool, defaultWidthForTool, smoothStrokePoints } from "@/lib/whiteboard/smoothing";
+import { defaultOpacityForTool, resolveStrokeWidth, STROKE_WIDTH_PRESETS, smoothStrokePoints } from "@/lib/whiteboard/smoothing";
 
 type Props = {
   courseId: string;
@@ -101,6 +101,8 @@ export default function WhiteboardStudio({
   const [theme, setTheme] = useState<WhiteboardThemeId>("WHITE");
   const [tool, setTool] = useState<WhiteboardTool>("pen");
   const [color, setColor] = useState("#111827");
+  const [strokeWidth, setStrokeWidth] = useState(3.5);
+  const [viewZoom, setViewZoom] = useState(1);
   const [recording, setRecording] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadingEdit, setLoadingEdit] = useState(editMode);
@@ -241,10 +243,15 @@ export default function WhiteboardStudio({
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
-    canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-    canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    const nextW = Math.max(1, Math.floor(rect.width * dpr));
+    const nextH = Math.max(1, Math.floor(rect.height * dpr));
+    if (canvas.width !== nextW || canvas.height !== nextH) {
+      canvas.width = nextW;
+      canvas.height = nextH;
+    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const scale = Math.min(rect.width / LOGICAL_BOARD_WIDTH, rect.height / LOGICAL_BOARD_HEIGHT);
+    const fit = Math.min(rect.width / LOGICAL_BOARD_WIDTH, rect.height / LOGICAL_BOARD_HEIGHT);
+    const scale = fit * viewZoom;
     const dx = (rect.width - LOGICAL_BOARD_WIDTH * scale) / 2;
     const dy = (rect.height - LOGICAL_BOARD_HEIGHT * scale) / 2;
     ctx.clearRect(0, 0, rect.width, rect.height);
@@ -273,6 +280,8 @@ export default function WhiteboardStudio({
         ctx.strokeStyle = shape.color;
         ctx.globalAlpha = preview ? 0.85 : 1;
         ctx.lineWidth = shape.width;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
         ctx.beginPath();
         if (shape.kind === "circle") {
           ctx.ellipse(
@@ -317,15 +326,24 @@ export default function WhiteboardStudio({
         ctx.lineWidth = stroke.width;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
-        if (stroke.points.length === 1) {
-          const p0 = stroke.points[0]!;
+        const pts = stroke.points;
+        if (pts.length === 1) {
+          const p0 = pts[0]!;
           ctx.arc(p0.x, p0.y, Math.max(stroke.width / 2, 2.5), 0, Math.PI * 2);
           ctx.fill();
+        } else if (pts.length === 2) {
+          ctx.moveTo(pts[0]!.x, pts[0]!.y);
+          ctx.lineTo(pts[1]!.x, pts[1]!.y);
+          ctx.stroke();
         } else {
-          ctx.moveTo(stroke.points[0]!.x, stroke.points[0]!.y);
-          for (let i = 1; i < stroke.points.length; i++) {
-            ctx.lineTo(stroke.points[i]!.x, stroke.points[i]!.y);
+          ctx.moveTo(pts[0]!.x, pts[0]!.y);
+          for (let i = 1; i < pts.length - 1; i++) {
+            const midX = (pts[i]!.x + pts[i + 1]!.x) / 2;
+            const midY = (pts[i]!.y + pts[i + 1]!.y) / 2;
+            ctx.quadraticCurveTo(pts[i]!.x, pts[i]!.y, midX, midY);
           }
+          const last = pts[pts.length - 1]!;
+          ctx.lineTo(last.x, last.y);
           ctx.stroke();
         }
         ctx.globalAlpha = 1;
@@ -344,7 +362,7 @@ export default function WhiteboardStudio({
       }
     }
     ctx.restore();
-  }, [boardBg, chromeBg]);
+  }, [boardBg, chromeBg, viewZoom]);
 
   useEffect(() => {
     paint();
@@ -377,7 +395,8 @@ export default function WhiteboardStudio({
   const toLogical = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
-    const scale = Math.min(rect.width / LOGICAL_BOARD_WIDTH, rect.height / LOGICAL_BOARD_HEIGHT);
+    const fit = Math.min(rect.width / LOGICAL_BOARD_WIDTH, rect.height / LOGICAL_BOARD_HEIGHT);
+    const scale = fit * viewZoom;
     const dx = (rect.width - LOGICAL_BOARD_WIDTH * scale) / 2;
     const dy = (rect.height - LOGICAL_BOARD_HEIGHT * scale) / 2;
     const x = (e.clientX - rect.left - dx) / scale;
@@ -387,6 +406,10 @@ export default function WhiteboardStudio({
       y: Math.max(0, Math.min(LOGICAL_BOARD_HEIGHT, y)),
       p: e.pressure > 0 ? e.pressure : 0.5,
     };
+  };
+
+  const nudgeViewZoom = (factor: number) => {
+    setViewZoom((z) => Math.min(5, Math.max(1, Number((z * factor).toFixed(2)))));
   };
 
   const startRecording = async () => {
@@ -604,7 +627,7 @@ export default function WhiteboardStudio({
         x2: pt.x,
         y2: pt.y,
         color,
-        width: 3,
+        width: Math.min(8, Math.max(1.5, resolveStrokeWidth("pen", strokeWidth))),
       };
       emitEvent("shape_add", {
         shapeId: id,
@@ -615,7 +638,7 @@ export default function WhiteboardStudio({
         x2: pt.x,
         y2: pt.y,
         color,
-        width: 3,
+        width: Math.min(8, Math.max(1.5, resolveStrokeWidth("pen", strokeWidth))),
       });
       redraw();
       return;
@@ -634,6 +657,7 @@ export default function WhiteboardStudio({
     }
 
     const strokeId = uid();
+    const width = resolveStrokeWidth(tool, strokeWidth);
     activeStrokeRef.current = { id: strokeId, points: [{ x: pt.x, y: pt.y, p: pt.p }] };
     emitEvent("stroke_begin", {
       strokeId,
@@ -641,7 +665,7 @@ export default function WhiteboardStudio({
       tool,
       color,
       opacity: defaultOpacityForTool(tool),
-      width: defaultWidthForTool(tool),
+      width,
     });
     emitEvent("stroke_point", { strokeId, x: pt.x, y: pt.y, p: pt.p });
     const page = boardRef.current.currentPage;
@@ -652,7 +676,7 @@ export default function WhiteboardStudio({
         tool,
         color,
         opacity: defaultOpacityForTool(tool),
-        width: defaultWidthForTool(tool),
+        width,
         points: [{ x: pt.x, y: pt.y, p: pt.p }],
       });
     }
@@ -699,7 +723,7 @@ export default function WhiteboardStudio({
           tool,
           color,
           opacity: defaultOpacityForTool(tool),
-          width: defaultWidthForTool(tool),
+          width: resolveStrokeWidth(tool, strokeWidth),
           points: active.points.map((p) => ({ ...p })),
         });
       }
@@ -721,7 +745,7 @@ export default function WhiteboardStudio({
         x2: pt.x,
         y2: pt.y,
         color,
-        width: 3,
+        width: draftShapeRef.current?.width ?? Math.min(8, Math.max(1.5, resolveStrokeWidth("pen", strokeWidth))),
       };
       const t = recording ? engineRef.current.now() : playheadMs;
       boardRef.current.apply({ id: shape.id, t, type: "shape_add", payload: fixed });
@@ -1162,6 +1186,26 @@ export default function WhiteboardStudio({
             style={{ background: c, borderColor: color === c ? "#2563EB" : "transparent" }}
           />
         ))}
+        {STROKE_WIDTH_PRESETS.map((w) => (
+          <button
+            key={w}
+            type="button"
+            title={`Thickness ${w}`}
+            onClick={() => setStrokeWidth(w)}
+            className={`flex h-7 w-7 items-center justify-center rounded-md ${
+              Math.abs(strokeWidth - w) < 0.01 ? "bg-blue-600" : "bg-black/10"
+            }`}
+          >
+            <span
+              className="rounded-full"
+              style={{
+                width: Math.min(18, 4 + w),
+                height: Math.min(18, 4 + w),
+                background: Math.abs(strokeWidth - w) < 0.01 ? "#fff" : chromeFg,
+              }}
+            />
+          </button>
+        ))}
         <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={undo} disabled={undoStackRef.current.length === 0}>
           Undo
         </button>
@@ -1177,11 +1221,22 @@ export default function WhiteboardStudio({
         <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={() => void importDevicePdf()}>
           Import PDF
         </button>
+        <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={() => nudgeViewZoom(1 / 1.35)}>
+          Board −
+        </button>
+        <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={() => nudgeViewZoom(1.35)}>
+          Board +
+        </button>
+        {viewZoom > 1.05 && (
+          <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={() => setViewZoom(1)}>
+            {viewZoom.toFixed(1)}× Reset
+          </button>
+        )}
         <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={() => nudgePdfZoom(1 / 1.25)}>
-          Zoom −
+          PDF −
         </button>
         <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={() => nudgePdfZoom(1.25)}>
-          Zoom +
+          PDF +
         </button>
         {/* keep historyTick referenced so undo/redo buttons re-enable */}
         <span className="sr-only">{historyTick}</span>

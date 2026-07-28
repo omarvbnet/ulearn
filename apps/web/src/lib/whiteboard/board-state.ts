@@ -65,6 +65,8 @@ export class BoardState {
   color = "#111827";
   opacity = 1;
   laser: BoardLaser | null = null;
+  /** Bumps on every applied event — drives efficient painter invalidation. */
+  revision = 0;
   private undoStack: UbrdEvent[][] = [];
   private openStrokes = new Map<string, BoardStroke>();
 
@@ -90,6 +92,7 @@ export class BoardState {
     this.opacity = 1;
     this.laser = null;
     this.openStrokes.clear();
+    this.revision = 0;
     this.addBlankPage("page_0");
   }
 
@@ -112,6 +115,7 @@ export class BoardState {
   }
 
   apply(e: UbrdEvent) {
+    this.revision++;
     const p = e.payload;
     switch (e.type) {
       case "session_start":

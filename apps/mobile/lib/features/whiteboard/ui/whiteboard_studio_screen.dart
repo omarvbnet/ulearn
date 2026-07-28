@@ -61,6 +61,11 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
 
   WhiteboardTool _tool = WhiteboardTool.pen;
   String _color = '#111827';
+  double _strokeWidth = 3.5;
+  final _viewTransform = TransformationController();
+  double _viewZoom = 1;
+  static const _minViewZoom = 1.0;
+  static const _maxViewZoom = 5.0;
   bool _recording = false;
   bool _saving = false;
   /// 0–100 overall publish progress while finishing a board lesson.
@@ -108,6 +113,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
     super.initState();
     _titleCtrl.text = widget.initialTitle ?? 'Whiteboard lesson';
     _board.theme = WhiteboardThemeId.white;
+    _viewTransform.addListener(_onViewTransformChanged);
     _autosaveTimer = Timer.periodic(const Duration(seconds: 20), (_) => _autosaveDraft());
     if (_editMode) {
       _loadingEdit = true;
@@ -115,6 +121,12 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
     } else {
       _restoreDraftIfAny();
     }
+  }
+
+  void _onViewTransformChanged() {
+    final next = _viewTransform.value.getMaxScaleOnAxis();
+    if ((next - _viewZoom).abs() < 0.01) return;
+    if (mounted) setState(() => _viewZoom = next);
   }
 
   Future<void> _loadExistingPackage() async {
@@ -418,6 +430,16 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
     setState(() {});
   }
 
+  void _setViewZoom(double scale) {
+    final clamped = scale.clamp(_minViewZoom, _maxViewZoom);
+    _viewTransform.value = Matrix4.identity()..scaleByDouble(clamped, clamped, 1, 1);
+    setState(() => _viewZoom = clamped);
+  }
+
+  void _nudgeViewZoom(double factor) => _setViewZoom(_viewZoom * factor);
+
+  void _resetViewZoom() => _setViewZoom(1);
+
   void _pushUndo(_UndoItem item) {
     _undoStack.add(item);
     _redoStack.clear();
@@ -622,6 +644,8 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
   void dispose() {
     _autosaveTimer?.cancel();
     _titleCtrl.dispose();
+    _viewTransform.removeListener(_onViewTransformChanged);
+    _viewTransform.dispose();
     _recorder.dispose();
     unawaited(_pdfCache.dispose());
     super.dispose();
@@ -1088,7 +1112,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         x2: logical.dx,
         y2: logical.dy,
         color: _color,
-        width: 2.5,
+        width: resolveStrokeWidth(WhiteboardTool.pen, _strokeWidth).clamp(1.5, 8.0),
       );
       // Students see the shape grow from press → release.
       if (_recording) {
@@ -1101,7 +1125,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
           'x2': logical.dx,
           'y2': logical.dy,
           'color': _color,
-          'width': 2.5,
+          'width': _draftShape!.width,
         });
       }
       setState(() {});
@@ -1115,13 +1139,14 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
 
     final strokeId = _uuid.v4();
     final first = StrokePoint(x: logical.dx, y: logical.dy, p: e.pressure);
+    final baseW = resolveStrokeWidth(_tool, _strokeWidth);
     _activeStroke = BoardStroke(
       id: strokeId,
       pageId: pageId,
       tool: _tool,
       color: _color,
       opacity: defaultOpacityForTool(_tool),
-      width: defaultWidthForTool(_tool) * (0.5 + (e.pressure.clamp(0.0, 1.0) * 0.8)),
+      width: baseW * (0.55 + (e.pressure.clamp(0.0, 1.0) * 0.7)),
       points: [first],
     );
     if (_recording) {
@@ -1209,7 +1234,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         'x2': end.dx,
         'y2': end.dy,
         'color': _color,
-        'width': 2.5,
+        'width': _draftShape?.width ?? 2.5,
       };
       if (_recording) {
         _engine.push('shape_update', payload);
@@ -1413,24 +1438,58 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
                 LayoutBuilder(
                   builder: (context, constraints) {
                     final size = Size(constraints.maxWidth, constraints.maxHeight);
-                    return Listener(
-                      onPointerDown: (e) => _onPointerDown(e, size),
-                      onPointerMove: (e) => _onPointerMove(e, size),
-                      onPointerUp: (e) => _onPointerUp(e, size),
-                      child: CustomPaint(
-                        painter: WhiteboardPainter(
-                          state: _board,
-                          boardWidth: kLogicalBoardWidth,
-                          boardHeight: kLogicalBoardHeight,
-                          activeStroke: _activeStroke,
-                          activeShape: _draftShape,
-                          pdfUnderlay: _pdfUnderlay,
+                    return InteractiveViewer(
+                      transformationController: _viewTransform,
+                      minScale: _minViewZoom,
+                      maxScale: _maxViewZoom,
+                      // Draw with one finger; pinch to zoom. Use Select tool to pan when zoomed.
+                      panEnabled: _tool == WhiteboardTool.select,
+                      scaleEnabled: true,
+                      boundaryMargin: const EdgeInsets.all(120),
+                      clipBehavior: Clip.hardEdge,
+                      child: Listener(
+                        onPointerDown: (e) => _onPointerDown(e, size),
+                        onPointerMove: (e) => _onPointerMove(e, size),
+                        onPointerUp: (e) => _onPointerUp(e, size),
+                        child: SizedBox(
+                          width: size.width,
+                          height: size.height,
+                          child: CustomPaint(
+                            painter: WhiteboardPainter(
+                              state: _board,
+                              boardWidth: kLogicalBoardWidth,
+                              boardHeight: kLogicalBoardHeight,
+                              activeStroke: _activeStroke,
+                              activeShape: _draftShape,
+                              pdfUnderlay: _pdfUnderlay,
+                            ),
+                            size: size,
+                          ),
                         ),
-                        size: Size.infinite,
                       ),
                     );
                   },
                 ),
+                if (_viewZoom > 1.05)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Material(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(16),
+                      child: InkWell(
+                        onTap: _resetViewZoom,
+                        borderRadius: BorderRadius.circular(16),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          child: Text(
+                            '${_viewZoom.toStringAsFixed(1)}× Reset',
+                            style: const TextStyle(color: Colors.white, fontSize: 12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 if (_pdfLoading)
                   const ColoredBox(
                     color: Color(0x66000000),
@@ -1582,6 +1641,35 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
               ),
             );
           }),
+          const SizedBox(width: 6),
+          ...kStrokeWidthPresets.map((w) {
+            final selected = (_strokeWidth - w).abs() < 0.01;
+            final dot = (6.0 + (w * 1.1)).clamp(8.0, 22.0);
+            return Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: InkWell(
+                onTap: () => setState(() => _strokeWidth = w),
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  width: iconSize + 8,
+                  height: iconSize + 8,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: selected ? const Color(0xFF2563EB) : Colors.black12,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Container(
+                    width: dot,
+                    height: dot,
+                    decoration: BoxDecoration(
+                      color: selected ? Colors.white : _chromeFg,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
           IconButton(
             tooltip: 'Undo',
             onPressed: _undoStack.isEmpty ? null : _undo,
@@ -1601,6 +1689,16 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
             tooltip: 'Add PDF',
             onPressed: _attachPdfMenu,
             icon: Icon(Icons.picture_as_pdf, color: _chromeFg, size: iconSize),
+          ),
+          IconButton(
+            tooltip: 'Zoom board out',
+            onPressed: () => _nudgeViewZoom(1 / 1.35),
+            icon: Icon(Icons.zoom_out_map, color: _chromeFg, size: iconSize),
+          ),
+          IconButton(
+            tooltip: 'Zoom board in',
+            onPressed: () => _nudgeViewZoom(1.35),
+            icon: Icon(Icons.zoom_in_map, color: _chromeFg, size: iconSize),
           ),
           IconButton(
             tooltip: 'Zoom PDF out',

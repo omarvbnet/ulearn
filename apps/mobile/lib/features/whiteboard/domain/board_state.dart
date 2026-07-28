@@ -95,6 +95,8 @@ class BoardState {
   double opacity = 1;
   BoardLaser? laser;
   final Map<String, BoardStroke> openStrokes = {};
+  /// Bumps on every applied event — drives efficient painter invalidation.
+  int revision = 0;
 
   BoardState() {
     addBlankPage('page_0');
@@ -125,6 +127,7 @@ class BoardState {
     opacity = 1;
     laser = null;
     openStrokes.clear();
+    revision = 0;
     addBlankPage('page_0');
   }
 
@@ -146,6 +149,7 @@ class BoardState {
   }
 
   void apply(UbrdEvent e) {
+    revision++;
     final p = e.payload;
     switch (e.type) {
       case 'session_start':

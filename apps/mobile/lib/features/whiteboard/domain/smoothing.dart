@@ -27,6 +27,9 @@ List<StrokePoint> smoothStrokePoints(List<StrokePoint> points, {int iterations =
   return pts;
 }
 
+/// Discrete pen thicknesses teachers can pick in the studio tool rail.
+const List<double> kStrokeWidthPresets = [1.5, 3.5, 6.0, 10.0, 16.0];
+
 double defaultWidthForTool(WhiteboardTool tool) {
   switch (tool) {
     case WhiteboardTool.pencil:
@@ -38,6 +41,20 @@ double defaultWidthForTool(WhiteboardTool tool) {
     default:
       return 3.5;
   }
+}
+
+/// Width used when drawing with [tool], honoring an optional teacher preset.
+double resolveStrokeWidth(WhiteboardTool tool, double? preset) {
+  if (tool == WhiteboardTool.eraser) return defaultWidthForTool(tool);
+  if (preset == null) return defaultWidthForTool(tool);
+  if (tool == WhiteboardTool.highlighter) {
+    // Keep highlighter broad relative to the chosen preset.
+    return (preset * 3.2).clamp(10.0, 36.0);
+  }
+  if (tool == WhiteboardTool.pencil) {
+    return (preset * 0.75).clamp(1.0, 12.0);
+  }
+  return preset;
 }
 
 double defaultOpacityForTool(WhiteboardTool tool) {

@@ -31,6 +31,9 @@ export function smoothStrokePoints(
   return pts;
 }
 
+/** Discrete pen thicknesses teachers can pick in the studio tool rail. */
+export const STROKE_WIDTH_PRESETS = [1.5, 3.5, 6, 10, 16] as const;
+
 export function defaultWidthForTool(tool: string): number {
   switch (tool) {
     case "pencil":
@@ -43,6 +46,15 @@ export function defaultWidthForTool(tool: string): number {
     default:
       return 3.5;
   }
+}
+
+/** Width used when drawing with [tool], honoring an optional teacher preset. */
+export function resolveStrokeWidth(tool: string, preset?: number | null): number {
+  if (tool === "eraser") return defaultWidthForTool(tool);
+  if (preset == null) return defaultWidthForTool(tool);
+  if (tool === "highlighter") return Math.min(36, Math.max(10, preset * 3.2));
+  if (tool === "pencil") return Math.min(12, Math.max(1, preset * 0.75));
+  return preset;
 }
 
 export function defaultOpacityForTool(tool: string): number {
