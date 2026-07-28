@@ -83,7 +83,6 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
   String? _error;
   bool _playing = false;
   bool _showControls = false;
-  bool _offlineSource = false;
   bool _savedOffline = false;
   bool _savingOffline = false;
   bool _online = true;
@@ -510,7 +509,6 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
         final pkgPath = await WhiteboardOfflineStore.resolvedPackagePath(offline);
         packageBytes = await File(pkgPath).readAsBytes();
         localPdfs = await WhiteboardOfflineStore.resolvedPdfPaths(offline);
-        _offlineSource = true;
       } else {
         final online = await NetworkStatus.isOnline();
         if (!online) {
@@ -529,7 +527,6 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
           throw StateError('PACKAGE_DOWNLOAD_${res.statusCode}');
         }
         packageBytes = Uint8List.fromList(res.bodyBytes);
-        _offlineSource = false;
       }
 
       final pkg = parseUbrdPackage(packageBytes);
@@ -890,7 +887,8 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
               },
             ),
           ),
-          if (!_online || _offlineSource)
+          // Only show when truly offline — a saved local copy while online is silent.
+          if (!_online)
             Positioned(
               top: 8,
               left: 8,
@@ -899,20 +897,20 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
                   color: Colors.black.withValues(alpha: 0.55),
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        _online ? Icons.offline_pin : Icons.wifi_off_rounded,
+                        Icons.wifi_off_rounded,
                         color: Colors.white,
                         size: 14,
                       ),
-                      const SizedBox(width: 6),
+                      SizedBox(width: 6),
                       Text(
-                        _online ? 'Playing offline copy' : 'Offline mode',
-                        style: const TextStyle(color: Colors.white, fontSize: 11),
+                        'Offline mode',
+                        style: TextStyle(color: Colors.white, fontSize: 11),
                       ),
                     ],
                   ),
@@ -988,14 +986,29 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     if (widget.embedded) {
       return ColoredBox(color: Colors.black, child: child);
     }
+    final isBlack = _board.theme == WhiteboardThemeId.black;
+    final chromeBg = isBlack ? const Color(0xFF111827) : const Color(0xFFEEF2F7);
+    final chromeFg = isBlack ? Colors.white : const Color(0xFF0F172A);
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: chromeBg,
       appBar: showAppBar
           ? AppBar(
-              title: Text(widget.title),
+              backgroundColor: chromeBg,
+              foregroundColor: chromeFg,
+              surfaceTintColor: Colors.transparent,
+              elevation: 0,
+              iconTheme: IconThemeData(color: chromeFg),
+              actionsIconTheme: IconThemeData(color: chromeFg),
+              systemOverlayStyle:
+                  isBlack ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+              title: Text(
+                widget.title,
+                style: TextStyle(color: chromeFg, fontWeight: FontWeight.w600),
+              ),
               actions: [
                 PopupMenuButton<double>(
                   initialValue: _speed,
+                  color: chromeBg,
                   onSelected: (v) async {
                     _speed = v;
                     await _audio.setSpeed(v);
@@ -1011,7 +1024,9 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
                   ],
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Center(child: Text('${_speed}x')),
+                    child: Center(
+                      child: Text('${_speed}x', style: TextStyle(color: chromeFg)),
+                    ),
                   ),
                 ),
               ],

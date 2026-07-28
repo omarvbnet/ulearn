@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:record/record.dart';
@@ -66,6 +67,11 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
   double _viewZoom = 1;
   static const _minViewZoom = 1.0;
   static const _maxViewZoom = 5.0;
+  /// Active raw pointers on the board (pinch = 2+ → block ink).
+  int _pointerCount = 0;
+  /// True only while an actual pinch/scale zoom is in progress.
+  bool _pinchZooming = false;
+  double? _interactionStartScale;
   bool _recording = false;
   bool _saving = false;
   /// 0–100 overall publish progress while finishing a board lesson.
@@ -432,6 +438,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
 
   void _setViewZoom(double scale) {
     final clamped = scale.clamp(_minViewZoom, _maxViewZoom);
+    _discardInProgressInk();
     _viewTransform.value = Matrix4.identity()..scaleByDouble(clamped, clamped, 1, 1);
     setState(() => _viewZoom = clamped);
   }
@@ -439,6 +446,76 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
   void _nudgeViewZoom(double factor) => _setViewZoom(_viewZoom * factor);
 
   void _resetViewZoom() => _setViewZoom(1);
+
+  /// Block ink only during a real multi-touch pinch zoom.
+  bool get _drawingBlocked => _pinchZooming || _pointerCount >= 2;
+
+  /// Drop any in-progress stroke/shape without committing (used during zoom).
+  void _discardInProgressInk() {
+    final stroke = _activeStroke;
+    if (stroke != null) {
+      if (_recording) {
+        _engine.push('erase', {
+          'pageId': stroke.pageId,
+          'strokeIds': [stroke.id],
+        });
+      }
+      _activeStroke = null;
+    }
+    if (_shapeId != null) {
+      if (_recording) {
+        _engine.push('shape_delete', {'shapeId': _shapeId});
+      }
+      _shapeId = null;
+      _shapeStart = null;
+      _draftShape = null;
+    }
+    if (_board.laser != null) {
+      final pageId = _board.currentPageId ?? 'page_0';
+      _board.laser = BoardLaser(pageId: pageId, x: 0, y: 0, visible: false);
+      if (_recording) {
+        _engine.push('laser_move', {
+          'pageId': pageId,
+          'x': 0,
+          'y': 0,
+          'visible': false,
+        });
+      }
+    }
+  }
+
+  void _endZoomGesture() {
+    if (!_pinchZooming && _pointerCount == 0) return;
+    _pinchZooming = false;
+    _interactionStartScale = null;
+    // Heal stuck pointer counts after a gesture ends.
+    if (_pointerCount < 0) _pointerCount = 0;
+  }
+
+  void _onViewInteractionStart(ScaleStartDetails details) {
+    _interactionStartScale = _viewTransform.value.getMaxScaleOnAxis();
+    // Only multi-touch starts a zoom block — never single-finger draw.
+    if (details.pointerCount >= 2) {
+      _pinchZooming = true;
+      _discardInProgressInk();
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _onViewInteractionUpdate(ScaleUpdateDetails details) {
+    // Require 2+ fingers — ignore scale jitter from single-finger / stylus.
+    if (details.pointerCount < 2) return;
+    if (!_pinchZooming) {
+      _pinchZooming = true;
+      _discardInProgressInk();
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _onViewInteractionEnd(ScaleEndDetails _) {
+    _endZoomGesture();
+    if (mounted) setState(() {});
+  }
 
   void _pushUndo(_UndoItem item) {
     _undoStack.add(item);
@@ -1076,6 +1153,24 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
   }
 
   void _onPointerDown(PointerDownEvent e, Size size) {
+    // Mouse / stylus are always single-pointer — never treat as pinch.
+    if (e.kind == ui.PointerDeviceKind.mouse ||
+        e.kind == ui.PointerDeviceKind.stylus ||
+        e.kind == ui.PointerDeviceKind.invertedStylus) {
+      _pointerCount = 1;
+      _pinchZooming = false;
+    } else {
+      _pointerCount++;
+    }
+    if (_drawingBlocked) {
+      _discardInProgressInk();
+      if (mounted) setState(() {});
+      return;
+    }
+    // Select pans via InteractiveViewer when zoomed; never starts ink.
+    if (_tool == WhiteboardTool.select) {
+      return;
+    }
     final logical = logicalFromLocal(e.localPosition, size, kLogicalBoardWidth, kLogicalBoardHeight);
     if (logical == null) return;
     final pageId = _board.currentPageId ?? 'page_0';
@@ -1170,6 +1265,13 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
   }
 
   void _onPointerMove(PointerMoveEvent e, Size size) {
+    if (_drawingBlocked) {
+      _discardInProgressInk();
+      return;
+    }
+    if (_tool == WhiteboardTool.select) {
+      return;
+    }
     final logical = logicalFromLocal(e.localPosition, size, kLogicalBoardWidth, kLogicalBoardHeight);
     if (logical == null) return;
     final pageId = _board.currentPageId ?? 'page_0';
@@ -1219,6 +1321,19 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
   }
 
   void _onPointerUp(PointerUpEvent e, Size size) {
+    if (_pointerCount > 0) _pointerCount--;
+    // Still pinching / another finger down → discard, don't commit.
+    if (_pinchZooming || _pointerCount >= 1) {
+      _discardInProgressInk();
+      if (_pointerCount == 0) _endZoomGesture();
+      if (mounted) setState(() {});
+      return;
+    }
+    // Zoom finished — clear flags and allow this / next stroke.
+    _endZoomGesture();
+    if (_tool == WhiteboardTool.select) {
+      return;
+    }
     final logical = logicalFromLocal(e.localPosition, size, kLogicalBoardWidth, kLogicalBoardHeight);
     final pageId = _board.currentPageId ?? 'page_0';
 
@@ -1277,6 +1392,13 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
     }));
     _activeStroke = null;
     setState(() {});
+  }
+
+  void _onPointerCancel(PointerCancelEvent e) {
+    if (_pointerCount > 0) _pointerCount--;
+    _discardInProgressInk();
+    if (_pointerCount == 0) _endZoomGesture();
+    if (mounted) setState(() {});
   }
 
   void _eraseNear(Offset logical, String pageId) {
@@ -1392,25 +1514,50 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
       appBar: AppBar(
         backgroundColor: _chromeBg,
         foregroundColor: _chromeFg,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: IconThemeData(color: _chromeFg),
+        actionsIconTheme: IconThemeData(color: _chromeFg),
+        systemOverlayStyle: _board.theme == WhiteboardThemeId.black
+            ? SystemUiOverlayStyle.light
+            : SystemUiOverlayStyle.dark,
         title: TextField(
           controller: _titleCtrl,
           style: TextStyle(color: _chromeFg, fontWeight: FontWeight.w600),
-          decoration: const InputDecoration(border: InputBorder.none, hintText: 'Lesson title'),
+          cursorColor: _chromeFg,
+          decoration: InputDecoration(
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            disabledBorder: InputBorder.none,
+            filled: false,
+            isDense: true,
+            hintText: 'Lesson title',
+            hintStyle: TextStyle(color: _chromeFg.withValues(alpha: 0.45)),
+          ),
         ),
         actions: [
           IconButton(
             tooltip: 'Board theme',
             onPressed: _toggleTheme,
-            icon: Icon(_board.theme == WhiteboardThemeId.black ? Icons.dark_mode : Icons.light_mode),
+            color: _chromeFg,
+            icon: Icon(
+              _board.theme == WhiteboardThemeId.black
+                  ? Icons.dark_mode
+                  : Icons.light_mode,
+              color: _chromeFg,
+            ),
           ),
           if (_editMode && !_recording)
             IconButton(
               tooltip: 'Cut time range',
               onPressed: _saving || _loadingEdit ? null : _cutTimeRangeDialog,
-              icon: const Icon(Icons.content_cut),
+              color: _chromeFg,
+              icon: Icon(Icons.content_cut, color: _chromeFg),
             ),
           if (_editMode && !_recording)
             TextButton(
+              style: TextButton.styleFrom(foregroundColor: _chromeFg),
               onPressed: (_saving || _loadingEdit || _dirtyRanges.isEmpty)
                   ? null
                   : _publishEditPackage,
@@ -1418,11 +1565,13 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
             ),
           if (!_recording)
             TextButton(
+              style: TextButton.styleFrom(foregroundColor: _chromeFg),
               onPressed: (_saving || _loadingEdit) ? null : _startRecording,
               child: Text(_editMode ? 'Continue recording' : 'Start Recording'),
             )
           else
             TextButton(
+              style: TextButton.styleFrom(foregroundColor: _chromeFg),
               onPressed: _saving ? null : _stopAndPublish,
               child: Text(_saving ? '$_publishPercent%' : (_editMode ? 'Stop & Publish edit' : 'Stop & Publish')),
             ),
@@ -1442,15 +1591,22 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
                       transformationController: _viewTransform,
                       minScale: _minViewZoom,
                       maxScale: _maxViewZoom,
-                      // Draw with one finger; pinch to zoom. Use Select tool to pan when zoomed.
+                      // Pan only with Select. Pinch zoom always available; ink blocks only while 2 fingers are down.
                       panEnabled: _tool == WhiteboardTool.select,
                       scaleEnabled: true,
+                      // Avoid trackpad scroll accidentally scaling and locking ink.
+                      trackpadScrollCausesScale: false,
                       boundaryMargin: const EdgeInsets.all(120),
                       clipBehavior: Clip.hardEdge,
+                      onInteractionStart: _onViewInteractionStart,
+                      onInteractionUpdate: _onViewInteractionUpdate,
+                      onInteractionEnd: _onViewInteractionEnd,
                       child: Listener(
+                        behavior: HitTestBehavior.opaque,
                         onPointerDown: (e) => _onPointerDown(e, size),
                         onPointerMove: (e) => _onPointerMove(e, size),
                         onPointerUp: (e) => _onPointerUp(e, size),
+                        onPointerCancel: _onPointerCancel,
                         child: SizedBox(
                           width: size.width,
                           height: size.height,

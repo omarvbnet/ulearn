@@ -75,6 +75,8 @@ export default function WhiteboardStudio({
   const streamRef = useRef<MediaStream | null>(null);
   const activeStrokeRef = useRef<{ id: string; points: { x: number; y: number; p?: number }[] } | null>(null);
   const shapeStartRef = useRef<{ x: number; y: number; id: string } | null>(null);
+  const activePointersRef = useRef(new Set<number>());
+  const zoomGestureRef = useRef(false);
   const draftShapeRef = useRef<{
     id: string;
     pageId: string;
@@ -409,7 +411,39 @@ export default function WhiteboardStudio({
   };
 
   const nudgeViewZoom = (factor: number) => {
+    zoomGestureRef.current = true;
+    discardInProgressInk();
     setViewZoom((z) => Math.min(5, Math.max(1, Number((z * factor).toFixed(2)))));
+    window.setTimeout(() => {
+      zoomGestureRef.current = false;
+    }, 180);
+  };
+
+  const discardInProgressInk = () => {
+    const active = activeStrokeRef.current;
+    if (active) {
+      const page = boardRef.current.currentPage;
+      if (page) page.strokes = page.strokes.filter((s) => s.id !== active.id);
+      emitEvent("erase", {
+        pageId: boardRef.current.currentPageId ?? "page_0",
+        strokeIds: [active.id],
+      });
+      activeStrokeRef.current = null;
+    }
+    const draft = draftShapeRef.current;
+    if (draft) {
+      emitEvent("shape_delete", { shapeId: draft.id });
+      const page = boardRef.current.currentPage;
+      if (page) page.shapes = page.shapes.filter((s) => s.id !== draft.id);
+      draftShapeRef.current = null;
+      shapeStartRef.current = null;
+    }
+    if (boardRef.current.laser?.visible) {
+      const pageId = boardRef.current.currentPageId ?? "page_0";
+      boardRef.current.laser = { pageId, x: 0, y: 0, visible: false };
+      emitEvent("laser_move", { pageId, x: 0, y: 0, visible: false });
+    }
+    redraw();
   };
 
   const startRecording = async () => {
@@ -594,6 +628,22 @@ export default function WhiteboardStudio({
 
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    // Mouse/pen are always single-pointer — clear stuck multi-touch state.
+    if (e.pointerType === "mouse" || e.pointerType === "pen") {
+      activePointersRef.current = new Set([e.pointerId]);
+      zoomGestureRef.current = false;
+    } else {
+      activePointersRef.current.add(e.pointerId);
+    }
+    const drawingBlocked =
+      zoomGestureRef.current || activePointersRef.current.size >= 2;
+    if (drawingBlocked) {
+      discardInProgressInk();
+      return;
+    }
+    if (tool === "select") {
+      return;
+    }
     const pt = toLogical(e);
     const pageId = boardRef.current.currentPageId ?? "page_0";
     if (!(recording || editMode)) return;
@@ -684,6 +734,13 @@ export default function WhiteboardStudio({
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (zoomGestureRef.current || activePointersRef.current.size >= 2) {
+      discardInProgressInk();
+      return;
+    }
+    if (tool === "select") {
+      return;
+    }
     const pt = toLogical(e);
     const pageId = boardRef.current.currentPageId ?? "page_0";
     if (!(recording || editMode)) return;
@@ -732,6 +789,17 @@ export default function WhiteboardStudio({
   };
 
   const onPointerUp = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    activePointersRef.current.delete(e.pointerId);
+    const othersDown = activePointersRef.current.size > 0;
+    if (zoomGestureRef.current || othersDown) {
+      discardInProgressInk();
+      if (!othersDown) zoomGestureRef.current = false;
+      return;
+    }
+    zoomGestureRef.current = false;
+    if (tool === "select") {
+      return;
+    }
     const pt = toLogical(e);
     const pageId = boardRef.current.currentPageId ?? "page_0";
     const shape = shapeStartRef.current;
@@ -773,6 +841,23 @@ export default function WhiteboardStudio({
     setHistoryTick((n) => n + 1);
     activeStrokeRef.current = null;
     redraw();
+  };
+
+  const onPointerCancel = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    activePointersRef.current.delete(e.pointerId);
+    discardInProgressInk();
+  };
+
+  const onWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    zoomGestureRef.current = true;
+    discardInProgressInk();
+    const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
+    setViewZoom((z) => Math.min(5, Math.max(1, Number((z * factor).toFixed(2)))));
+    window.setTimeout(() => {
+      zoomGestureRef.current = false;
+    }, 180);
   };
 
   const attachCoursePdf = async () => {
@@ -1106,9 +1191,13 @@ export default function WhiteboardStudio({
       className="flex h-[min(80vh,800px)] flex-col overflow-hidden rounded-xl border border-card-border"
       style={{ background: chromeBg, color: chromeFg }}
     >
-      <div className="flex flex-wrap items-center gap-2 border-b border-black/10 px-3 py-2">
+      <div
+        className="flex flex-wrap items-center gap-2 border-b px-3 py-2"
+        style={{ borderColor: theme === "BLACK" ? "rgba(255,255,255,0.12)" : "rgba(15,23,42,0.12)" }}
+      >
         <input
-          className="min-w-[160px] flex-1 bg-transparent text-sm font-semibold outline-none"
+          className="min-w-[160px] flex-1 bg-transparent text-sm font-semibold outline-none placeholder:opacity-45"
+          style={{ color: chromeFg, caretColor: chromeFg }}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Lesson title"
@@ -1118,7 +1207,12 @@ export default function WhiteboardStudio({
             Editing
           </span>
         )}
-        <button type="button" className="rounded-lg px-2 py-1 text-xs hover:bg-black/10" onClick={toggleTheme}>
+        <button
+          type="button"
+          className="rounded-lg px-2 py-1 text-xs"
+          style={{ color: chromeFg }}
+          onClick={toggleTheme}
+        >
           Theme: {theme}
         </button>
         {!recording ? (
@@ -1152,7 +1246,12 @@ export default function WhiteboardStudio({
           </button>
         )}
         {onCancel && (
-          <button type="button" className="rounded-lg px-2 py-1 text-xs hover:bg-black/10" onClick={onCancel}>
+          <button
+            type="button"
+            className="rounded-lg px-2 py-1 text-xs"
+            style={{ color: chromeFg }}
+            onClick={onCancel}
+          >
             Close
           </button>
         )}
@@ -1228,7 +1327,14 @@ export default function WhiteboardStudio({
           Board +
         </button>
         {viewZoom > 1.05 && (
-          <button type="button" className="rounded-md bg-black/10 px-2 py-1 text-[11px]" onClick={() => setViewZoom(1)}>
+          <button
+            type="button"
+            className="rounded-md bg-black/10 px-2 py-1 text-[11px]"
+            onClick={() => {
+              discardInProgressInk();
+              setViewZoom(1);
+            }}
+          >
             {viewZoom.toFixed(1)}× Reset
           </button>
         )}
@@ -1249,6 +1355,8 @@ export default function WhiteboardStudio({
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
+          onWheel={onWheel}
         />
       </div>
 
