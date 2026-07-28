@@ -46,7 +46,7 @@ lesson.ubrd
 }
 ```
 
-- `theme`: `WHITE` | `BLACK`
+- `theme`: `WHITE` | `BLACK` | `GREEN` (whiteboard, blackboard, green chalkboard)
 - Logical board size is fixed; clients scale to the viewport (responsive).
 - `audioCodec`: `opus` preferred. Web may produce `audio.webm` (Opus-in-WebM); Flutter may produce `audio.opus` or `audio.m4a`. Players must honor `audioFile` + `audioCodec`.
 

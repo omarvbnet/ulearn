@@ -423,7 +423,6 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       };
       _purchased = true;
       _error = null;
-      _online = false;
       _activeLesson = lessons.first;
       _offlineBoardLessons
         ..clear()
@@ -1648,6 +1647,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
           isWhiteboard: _isWhiteboard(lesson),
           savedOffline: _offlineBoardLessons.contains(lesson['id']?.toString()),
           savingOffline: _savingOfflineLessonId == lesson['id']?.toString(),
+          deviceOnline: _online,
           onTap: () => _selectLesson(lesson, unlocked),
           onToggleOffline: canWatch && _isWhiteboard(lesson)
               ? () => _toggleOfflineBoardLesson(lesson)
@@ -3376,6 +3376,7 @@ class _LessonVideoCard extends StatelessWidget {
     this.isWhiteboard = false,
     this.savedOffline = false,
     this.savingOffline = false,
+    this.deviceOnline = true,
     this.onToggleOffline,
   });
 
@@ -3393,6 +3394,7 @@ class _LessonVideoCard extends StatelessWidget {
   final bool isWhiteboard;
   final bool savedOffline;
   final bool savingOffline;
+  final bool deviceOnline;
   final VoidCallback? onToggleOffline;
 
   @override
@@ -3418,7 +3420,9 @@ class _LessonVideoCard extends StatelessWidget {
       l10n.homeLikes(likes),
       statusLabel,
       if (showFreeBadge) l10n.t('common.free'),
-      if (savedOffline) 'Offline',
+      // "Offline" label only when the device is actually disconnected.
+      if (!deviceOnline) 'Offline',
+      if (deviceOnline && savedOffline) 'Saved',
     ];
 
     return SizedBox(

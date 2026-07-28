@@ -19,10 +19,14 @@ import {
 import {
   LOGICAL_BOARD_HEIGHT,
   LOGICAL_BOARD_WIDTH,
+  boardThemeColors,
+  nextWhiteboardTheme,
+  parseWhiteboardTheme,
   type WhiteboardThemeId,
   type WhiteboardTool,
 } from "@/lib/whiteboard/types";
 import { defaultOpacityForTool, resolveStrokeWidth, STROKE_WIDTH_PRESETS, smoothStrokePoints } from "@/lib/whiteboard/smoothing";
+import { paintBoardSurface } from "@/lib/whiteboard/board-theme";
 
 type Props = {
   courseId: string;
@@ -121,9 +125,10 @@ export default function WhiteboardStudio({
   const [, bump] = useState(0);
   const redraw = useCallback(() => bump((n) => n + 1), []);
 
-  const boardBg = theme === "BLACK" ? "#0B0F14" : "#F8FAFC";
-  const chromeBg = theme === "BLACK" ? "#111827" : "#EEF2F7";
-  const chromeFg = theme === "BLACK" ? "#F8FAFC" : "#0F172A";
+  const colors = boardThemeColors(theme);
+  const boardBg = colors.surface;
+  const chromeBg = colors.chromeBg;
+  const chromeFg = colors.chromeFg;
 
   const markDirty = useCallback(
     (startMs: number, endMs: number, kind: WhiteboardEditRange["kind"] = "redraw") => {
@@ -196,8 +201,8 @@ export default function WhiteboardStudio({
           : "audio/webm";
         audioBlobRef.current = new Blob([parsed.audioBytes.buffer as ArrayBuffer], { type: mime });
         previousDurationRef.current = parsed.manifest.durationMs;
-        setTheme(parsed.manifest.theme);
-        setColor(parsed.manifest.theme === "BLACK" ? "#F8FAFC" : "#111827");
+        setTheme(parseWhiteboardTheme(parsed.manifest.theme));
+        setColor(boardThemeColors(parseWhiteboardTheme(parsed.manifest.theme)).defaultInk);
         setDurationMs(parsed.manifest.durationMs);
         setElapsed(parsed.manifest.durationMs);
         setPlayheadMs(0);
@@ -262,8 +267,7 @@ export default function WhiteboardStudio({
     ctx.save();
     ctx.translate(dx, dy);
     ctx.scale(scale, scale);
-    ctx.fillStyle = boardBg;
-    ctx.fillRect(0, 0, LOGICAL_BOARD_WIDTH, LOGICAL_BOARD_HEIGHT);
+    paintBoardSurface(ctx, theme);
     const board = boardRef.current;
     const page = board.currentPage;
     if (page) {
@@ -1133,13 +1137,14 @@ export default function WhiteboardStudio({
   };
 
   const toggleTheme = () => {
-    const next: WhiteboardThemeId = theme === "WHITE" ? "BLACK" : "WHITE";
+    const next = nextWhiteboardTheme(theme);
     setTheme(next);
     boardRef.current.theme = next;
-    setColor(next === "BLACK" ? "#F8FAFC" : "#111827");
+    const ink = boardThemeColors(next).defaultInk;
+    setColor(ink);
     if (recording || editMode) {
       emitEvent("theme_change", { theme: next });
-      emitEvent("color_change", { color: next === "BLACK" ? "#F8FAFC" : "#111827" });
+      emitEvent("color_change", { color: ink });
     }
     redraw();
   };
@@ -1213,7 +1218,7 @@ export default function WhiteboardStudio({
           style={{ color: chromeFg }}
           onClick={toggleTheme}
         >
-          Theme: {theme}
+          Theme: {boardThemeColors(theme).label}
         </button>
         {!recording ? (
           <>

@@ -15,6 +15,7 @@ import 'package:ulearn/features/whiteboard/domain/offline_store.dart';
 import 'package:ulearn/features/whiteboard/domain/package.dart';
 import 'package:ulearn/features/whiteboard/domain/types.dart';
 import 'package:ulearn/features/whiteboard/domain/whiteboard_audio.dart';
+import 'package:ulearn/features/whiteboard/ui/board_theme.dart';
 import 'package:ulearn/features/whiteboard/ui/pdf_underlay.dart';
 import 'package:ulearn/features/whiteboard/ui/whiteboard_brand_intro.dart';
 import 'package:ulearn/features/whiteboard/ui/whiteboard_painter.dart';
@@ -103,6 +104,9 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
   bool _fsShowControls = true;
   double _fsZoom = 1;
   Timer? _fsHideControlsTimer;
+  /// Lightweight board repaint clock — avoids rebuilding the whole player every tick.
+  final ValueNotifier<int> _boardPaint = ValueNotifier(0);
+  int _lastUiSyncMs = 0;
 
   static const double _minZoom = 1;
   static const double _maxZoom = 5;
@@ -133,6 +137,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     _fsTransform.removeListener(_onFsTransformChanged);
     _transform.dispose();
     _fsTransform.dispose();
+    _boardPaint.dispose();
     unawaited(_audioPosSub?.cancel());
     unawaited(_audioStateSub?.cancel());
     unawaited(_audio.dispose());
@@ -252,9 +257,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
   }
 
   Widget _buildFullscreenOverlay(BuildContext context) {
-    final bg = _board.theme == WhiteboardThemeId.black
-        ? const Color(0xFF0B0F14)
-        : const Color(0xFFF1F5F9);
+    final bg = boardThemeStyle(_board.theme).surfaceDeep;
     final dur = _durationMs <= 0 ? 1.0 : _durationMs.toDouble();
 
     return Material(
@@ -292,14 +295,19 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
                       child: SizedBox(
                         width: size.width,
                         height: size.height,
-                        child: CustomPaint(
-                          painter: WhiteboardPainter(
-                            state: _board,
-                            boardWidth: _pkg?.manifest.boardWidth ?? kLogicalBoardWidth,
-                            boardHeight: _pkg?.manifest.boardHeight ?? kLogicalBoardHeight,
-                            pdfUnderlay: _pdfUnderlay,
+                        child: ValueListenableBuilder<int>(
+                          valueListenable: _boardPaint,
+                          builder: (_, __, ___) => RepaintBoundary(
+                            child: CustomPaint(
+                              painter: WhiteboardPainter(
+                                state: _board,
+                                boardWidth: _pkg?.manifest.boardWidth ?? kLogicalBoardWidth,
+                                boardHeight: _pkg?.manifest.boardHeight ?? kLogicalBoardHeight,
+                                pdfUnderlay: _pdfUnderlay,
+                              ),
+                              size: size,
+                            ),
                           ),
-                          size: size,
                         ),
                       ),
                     ),
@@ -605,6 +613,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
         _loading = false;
         _showBrandIntro = showIntro;
       });
+      _boardPaint.value++;
       if (!showIntro) {
         if (widget.autoPlay) {
           await _play();
@@ -712,6 +721,8 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     if (ms == _playheadMs) return;
     final prevPageId = _board.currentPageId;
     final prevPdfPage = _board.currentPage?.pdfPage;
+    final prevTheme = _board.theme;
+    final prevRevision = _board.revision;
     _playheadMs = ms;
     _applyForward(ms);
     final preview = widget.freePreviewSec;
@@ -728,9 +739,18 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     if (pageChanged) {
       unawaited(_refreshPdfUnderlay());
     }
+    if (_board.revision != prevRevision) {
+      _boardPaint.value++;
+    }
+    final themeChanged = prevTheme != _board.theme;
+    final shouldSyncUi = themeChanged ||
+        _showControls ||
+        !_playing ||
+        (ms - _lastUiSyncMs).abs() >= 200;
     if (_inFullscreen) {
       _fullscreenEntry?.markNeedsBuild();
-    } else if (mounted) {
+    } else if (shouldSyncUi && mounted) {
+      _lastUiSyncMs = ms;
       setState(() {});
     }
   }
@@ -841,7 +861,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
       );
     }
 
-    final bg = _board.theme == WhiteboardThemeId.black ? const Color(0xFF0B0F14) : const Color(0xFFF1F5F9);
+    final bg = boardThemeStyle(_board.theme).surfaceDeep;
 
     final board = ColoredBox(
       color: bg,
@@ -872,14 +892,19 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
                     child: SizedBox(
                       width: size.width,
                       height: size.height,
-                      child: CustomPaint(
-                        painter: WhiteboardPainter(
-                          state: _board,
-                          boardWidth: _pkg?.manifest.boardWidth ?? kLogicalBoardWidth,
-                          boardHeight: _pkg?.manifest.boardHeight ?? kLogicalBoardHeight,
-                          pdfUnderlay: _pdfUnderlay,
+                      child: ValueListenableBuilder<int>(
+                        valueListenable: _boardPaint,
+                        builder: (_, __, ___) => RepaintBoundary(
+                          child: CustomPaint(
+                            painter: WhiteboardPainter(
+                              state: _board,
+                              boardWidth: _pkg?.manifest.boardWidth ?? kLogicalBoardWidth,
+                              boardHeight: _pkg?.manifest.boardHeight ?? kLogicalBoardHeight,
+                              pdfUnderlay: _pdfUnderlay,
+                            ),
+                            size: size,
+                          ),
                         ),
-                        size: size,
                       ),
                     ),
                   ),
@@ -986,29 +1011,28 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     if (widget.embedded) {
       return ColoredBox(color: Colors.black, child: child);
     }
-    final isBlack = _board.theme == WhiteboardThemeId.black;
-    final chromeBg = isBlack ? const Color(0xFF111827) : const Color(0xFFEEF2F7);
-    final chromeFg = isBlack ? Colors.white : const Color(0xFF0F172A);
+    final isLight = _board.theme == WhiteboardThemeId.white;
+    final style = boardThemeStyle(_board.theme);
     return Scaffold(
-      backgroundColor: chromeBg,
+      backgroundColor: style.chromeBg,
       appBar: showAppBar
           ? AppBar(
-              backgroundColor: chromeBg,
-              foregroundColor: chromeFg,
+              backgroundColor: style.chromeBg,
+              foregroundColor: style.chromeFg,
               surfaceTintColor: Colors.transparent,
               elevation: 0,
-              iconTheme: IconThemeData(color: chromeFg),
-              actionsIconTheme: IconThemeData(color: chromeFg),
+              iconTheme: IconThemeData(color: style.chromeFg),
+              actionsIconTheme: IconThemeData(color: style.chromeFg),
               systemOverlayStyle:
-                  isBlack ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+                  isLight ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light,
               title: Text(
                 widget.title,
-                style: TextStyle(color: chromeFg, fontWeight: FontWeight.w600),
+                style: TextStyle(color: style.chromeFg, fontWeight: FontWeight.w600),
               ),
               actions: [
                 PopupMenuButton<double>(
                   initialValue: _speed,
-                  color: chromeBg,
+                  color: style.chromeBg,
                   onSelected: (v) async {
                     _speed = v;
                     await _audio.setSpeed(v);
@@ -1025,7 +1049,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: Center(
-                      child: Text('${_speed}x', style: TextStyle(color: chromeFg)),
+                      child: Text('${_speed}x', style: TextStyle(color: style.chromeFg)),
                     ),
                   ),
                 ),

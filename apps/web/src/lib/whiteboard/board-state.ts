@@ -5,6 +5,7 @@ import type {
   WhiteboardThemeId,
   WhiteboardTool,
 } from "./types";
+import { parseWhiteboardTheme } from "./types";
 
 export type BoardStroke = {
   id: string;
@@ -119,10 +120,10 @@ export class BoardState {
     const p = e.payload;
     switch (e.type) {
       case "session_start":
-        if (typeof p.theme === "string") this.theme = p.theme as WhiteboardThemeId;
+        if (typeof p.theme === "string") this.theme = parseWhiteboardTheme(p.theme);
         break;
       case "theme_change":
-        if (typeof p.theme === "string") this.theme = p.theme as WhiteboardThemeId;
+        if (typeof p.theme === "string") this.theme = parseWhiteboardTheme(p.theme);
         break;
       case "tool_change":
         if (typeof p.tool === "string") this.tool = p.tool as WhiteboardTool;

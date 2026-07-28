@@ -4,7 +4,59 @@ export const UBRD_SCHEMA_VERSION = 1;
 export const LOGICAL_BOARD_WIDTH = 1920;
 export const LOGICAL_BOARD_HEIGHT = 1080;
 
-export type WhiteboardThemeId = "WHITE" | "BLACK";
+export type WhiteboardThemeId = "WHITE" | "BLACK" | "GREEN";
+
+export function parseWhiteboardTheme(v?: string | null): WhiteboardThemeId {
+  switch ((v ?? "").toUpperCase()) {
+    case "BLACK":
+      return "BLACK";
+    case "GREEN":
+    case "CHALK":
+    case "CHALKBOARD":
+      return "GREEN";
+    default:
+      return "WHITE";
+  }
+}
+
+export function nextWhiteboardTheme(theme: WhiteboardThemeId): WhiteboardThemeId {
+  if (theme === "WHITE") return "GREEN";
+  if (theme === "GREEN") return "BLACK";
+  return "WHITE";
+}
+
+export function boardThemeColors(theme: WhiteboardThemeId) {
+  switch (theme) {
+    case "GREEN":
+      return {
+        surface: "#1A5C3A",
+        surfaceDeep: "#0E3A24",
+        chromeBg: "#0F2F1E",
+        chromeFg: "#F1F5F9",
+        defaultInk: "#F8FAFC",
+        label: "Green board",
+      };
+    case "BLACK":
+      return {
+        surface: "#1A1D24",
+        surfaceDeep: "#0B0D12",
+        chromeBg: "#111827",
+        chromeFg: "#F8FAFC",
+        defaultInk: "#F8FAFC",
+        label: "Blackboard",
+      };
+    case "WHITE":
+    default:
+      return {
+        surface: "#F7F8FA",
+        surfaceDeep: "#E8EDF4",
+        chromeBg: "#EEF2F7",
+        chromeFg: "#0F172A",
+        defaultInk: "#111827",
+        label: "Whiteboard",
+      };
+  }
+}
 
 export type WhiteboardTool =
   | "pen"

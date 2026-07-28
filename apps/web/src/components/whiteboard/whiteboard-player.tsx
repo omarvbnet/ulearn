@@ -7,8 +7,11 @@ import { parseUbrdPackage } from "@/lib/whiteboard/package";
 import {
   LOGICAL_BOARD_HEIGHT,
   LOGICAL_BOARD_WIDTH,
+  boardThemeColors,
+  parseWhiteboardTheme,
   type ParsedUbrdPackage,
 } from "@/lib/whiteboard/types";
+import { paintBoardSurface } from "@/lib/whiteboard/board-theme";
 import { WhiteboardBrandIntro } from "@/components/whiteboard/whiteboard-brand-intro";
 
 type Props = {
@@ -131,15 +134,15 @@ export default function WhiteboardPlayer({
     const dx = (rect.width - bw * scale) / 2;
     const dy = (rect.height - bh * scale) / 2;
     const board = boardRef.current;
-    const bg = board.theme === "BLACK" ? "#0B0F14" : "#F8FAFC";
+    const theme = parseWhiteboardTheme(board.theme);
+    const chrome = boardThemeColors(theme);
 
-    ctx.fillStyle = board.theme === "BLACK" ? "#111827" : "#EEF2F7";
+    ctx.fillStyle = chrome.chromeBg;
     ctx.fillRect(0, 0, rect.width, rect.height);
     ctx.save();
     ctx.translate(dx, dy);
     ctx.scale(scale, scale);
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, bw, bh);
+    paintBoardSurface(ctx, theme, bw, bh);
 
     const page = board.currentPage;
     if (page) {

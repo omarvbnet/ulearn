@@ -6,6 +6,7 @@ import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/auth/auth_provider.dart';
 import 'package:ulearn/core/auth/require_auth.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
+import 'package:ulearn/core/network/network_status.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
@@ -61,6 +62,7 @@ class HomeFeedState extends State<HomeFeed> {
   Map<String, dynamic>? _aiExamStats;
   bool _loading = true;
   bool _searching = false;
+  bool _online = true;
   String? _error;
 
   // Filters: null stage = my own stage, 'all' = every stage.
@@ -70,16 +72,26 @@ class HomeFeedState extends State<HomeFeed> {
   String? _levelFilter;
   final _search = TextEditingController();
   Timer? _debounce;
+  StreamSubscription<bool>? _netSub;
 
   @override
   void initState() {
     super.initState();
+    _netSub = NetworkStatus.onOnlineChanged().listen((online) {
+      if (!mounted) return;
+      setState(() => _online = online);
+      if (online) _load(soft: true);
+    });
+    NetworkStatus.isOnline().then((v) {
+      if (mounted) setState(() => _online = v);
+    });
     _load();
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
+    _netSub?.cancel();
     _search.dispose();
     super.dispose();
   }
@@ -460,6 +472,25 @@ class HomeFeedState extends State<HomeFeed> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(bottom: 24),
         children: [
+          if (!_online)
+            Material(
+              color: const Color(0xFF1E293B),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  children: const [
+                    Icon(Icons.wifi_off_rounded, color: Colors.white70, size: 16),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Offline mode — connect to browse the latest courses',
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           StaggeredItem(
             index: 0,
             child: _WelcomeHeader(

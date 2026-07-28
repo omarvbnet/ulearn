@@ -21,6 +21,7 @@ import 'package:ulearn/features/whiteboard/domain/package.dart';
 import 'package:ulearn/features/whiteboard/domain/smoothing.dart';
 import 'package:ulearn/features/whiteboard/domain/types.dart';
 import 'package:ulearn/features/whiteboard/ui/pdf_underlay.dart';
+import 'package:ulearn/features/whiteboard/ui/board_theme.dart';
 import 'package:ulearn/features/whiteboard/ui/whiteboard_painter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -728,17 +729,13 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
     super.dispose();
   }
 
-  Color get _chromeBg =>
-      _board.theme == WhiteboardThemeId.black ? const Color(0xFF111827) : const Color(0xFFEEF2F7);
-  Color get _chromeFg =>
-      _board.theme == WhiteboardThemeId.black ? Colors.white : const Color(0xFF0F172A);
+  Color get _chromeBg => boardThemeStyle(_board.theme).chromeBg;
+  Color get _chromeFg => boardThemeStyle(_board.theme).chromeFg;
 
   Future<void> _toggleTheme() async {
     setState(() {
-      _board.theme = _board.theme == WhiteboardThemeId.white
-          ? WhiteboardThemeId.black
-          : WhiteboardThemeId.white;
-      _color = _board.theme == WhiteboardThemeId.black ? '#F8FAFC' : '#111827';
+      _board.theme = _board.theme.next;
+      _color = boardThemeStyle(_board.theme).defaultInk;
     });
     if (_recording) {
       _engine.push('theme_change', {'theme': _board.theme.wire});
@@ -1518,9 +1515,9 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         elevation: 0,
         iconTheme: IconThemeData(color: _chromeFg),
         actionsIconTheme: IconThemeData(color: _chromeFg),
-        systemOverlayStyle: _board.theme == WhiteboardThemeId.black
-            ? SystemUiOverlayStyle.light
-            : SystemUiOverlayStyle.dark,
+        systemOverlayStyle: _board.theme == WhiteboardThemeId.white
+            ? SystemUiOverlayStyle.dark
+            : SystemUiOverlayStyle.light,
         title: TextField(
           controller: _titleCtrl,
           style: TextStyle(color: _chromeFg, fontWeight: FontWeight.w600),
@@ -1538,13 +1535,15 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         ),
         actions: [
           IconButton(
-            tooltip: 'Board theme',
+            tooltip: boardThemeStyle(_board.theme).label,
             onPressed: _toggleTheme,
             color: _chromeFg,
             icon: Icon(
-              _board.theme == WhiteboardThemeId.black
-                  ? Icons.dark_mode
-                  : Icons.light_mode,
+              switch (_board.theme) {
+                WhiteboardThemeId.white => Icons.crop_portrait_rounded,
+                WhiteboardThemeId.green => Icons.dashboard_customize_rounded,
+                WhiteboardThemeId.black => Icons.dark_mode_rounded,
+              },
               color: _chromeFg,
             ),
           ),

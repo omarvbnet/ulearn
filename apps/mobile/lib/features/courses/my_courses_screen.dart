@@ -27,20 +27,31 @@ class MyCoursesScreen extends StatefulWidget {
 class _MyCoursesScreenState extends State<MyCoursesScreen> {
   List<Map<String, dynamic>> _courses = [];
   bool _loading = true;
+  bool _online = true;
   String _search = '';
   String _sort = 'recent';
   int _minProgress = 0;
   Timer? _debounce;
+  StreamSubscription<bool>? _netSub;
 
   @override
   void initState() {
     super.initState();
+    _netSub = NetworkStatus.onOnlineChanged().listen((online) {
+      if (!mounted) return;
+      setState(() => _online = online);
+      if (online) _load();
+    });
+    NetworkStatus.isOnline().then((v) {
+      if (mounted) setState(() => _online = v);
+    });
     _load();
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
+    _netSub?.cancel();
     super.dispose();
   }
 
@@ -57,11 +68,13 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
         final offline = await WhiteboardOfflineStore.libraryCourseCards();
         if (!mounted) return;
         setState(() {
+          _online = false;
           _courses = offline;
           _loading = false;
         });
         return;
       }
+      setState(() => _online = true);
       final q = _search.trim();
       final params = <String, String>{
         'sort': _sort,
@@ -163,6 +176,27 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
 
     return Column(
       children: [
+        if (!_online)
+          Material(
+            color: const Color(0xFF1E293B),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.wifi_off_rounded, color: Colors.white70, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _courses.isEmpty
+                          ? 'Offline — connect to sync your courses'
+                          : 'Offline mode — showing saved board courses',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           child: Column(
@@ -342,7 +376,7 @@ class _MyCoursesScreenState extends State<MyCoursesScreen> {
                                               ),
                                             ),
                                           ),
-                                        if (c['offlineOnly'] == true)
+                                        if (!_online)
                                           Positioned(
                                             left: 12,
                                             top: 12,

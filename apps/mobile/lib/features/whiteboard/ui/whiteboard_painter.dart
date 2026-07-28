@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:ulearn/features/whiteboard/domain/board_state.dart';
 import 'package:ulearn/features/whiteboard/domain/types.dart';
+import 'package:ulearn/features/whiteboard/ui/board_theme.dart';
 import 'package:ulearn/features/whiteboard/ui/pdf_underlay.dart';
 
 Color _parseColor(String hex, {double opacity = 1}) {
@@ -43,10 +44,7 @@ class WhiteboardPainter extends CustomPainter {
     canvas.translate(dx, dy);
     canvas.scale(s);
 
-    final bg = state.theme == WhiteboardThemeId.black
-        ? const Color(0xFF0B0F14)
-        : const Color(0xFFF8FAFC);
-    canvas.drawRect(Rect.fromLTWH(0, 0, boardWidth, boardHeight), Paint()..color = bg);
+    paintBoardSurface(canvas, Size(boardWidth, boardHeight), state.theme);
 
     final page = state.currentPage;
     if (page == null) {

@@ -5,12 +5,33 @@ const int kUbrdSchemaVersion = 1;
 const double kLogicalBoardWidth = 1920;
 const double kLogicalBoardHeight = 1080;
 
-enum WhiteboardThemeId { white, black }
+enum WhiteboardThemeId { white, black, green }
 
 extension WhiteboardThemeIdX on WhiteboardThemeId {
-  String get wire => this == WhiteboardThemeId.white ? 'WHITE' : 'BLACK';
-  static WhiteboardThemeId parse(String? v) =>
-      v == 'BLACK' ? WhiteboardThemeId.black : WhiteboardThemeId.white;
+  String get wire => switch (this) {
+        WhiteboardThemeId.white => 'WHITE',
+        WhiteboardThemeId.black => 'BLACK',
+        WhiteboardThemeId.green => 'GREEN',
+      };
+
+  static WhiteboardThemeId parse(String? v) {
+    switch ((v ?? '').toUpperCase()) {
+      case 'BLACK':
+        return WhiteboardThemeId.black;
+      case 'GREEN':
+      case 'CHALK':
+      case 'CHALKBOARD':
+        return WhiteboardThemeId.green;
+      default:
+        return WhiteboardThemeId.white;
+    }
+  }
+
+  WhiteboardThemeId get next => switch (this) {
+        WhiteboardThemeId.white => WhiteboardThemeId.green,
+        WhiteboardThemeId.green => WhiteboardThemeId.black,
+        WhiteboardThemeId.black => WhiteboardThemeId.white,
+      };
 }
 
 enum WhiteboardTool {

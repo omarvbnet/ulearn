@@ -9,6 +9,7 @@ import {
   type UbrdManifest,
   type UbrdTimeline,
   type WhiteboardThemeId,
+  parseWhiteboardTheme,
 } from "./types";
 
 export type BuildUbrdInput = {
@@ -72,6 +73,7 @@ export async function parseUbrdPackage(bytes: ArrayBuffer | Uint8Array): Promise
   const manifestRaw = await zip.file("manifest.json")?.async("string");
   if (!manifestRaw) throw new Error("INVALID_PACKAGE_MANIFEST");
   const manifest = JSON.parse(manifestRaw) as UbrdManifest;
+  manifest.theme = parseWhiteboardTheme(manifest.theme);
 
   const eventsRaw = (await zip.file("board.events")?.async("string")) ?? "";
   const events = EventEngine.parseNdjson(eventsRaw);
