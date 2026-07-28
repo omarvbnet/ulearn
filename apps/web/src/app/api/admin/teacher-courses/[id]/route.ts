@@ -2,6 +2,7 @@ import { error, json, requireAuth } from "@/lib/api";
 import { ADMIN_ROLES } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { getDownloadUrl, resolvePublicMediaUrl } from "@/lib/r2";
+import { WHITEBOARD_PLAYBACK_EXPIRES_SEC } from "@/lib/r2-whiteboard";
 import { TeacherCourseService } from "@/services/teacher-course.service";
 
 /** Admin: full course detail for review (lessons, quizzes, documents, readiness). */
@@ -41,6 +42,8 @@ export async function GET(
           sortOrder: true,
           isFreePreview: true,
           isInterview: true,
+          lessonType: true,
+          whiteboardAssetId: true,
         },
       },
       materials: {
@@ -85,7 +88,8 @@ export async function GET(
           },
           _count: { select: { questions: { where: { deletedAt: null } } } },
         },
-      },      _count: {
+      },
+      _count: {
         select: {
           purchases: { where: { status: "PAID" } },
         },
@@ -98,17 +102,70 @@ export async function GET(
   await TeacherCourseService.ensureInterviewFromFreePreviews(id);
   const readiness = await TeacherCourseService.getCourseReadiness(id);
 
+  const whiteboardIds = [
+    ...new Set(
+      course.lessons
+        .map((l) => l.whiteboardAssetId)
+        .filter((wid): wid is string => Boolean(wid))
+    ),
+  ];
+  const whiteboardAssets = whiteboardIds.length
+    ? await prisma.whiteboardAsset.findMany({
+        where: { id: { in: whiteboardIds } },
+        select: { id: true, objectKey: true, durationSec: true, theme: true, processingStatus: true },
+      })
+    : [];
+  const wbById = new Map(whiteboardAssets.map((a) => [a.id, a]));
+  const wbPackageUrls = new Map<string, string>();
+  await Promise.all(
+    whiteboardAssets.map(async (a) => {
+      try {
+        wbPackageUrls.set(
+          a.id,
+          await getDownloadUrl(a.objectKey, WHITEBOARD_PLAYBACK_EXPIRES_SEC)
+        );
+      } catch {
+        /* leave missing — player can still try /api/whiteboards/[id] */
+      }
+    })
+  );
+
   const lessons = await Promise.all(
     course.lessons.map(async (l) => {
+      const isWhiteboard = l.lessonType === "WHITEBOARD" || Boolean(l.whiteboardAssetId);
+      const wb = l.whiteboardAssetId ? wbById.get(l.whiteboardAssetId) : null;
       let fileUrl: string | null = null;
-      if (l.fileKey) {
+      let packageUrl: string | null = null;
+
+      if (isWhiteboard && l.whiteboardAssetId) {
+        packageUrl = wbPackageUrls.get(l.whiteboardAssetId) ?? null;
+        // Prefer the .ubrd package for audits; fall back to signed fileKey if present.
+        fileUrl = packageUrl;
+        if (!fileUrl && l.fileKey) {
+          fileUrl = await getDownloadUrl(l.fileKey, WHITEBOARD_PLAYBACK_EXPIRES_SEC).catch(
+            () => null
+          );
+          packageUrl = fileUrl;
+        }
+      } else if (l.fileKey) {
         fileUrl = await getDownloadUrl(l.fileKey).catch(() => null);
       }
       if (!fileUrl) fileUrl = l.fileUrl;
+
       const thumbnailUrl =
         (await resolvePublicMediaUrl(l.thumbnailUrl, l.thumbnailKey).catch(() => null)) ??
         l.thumbnailUrl;
-      return { ...l, fileUrl, thumbnailUrl };
+
+      return {
+        ...l,
+        lessonType: isWhiteboard ? "WHITEBOARD" : l.lessonType ?? "VIDEO",
+        fileUrl,
+        thumbnailUrl,
+        packageUrl,
+        whiteboardId: l.whiteboardAssetId,
+        whiteboardTheme: wb?.theme ?? null,
+        whiteboardStatus: wb?.processingStatus ?? null,
+      };
     })
   );
 

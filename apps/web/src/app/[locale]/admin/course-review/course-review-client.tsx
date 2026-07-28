@@ -53,6 +53,8 @@ type ChangeSummary = {
     previousTitle?: string;
     title?: string;
     videoChanged?: boolean;
+    whiteboardChanged?: boolean;
+    lessonType?: string | null;
   }[];
   addedQuizzes?: { id: string; titleEn?: string }[];
   removedQuizzes?: { id: string; titleEn?: string }[];
@@ -74,6 +76,12 @@ type CourseDetail = Omit<Course, "lessons" | "thumbnail"> & {
     thumbnailUrl: string | null;
     isFreePreview: boolean;
     isInterview: boolean;
+    lessonType?: "VIDEO" | "WHITEBOARD" | string | null;
+    whiteboardAssetId?: string | null;
+    whiteboardId?: string | null;
+    packageUrl?: string | null;
+    whiteboardTheme?: string | null;
+    whiteboardStatus?: string | null;
   }[];
   materials: {
     id: string;
@@ -208,6 +216,8 @@ export function CourseReviewClient() {
   const [googleProductId, setGoogleProductId] = useState("");
   const [busy, setBusy] = useState(false);
   const [contentEditorFor, setContentEditorFor] = useState<Course | null>(null);
+  /** When false, Pending Review shows only newest additions/updates (not the whole course). */
+  const [showFullCourse, setShowFullCourse] = useState(false);
 
   const [purchaseFilter, setPurchaseFilter] = useState<"PENDING" | "PAID">("PENDING");
 
@@ -285,10 +295,12 @@ export function CourseReviewClient() {
     if (!selected) {
       setDetail(null);
       setReadiness(null);
+      setShowFullCourse(false);
       return;
     }
     let cancelled = false;
     setDetailLoading(true);
+    setShowFullCourse(false);
     setDetail(null);
     setReadiness(null);
     fetch(`/api/admin/teacher-courses/${selected.id}`)
@@ -986,10 +998,13 @@ export function CourseReviewClient() {
                       <li>
                         Updated lessons:{" "}
                         {detail.pendingChangeSummary.changedLessons!
-                          .map(
-                            (l) =>
-                              `${l.title || l.id}${l.videoChanged ? " (video)" : ""}`
-                          )
+                          .map((l) => {
+                            const tags = [
+                              l.whiteboardChanged ? "board" : null,
+                              l.videoChanged ? "video" : null,
+                            ].filter(Boolean);
+                            return `${l.title || l.id}${tags.length ? ` (${tags.join(", ")})` : ""}`;
+                          })
                           .join(", ")}
                       </li>
                     )}
@@ -1078,15 +1093,92 @@ export function CourseReviewClient() {
 
             {detail && (
               <>
+                {(() => {
+                  const summary = detail.pendingChangeSummary;
+                  const deltaMode =
+                    Boolean(summary) &&
+                    !summary?.firstReview &&
+                    !showFullCourse;
+                  const focusLessonIds = new Set([
+                    ...(summary?.addedLessons?.map((l) => l.id) ?? []),
+                    ...(summary?.changedLessons?.map((l) => l.id) ?? []),
+                  ]);
+                  const focusQuizIds = new Set(
+                    summary?.addedQuizzes?.map((q) => q.id) ?? []
+                  );
+                  const focusMaterialIds = new Set(
+                    summary?.addedMaterials?.map((m) => m.id) ?? []
+                  );
+                  const hasContentFocus =
+                    focusLessonIds.size > 0 ||
+                    focusQuizIds.size > 0 ||
+                    focusMaterialIds.size > 0;
+                  const reviewLessons =
+                    deltaMode && hasContentFocus
+                      ? detail.lessons.filter((l) => focusLessonIds.has(l.id))
+                      : deltaMode && !hasContentFocus
+                        ? []
+                        : detail.lessons;
+                  const reviewQuizzes =
+                    deltaMode && hasContentFocus
+                      ? detail.quizzes.filter((q) => focusQuizIds.has(q.id))
+                      : deltaMode && !hasContentFocus
+                        ? []
+                        : detail.quizzes;
+                  const reviewMaterials =
+                    deltaMode && hasContentFocus
+                      ? detail.materials.filter((m) => focusMaterialIds.has(m.id))
+                      : deltaMode && !hasContentFocus
+                        ? []
+                        : detail.materials;
+                  const addedLessonIds = new Set(
+                    summary?.addedLessons?.map((l) => l.id) ?? []
+                  );
+                  const changedLessonIds = new Set(
+                    summary?.changedLessons?.map((l) => l.id) ?? []
+                  );
+
+                  return (
+                    <>
+                      {summary && !summary.firstReview && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-card-border bg-card/40 px-3 py-2">
+                          <p className="text-sm text-muted">
+                            {showFullCourse
+                              ? "Showing full course content"
+                              : hasContentFocus
+                                ? "Showing only newest additions & updates"
+                                : "Metadata-only changes — no new lesson content to audit"}
+                          </p>
+                          <Button
+                            variant="outline"
+                            onClick={() => setShowFullCourse((v) => !v)}
+                          >
+                            {showFullCourse
+                              ? "Show changes only"
+                              : "Show full course"}
+                          </Button>
+                        </div>
+                      )}
+
                 <div>
                   <h3 className="mb-2 text-sm font-semibold">
-                    Lessons ({detail.lessons.length})
+                    {deltaMode && hasContentFocus
+                      ? `Lessons to review (${reviewLessons.length})`
+                      : `Lessons (${reviewLessons.length})`}
                   </h3>
-                  {detail.lessons.length === 0 ? (
-                    <p className="text-sm text-muted">No lessons</p>
+                  {reviewLessons.length === 0 ? (
+                    <p className="text-sm text-muted">
+                      {deltaMode && !hasContentFocus
+                        ? "No lesson media changed in this update."
+                        : "No lessons"}
+                    </p>
                   ) : (
                     <ul className="space-y-3">
-                      {detail.lessons.map((l, i) => (
+                      {reviewLessons.map((l, i) => {
+                        const isBoard =
+                          l.lessonType === "WHITEBOARD" || Boolean(l.whiteboardId || l.whiteboardAssetId);
+                        const packageUrl = l.packageUrl || (isBoard ? l.fileUrl : null);
+                        return (
                         <li
                           key={l.id}
                           className="rounded-xl border border-card-border p-3"
@@ -1095,6 +1187,21 @@ export function CourseReviewClient() {
                             <span className="font-medium">
                               {i + 1}. {l.title}
                             </span>
+                            {addedLessonIds.has(l.id) && (
+                              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs text-emerald-300">
+                                New
+                              </span>
+                            )}
+                            {changedLessonIds.has(l.id) && (
+                              <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-200">
+                                Updated
+                              </span>
+                            )}
+                            {isBoard && (
+                              <span className="rounded bg-violet-500/15 px-1.5 py-0.5 text-xs text-violet-200">
+                                Board (.ubrd)
+                              </span>
+                            )}
                             {l.isInterview && (
                               <span className="rounded bg-accent/15 px-1.5 py-0.5 text-xs text-accent">
                                 Interview
@@ -1111,7 +1218,32 @@ export function CourseReviewClient() {
                               </span>
                             )}
                           </div>
-                          {l.fileUrl ? (
+                          {isBoard ? (
+                            <div className="space-y-2">
+                              {packageUrl || l.whiteboardId ? (
+                                <WhiteboardPlayer
+                                  packageUrl={packageUrl}
+                                  whiteboardId={l.whiteboardId || l.whiteboardAssetId}
+                                  title={l.title}
+                                  compact
+                                  autoPlay={false}
+                                />
+                              ) : (
+                                <p className="text-xs text-muted">No UBRD package URL</p>
+                              )}
+                              {packageUrl && (
+                                <a
+                                  href={packageUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex text-xs text-accent hover:underline"
+                                  download={`${l.title || "lesson"}.ubrd`}
+                                >
+                                  Download .ubrd for audit
+                                </a>
+                              )}
+                            </div>
+                          ) : l.fileUrl ? (
                             <video
                               src={l.fileUrl}
                               controls
@@ -1122,20 +1254,25 @@ export function CourseReviewClient() {
                             <p className="text-xs text-muted">No video URL</p>
                           )}
                         </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   )}
                 </div>
 
                 <div>
                   <h3 className="mb-2 text-sm font-semibold">
-                    Quizzes ({detail.quizzes.length})
+                    {deltaMode && hasContentFocus
+                      ? `Quizzes to review (${reviewQuizzes.length})`
+                      : `Quizzes (${reviewQuizzes.length})`}
                   </h3>
-                  {detail.quizzes.length === 0 ? (
-                    <p className="text-sm text-muted">No quizzes</p>
+                  {reviewQuizzes.length === 0 ? (
+                    <p className="text-sm text-muted">
+                      {deltaMode ? "No new quizzes in this update." : "No quizzes"}
+                    </p>
                   ) : (
                     <ul className="space-y-3">
-                      {detail.quizzes.map((q) => {
+                      {reviewQuizzes.map((q) => {
                         const afterLesson = detail.lessons.find((l) => l.id === q.afterLessonId);
                         const questions = q.questions ?? [];
                         return (
@@ -1145,6 +1282,11 @@ export function CourseReviewClient() {
                           >
                             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                               <span className="font-medium">{q.titleEn}</span>
+                              {(deltaMode || focusQuizIds.has(q.id)) && (
+                                <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs text-emerald-300">
+                                  New
+                                </span>
+                              )}
                               <span className="text-xs text-muted">
                                 {questions.length || q._count.questions} questions
                                 {q.passPercentage != null ? ` · pass ${q.passPercentage}%` : ""}
@@ -1152,7 +1294,7 @@ export function CourseReviewClient() {
                             </div>
                             <p className="mt-1 text-xs text-muted">
                               {afterLesson
-                                ? `After video: ${afterLesson.title}`
+                                ? `After lesson: ${afterLesson.title}`
                                 : "At end of course"}
                             </p>
                             {questions.length > 0 && (
@@ -1201,13 +1343,17 @@ export function CourseReviewClient() {
 
                 <div>
                   <h3 className="mb-2 text-sm font-semibold">
-                    Documents ({detail.materials.length})
+                    {deltaMode && hasContentFocus
+                      ? `Documents to review (${reviewMaterials.length})`
+                      : `Documents (${reviewMaterials.length})`}
                   </h3>
-                  {detail.materials.length === 0 ? (
-                    <p className="text-sm text-muted">No documents</p>
+                  {reviewMaterials.length === 0 ? (
+                    <p className="text-sm text-muted">
+                      {deltaMode ? "No new documents in this update." : "No documents"}
+                    </p>
                   ) : (
                     <ul className="space-y-1 text-sm">
-                      {detail.materials.map((m) => {
+                      {reviewMaterials.map((m) => {
                         const afterLesson = detail.lessons.find((l) => l.id === m.lessonId);
                         return (
                           <li key={m.id}>
@@ -1223,6 +1369,11 @@ export function CourseReviewClient() {
                             ) : (
                               m.title
                             )}{" "}
+                            {focusMaterialIds.has(m.id) && (
+                              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs text-emerald-300">
+                                New
+                              </span>
+                            )}{" "}
                             <span className="text-xs text-muted">
                               ({m.type}
                               {afterLesson
@@ -1236,6 +1387,9 @@ export function CourseReviewClient() {
                     </ul>
                   )}
                 </div>
+                    </>
+                  );
+                })()}
               </>
             )}
 

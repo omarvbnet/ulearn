@@ -792,6 +792,8 @@ export class TeacherCourseService {
             fileUrl: true,
             durationSec: true,
             sortOrder: true,
+            lessonType: true,
+            whiteboardAssetId: true,
           },
           orderBy: { sortOrder: "asc" },
         },
@@ -821,6 +823,8 @@ export class TeacherCourseService {
             fileUrl: l.fileUrl,
             durationSec: l.durationSec,
             sortOrder: l.sortOrder,
+            lessonType: l.lessonType,
+            whiteboardAssetId: l.whiteboardAssetId,
           },
         ])
       ),
@@ -847,7 +851,15 @@ export class TeacherCourseService {
       subjectId?: string;
       thumbnail?: string | null;
       lessonIds?: string[];
-      lessonMeta?: Record<string, { title?: string; fileUrl?: string | null }>;
+      lessonMeta?: Record<
+        string,
+        {
+          title?: string;
+          fileUrl?: string | null;
+          lessonType?: string | null;
+          whiteboardAssetId?: string | null;
+        }
+      >;
       quizIds?: string[];
       quizMeta?: Record<string, { titleEn?: string }>;
       materialIds?: string[];
@@ -883,15 +895,30 @@ export class TeacherCourseService {
       .filter((id) => {
         const a = snap.lessonMeta?.[id];
         const b = current.lessonMeta[id];
-        return a?.title !== b?.title || a?.fileUrl !== b?.fileUrl;
+        return (
+          a?.title !== b?.title ||
+          a?.fileUrl !== b?.fileUrl ||
+          a?.lessonType !== b?.lessonType ||
+          a?.whiteboardAssetId !== b?.whiteboardAssetId
+        );
       })
-      .map((id) => ({
-        id,
-        previousTitle: snap.lessonMeta?.[id]?.title,
-        title: current.lessonMeta[id]?.title,
-        videoChanged:
-          snap.lessonMeta?.[id]?.fileUrl !== current.lessonMeta[id]?.fileUrl,
-      }));
+      .map((id) => {
+        const prev = snap.lessonMeta?.[id];
+        const next = current.lessonMeta[id];
+        const whiteboardChanged =
+          prev?.whiteboardAssetId !== next?.whiteboardAssetId ||
+          (next?.lessonType === "WHITEBOARD" && prev?.fileUrl !== next?.fileUrl);
+        const videoChanged =
+          !whiteboardChanged && prev?.fileUrl !== next?.fileUrl;
+        return {
+          id,
+          previousTitle: prev?.title,
+          title: next?.title,
+          videoChanged,
+          whiteboardChanged,
+          lessonType: next?.lessonType ?? null,
+        };
+      });
 
     const prevQuizzes = new Set(snap.quizIds ?? []);
     const nextQuizzes = new Set(current.quizIds);
