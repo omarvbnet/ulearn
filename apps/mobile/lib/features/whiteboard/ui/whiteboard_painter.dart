@@ -22,7 +22,14 @@ class WhiteboardPainter extends CustomPainter {
     this.activeStroke,
     this.activeShape,
     this.pdfUnderlay,
-  });
+  })  : // Snapshot mutable BoardState fields — old/new painters share the same
+        // instance, so comparing live `state.revision` always looks equal and
+        // Flutter skips paint (students only saw ink after a PDF underlay swap).
+        _paintRevision = state.revision,
+        _openStrokeCount = state.openStrokes.length,
+        _theme = state.theme,
+        _pageId = state.currentPageId,
+        _laserKey = _laserPaintKey(state.laser);
 
   final BoardState state;
   final double boardWidth;
@@ -31,6 +38,17 @@ class WhiteboardPainter extends CustomPainter {
   /// Live shape draft while the teacher is still dragging.
   final BoardShape? activeShape;
   final ui.Image? pdfUnderlay;
+
+  final int _paintRevision;
+  final int _openStrokeCount;
+  final WhiteboardThemeId _theme;
+  final String? _pageId;
+  final String _laserKey;
+
+  static String _laserPaintKey(BoardLaser? laser) {
+    if (laser == null || !laser.visible) return '';
+    return '${laser.pageId}:${laser.x.toStringAsFixed(1)},${laser.y.toStringAsFixed(1)}';
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -165,30 +183,38 @@ class WhiteboardPainter extends CustomPainter {
       ..color = _parseColor(shape.color, opacity: preview ? 0.85 : 1)
       ..style = PaintingStyle.stroke
       ..strokeWidth = shape.width
-      ..strokeCap = StrokeCap.round;
-    if (preview) {
-      paint.strokeWidth = shape.width;
-    }
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..isAntiAlias = true;
     final rect = Rect.fromPoints(Offset(shape.x1, shape.y1), Offset(shape.x2, shape.y2));
     switch (shape.kind) {
       case 'circle':
         canvas.drawOval(rect, paint);
         break;
       case 'line':
+        canvas.drawLine(Offset(shape.x1, shape.y1), Offset(shape.x2, shape.y2), paint);
+        break;
       case 'arrow':
         canvas.drawLine(Offset(shape.x1, shape.y1), Offset(shape.x2, shape.y2), paint);
-        if (shape.kind == 'arrow') {
-          canvas.drawCircle(
-            Offset(shape.x2, shape.y2),
-            shape.width * 1.2,
-            Paint()
-              ..color = paint.color
-              ..style = PaintingStyle.fill,
-          );
-        }
+        _paintArrowHead(canvas, shape, paint.color);
+        break;
+      case 'rect':
+      case 'rectangle':
+        // Sharp rectangle — strokeJoin.miter keeps crisp corners for teachers.
+        canvas.drawRect(
+          rect,
+          paint
+            ..strokeJoin = StrokeJoin.miter
+            ..strokeMiterLimit = 4,
+        );
         break;
       default:
-        canvas.drawRect(rect, paint);
+        canvas.drawRect(
+          rect,
+          paint
+            ..strokeJoin = StrokeJoin.miter
+            ..strokeMiterLimit = 4,
+        );
     }
 
     if (preview) {
@@ -215,6 +241,39 @@ class WhiteboardPainter extends CustomPainter {
     }
   }
 
+  void _paintArrowHead(Canvas canvas, BoardShape shape, Color color) {
+    final dx = shape.x2 - shape.x1;
+    final dy = shape.y2 - shape.y1;
+    final len = math.sqrt(dx * dx + dy * dy);
+    if (len < 1) return;
+    final ux = dx / len;
+    final uy = dy / len;
+    final head = math.max(shape.width * 3.2, 14.0);
+    final px = -uy;
+    final py = ux;
+    final tip = Offset(shape.x2, shape.y2);
+    final left = Offset(
+      shape.x2 - ux * head + px * head * 0.45,
+      shape.y2 - uy * head + py * head * 0.45,
+    );
+    final right = Offset(
+      shape.x2 - ux * head - px * head * 0.45,
+      shape.y2 - uy * head - py * head * 0.45,
+    );
+    final path = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo(left.dx, left.dy)
+      ..lineTo(right.dx, right.dy)
+      ..close();
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.fill
+        ..isAntiAlias = true,
+    );
+  }
+
   @override
   bool shouldRepaint(covariant WhiteboardPainter oldDelegate) {
     // Live drawing mutates stroke/shape in place — always refresh while active.
@@ -224,11 +283,14 @@ class WhiteboardPainter extends CustomPainter {
         oldDelegate.activeShape != null) {
       return true;
     }
-    return oldDelegate.state.revision != state.revision ||
+    return oldDelegate._paintRevision != _paintRevision ||
+        oldDelegate._openStrokeCount != _openStrokeCount ||
+        oldDelegate._theme != _theme ||
+        oldDelegate._pageId != _pageId ||
+        oldDelegate._laserKey != _laserKey ||
         oldDelegate.pdfUnderlay != pdfUnderlay ||
         oldDelegate.boardWidth != boardWidth ||
-        oldDelegate.boardHeight != boardHeight ||
-        oldDelegate.state.openStrokes.length != state.openStrokes.length;
+        oldDelegate.boardHeight != boardHeight;
   }
 }
 

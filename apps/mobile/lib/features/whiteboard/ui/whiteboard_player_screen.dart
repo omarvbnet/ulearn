@@ -108,8 +108,14 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
   final ValueNotifier<int> _boardPaint = ValueNotifier(0);
   int _lastUiSyncMs = 0;
 
+  /// Wall-clock playhead between sparse audio position updates (~60fps, matches web rAF).
+  int _clockAnchorMs = 0;
+  DateTime? _clockAnchorAt;
+  bool _hasAudioTrack = false;
+
   static const double _minZoom = 1;
   static const double _maxZoom = 5;
+  static const int _displayTickMs = 16;
 
   @override
   void initState() {
@@ -128,7 +134,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
   @override
   void dispose() {
     _removeFullscreenOverlay(restoreSystemUi: true);
-    _tick?.cancel();
+    _stopDisplayTicker();
     _progressTimer?.cancel();
     _hideControlsTimer?.cancel();
     _fsHideControlsTimer?.cancel();
@@ -464,6 +470,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
                                   onSelected: (v) async {
                                     _speed = v;
                                     await _audio.setSpeed(v);
+                                    _armDisplayClock(_playheadMs);
                                     if (mounted) setState(() {});
                                     _scheduleFsHideControls();
                                     _fullscreenEntry?.markNeedsBuild();
@@ -583,17 +590,27 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
           }
         }
         await _audio.setSpeed(_speed);
+        _hasAudioTrack = true;
         _audioPosSub = _audio.positionStream.listen((pos) {
-          _onAudioPosition(pos.inMilliseconds);
+          final ms = pos.inMilliseconds;
+          _armDisplayClock(ms);
+          // Re-anchor only — the display ticker applies events at ~60fps so ink
+          // grows continuously instead of jumping on sparse positionStream pulses.
+          if (!_playing || ms > _playheadMs + 40) {
+            _onAudioPosition(ms);
+          }
         });
         _audioStateSub = _audio.playerStateStream.listen((state) {
           if (state.processingState == ProcessingState.completed) {
+            _stopDisplayTicker();
             _onAudioPosition(_durationMs);
             if (mounted) setState(() => _playing = false);
             unawaited(_setKeepAwake(false));
             _emitProgress();
           }
         });
+      } else {
+        _hasAudioTrack = false;
       }
 
       _pkg = pkg;
@@ -717,16 +734,69 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     }
   }
 
+  void _armDisplayClock(int ms) {
+    _clockAnchorMs = ms;
+    _clockAnchorAt = DateTime.now();
+  }
+
+  int _estimatedPlayheadMs() {
+    final anchorAt = _clockAnchorAt;
+    if (anchorAt == null) return _playheadMs;
+    final elapsed = DateTime.now().difference(anchorAt).inMilliseconds;
+    final estimated = _clockAnchorMs + (elapsed * _speed).round();
+    final cap = _durationMs > 0 ? _durationMs : estimated;
+    return estimated.clamp(0, cap);
+  }
+
+  void _startDisplayTicker() {
+    _tick?.cancel();
+    _tick = Timer.periodic(const Duration(milliseconds: _displayTickMs), (_) {
+      if (!_playing || !mounted) return;
+      if (_hasAudioTrack) {
+        final next = _estimatedPlayheadMs();
+        // Keep playhead monotonic between audio anchors to avoid flicker.
+        if (next >= _playheadMs) {
+          _onAudioPosition(next);
+        }
+        return;
+      }
+      final step = (_displayTickMs * _speed).round().clamp(1, 48);
+      final next = (_playheadMs + step).clamp(0, _durationMs);
+      _onAudioPosition(next);
+      if (next >= _durationMs && _durationMs > 0) {
+        _stopDisplayTicker();
+        if (mounted) setState(() => _playing = false);
+        unawaited(_setKeepAwake(false));
+        _emitProgress();
+      }
+    });
+  }
+
+  void _stopDisplayTicker() {
+    _tick?.cancel();
+    _tick = null;
+  }
+
   void _onAudioPosition(int ms) {
-    if (ms == _playheadMs) return;
+    final cap = _durationMs > 0 ? _durationMs : ms;
+    final clamped = ms.clamp(0, cap);
+    if (clamped == _playheadMs) return;
+
     final prevPageId = _board.currentPageId;
     final prevPdfPage = _board.currentPage?.pdfPage;
     final prevTheme = _board.theme;
     final prevRevision = _board.revision;
-    _playheadMs = ms;
-    _applyForward(ms);
+
+    if (clamped < _playheadMs) {
+      // Large rewind (seek) — rebuild. Tiny backward noise is ignored by callers.
+      _applyUntil(clamped);
+    } else {
+      _applyForward(clamped);
+    }
+    _playheadMs = clamped;
+
     final preview = widget.freePreviewSec;
-    if (preview != null && preview > 0 && ms >= preview * 1000) {
+    if (preview != null && preview > 0 && clamped >= preview * 1000) {
       unawaited(_pause());
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -746,11 +816,11 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     final shouldSyncUi = themeChanged ||
         _showControls ||
         !_playing ||
-        (ms - _lastUiSyncMs).abs() >= 200;
+        (clamped - _lastUiSyncMs).abs() >= 200;
     if (_inFullscreen) {
       _fullscreenEntry?.markNeedsBuild();
     } else if (shouldSyncUi && mounted) {
-      _lastUiSyncMs = ms;
+      _lastUiSyncMs = clamped;
       setState(() {});
     }
   }
@@ -777,8 +847,10 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
         await _audio.seek(Duration(milliseconds: clamped));
       }
     } catch (_) {}
+    _armDisplayClock(clamped);
     _playheadMs = clamped;
     _applyUntil(clamped);
+    _boardPaint.value++;
     await _refreshPdfUnderlay();
     if (mounted) setState(() {});
   }
@@ -787,33 +859,25 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     try {
       if (_audio.audioSource != null) {
         await _audio.play();
-      } else if (_durationMs > 0) {
-        // Silent board (no audio track) — advance via ticker.
-        _tick?.cancel();
-        _tick = Timer.periodic(const Duration(milliseconds: 16), (_) {
-          if (!_playing) return;
-          final next = (_playheadMs + 16).clamp(0, _durationMs);
-          _onAudioPosition(next);
-          if (next >= _durationMs) {
-            _tick?.cancel();
-            if (mounted) setState(() => _playing = false);
-            unawaited(_setKeepAwake(false));
-            _emitProgress();
-          }
-        });
+        _hasAudioTrack = true;
+      } else {
+        _hasAudioTrack = false;
       }
     } catch (e) {
       debugPrint('WhiteboardPlayer play: $e');
     }
+    _armDisplayClock(_playheadMs);
+    _startDisplayTicker();
     if (mounted) setState(() => _playing = true);
     unawaited(_setKeepAwake(true));
   }
 
   Future<void> _pause() async {
-    _tick?.cancel();
+    _stopDisplayTicker();
     try {
       if (_audio.audioSource != null) await _audio.pause();
     } catch (_) {}
+    _armDisplayClock(_playheadMs);
     if (mounted) setState(() => _playing = false);
     unawaited(_setKeepAwake(false));
     _emitProgress();
@@ -1036,6 +1100,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
                   onSelected: (v) async {
                     _speed = v;
                     await _audio.setSpeed(v);
+                    _armDisplayClock(_playheadMs);
                     setState(() {});
                     _scheduleHideControls();
                   },
@@ -1163,6 +1228,7 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
                     onSelected: (v) async {
                       _speed = v;
                       await _audio.setSpeed(v);
+                      _armDisplayClock(_playheadMs);
                       setState(() {});
                       _scheduleHideControls();
                     },

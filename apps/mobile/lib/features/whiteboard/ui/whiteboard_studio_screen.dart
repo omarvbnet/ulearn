@@ -1738,18 +1738,18 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
   }
 
   Widget _toolRail(double iconSize) {
-    final tools = [
-      (WhiteboardTool.pen, Icons.edit),
-      (WhiteboardTool.pencil, Icons.edit_outlined),
-      (WhiteboardTool.highlighter, Icons.highlight),
-      (WhiteboardTool.eraser, Icons.auto_fix_off),
-      (WhiteboardTool.text, Icons.text_fields),
-      (WhiteboardTool.laser, Icons.highlight_alt),
-      (WhiteboardTool.rect, Icons.crop_square),
-      (WhiteboardTool.circle, Icons.circle_outlined),
-      (WhiteboardTool.line, Icons.show_chart),
-      (WhiteboardTool.arrow, Icons.arrow_right_alt),
-      (WhiteboardTool.select, Icons.near_me),
+    final tools = <(WhiteboardTool, IconData, String)>[
+      (WhiteboardTool.pen, Icons.edit, 'Pen'),
+      (WhiteboardTool.pencil, Icons.edit_outlined, 'Pencil'),
+      (WhiteboardTool.highlighter, Icons.highlight, 'Highlighter'),
+      (WhiteboardTool.eraser, Icons.auto_fix_off, 'Eraser'),
+      (WhiteboardTool.text, Icons.text_fields, 'Text'),
+      (WhiteboardTool.laser, Icons.highlight_alt, 'Laser'),
+      (WhiteboardTool.rect, Icons.rectangle_outlined, 'Rectangle'),
+      (WhiteboardTool.circle, Icons.circle_outlined, 'Circle'),
+      (WhiteboardTool.line, Icons.show_chart, 'Line'),
+      (WhiteboardTool.arrow, Icons.arrow_right_alt, 'Arrow'),
+      (WhiteboardTool.select, Icons.near_me, 'Select'),
     ];
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -1760,16 +1760,19 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
             final selected = _tool == t.$1;
             return Padding(
               padding: const EdgeInsets.only(right: 4),
-              child: InkWell(
-                onTap: () => _selectTool(t.$1),
-                borderRadius: BorderRadius.circular(10),
-                child: Container(
-                  padding: EdgeInsets.all(iconSize * 0.35),
-                  decoration: BoxDecoration(
-                    color: selected ? const Color(0xFF2563EB) : Colors.black12,
-                    borderRadius: BorderRadius.circular(10),
+              child: Tooltip(
+                message: t.$3,
+                child: InkWell(
+                  onTap: () => _selectTool(t.$1),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: EdgeInsets.all(iconSize * 0.35),
+                    decoration: BoxDecoration(
+                      color: selected ? const Color(0xFF2563EB) : Colors.black12,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(t.$2, size: iconSize, color: selected ? Colors.white : _chromeFg),
                   ),
-                  child: Icon(t.$2, size: iconSize, color: selected ? Colors.white : _chromeFg),
                 ),
               ),
             );

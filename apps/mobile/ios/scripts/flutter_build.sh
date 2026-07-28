@@ -6,8 +6,10 @@ export COPYFILE_DISABLE=1
 
 ROOT="${SRCROOT}/.."
 BUILD_DIR="${ROOT}/build"
-if [ -d /Volumes/ULearnBuild ]; then
+if [ -d /Volumes/ULearnBuild/mobile-build ] || [ -w /Volumes/ULearnBuild ] 2>/dev/null; then
   CACHE="/Volumes/ULearnBuild/mobile-build"
+elif [ -d "${HOME}/ULearnBuild" ]; then
+  CACHE="${HOME}/ULearnBuild/mobile-build"
 else
   CACHE="${HOME}/Library/Caches/ulearn-mobile-build"
 fi

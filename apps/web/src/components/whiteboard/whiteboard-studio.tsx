@@ -44,7 +44,7 @@ const TOOLS: { id: WhiteboardTool; label: string }[] = [
   { id: "eraser", label: "Eraser" },
   { id: "text", label: "Text" },
   { id: "laser", label: "Laser" },
-  { id: "rect", label: "Rect" },
+  { id: "rect", label: "Rectangle" },
   { id: "circle", label: "Circle" },
   { id: "line", label: "Line" },
   { id: "arrow", label: "Arrow" },
@@ -287,9 +287,9 @@ export default function WhiteboardStudio({
         ctx.globalAlpha = preview ? 0.85 : 1;
         ctx.lineWidth = shape.width;
         ctx.lineCap = "round";
-        ctx.lineJoin = "round";
         ctx.beginPath();
         if (shape.kind === "circle") {
+          ctx.lineJoin = "round";
           ctx.ellipse(
             (shape.x1 + shape.x2) / 2,
             (shape.y1 + shape.y2) / 2,
@@ -299,13 +299,39 @@ export default function WhiteboardStudio({
             0,
             Math.PI * 2
           );
-        } else if (shape.kind === "line" || shape.kind === "arrow") {
+          ctx.stroke();
+        } else if (shape.kind === "line") {
+          ctx.lineJoin = "round";
           ctx.moveTo(shape.x1, shape.y1);
           ctx.lineTo(shape.x2, shape.y2);
+          ctx.stroke();
+        } else if (shape.kind === "arrow") {
+          ctx.lineJoin = "round";
+          ctx.moveTo(shape.x1, shape.y1);
+          ctx.lineTo(shape.x2, shape.y2);
+          ctx.stroke();
+          const dx = shape.x2 - shape.x1;
+          const dy = shape.y2 - shape.y1;
+          const len = Math.hypot(dx, dy) || 1;
+          const ux = dx / len;
+          const uy = dy / len;
+          const head = Math.max(shape.width * 3.2, 14);
+          const px = -uy;
+          const py = ux;
+          ctx.beginPath();
+          ctx.moveTo(shape.x2, shape.y2);
+          ctx.lineTo(shape.x2 - ux * head + px * head * 0.45, shape.y2 - uy * head + py * head * 0.45);
+          ctx.lineTo(shape.x2 - ux * head - px * head * 0.45, shape.y2 - uy * head - py * head * 0.45);
+          ctx.closePath();
+          ctx.fillStyle = shape.color;
+          ctx.fill();
         } else {
+          // rect / rectangle
+          ctx.lineJoin = "miter";
+          ctx.miterLimit = 4;
           ctx.rect(shape.x1, shape.y1, shape.x2 - shape.x1, shape.y2 - shape.y1);
+          ctx.stroke();
         }
-        ctx.stroke();
         if (preview) {
           const w = Math.abs(shape.x2 - shape.x1);
           const h = Math.abs(shape.y2 - shape.y1);

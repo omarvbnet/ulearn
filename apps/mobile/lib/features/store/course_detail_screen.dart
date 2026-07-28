@@ -1083,9 +1083,11 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   /// Fixed stage shared by video, quiz, and documents.
-  /// Portrait uses a slightly taller-than-16:9 frame; pinch zooms the stage height
-  /// so widgets under the video move down / up with zoom.
+  /// Portrait uses a slightly taller-than-16:9 frame; board lessons get an even
+  /// taller stage so ink/shapes match the real classroom board experience.
+  /// Pinch zooms the stage height so widgets under the player move with zoom.
   static const double _portraitStageAspect = 16 / 10;
+  static const double _portraitBoardStageAspect = 16 / 12.5;
 
   Widget _buildPlayerStage({
     required List<Map<String, dynamic>> lessons,
@@ -1120,6 +1122,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
     );
 
     final zoomed = _playerZoom > 1.02;
+    final boardStage = active != null && _isWhiteboard(active);
+    final stageAspect =
+        boardStage ? _portraitBoardStageAspect : _portraitStageAspect;
 
     return ClipRect(
       child: AnimatedAlign(
@@ -1130,7 +1135,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final width = constraints.maxWidth;
-            final baseHeight = width / _portraitStageAspect;
+            final baseHeight = width / stageAspect;
             final height = baseHeight * _playerZoom;
             return GestureDetector(
               behavior: HitTestBehavior.opaque,

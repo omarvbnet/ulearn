@@ -45,3 +45,21 @@ if [ -d "${BUILD_DIR}" ]; then
 fi
 
 /bin/sh "$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh" embed_and_thin
+
+# Flutter sometimes leaves native-asset frameworks adhoc-signed — force team identity.
+identity="${EXPANDED_CODE_SIGN_IDENTITY:-}"
+if [ -n "${identity}" ] && [ "${identity}" != "-" ]; then
+  for fw in \
+    "${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Frameworks/objective_c.framework" \
+    "${NATIVE_FW}"
+  do
+    if [ -d "${fw}" ]; then
+      xattr -cr "${fw}" 2>/dev/null || true
+      echo "Signing $(basename "${fw}") with ${EXPANDED_CODE_SIGN_IDENTITY_NAME:-$identity}"
+      /usr/bin/codesign --force --sign "${identity}" \
+        --timestamp=none \
+        --generate-entitlement-der \
+        "${fw}"
+    fi
+  done
+fi
