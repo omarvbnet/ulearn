@@ -549,9 +549,13 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
       _board.reset();
       _board.theme = pkg.manifest.theme;
 
-      // PDF underlay is optional — never block strokes/audio on Android PdfRenderer.
+      // PDF underlay is optional — do not block lesson startup on PDF preload.
       for (final pdf in pkg.pdfs) {
-        await _pdfCache.preload(pdf, localFilePath: localPdfs[pdf.assetId]);
+        unawaited(
+          _pdfCache
+              .preload(pdf, localFilePath: localPdfs[pdf.assetId])
+              .catchError((_) {}),
+        );
       }
 
       await _audioPosSub?.cancel();

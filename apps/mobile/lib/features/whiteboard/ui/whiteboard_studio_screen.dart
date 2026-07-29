@@ -154,6 +154,15 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
       _pdfs
         ..clear()
         ..addAll(parsed.pdfs);
+      // Preload known PDFs for edit mode so current PDF page is visible immediately.
+      for (final pdf in parsed.pdfs) {
+        try {
+          await _pdfCache.preload(pdf);
+        } catch (_) {
+          // Keep editor usable even if a PDF underlay fails to load.
+        }
+      }
+      await _refreshPdfUnderlay();
       _previousDurationMs = parsed.manifest.durationMs;
       final dir = await getApplicationDocumentsDirectory();
       final audioPath =

@@ -205,13 +205,14 @@ export default function WhiteboardStudio({
         setColor(boardThemeColors(parseWhiteboardTheme(parsed.manifest.theme)).defaultInk);
         setDurationMs(parsed.manifest.durationMs);
         setElapsed(parsed.manifest.durationMs);
-        setPlayheadMs(0);
+        // Open edits at latest board state (not t=0 blank board).
+        setPlayheadMs(parsed.manifest.durationMs);
         setPageIds(boardRef.current.pages.map((p) => p.id));
         setCurrentPageId(boardRef.current.currentPageId ?? "page_0");
         if (initialTitle) setTitle(initialTitle);
         boardRef.current.reset();
         boardRef.current.theme = parsed.manifest.theme;
-        boardRef.current.applyEvents(engineRef.current.eventsUpTo(0));
+        boardRef.current.applyEvents(engineRef.current.eventsUpTo(parsed.manifest.durationMs));
         redraw();
         setLoadingEdit(false);
       } catch (e) {
