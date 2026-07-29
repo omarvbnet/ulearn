@@ -11,9 +11,11 @@ import {
 } from "./tutoring-prompt";
 import {
   buildAiTeacherFallbackLesson,
+  buildClassroomInterruptPrompt,
   buildCompactAiTeacherPrompt,
   normalizeAiTeacherLesson,
   parseAiTeacherLesson,
+  parseClassroomInterrupt,
   sanitizeClassroomPlainText,
   type AiTeacherLesson,
 } from "./ai-teacher-prompt";
@@ -87,6 +89,58 @@ export class AiChatService {
       mode: "ai_teacher",
       attachments: [],
     });
+  }
+
+  /** Live classroom interrupt: spoken answer + smart board drawings for the question. */
+  static async classroomInterrupt(input: {
+    userId: string;
+    question: string;
+    language?: string | null;
+    lessonTitle?: string;
+    pausedSpeechIndex?: number;
+    spokenSoFar?: string[];
+  }) {
+    const question = sanitizeClassroomPlainText(input.question, 220) || input.question.trim();
+    if (!question) {
+      throw new Error("Empty question");
+    }
+    const system = buildClassroomInterruptPrompt({
+      language: input.language,
+      lessonTitle: input.lessonTitle,
+      pausedIndex: input.pausedSpeechIndex,
+      spokenSoFar: input.spokenSoFar,
+    });
+    const messages: ChatMessage[] = [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content: `Student asked (answer + draw on board): ${question}`,
+      },
+    ];
+    const result = await AiProviderService.chat(
+      "TEACHING_ASSISTANT",
+      messages,
+      input.userId
+    );
+    const parsed =
+      parseClassroomInterrupt(result.text, input.language) ||
+      parseClassroomInterrupt(
+        JSON.stringify({
+          answer:
+            input.language === "ar"
+              ? "سؤال ممتاز. هذه الفكرة باختصار، وسنكمل من حيث توقفنا."
+              : input.language === "tr"
+                ? "Harika soru. Kısaca bu fikir şöyle; kaldığımız yerden devam edeceğiz."
+                : "Great question. Here is the idea briefly — then we continue where we paused.",
+          board: [],
+        }),
+        input.language
+      );
+
+    return {
+      answer: parsed!.answer,
+      board: parsed!.board,
+    };
   }
 
   static async chat(input: {

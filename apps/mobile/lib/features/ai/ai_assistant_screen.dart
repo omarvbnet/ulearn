@@ -425,13 +425,12 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     }
   }
 
-  Future<String> _askClassroomTeacher({
+  Future<Map<String, dynamic>> _askClassroomTeacher({
     required String question,
     required int pausedIndex,
     required Map<String, dynamic> lesson,
   }) async {
     final api = context.read<ApiClient>();
-    final auth = context.read<AuthProvider>();
     final locale = context.read<LocaleProvider>().code.toLowerCase();
     final title = lesson['lesson_title']?.toString() ?? 'Lesson';
     final speech = (lesson['speech'] as List?) ?? const [];
@@ -440,29 +439,34 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       final s = speech[i];
       if (s is Map && s['text'] != null) spoken.add(s['text'].toString());
     }
-    final prompt = [
-      'You are U Learn AI Teacher in a live classroom. The student interrupted the lesson.',
-      'Answer briefly like a professional teacher. Do NOT restart. Do NOT return JSON.',
-      'Lesson title: $title',
-      'Paused after step ${pausedIndex + 1}.',
-      if (spoken.isNotEmpty)
-        'Already taught:\n- ${spoken.skip(math.max(0, spoken.length - 4)).join('\n- ')}',
-      'Student question: $question',
-      'End by saying you will continue from where you paused.',
-    ].join('\n');
-    final data = await api.post('/api/ai/chat', {
-      'question': prompt,
-      'language': locale,
-      'mode': 'chat',
-      if (_conversationId != null) 'conversationId': _conversationId,
-      ..._stagePayload(auth),
-    });
-    final answer = data['answer']?.toString().trim() ?? '';
-    return answer.isNotEmpty
-        ? answer
-        : (locale == 'ar'
+    try {
+      final data = await api.post('/api/ai/teacher/interrupt', {
+        'question': question,
+        'language': locale,
+        'lessonTitle': title,
+        'pausedSpeechIndex': pausedIndex,
+        'spokenSoFar': spoken.length <= 5
+            ? spoken
+            : spoken.sublist(spoken.length - 5),
+      });
+      final answer = data['answer']?.toString().trim() ?? '';
+      final board = data['board'];
+      return {
+        'answer': answer.isNotEmpty
+            ? answer
+            : (locale == 'ar'
+                ? 'سؤال ممتاز. دعنا نكمل من حيث توقفنا.'
+                : 'Excellent question. Let’s continue from where we paused.'),
+        'board': board is List ? board : const [],
+      };
+    } catch (_) {
+      return {
+        'answer': locale == 'ar'
             ? 'سؤال ممتاز. دعنا نكمل من حيث توقفنا.'
-            : 'Excellent question. Let’s continue from where we paused.');
+            : 'Excellent question. Let’s continue from where we paused.',
+        'board': const [],
+      };
+    }
   }
 
   Future<void> _openLiveClassroom(Map<String, dynamic> lesson) async {

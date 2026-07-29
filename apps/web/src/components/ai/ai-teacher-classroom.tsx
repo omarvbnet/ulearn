@@ -146,14 +146,14 @@ function t(locale: string): Labels {
       hideAnswer: "إخفاء الإجابة",
       placeholder: "اكتب سؤالك للمعلم…",
       teacherReply: "رد المعلم",
-      interruptHint: "يمكنك المقاطعة في أي وقت",
+      interruptHint: "تحدث في أي وقت — بدون زر — والمعلم يجيب على السبورة",
       completed: "أحسنت! انتهينا من هذا الجزء. هل تريد مثالاً آخر؟",
       enableSound: "تفعيل الصوت",
       soundOn: "الصوت يعمل",
       soundOff: "الصوت متوقف",
       writing: "يكتب على السبورة…",
       tapToBegin: "اضغط لبدء الدرس المباشر",
-      tapHint: "سيتحدث المعلم ويرسم على السبورة معاً",
+      tapHint: "سيتحدث المعلم ويرسم؛ اسأل بصوتك مباشرة",
       liveVoice: "صوت مباشر",
       voiceMissing: "صوت المعلم غير متاح. عيّن VOICE_TTS (ElevenLabs/OpenAI) من لوحة الإدارة.",
       phaseReady: "جاهز",
@@ -186,14 +186,14 @@ function t(locale: string): Labels {
       hideAnswer: "Cevabı gizle",
       placeholder: "Öğretmene sorunu yaz…",
       teacherReply: "Öğretmen yanıtı",
-      interruptHint: "İstediğin zaman soru sorabilirsin",
+      interruptHint: "İstediğin zaman konuş — butona basmadan sor, öğretmen tahtada yanıtlar",
       completed: "Harika! Bu bölüm bitti. Başka bir örnek ister misin?",
       enableSound: "Sesi aç",
       soundOn: "Ses açık",
       soundOff: "Ses kapalı",
       writing: "Tahtaya yazıyor…",
       tapToBegin: "Canlı derse başlamak için dokun",
-      tapHint: "Öğretmen konuşurken tahtaya çizer",
+      tapHint: "Öğretmen konuşurken çizer; doğrudan sesinle sor",
       liveVoice: "Canlı ses",
       voiceMissing: "Öğretmen sesi yok. Yönetim panelinden VOICE_TTS (ElevenLabs/OpenAI) atayın.",
       phaseReady: "Hazır",
@@ -225,14 +225,14 @@ function t(locale: string): Labels {
     hideAnswer: "Hide answer",
     placeholder: "Type your question for the teacher…",
     teacherReply: "Teacher reply",
-    interruptHint: "Interrupt anytime by voice or text",
+    interruptHint: "Speak anytime — no button needed — teacher answers on the board",
     completed: "Well done! This part is complete. Want another example?",
     enableSound: "Enable sound",
     soundOn: "Sound on",
     soundOff: "Sound off",
     writing: "Writing on the board…",
     tapToBegin: "Tap to begin live lesson",
-    tapHint: "Teacher speaks while drawing on the board",
+    tapHint: "Teacher speaks and draws; ask by voice anytime",
     liveVoice: "Live voice",
     voiceMissing: "AI voice unavailable. Assign VOICE_TTS (ElevenLabs/OpenAI) in admin.",
     phaseReady: "Ready",
@@ -667,7 +667,7 @@ export function AiTeacherClassroom({
     pausedSpeechIndex: number;
     spokenSoFar: string[];
     lessonTitle: string;
-  }) => Promise<string>;
+  }) => Promise<{ answer: string; board?: Array<{ time?: number; action: string; parameters?: Record<string, unknown> }> } | string>;
 }) {
   const labels = useMemo(() => t(locale), [locale]);
   const [phase, setPhase] = useState<Phase>("ready");
@@ -681,6 +681,8 @@ export function AiTeacherClassroom({
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [micLevel, setMicLevel] = useState(0);
+  const [hzBars, setHzBars] = useState<number[]>(() => Array.from({ length: 18 }, () => 0.12));
+  const [handsFree, setHandsFree] = useState(true);
 
   const cancelledRef = useRef(false);
   const pausedRef = useRef(false);
@@ -691,6 +693,15 @@ export function AiTeacherClassroom({
   const rafRef = useRef<number | null>(null);
   const boardItemsRef = useRef<BoardItem[]>([]);
   const soundEnabledRef = useRef(false);
+  const handsFreeRef = useRef(true);
+  const handlingInterruptRef = useRef(false);
+  const alwaysListenRef = useRef<SpeechRecognitionLike | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const hzRafRef = useRef<number | null>(null);
+  const interimBufRef = useRef("");
+  const phaseRef = useRef<Phase>("ready");
 
   const speech = useMemo(
     () =>
@@ -744,6 +755,73 @@ export function AiTeacherClassroom({
     setSoundEnabled(true);
     setVoiceError(null);
     return true;
+  }, []);
+
+  const stopHzMonitor = useCallback(() => {
+    if (hzRafRef.current) {
+      cancelAnimationFrame(hzRafRef.current);
+      hzRafRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      void audioCtxRef.current.close().catch(() => undefined);
+      audioCtxRef.current = null;
+    }
+    analyserRef.current = null;
+    setHzBars(Array.from({ length: 18 }, () => 0.1));
+    setMicLevel(0);
+  }, []);
+
+  const startHzMonitor = useCallback(async () => {
+    if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
+    if (analyserRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+        video: false,
+      });
+      micStreamRef.current = stream;
+      const ctx = new AudioContext();
+      audioCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      analyser.smoothingTimeConstant = 0.72;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        const node = analyserRef.current;
+        if (!node) return;
+        node.getByteFrequencyData(data);
+        const bars: number[] = [];
+        const step = Math.max(1, Math.floor(data.length / 18));
+        let peak = 0;
+        for (let i = 0; i < 18; i++) {
+          const v = (data[i * step] || 0) / 255;
+          bars.push(Math.max(0.08, Math.min(1, v * 1.35)));
+          peak = Math.max(peak, v);
+        }
+        setHzBars(bars);
+        setMicLevel(peak);
+        hzRafRef.current = requestAnimationFrame(tick);
+      };
+      hzRafRef.current = requestAnimationFrame(tick);
+    } catch {
+      /* mic permission denied — listening still via SpeechRecognition */
+    }
+  }, []);
+
+  const stopAlwaysListen = useCallback(() => {
+    try {
+      alwaysListenRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
+    alwaysListenRef.current = null;
   }, []);
 
   const speak = useCallback(
@@ -813,6 +891,51 @@ export function AiTeacherClassroom({
     boardItemsRef.current = items;
     setBoard(items);
   }, []);
+
+  const appendInterruptBoard = useCallback(
+    (
+      cues: Array<{
+        time?: number;
+        action: string;
+        parameters?: Record<string, unknown>;
+      }>
+    ) => {
+      if (!cues.length) return;
+      const rtl = isRtlLang(lesson.language || locale);
+      let acc = boardItemsRef.current;
+      let penAt = nowMs();
+      for (const item of acc) {
+        if (item.kind === "text") penAt = Math.max(penAt, item.bornAt + item.writeMs + 200);
+      }
+      cues.slice(0, 5).forEach((cue, i) => {
+        const action = String(cue.action || "").toLowerCase();
+        const isText =
+          action === "write_text" ||
+          action === "draw_formula" ||
+          action === "draw_equation";
+        const start = isText ? penAt + i * 40 : nowMs() + i * 80;
+        const before = acc.length;
+        acc = applyCue(
+          acc,
+          {
+            time: Number(cue.time) || i * 400,
+            action: cue.action,
+            parameters: cue.parameters || {},
+          },
+          boardAppliedRef.current + i + 1,
+          start,
+          rtl
+        );
+        if (isText && acc.length > before) {
+          const last = acc[acc.length - 1];
+          if (last?.kind === "text") penAt = last.bornAt + last.writeMs + 220;
+        }
+      });
+      boardAppliedRef.current += cues.length;
+      setBoardSmooth(acc);
+    },
+    [lesson.language, locale, setBoardSmooth]
+  );
 
   /** Append cues with pen timing so only one write_text line animates at a time. */
   const applyBoardUntil = useCallback(
@@ -964,17 +1087,86 @@ export function AiTeacherClassroom({
   );
 
   useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
     return () => {
       cancelledRef.current = true;
       runIdRef.current += 1;
       stopVoice();
+      stopAlwaysListen();
+      stopHzMonitor();
       recognitionRef.current?.stop();
     };
-  }, [stopVoice]);
+  }, [stopVoice, stopAlwaysListen, stopHzMonitor]);
+
+  function startAlwaysListen() {
+    if (!handsFreeRef.current) return;
+    if (handlingInterruptRef.current || voiceBusy) return;
+    const Ctor = getSpeechRecognition();
+    if (!Ctor) return;
+    stopAlwaysListen();
+    try {
+      const rec = new Ctor();
+      rec.lang = speechLang(lesson.language || locale);
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.onresult = (ev) => {
+        if (handlingInterruptRef.current || voiceBusy) return;
+        let interim = "";
+        let finalText = "";
+        for (let i = 0; i < ev.results.length; i++) {
+          const row = ev.results[i];
+          const alt = row?.[0]?.transcript || "";
+          if (row?.isFinal) finalText += `${alt} `;
+          else interim += alt;
+        }
+        interimBufRef.current = (finalText || interim).trim();
+        const words = interimBufRef.current.split(/\s+/).filter(Boolean);
+        // Student started talking — pause teacher immediately (ChatGPT-like barge-in).
+        if (words.length >= 2 && phaseRef.current === "teaching") {
+          pauseTeaching();
+          setPhase("listening");
+        }
+        const q = finalText.trim();
+        if (q.split(/\s+/).filter(Boolean).length >= 2) {
+          interimBufRef.current = "";
+          void submitQuestionWithText(q);
+        }
+      };
+      rec.onerror = () => {
+        /* keep teaching; retry shortly */
+        window.setTimeout(() => {
+          if (handsFreeRef.current && !handlingInterruptRef.current) startAlwaysListen();
+        }, 700);
+      };
+      rec.onend = () => {
+        const p = phaseRef.current;
+        if (
+          handsFreeRef.current &&
+          !handlingInterruptRef.current &&
+          !cancelledRef.current &&
+          (p === "teaching" || p === "listening" || p === "paused")
+        ) {
+          window.setTimeout(() => startAlwaysListen(), 280);
+        }
+      };
+      alwaysListenRef.current = rec;
+      recognitionRef.current = rec;
+      rec.start();
+    } catch {
+      /* unsupported */
+    }
+  }
 
   function startWithVoice() {
     unlockVoice();
+    handsFreeRef.current = true;
+    setHandsFree(true);
+    void startHzMonitor();
     void runLesson(0);
+    window.setTimeout(() => startAlwaysListen(), 500);
   }
 
   function pauseTeaching() {
@@ -988,78 +1180,63 @@ export function AiTeacherClassroom({
     pausedRef.current = false;
     setPhase("teaching");
     void runLesson(speechIdxRef.current);
+    window.setTimeout(() => startAlwaysListen(), 400);
   }
 
   function startListening() {
+    // Manual mic is optional — same hands-free path.
+    handsFreeRef.current = true;
+    setHandsFree(true);
+    void startHzMonitor();
     pauseTeaching();
     setPhase("listening");
-    setMicLevel(0.35);
-    const Ctor = getSpeechRecognition();
-    if (!Ctor) {
-      setPhase("paused");
-      setMicLevel(0);
-      return;
-    }
-    try {
-      const rec = new Ctor();
-      rec.lang = speechLang(lesson.language || locale);
-      rec.continuous = false;
-      rec.interimResults = true;
-      rec.onresult = (ev) => {
-        let interim = "";
-        let finalText = "";
-        for (let i = 0; i < ev.results.length; i++) {
-          const row = ev.results[i];
-          const alt = row?.[0]?.transcript || "";
-          if (row?.isFinal) finalText += alt;
-          else interim += alt;
-        }
-        const level = Math.min(1, ((finalText || interim).length % 24) / 18 + 0.35);
-        setMicLevel(level);
-        const q = (finalText || "").trim();
-        if (q) {
-          setMicLevel(0);
-          void submitQuestionWithText(q);
-        }
-      };
-      rec.onerror = () => {
-        setMicLevel(0);
-        setPhase("paused");
-      };
-      rec.onend = () => {
-        setMicLevel(0);
-      };
-      recognitionRef.current = rec;
-      rec.start();
-    } catch {
-      setMicLevel(0);
-      setPhase("paused");
-    }
+    startAlwaysListen();
   }
 
   async function submitQuestionWithText(qRaw: string) {
     const q = cleanBoardText(qRaw) || qRaw.trim();
-    if (!q || asking) return;
-    recognitionRef.current?.stop();
+    if (!q || asking || handlingInterruptRef.current) return;
+    handlingInterruptRef.current = true;
+    stopAlwaysListen();
+    stopVoice();
     setAsking(true);
     setPhase("answering");
     pauseTeaching();
     try {
       const spokenSoFar = speech.slice(0, speechIdxRef.current + 1).map((s) => s.text);
       let reply = labels.completed;
+      let boardCues: Array<{
+        time?: number;
+        action: string;
+        parameters?: Record<string, unknown>;
+      }> = [];
       if (onAskTeacher) {
-        reply = await onAskTeacher({
+        const raw = await onAskTeacher({
           question: q,
           pausedSpeechIndex: speechIdxRef.current,
           spokenSoFar,
           lessonTitle: lesson.lesson_title,
         });
+        if (typeof raw === "string") {
+          reply = raw;
+        } else {
+          reply = raw.answer || labels.completed;
+          boardCues = raw.board || [];
+        }
       }
-      setTeacherReply(cleanBoardText(reply) || reply);
-      if (soundEnabledRef.current) await speak(reply);
+      const cleanReply = cleanBoardText(reply) || reply;
+      setTeacherReply(cleanReply);
+      setCaption(cleanReply);
+      appendInterruptBoard(boardCues);
+      if (soundEnabledRef.current) await speak(cleanReply);
     } finally {
       setAsking(false);
       setPhase("paused");
+      handlingInterruptRef.current = false;
+      // Auto-continue like a live teacher after answering.
+      window.setTimeout(() => {
+        if (!cancelledRef.current) resumeTeaching();
+      }, 700);
     }
   }
 
@@ -1409,43 +1586,63 @@ export function AiTeacherClassroom({
             {teacherReply ? labels.continue : labels.resume}
           </button>
         ) : null}
-        <button
-          type="button"
-          className="relative flex h-20 w-20 items-center justify-center"
-          onClick={() => startListening()}
-          aria-label={phase === "listening" ? labels.listening : labels.ask}
-          title={phase === "listening" ? labels.listening : labels.ask}
-        >
-          {phase === "listening" ? (
-            <>
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex h-10 items-end gap-[3px]" aria-hidden>
+            {hzBars.map((h, i) => (
               <span
-                className="absolute inset-0 rounded-full border-2 border-amber-300/70 animate-ping"
-                style={{ transform: `scale(${1.05 + micLevel * 0.45})` }}
+                key={i}
+                className={cn(
+                  "w-[3px] rounded-full transition-[height,background-color] duration-75",
+                  phase === "listening" || micLevel > 0.18
+                    ? "bg-amber-300"
+                    : phase === "teaching"
+                      ? "bg-emerald-300/90"
+                      : "bg-sky-300/70"
+                )}
+                style={{ height: `${Math.max(6, Math.round(h * 36))}px` }}
               />
-              <span
-                className="absolute inset-1 rounded-full border border-amber-200/50"
-                style={{ transform: `scale(${1.1 + micLevel * 0.7})`, opacity: 0.35 + micLevel * 0.5 }}
-              />
-            </>
-          ) : null}
-          <span
-            className={cn(
-              "relative flex h-16 w-16 items-center justify-center rounded-full text-slate-950 transition",
-              phase === "listening"
-                ? "bg-amber-400 shadow-lg shadow-amber-500/40"
-                : "bg-gradient-to-br from-sky-400 to-emerald-400 shadow-lg shadow-sky-500/30"
-            )}
-            style={
-              phase === "listening"
-                ? { transform: `scale(${1 + micLevel * 0.18})` }
-                : undefined
-            }
+            ))}
+          </div>
+          <button
+            type="button"
+            className="relative flex h-16 w-16 items-center justify-center"
+            onClick={() => {
+              // Optional mute/unmute hands-free listening
+              if (handsFree) {
+                handsFreeRef.current = false;
+                setHandsFree(false);
+                stopAlwaysListen();
+              } else {
+                startListening();
+              }
+            }}
+            aria-label={handsFree ? labels.listening : labels.ask}
+            title={handsFree ? labels.listening : labels.ask}
           >
-            <svg viewBox="0 0 24 24" className="h-7 w-7 fill-current" aria-hidden>
-              <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
-            </svg>
-          </span>
-        </button>
+            {(phase === "listening" || micLevel > 0.2) && (
+              <span
+                className="absolute inset-0 animate-ping rounded-full border-2 border-amber-300/60"
+                style={{ transform: `scale(${1.05 + micLevel * 0.5})` }}
+              />
+            )}
+            <span
+              className={cn(
+                "relative flex h-14 w-14 items-center justify-center rounded-full text-slate-950 transition",
+                handsFree
+                  ? "bg-amber-400 shadow-lg shadow-amber-500/35"
+                  : "bg-gradient-to-br from-sky-400 to-emerald-400 shadow-lg shadow-sky-500/30"
+              )}
+              style={{ transform: `scale(${1 + micLevel * 0.2})` }}
+            >
+              <svg viewBox="0 0 24 24" className="h-7 w-7 fill-current" aria-hidden>
+                <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
+              </svg>
+            </span>
+          </button>
+          <p className="text-[10px] font-semibold text-slate-300">
+            {handsFree ? labels.listening : labels.ask}
+          </p>
+        </div>
       </div>
       {voiceError ? (
         <p className="relative z-10 mx-4 mb-2 text-center text-[11px] font-semibold text-rose-300">

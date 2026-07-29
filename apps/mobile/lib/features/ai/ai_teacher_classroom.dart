@@ -21,7 +21,9 @@ class AiTeacherClassroom extends StatefulWidget {
   });
 
   final Map<String, dynamic> lesson;
-  final Future<String> Function(String question, int pausedIndex)? onAskTeacher;
+  /// Returns `{answer: String, board: List<Map>?}` for smart board replies.
+  final Future<Map<String, dynamic>> Function(String question, int pausedIndex)?
+      onAskTeacher;
 
   @override
   State<AiTeacherClassroom> createState() => _AiTeacherClassroomState();
@@ -53,6 +55,10 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
   var _soundLevel = 0.0;
   String? _ttsError;
   var _voiceBusy = false;
+  var _handsFree = true;
+  var _handlingInterrupt = false;
+  final _hzBars = List<double>.filled(18, 0.12);
+  Timer? _hzTimer;
 
   List<Map<String, dynamic>> get _speech {
     final raw = widget.lesson['speech'];
@@ -109,6 +115,7 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
     _cancelled = true;
     _runId++;
     _paintTimer?.cancel();
+    _hzTimer?.cancel();
     _micPulse.dispose();
     unawaited(_speechStt.stop());
     unawaited(_audio.stop());
@@ -175,66 +182,82 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
     }
   }
 
-  Future<void> _listenAsk() async {
-    _pause();
+  void _updateHzFromLevel(double level) {
+    final t = DateTime.now().millisecondsSinceEpoch / 120.0;
+    for (var i = 0; i < _hzBars.length; i++) {
+      final wave = (math.sin(t + i * 0.55) * 0.5 + 0.5);
+      _hzBars[i] = (0.1 + level * (0.35 + wave * 0.65)).clamp(0.08, 1.0);
+    }
+  }
+
+  Future<void> _startAlwaysListen() async {
+    if (!_handsFree || _handlingInterrupt || _asking || _voiceBusy) return;
+    if (_phase != _Phase.teaching &&
+        _phase != _Phase.paused &&
+        _phase != _Phase.answering) {
+      return;
+    }
     final available = await _speechStt.initialize(
       onError: (_) {
-        if (mounted) {
-          setState(() {
-            _listeningAsk = false;
-            _phase = _Phase.paused;
-          });
-        }
+        if (!mounted) return;
+        _hzTimer?.cancel();
+        Future<void>.delayed(const Duration(milliseconds: 800), _startAlwaysListen);
       },
       onStatus: (status) {
         if (!mounted) return;
         if (status == 'done' || status == 'notListening') {
-          setState(() => _listeningAsk = false);
+          if (_handsFree && !_handlingInterrupt && !_asking) {
+            Future<void>.delayed(const Duration(milliseconds: 350), _startAlwaysListen);
+          }
         }
       },
     );
-    if (!available || !mounted) {
-      if (mounted) setState(() => _phase = _Phase.paused);
-      return;
-    }
+    if (!available || !mounted) return;
     setState(() {
       _listeningAsk = true;
-      _phase = _Phase.answering;
-      _teacherReply = null;
-      _soundLevel = 0;
     });
-    unawaited(_micPulse.repeat(reverse: true));
+    if (!_micPulse.isAnimating) {
+      unawaited(_micPulse.repeat(reverse: true));
+    }
+    _hzTimer?.cancel();
+    _hzTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      if (!mounted) return;
+      setState(() => _updateHzFromLevel(_soundLevel));
+    });
     await _speechStt.listen(
       onSoundLevelChange: (level) {
         if (!mounted) return;
-        setState(() => _soundLevel = level.clamp(0, 50) / 50.0);
+        final n = (level.clamp(-50, 10) + 50) / 60.0;
+        setState(() {
+          _soundLevel = n.clamp(0.0, 1.0);
+          _updateHzFromLevel(_soundLevel);
+        });
+        // Barge-in: student talking while teacher explains
+        if (_phase == _Phase.teaching && _soundLevel > 0.35 && !_handlingInterrupt) {
+          _pause();
+          setState(() => _phase = _Phase.answering);
+        }
       },
       onResult: (result) async {
+        final words = result.recognizedWords.trim();
+        if (words.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length < 2) {
+          return;
+        }
         if (!result.finalResult) {
-          if (mounted && result.recognizedWords.trim().isNotEmpty) {
-            setState(() => _listeningAsk = true);
+          if (_phase == _Phase.teaching) {
+            _pause();
+            if (mounted) setState(() => _phase = _Phase.answering);
           }
           return;
         }
-        final q = (_cleanBoardText(result.recognizedWords) ??
-                result.recognizedWords.trim());
+        final q = (_cleanBoardText(words) ?? words).trim();
         await _speechStt.stop();
-        if (!mounted) return;
-        _micPulse.stop();
-        _micPulse.value = 0;
-        setState(() {
-          _listeningAsk = false;
-          _soundLevel = 0;
-        });
-        if (q.isEmpty) {
-          setState(() => _phase = _Phase.paused);
-          return;
-        }
+        if (!mounted || q.isEmpty) return;
         await _submitAsk(q);
       },
       listenOptions: stt.SpeechListenOptions(
-        listenFor: const Duration(seconds: 20),
-        pauseFor: const Duration(seconds: 3),
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 2),
         partialResults: true,
         localeId: _lang == 'ar'
             ? 'ar_SA'
@@ -243,6 +266,11 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
                 : 'en_US',
       ),
     );
+  }
+
+  Future<void> _listenAsk() async {
+    _handsFree = true;
+    await _startAlwaysListen();
   }
 
   Future<void> _waitWhilePaused() async {
@@ -317,7 +345,9 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
     setState(() {
       _phase = _Phase.teaching;
       _teacherReply = null;
+      _handsFree = true;
     });
+    unawaited(_startAlwaysListen());
 
     final speech = _speech;
     if (fromIndex == 0) {
@@ -402,30 +432,87 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
     _paused = false;
     if (mounted) setState(() => _phase = _Phase.teaching);
     _runLesson(_speechIndex);
+    unawaited(_startAlwaysListen());
   }
 
   Future<void> _submitAsk(String question) async {
     final q = (_cleanBoardText(question) ?? question).trim();
-    if (q.isEmpty || _asking) return;
+    if (q.isEmpty || _asking || _handlingInterrupt) return;
+    _handlingInterrupt = true;
     _pause();
     setState(() {
       _asking = true;
       _phase = _Phase.answering;
+      _listeningAsk = true;
     });
     try {
       var reply = context.l10n.t('mobile.ai.aiTeacherCompleted');
+      List<dynamic> board = const [];
       if (widget.onAskTeacher != null) {
-        reply = await widget.onAskTeacher!(q, _speechIndex);
+        final raw = await widget.onAskTeacher!(q, _speechIndex);
+        reply = raw['answer']?.toString() ?? reply;
+        final b = raw['board'];
+        if (b is List) board = b;
       }
       if (!mounted) return;
       final cleanReply = _cleanBoardText(reply) ?? reply;
+      _appendInterruptBoard(board);
       setState(() {
         _teacherReply = cleanReply;
+        _caption = cleanReply;
         _phase = _Phase.paused;
       });
       await _speak(cleanReply);
+      await _waitBoardCatchUp();
     } finally {
-      if (mounted) setState(() => _asking = false);
+      _handlingInterrupt = false;
+      if (mounted) {
+        setState(() => _asking = false);
+        // Auto-continue like a live teacher
+        Future<void>.delayed(const Duration(milliseconds: 600), () {
+          if (!mounted || _cancelled) return;
+          _resume();
+        });
+      }
+    }
+  }
+
+  void _appendInterruptBoard(List<dynamic> cues) {
+    if (cues.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch.toDouble();
+    var penAt = now;
+    for (final item in _items) {
+      if (item.kind == _Kind.text) {
+        penAt = math.max(penAt, item.bornAt + item.writeMs + 200);
+      }
+    }
+    for (var i = 0; i < cues.length && i < 5; i++) {
+      final raw = cues[i];
+      if (raw is! Map) continue;
+      final cue = Map<String, dynamic>.from(raw);
+      final action =
+          (cue['action']?.toString() ?? '').toLowerCase().replaceAll(' ', '_');
+      if (action.isEmpty ||
+          action == 'open_new_board' ||
+          action == 'clear_board') {
+        continue;
+      }
+      final isText = action == 'write_text' ||
+          action == 'draw_formula' ||
+          action == 'draw_equation';
+      final start = isText ? penAt : now + i * 80;
+      final before = _items.length;
+      _applyCue(_items, cue, _boardApplied + i + 1, start, _rtl);
+      if (isText && _items.length > before) {
+        final last = _items.last;
+        penAt = last.bornAt + last.writeMs + 220;
+      }
+    }
+    _boardApplied += cues.length;
+    if (mounted) {
+      setState(() {
+        _clockMs = DateTime.now().millisecondsSinceEpoch.toDouble();
+      });
     }
   }
 
@@ -775,9 +862,43 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
                   const SizedBox(width: 56),
                 const Spacer(),
                 GestureDetector(
-                  onTap: _listeningAsk || _asking ? null : _listenAsk,
+                  onTap: () {
+                    if (_handsFree) {
+                      setState(() {
+                        _handsFree = false;
+                        _listeningAsk = false;
+                      });
+                      unawaited(_speechStt.stop());
+                      _micPulse.stop();
+                      _hzTimer?.cancel();
+                    } else {
+                      unawaited(_listenAsk());
+                    }
+                  },
                   child: Column(
                     children: [
+                      SizedBox(
+                        height: 36,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            for (var i = 0; i < _hzBars.length; i++)
+                              Container(
+                                width: 3,
+                                height: 6 + _hzBars[i] * 28,
+                                margin: const EdgeInsets.symmetric(horizontal: 1),
+                                decoration: BoxDecoration(
+                                  color: _listeningAsk || _soundLevel > 0.2
+                                      ? const Color(0xFFFBBF24)
+                                      : const Color(0xFF34D399),
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 6),
                       AnimatedBuilder(
                         animation: _micPulse,
                         builder: (context, child) {

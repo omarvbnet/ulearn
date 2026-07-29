@@ -481,35 +481,29 @@ export default function StudentAiPage() {
     pausedSpeechIndex: number;
     spokenSoFar: string[];
     lessonTitle: string;
-  }): Promise<string> {
-    const contextPrompt = [
-      "You are U Learn AI Teacher in a live classroom. The student interrupted the lesson.",
-      "Answer briefly like a professional teacher standing at the board.",
-      "Do NOT restart the lesson. Do NOT return JSON. Plain spoken teacher reply only.",
-      `Lesson title: ${input.lessonTitle}`,
-      `Paused after step ${input.pausedSpeechIndex + 1}.`,
-      input.spokenSoFar.length
-        ? `What was already taught:\n- ${input.spokenSoFar.slice(-4).join("\n- ")}`
-        : "",
-      `Student question: ${input.question}`,
-      "End by saying you will continue from where you paused.",
-    ]
-      .filter(Boolean)
-      .join("\n");
-    const res = await fetch("/api/ai/chat", {
+  }): Promise<{
+    answer: string;
+    board?: Array<{ time?: number; action: string; parameters?: Record<string, unknown> }>;
+  }> {
+    const res = await fetch("/api/ai/teacher/interrupt", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        question: contextPrompt,
+        question: input.question,
         language: locale,
-        conversationId: conversationId || undefined,
-        mode: "chat",
+        lessonTitle: input.lessonTitle,
+        pausedSpeechIndex: input.pausedSpeechIndex,
+        spokenSoFar: input.spokenSoFar.slice(-5),
       }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed");
-    if (data.conversationId) setConversationId(data.conversationId);
-    return String(data.answer || "").trim() || "Excellent question. Let’s continue.";
+    return {
+      answer:
+        String(data.answer || "").trim() ||
+        "Excellent question. Let’s continue from where we paused.",
+      board: Array.isArray(data.board) ? data.board : [],
+    };
   }
 
   async function openConversation(id: string) {

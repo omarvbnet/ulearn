@@ -795,6 +795,140 @@ export function buildCompactAiTeacherPrompt(input: {
     .join("\n");
 }
 
+
+export type ClassroomInterruptResult = {
+  answer: string;
+  board: AiTeacherBoardCue[];
+};
+
+/** Fast interrupt reply: spoken answer + board drawings for the student's question. */
+export function buildClassroomInterruptPrompt(input: {
+  language?: string | null;
+  lessonTitle?: string;
+  pausedIndex?: number;
+  spokenSoFar?: string[];
+}): string {
+  const language = normalizeClassroomLanguage(input.language);
+  const rtl = language === "ar";
+  return [
+    "You are U Learn AI Teacher in a LIVE classroom. The student just interrupted by speaking.",
+    languageInstruction(input.language),
+    "Reply like ChatGPT voice mode + a human teacher at a whiteboard: warm, clear, concise.",
+    "Return ONLY valid JSON (no markdown): {\"answer\":\"...\",\"board\":[...]}",
+    "answer: 2–4 short spoken sentences in the classroom language. Answer the question directly. End by saying you will continue the lesson.",
+    "board: 2–4 actions that ILLUSTRATE the answer NOW (write_text + draw_circle/draw_arrow/draw_rectangle/draw_line/underline).",
+    rtl
+      ? "Arabic RTL: write_text x ≈ 1700–1820, diagrams x ≈ 400–700."
+      : "LTR: write_text x ≈ 100–220, diagrams x ≈ 1300–1700.",
+    "write_text notes max 8 words. Coordinates 0..1920 x 0..1080. y around 700–980 so new notes appear below prior content.",
+    "NEVER dump schema keys. NEVER restart the whole lesson.",
+    input.lessonTitle ? `Lesson: ${input.lessonTitle}` : "",
+    typeof input.pausedIndex === "number" ? `Paused after step ${input.pausedIndex + 1}.` : "",
+    input.spokenSoFar?.length
+      ? `Already taught:\n- ${input.spokenSoFar.slice(-4).join("\n- ")}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function parseClassroomInterrupt(
+  raw: string,
+  language?: string | null
+): ClassroomInterruptResult | null {
+  const lang = normalizeClassroomLanguage(language);
+  const rtl = lang === "ar";
+  const jsonText = extractJsonObject(raw);
+  if (!jsonText) {
+    const plain = sanitizeClassroomPlainText(raw, 280);
+    if (!plain) return null;
+    return {
+      answer: plain,
+      board: synthesizeInterruptBoard(plain, rtl),
+    };
+  }
+  try {
+    const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    const answer =
+      sanitizeClassroomPlainText(parsed.answer ?? parsed.text ?? parsed.reply, 320) ||
+      sanitizeClassroomPlainText(raw, 280);
+    if (!answer) return null;
+    const boardRaw = Array.isArray(parsed.board)
+      ? parsed.board
+      : Array.isArray(parsed.whiteboard)
+        ? parsed.whiteboard
+        : [];
+    const board: AiTeacherBoardCue[] = boardRaw
+      .map((a, i) => {
+        if (!a || typeof a !== "object") return null;
+        const row = a as Record<string, unknown>;
+        const action = String(row.action || "")
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, "_");
+        if (!action || action === "open_new_board" || action === "clear_board") return null;
+        const parameters =
+          row.parameters && typeof row.parameters === "object" && !Array.isArray(row.parameters)
+            ? { ...(row.parameters as Record<string, unknown>) }
+            : {};
+        if ("text" in parameters) {
+          parameters.text = sanitizeClassroomPlainText(parameters.text, 48);
+        }
+        return {
+          time: Math.max(0, Number(row.time) || i * 400),
+          action,
+          parameters,
+        };
+      })
+      .filter(Boolean) as AiTeacherBoardCue[];
+    return {
+      answer,
+      board: board.length ? board.slice(0, 5) : synthesizeInterruptBoard(answer, rtl),
+    };
+  } catch {
+    const plain = sanitizeClassroomPlainText(raw, 280);
+    if (!plain) return null;
+    return { answer: plain, board: synthesizeInterruptBoard(plain, rtl) };
+  }
+}
+
+function synthesizeInterruptBoard(answer: string, rtl: boolean): AiTeacherBoardCue[] {
+  const note = shortBoardNote(answer, 40) || (rtl ? "إجابة" : "Answer");
+  const textX = rtl ? 1780 : 120;
+  const diagramX = rtl ? 520 : 1500;
+  return [
+    {
+      time: 0,
+      action: "write_text",
+      parameters: {
+        text: note,
+        x: textX,
+        y: 860,
+        size: 26,
+        color: "blue",
+        align: rtl ? "right" : "left",
+      },
+    },
+    {
+      time: 350,
+      action: "draw_circle",
+      parameters: { cx: diagramX, cy: 820, r: 55, color: "orange", width: 3 },
+    },
+    {
+      time: 700,
+      action: "draw_arrow",
+      parameters: {
+        x1: diagramX - 70,
+        y1: 900,
+        x2: diagramX + 80,
+        y2: 780,
+        color: "green",
+        width: 3,
+      },
+    },
+  ];
+}
+
 /** Human-readable fallback for chat history when the board player is unavailable. */
 export function aiTeacherLessonToMarkdown(lesson: AiTeacherLesson): string {
   const lines: string[] = [
