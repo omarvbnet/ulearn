@@ -109,6 +109,35 @@ class BoardState {
     return pages.isEmpty ? null : pages.first;
   }
 
+  /// If replay ends on an empty/invalid page id, switch to the latest useful page.
+  void normalizeCurrentPageForDisplay() {
+    if (pages.isEmpty) {
+      addBlankPage('page_0');
+      return;
+    }
+    final hasCurrent =
+        currentPageId != null && pages.any((p) => p.id == currentPageId);
+    if (hasCurrent) {
+      final cp = currentPage;
+      final useful = cp != null &&
+          (cp.kind == 'pdf' ||
+              cp.strokes.isNotEmpty ||
+              cp.texts.isNotEmpty ||
+              cp.shapes.isNotEmpty);
+      if (useful) return;
+    }
+    for (final p in pages.reversed) {
+      if (p.kind == 'pdf' ||
+          p.strokes.isNotEmpty ||
+          p.texts.isNotEmpty ||
+          p.shapes.isNotEmpty) {
+        currentPageId = p.id;
+        return;
+      }
+    }
+    currentPageId = pages.first.id;
+  }
+
   BoardPage? _pageById(Object? id) {
     if (id == null) return currentPage;
     final sid = id.toString();

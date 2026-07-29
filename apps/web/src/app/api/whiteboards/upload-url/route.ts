@@ -10,7 +10,7 @@ const bodySchema = z.object({
   filename: z.string().min(1),
   contentType: z.string().min(1).default("application/octet-stream"),
   size: z.number().int().positive(),
-  theme: z.enum(["WHITE", "BLACK"]).optional(),
+  theme: z.enum(["WHITE", "BLACK", "GREEN"]).optional(),
 });
 
 async function verifyCourseAccess(userId: string, role: string, courseId: string) {

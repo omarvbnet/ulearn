@@ -8,7 +8,7 @@ const bodySchema = z.object({
   whiteboardId: z.string().min(1),
   size: z.number().int().positive().optional(),
   durationSec: z.number().int().positive().optional(),
-  theme: z.enum(["WHITE", "BLACK"]).optional(),
+  theme: z.enum(["WHITE", "BLACK", "GREEN"]).optional(),
   thumbnailKey: z.string().optional(),
   schemaVersion: z.number().int().positive().optional(),
   courseLessonId: z.string().optional(),

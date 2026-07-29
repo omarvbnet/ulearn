@@ -84,6 +84,39 @@ export class BoardState {
     return this.pages.find((p) => p.id === this.currentPageId) ?? this.pages[0] ?? null;
   }
 
+  /** Keep UI on the latest useful page after replay/edit load. */
+  normalizeCurrentPageForDisplay() {
+    if (!this.pages.length) {
+      this.addBlankPage("page_0");
+      return;
+    }
+    const current = this.currentPage;
+    const hasCurrent =
+      Boolean(this.currentPageId) &&
+      this.pages.some((p) => p.id === this.currentPageId);
+    const currentUseful =
+      Boolean(current) &&
+      (current!.kind === "pdf" ||
+        current!.strokes.length > 0 ||
+        current!.texts.length > 0 ||
+        current!.shapes.length > 0);
+    if (hasCurrent && currentUseful) return;
+
+    for (let i = this.pages.length - 1; i >= 0; i--) {
+      const p = this.pages[i]!;
+      if (
+        p.kind === "pdf" ||
+        p.strokes.length > 0 ||
+        p.texts.length > 0 ||
+        p.shapes.length > 0
+      ) {
+        this.currentPageId = p.id;
+        return;
+      }
+    }
+    this.currentPageId = this.pages[0]!.id;
+  }
+
   reset() {
     this.theme = "WHITE";
     this.pages = [];

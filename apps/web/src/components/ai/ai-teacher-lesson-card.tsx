@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export type AiTeacherLessonView = {
@@ -30,6 +30,7 @@ export function AiTeacherLessonCard({
 }) {
   const [quizReveal, setQuizReveal] = useState<Record<number, boolean>>({});
   const [speaking, setSpeaking] = useState(false);
+  const autoSpokenRef = useRef(false);
 
   const labels = useMemo(() => {
     if (locale === "ar") {
@@ -111,6 +112,19 @@ export function AiTeacherLessonCard({
     setSpeaking(true);
     window.speechSynthesis.speak(utter);
   }
+
+  useEffect(() => {
+    if (autoSpokenRef.current) return;
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    autoSpokenRef.current = true;
+    toggleSpeech();
+    return () => {
+      if (window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const previewActions = lesson.whiteboard.slice(0, 12);
 

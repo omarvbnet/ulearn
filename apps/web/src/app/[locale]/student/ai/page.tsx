@@ -59,7 +59,9 @@ export default function StudentAiPage() {
   const [conversations, setConversations] = useState<Conv[]>([]);
   const [docs, setDocs] = useState<KbDoc[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerMode, setPickerMode] = useState<"exam" | "explain_observe">("exam");
+  const [pickerMode, setPickerMode] = useState<
+    "exam" | "explain_observe" | "ai_teacher"
+  >("exam");
   const [pendingExplainQuestion, setPendingExplainQuestion] = useState("");
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const [examCount, setExamCount] = useState<5 | 10 | 20>(5);
@@ -305,7 +307,12 @@ export default function StudentAiPage() {
 
   async function sendAiTeacherLesson(question?: string) {
     const q = (question ?? input).trim();
-    if (!q || sending) return;
+    if (sending) return;
+    if (!q) {
+      setPendingExplainQuestion("");
+      await openMaterialPicker("ai_teacher");
+      return;
+    }
     setSending(true);
     setInput("");
     setMessages((m) => [
@@ -325,6 +332,21 @@ export default function StudentAiPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "AI Teacher failed");
+      if (data.needsMaterialSelection) {
+        setMessages((m) => [
+          ...m,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            text: data.answer || "",
+          },
+        ]);
+        setPendingExplainQuestion(String(data.pendingQuestion || q || "").trim() || q);
+        await openMaterialPicker(
+          data.pendingMode === "ai_teacher" ? "ai_teacher" : "explain_observe"
+        );
+        return;
+      }
       setConversationId(data.conversationId || conversationId);
       setMessages((m) => [
         ...m,
@@ -402,7 +424,9 @@ export default function StudentAiPage() {
     setInput("");
   }
 
-  async function openMaterialPicker(mode: "exam" | "explain_observe" = "exam") {
+  async function openMaterialPicker(
+    mode: "exam" | "explain_observe" | "ai_teacher" = "exam"
+  ) {
     const res = await fetch("/api/ai/kb-documents");
     const data = await res.json();
     if (!res.ok) {
@@ -454,14 +478,19 @@ export default function StudentAiPage() {
       (locale === "ar"
         ? "اشرح المادة وساعدني على ملاحظة الأشكال"
         : "Explain the material and help me observe the shapes");
+    const aiTeacherPrompt =
+      pendingExplainQuestion.trim() ||
+      (locale === "ar"
+        ? "ابدأ درس السبورة الصوتي من المادة المختارة"
+        : "Start an AI teacher board lesson from the selected material");
     try {
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question: prompt,
+          question: pickerMode === "ai_teacher" ? aiTeacherPrompt : prompt,
           language: locale,
-          mode: "explain_observe",
+          mode: pickerMode === "ai_teacher" ? "ai_teacher" : "explain_observe",
           documentIds: selectedDocs,
           conversationId: conversationId || undefined,
         }),
@@ -475,7 +504,8 @@ export default function StudentAiPage() {
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          text: data.answer || "",
+          text: data.aiTeacherLesson ? "" : data.answer || "",
+          aiTeacherLesson: (data.aiTeacherLesson as AiTeacherLessonView) || null,
           file: edited
             ? {
                 fileName: edited.fileName,
@@ -706,7 +736,7 @@ export default function StudentAiPage() {
             <Button
               type="button"
               variant="outline"
-              disabled={sending || !input.trim()}
+              disabled={sending}
               onClick={() => void sendAiTeacherLesson()}
               className="border-violet-500/40 text-violet-200 hover:bg-violet-500/10"
             >
@@ -868,6 +898,10 @@ export default function StudentAiPage() {
               >
                 {pickerMode === "exam"
                   ? t.student.aiGenerateExam
+                  : pickerMode === "ai_teacher"
+                    ? locale === "ar"
+                      ? "ابدأ درس المعلم الصوتي"
+                      : "Start voice board lesson"
                   : locale === "ar"
                     ? "شرح مع رسم الأشكال"
                     : "Explain with shapes"}

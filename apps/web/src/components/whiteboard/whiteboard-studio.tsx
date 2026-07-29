@@ -161,6 +161,7 @@ export default function WhiteboardStudio({
       boardRef.current.reset();
       boardRef.current.theme = theme;
       boardRef.current.applyEvents(engineRef.current.eventsUpTo(clamped));
+      boardRef.current.normalizeCurrentPageForDisplay();
       setPageIds(boardRef.current.pages.map((p) => p.id));
       setCurrentPageId(boardRef.current.currentPageId ?? "page_0");
       const audio = audioPreviewRef.current;
@@ -189,6 +190,7 @@ export default function WhiteboardStudio({
         boardRef.current.reset();
         boardRef.current.theme = parsed.manifest.theme;
         boardRef.current.applyEvents(parsed.events);
+        boardRef.current.normalizeCurrentPageForDisplay();
         pdfsRef.current = (parsed.assets.pdfs ?? []).map((p) => ({
           assetId: p.assetId,
           materialId: p.materialId,
@@ -213,6 +215,7 @@ export default function WhiteboardStudio({
         boardRef.current.reset();
         boardRef.current.theme = parsed.manifest.theme;
         boardRef.current.applyEvents(engineRef.current.eventsUpTo(parsed.manifest.durationMs));
+        boardRef.current.normalizeCurrentPageForDisplay();
         redraw();
         setLoadingEdit(false);
       } catch (e) {
@@ -238,6 +241,7 @@ export default function WhiteboardStudio({
       boardRef.current.reset();
       boardRef.current.theme = theme;
       boardRef.current.applyEvents(engineRef.current.eventsUpTo(ms));
+      boardRef.current.normalizeCurrentPageForDisplay();
       redraw();
       if (audio.ended || ms >= durationMs) setPreviewPlaying(false);
     }, 80);

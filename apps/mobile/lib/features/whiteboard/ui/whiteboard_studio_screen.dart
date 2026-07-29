@@ -151,6 +151,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
       _board.reset();
       _board.theme = parsed.manifest.theme;
       _board.applyEvents(parsed.events);
+      _board.normalizeCurrentPageForDisplay();
       _pdfs
         ..clear()
         ..addAll(parsed.pdfs);

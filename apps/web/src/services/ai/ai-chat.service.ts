@@ -218,27 +218,6 @@ export class AiChatService {
       }
     }
 
-    // Individual option: whiteboard-first AI Teacher (strict JSON lessons).
-    if (input.mode === "ai_teacher") {
-      return this.runAiTeacherLesson({
-        userId: input.userId,
-        conversationId: input.conversationId,
-        question,
-        language,
-        stageId,
-        subjectId,
-        subjectIds,
-        profile,
-        memory,
-        isCert,
-        studentName,
-        stageName,
-        interestNames,
-        grade,
-        attachments,
-      });
-    }
-
     // Creative Studio: attachments are the escape hatch for external files.
     // Without attachments, design/file generation must use stage material → chapter.
     const { detectCreativeChatIntent } = await import("./creative/creative-intent");
@@ -284,6 +263,7 @@ export class AiChatService {
     const { AiExamService } = await import("./ai-exam.service");
 
     const practiceQuiz = input.mode === "practice_quiz";
+    const aiTeacher = input.mode === "ai_teacher";
     const explainObserve =
       input.mode === "explain_observe" ||
       (learnerCreative &&
@@ -314,7 +294,9 @@ export class AiChatService {
         input.mode === "from_materials" ||
         Boolean(question.trim()));
 
-    const pendingMode: string = practiceQuiz
+    const pendingMode: string = aiTeacher
+      ? "ai_teacher"
+      : practiceQuiz
       ? "practice_quiz"
       : creativeNeedsMaterial && creativeIntent
         ? creativeIntent
@@ -379,6 +361,32 @@ export class AiChatService {
           chapters.length <= 1 &&
           (chapters[0]?.id === "__all__" ||
             chapters[0]?.title === materialName);
+
+        if (aiTeacher) {
+          const autoChapter = chapters[0];
+          const resolvedChapterEarly = autoChapter?.id || "__all__";
+          return this.runAiTeacherLesson({
+            userId: input.userId,
+            conversationId: input.conversationId,
+            question,
+            language,
+            stageId,
+            subjectId,
+            subjectIds,
+            profile,
+            memory,
+            isCert,
+            studentName,
+            stageName,
+            interestNames,
+            grade,
+            attachments,
+            documentIds,
+            chapterHeading: resolvedChapterEarly,
+            chunkFrom: autoChapter?.chunkFrom ?? input.chunkFrom,
+            chunkTo: autoChapter?.chunkTo ?? input.chunkTo,
+          });
+        }
 
         if (!onlyWholeFile) {
           return {
@@ -466,6 +474,28 @@ export class AiChatService {
           });
         }
 
+        if (aiTeacher) {
+          return this.runAiTeacherLesson({
+            userId: input.userId,
+            conversationId: input.conversationId,
+            question,
+            language,
+            stageId,
+            subjectId,
+            subjectIds,
+            profile,
+            memory,
+            isCert,
+            studentName,
+            stageName,
+            interestNames,
+            grade,
+            attachments,
+            documentIds,
+            ...chapterOptsEarly,
+          });
+        }
+
         return this.runExplainObserveWithMaterials({
           userId: input.userId,
           conversationId: input.conversationId,
@@ -498,6 +528,30 @@ export class AiChatService {
           subjectIds,
           count: input.count,
           ...chapterOpts,
+        });
+      }
+
+      if (aiTeacher) {
+        return this.runAiTeacherLesson({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          question,
+          language,
+          stageId,
+          subjectId,
+          subjectIds,
+          profile,
+          memory,
+          isCert,
+          studentName,
+          stageName,
+          interestNames,
+          grade,
+          attachments,
+          documentIds,
+          chapterHeading: resolvedChapter,
+          chunkFrom: input.chunkFrom,
+          chunkTo: input.chunkTo,
         });
       }
 
@@ -547,6 +601,31 @@ export class AiChatService {
         subjectId,
         subjectIds,
         ...chapterOpts,
+      });
+    }
+
+    // AI Teacher still requires material selection for learners without attachments.
+    if (aiTeacher) {
+      return this.runAiTeacherLesson({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        question,
+        language,
+        stageId,
+        subjectId,
+        subjectIds,
+        profile,
+        memory,
+        isCert,
+        studentName,
+        stageName,
+        interestNames,
+        grade,
+        attachments,
+        documentIds: input.documentIds,
+        chapterHeading: input.chapterHeading || undefined,
+        chunkFrom: input.chunkFrom ?? undefined,
+        chunkTo: input.chunkTo ?? undefined,
       });
     }
 
@@ -960,6 +1039,10 @@ export class AiChatService {
     interestNames: string[];
     grade: string | number | null;
     attachments: ChatAttachmentInput[];
+    documentIds?: string[];
+    chapterHeading?: string;
+    chunkFrom?: number | null;
+    chunkTo?: number | null;
   }) {
     const memoryBlurb = StudentMemoryService.toPromptBlurb({
       ...input.memory,
@@ -998,24 +1081,49 @@ export class AiChatService {
       .join("; ");
 
     let materialContext = "";
-    try {
-      const emb = await EmbeddingService.embedText(input.question, input.userId);
-      if (emb?.length) {
-        const hits = await VectorSearchService.search(emb, {
+    const selectedDocumentIds =
+      input.documentIds?.filter((id) => id && id.trim().length > 0) ?? [];
+    if (selectedDocumentIds.length > 0) {
+      try {
+        const { AiExamService } = await import("./ai-exam.service");
+        const { ExamGeneratorService } = await import("./exam-generator.service");
+        const allowed = await AiExamService.assertDocumentsAllowed(
+          input.userId,
+          selectedDocumentIds
+        );
+        const material = await ExamGeneratorService.loadMaterialForDocuments({
+          userId: input.userId,
+          documentIds: allowed,
           educationalStageId: input.stageId,
-          subjectId: input.subjectId,
-          subjectIds: input.subjectId ? undefined : input.subjectIds,
-          topK: TOP_K,
-          minSimilarity: MIN_SIMILARITY,
-          preferLanguage: input.language,
-          stageStrict: true,
+          chapterHeading: input.chapterHeading || "__all__",
+          chunkFrom: input.chunkFrom ?? undefined,
+          chunkTo: input.chunkTo ?? undefined,
         });
-        if (hits.length) {
-          materialContext = compressContext(hits);
-        }
+        materialContext = material?.text?.trim() ?? "";
+      } catch {
+        /* fallback below */
       }
-    } catch {
-      /* optional grounding */
+    }
+    if (!materialContext) {
+      try {
+        const emb = await EmbeddingService.embedText(input.question, input.userId);
+        if (emb?.length) {
+          const hits = await VectorSearchService.search(emb, {
+            educationalStageId: input.stageId,
+            subjectId: input.subjectId,
+            subjectIds: input.subjectId ? undefined : input.subjectIds,
+            topK: TOP_K,
+            minSimilarity: MIN_SIMILARITY,
+            preferLanguage: input.language,
+            stageStrict: true,
+          });
+          if (hits.length) {
+            materialContext = compressContext(hits);
+          }
+        }
+      } catch {
+        /* optional grounding */
+      }
     }
 
     const processed =
