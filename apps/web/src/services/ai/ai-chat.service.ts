@@ -10,6 +10,7 @@ import {
   extractFollowUps,
 } from "./tutoring-prompt";
 import {
+  buildAiTeacherFallbackLesson,
   buildCompactAiTeacherPrompt,
   normalizeAiTeacherLesson,
   parseAiTeacherLesson,
@@ -1164,46 +1165,11 @@ export class AiChatService {
     const raw = result.text.trim();
     let lesson = parseAiTeacherLesson(raw);
 
-    // Hard fallback — NEVER strip JSON braces into key:value speech (that leaked on boards).
+    // Hard fallback — teach a real topic (never meta UI instructions).
     if (!lesson) {
-      const q = sanitizeClassroomPlainText(input.question, 160) || input.question.slice(0, 160);
-      const lines =
-        input.language === "ar"
-          ? [
-              "مرحباً، لنبدأ درس اليوم معاً.",
-              q,
-              "سأكتب على السبورة سطراً واحداً في كل مرة.",
-              "راقب الرسم بينما أشرح.",
-              "هل تريد مثالاً أبسط؟",
-            ]
-          : input.language === "tr"
-            ? [
-                "Merhaba, bugünkü derse birlikte başlayalım.",
-                q,
-                "Tahtaya her seferinde yalnızca bir satır yazacağım.",
-                "Anlatırken çizimleri izle.",
-                "Daha basit bir örnek ister misin?",
-              ]
-            : [
-                "Hello — let's start today's lesson together.",
-                q,
-                "I will write only one board line at a time.",
-                "Watch the drawings while I explain.",
-                "Want a simpler example?",
-              ];
-      lesson = normalizeAiTeacherLesson({
-        language: input.language || "en",
-        lesson_title:
-          input.language === "ar"
-            ? "درس تفاعلي"
-            : input.language === "tr"
-              ? "Etkileşimli Ders"
-              : "Interactive Lesson",
-        objective: q,
-        speech: lines.map((text, i) => ({ time: i * 7000, text })),
-        whiteboard: [],
-        quiz: [],
-        summary: [q].filter(Boolean),
+      lesson = buildAiTeacherFallbackLesson({
+        language: input.language,
+        question: input.question,
       });
     }
 

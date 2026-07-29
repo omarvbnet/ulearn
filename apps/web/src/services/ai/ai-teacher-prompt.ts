@@ -387,26 +387,25 @@ export function parseAiTeacherLesson(raw: string): AiTeacherLesson | null {
 
 /**
  * Force speech ↔ board timing alignment so drawings match explanations.
- * One spoken cue → one short board line + shapes; never dump schema keys.
+ * One spoken cue → one short board note + one diagram beat; never dump schema keys.
  */
 export function normalizeAiTeacherLesson(lesson: AiTeacherLesson): AiTeacherLesson {
   const language = normalizeClassroomLanguage(lesson.language);
   const rtl = language === "ar";
   const textX = rtl ? 1780 : 120;
+  const diagramX = rtl ? 420 : 1480;
 
   const syncedSpeech = (lesson.speech || [])
     .map((s, i) => ({
-      time: i * 7000,
-      text: sanitizeClassroomPlainText(s.text, 160),
+      time: i * 7500,
+      text: sanitizeClassroomPlainText(s.text, 140),
     }))
-    .filter((s) => s.text)
+    .filter((s) => s.text && !isMetaTeachingLine(s.text))
     .slice(0, 8);
 
   if (!syncedSpeech.length) {
-    const q = sanitizeClassroomPlainText(lesson.objective || lesson.lesson_title, 160);
-    if (q) {
-      syncedSpeech.push({ time: 0, text: q });
-    }
+    const q = sanitizeClassroomPlainText(lesson.objective || lesson.lesson_title, 140);
+    if (q) syncedSpeech.push({ time: 0, text: q });
   }
 
   const boardRaw = (lesson.whiteboard || [])
@@ -421,33 +420,27 @@ export function normalizeAiTeacherLesson(lesson: AiTeacherLesson): AiTeacherLess
           ? { ...a.parameters }
           : {},
     }))
-    .filter((a) => a.action);
+    .filter((a) => a.action && a.action !== "open_new_board");
+
+  const titleLine =
+    sanitizeClassroomPlainText(lesson.lesson_title, 36) ||
+    (language === "ar" ? "درس اليوم" : language === "tr" ? "Bugünün dersi" : "Today's lesson");
 
   const board: AiTeacherBoardCue[] = [
+    { time: 0, action: "open_new_board", parameters: { title: titleLine } },
     {
-      time: 0,
-      action: "open_new_board",
-      parameters: {
-        title: sanitizeClassroomPlainText(lesson.lesson_title, 40) || "Lesson",
-      },
-    },
-  ];
-
-  const titleLine = sanitizeClassroomPlainText(lesson.lesson_title, 40);
-  if (titleLine) {
-    board.push({
-      time: 200,
+      time: 250,
       action: "write_text",
       parameters: {
         text: titleLine,
         x: textX,
-        y: 110,
-        size: 34,
+        y: 100,
+        size: 36,
         color: "blue",
         align: rtl ? "right" : "left",
       },
-    });
-  }
+    },
+  ];
 
   const drawActions = boardRaw.filter((a) =>
     /^(draw_|highlight|underline|circle)/.test(a.action)
@@ -459,89 +452,40 @@ export function normalizeAiTeacherLesson(lesson: AiTeacherLesson): AiTeacherLess
       a.action === "draw_equation"
   );
 
-  // Exactly one short write_text line per speech segment (human writer pace).
   syncedSpeech.forEach((s, i) => {
     const fromModel = writeActions[i];
+    const modelNote = sanitizeClassroomPlainText(fromModel?.parameters?.text, 42);
     const line =
-      sanitizeClassroomPlainText(fromModel?.parameters?.text, 55) ||
-      sanitizeClassroomPlainText(s.text, 55);
-    if (!line) return;
-    board.push({
-      time: s.time + 500,
-      action: "write_text",
-      parameters: {
-        text: line,
-        x: textX,
-        y: 200 + i * 100,
-        size: 28,
-        color: i === 0 ? "blue" : "black",
-        align: rtl ? "right" : "left",
-      },
-    });
+      (modelNote && modelNote !== titleLine ? modelNote : "") ||
+      shortBoardNote(s.text, 42);
+    if (!line || line === titleLine) {
+      // still draw diagram for this beat
+    } else {
+      board.push({
+        time: s.time + 450,
+        action: "write_text",
+        parameters: {
+          text: line,
+          x: textX,
+          y: 190 + i * 95,
+          size: 26,
+          color: "black",
+          align: rtl ? "right" : "left",
+        },
+      });
+    }
 
-    // Prefer model drawings; otherwise synthesize clear shapes for the explanation.
-    const drawsForSeg = drawActions.filter((_, di) => di % syncedSpeech.length === i);
+    const drawsForSeg = drawActions.filter((_, di) => di % Math.max(1, syncedSpeech.length) === i);
     if (drawsForSeg.length) {
       drawsForSeg.slice(0, 2).forEach((d, di) => {
         board.push({
-          time: s.time + 1200 + di * 700,
+          time: s.time + 1100 + di * 650,
           action: d.action,
           parameters: { ...d.parameters },
         });
       });
     } else {
-      // Synthetic teaching visuals (DeepSeek-style JSON shapes → lines/circles).
-      const baseY = 220 + i * 100;
-      if (i === 0) {
-        board.push({
-          time: s.time + 1400,
-          action: "draw_circle",
-          parameters: {
-            cx: rtl ? 1400 : 520,
-            cy: baseY + 40,
-            r: 55,
-            color: "red",
-            width: 3,
-          },
-        });
-      } else if (i % 2 === 1) {
-        board.push({
-          time: s.time + 1400,
-          action: "draw_arrow",
-          parameters: {
-            x1: rtl ? 1600 : 320,
-            y1: baseY - 40,
-            x2: rtl ? 1300 : 620,
-            y2: baseY + 20,
-            color: "orange",
-            width: 3,
-          },
-        });
-      } else {
-        board.push({
-          time: s.time + 1400,
-          action: "draw_rectangle",
-          parameters: {
-            x1: rtl ? 1200 : 280,
-            y1: baseY - 10,
-            x2: rtl ? 1550 : 630,
-            y2: baseY + 70,
-            color: "purple",
-            width: 3,
-          },
-        });
-      }
-      board.push({
-        time: s.time + 2100,
-        action: "highlight",
-        parameters: {
-          x1: rtl ? 1100 : 100,
-          y1: baseY - 30,
-          x2: rtl ? 1820 : 900,
-          y2: baseY + 20,
-          color: "yellow",
-        },
-      });
+      board.push(...synthesizeTeachingDiagram({ index: i, time: s.time, rtl, diagramX, language }));
     }
   });
 
@@ -550,9 +494,7 @@ export function normalizeAiTeacherLesson(lesson: AiTeacherLesson): AiTeacherLess
   return {
     ...lesson,
     language,
-    lesson_title:
-      sanitizeClassroomPlainText(lesson.lesson_title, 80) ||
-      (language === "ar" ? "درس تفاعلي" : language === "tr" ? "Etkileşimli Ders" : "Interactive Lesson"),
+    lesson_title: titleLine,
     objective: sanitizeClassroomPlainText(lesson.objective, 160),
     speech: syncedSpeech,
     whiteboard: board,
@@ -572,6 +514,252 @@ export function normalizeAiTeacherLesson(lesson: AiTeacherLesson): AiTeacherLess
   };
 }
 
+function isMetaTeachingLine(text: string): boolean {
+  return /سأكتب على السبورة|سطراً واحداً|one board line|only one line|tahtaya her seferinde|watch the drawings while|راقب الرسم بينما/i.test(
+    text
+  );
+}
+
+function shortBoardNote(speech: string, maxLen = 42): string {
+  const clean = sanitizeClassroomPlainText(speech, 120);
+  if (!clean) return "";
+  const words = clean.split(/\s+/).filter(Boolean);
+  const clipped = words.slice(0, 8).join(" ");
+  return clipped.length > maxLen ? clipped.slice(0, maxLen - 1).trim() + "…" : clipped;
+}
+
+function synthesizeTeachingDiagram(input: {
+  index: number;
+  time: number;
+  rtl: boolean;
+  diagramX: number;
+  language: string;
+}): AiTeacherBoardCue[] {
+  const { index: i, time, rtl, diagramX } = input;
+  const cy = 260 + (i % 5) * 110;
+  const cues: AiTeacherBoardCue[] = [];
+  // Progressive concept map on the diagram side — not stacked yellow bars.
+  if (i === 0) {
+    cues.push({
+      time: time + 1200,
+      action: "draw_circle",
+      parameters: { cx: diagramX, cy, r: 70, color: "blue", width: 4 },
+    });
+  } else if (i === 1) {
+    cues.push({
+      time: time + 1200,
+      action: "draw_arrow",
+      parameters: {
+        x1: diagramX,
+        y1: cy - 90,
+        x2: diagramX + (rtl ? -90 : 90),
+        y2: cy + 10,
+        color: "orange",
+        width: 4,
+      },
+    });
+    cues.push({
+      time: time + 1800,
+      action: "draw_rectangle",
+      parameters: {
+        x1: diagramX + (rtl ? -200 : 40),
+        y1: cy - 20,
+        x2: diagramX + (rtl ? -40 : 200),
+        y2: cy + 70,
+        color: "purple",
+        width: 3,
+      },
+    });
+  } else if (i === 2) {
+    cues.push({
+      time: time + 1200,
+      action: "draw_circle",
+      parameters: { cx: diagramX - (rtl ? -120 : 120), cy, r: 45, color: "red", width: 3 },
+    });
+    cues.push({
+      time: time + 1700,
+      action: "draw_circle",
+      parameters: { cx: diagramX + (rtl ? -120 : 120), cy, r: 45, color: "green", width: 3 },
+    });
+    cues.push({
+      time: time + 2200,
+      action: "draw_line",
+      parameters: {
+        x1: diagramX - (rtl ? -120 : 120) + 45,
+        y1: cy,
+        x2: diagramX + (rtl ? -120 : 120) - 45,
+        y2: cy,
+        color: "orange",
+        width: 3,
+      },
+    });
+  } else if (i === 3) {
+    cues.push({
+      time: time + 1200,
+      action: "draw_arrow",
+      parameters: {
+        x1: diagramX - 80,
+        y1: cy - 40,
+        x2: diagramX + 100,
+        y2: cy + 50,
+        color: "red",
+        width: 4,
+      },
+    });
+  } else {
+    cues.push({
+      time: time + 1200,
+      action: "draw_rectangle",
+      parameters: {
+        x1: diagramX - 110,
+        y1: cy - 50,
+        x2: diagramX + 110,
+        y2: cy + 50,
+        color: "blue",
+        width: 3,
+      },
+    });
+    cues.push({
+      time: time + 1800,
+      action: "underline",
+      parameters: {
+        x1: diagramX - 90,
+        y1: cy + 60,
+        x2: diagramX + 90,
+        y2: cy + 60,
+        color: "green",
+      },
+    });
+  }
+  return cues;
+}
+
+/**
+ * Rich topic lesson when the model JSON fails — teaches the subject, not the UI.
+ */
+export function buildAiTeacherFallbackLesson(input: {
+  language?: string | null;
+  question: string;
+}): AiTeacherLesson {
+  const language = normalizeClassroomLanguage(input.language);
+  const topicRaw = sanitizeClassroomPlainText(input.question, 100);
+  const vague = isVagueTopicRequest(topicRaw);
+
+  if (language === "ar") {
+    const title = vague ? "الكهرباء الساكنة" : topicRaw.slice(0, 40) || "درس اليوم";
+    const steps = vague
+      ? [
+          { speak: "مرحباً! اليوم سنتعلم الكهرباء الساكنة معاً.", board: "الكهرباء الساكنة" },
+          { speak: "هي تجمع شحنات كهربائية على سطح الأجسام.", board: "تجمّع الشحنات" },
+          { speak: "مثال: عندما ندلك مشطاً بالشعر يصبح مشحوناً.", board: "مشط + شعر" },
+          { speak: "المشط المشحون يجذب قصاصات الورق الخفيفة.", board: "يجذب الورق" },
+          { speak: "إذن الشحنات تنتقل بالاحتكاك. هل صار واضحاً؟", board: "الاحتكاك ← شحن" },
+        ]
+      : [
+          { speak: `مرحباً! لنشرح ${title} خطوة بخطوة.`, board: title },
+          { speak: `أولاً: نعرّف فكرة ${title} ببساطة.`, board: "التعريف" },
+          { speak: "ثانياً: انظر إلى الرسم على السبورة.", board: "الرسم يوضح الفكرة" },
+          { speak: "ثالثاً: مثال من الحياة اليومية يربط الفكرة.", board: "مثال واقعي" },
+          { speak: "أخيراً: راجع النقطة الأهم، ثم اسألني بصوتك.", board: "الخلاصة" },
+        ];
+    return normalizeAiTeacherLesson({
+      language: "ar",
+      lesson_title: title,
+      objective: vague ? "فهم ظاهرة الكهرباء الساكنة بأمثلة بسيطة" : `فهم ${title}`,
+      speech: steps.map((s, i) => ({ time: i * 7500, text: s.speak })),
+      whiteboard: steps.map((s, i) => ({
+        time: i * 7500 + 500,
+        action: "write_text",
+        parameters: { text: s.board, x: 1780, y: 190 + i * 95, size: 26, color: "black", align: "right" },
+      })),
+      quiz: [
+        {
+          question: vague ? "ماذا يحدث عند دلك المشط بالشعر؟" : `ما الفكرة الأساسية في ${title}؟`,
+          choices: vague
+            ? ["يصبح مشحوناً", "يصبح أثقل", "يختفي", "يذوب"]
+            : ["فكرة أساسية", "لا شيء", "عكس الفكرة", "رقم فقط"],
+          answer: vague ? "يصبح مشحوناً" : "فكرة أساسية",
+        },
+      ],
+      summary: vague
+        ? ["الكهرباء الساكنة = تجمع شحنات", "الاحتكاك ينقل الشحنات", "المشط يجذب الورق"]
+        : [title, "شرح خطوة بخطوة", "مثال واقعي"],
+    });
+  }
+
+  if (language === "tr") {
+    const title = vague ? "Statik elektrik" : topicRaw.slice(0, 40) || "Bugünün dersi";
+    const steps = vague
+      ? [
+          { speak: "Merhaba! Bugün statik elektriği birlikte öğreneceğiz.", board: "Statik elektrik" },
+          { speak: "Cisimlerin yüzeyinde yük birikmesidir.", board: "Yük birikmesi" },
+          { speak: "Örnek: Tarağı saça sürtünce yüklü olur.", board: "Tarak + saç" },
+          { speak: "Yüklü tarak hafif kâğıt parçalarını çeker.", board: "Kâğıdı çeker" },
+          { speak: "Yani sürtünme yükleri taşır. Anladın mı?", board: "Sürtünme → yük" },
+        ]
+      : [
+          { speak: `Merhaba! ${title} konusunu adım adım anlatalım.`, board: title },
+          { speak: `Önce ${title} fikrini basitçe tanımlayalım.`, board: "Tanım" },
+          { speak: "Sonra tahtadaki çizime bak.", board: "Çizim" },
+          { speak: "Sonra günlük hayattan bir örnek verelim.", board: "Örnek" },
+          { speak: "Son olarak ana fikri tekrarlayıp sesinle soru sor.", board: "Özet" },
+        ];
+    return normalizeAiTeacherLesson({
+      language: "tr",
+      lesson_title: title,
+      objective: vague ? "Statik elektriği basit örneklerle anlamak" : `${title} konusunu anlamak`,
+      speech: steps.map((s, i) => ({ time: i * 7500, text: s.speak })),
+      whiteboard: steps.map((s, i) => ({
+        time: i * 7500 + 500,
+        action: "write_text",
+        parameters: { text: s.board, x: 120, y: 190 + i * 95, size: 26, color: "black", align: "left" },
+      })),
+      quiz: [],
+      summary: vague
+        ? ["Statik elektrik = yük birikmesi", "Sürtünme yük taşır", "Tarak kâğıdı çeker"]
+        : [title, "Adım adım anlatım", "Gerçek örnek"],
+    });
+  }
+
+  const title = vague ? "Static electricity" : topicRaw.slice(0, 40) || "Today's lesson";
+  const steps = vague
+    ? [
+        { speak: "Hi! Today we'll learn about static electricity together.", board: "Static electricity" },
+        { speak: "It is electric charge gathered on a surface.", board: "Charge on surfaces" },
+        { speak: "Example: rubbing a comb on hair charges the comb.", board: "Comb + hair" },
+        { speak: "The charged comb attracts light paper bits.", board: "Attracts paper" },
+        { speak: "So friction moves charge. Want to ask me anything?", board: "Friction → charge" },
+      ]
+    : [
+        { speak: `Hi! Let's learn ${title} step by step.`, board: title },
+        { speak: `First, a simple definition of ${title}.`, board: "Definition" },
+        { speak: "Next, watch the diagram on the board.", board: "Diagram" },
+        { speak: "Then a real-life example to connect the idea.", board: "Real example" },
+        { speak: "Finally, the key takeaway — ask me by talking.", board: "Takeaway" },
+      ];
+  return normalizeAiTeacherLesson({
+    language: "en",
+    lesson_title: title,
+    objective: vague ? "Understand static electricity with simple examples" : `Understand ${title}`,
+    speech: steps.map((s, i) => ({ time: i * 7500, text: s.speak })),
+    whiteboard: steps.map((s, i) => ({
+      time: i * 7500 + 500,
+      action: "write_text",
+      parameters: { text: s.board, x: 120, y: 190 + i * 95, size: 26, color: "black", align: "left" },
+    })),
+    quiz: [],
+    summary: vague
+      ? ["Static electricity = charge buildup", "Friction moves charge", "Comb attracts paper"]
+      : [title, "Step-by-step explanation", "Real-life example"],
+  });
+}
+
+function isVagueTopicRequest(q: string): boolean {
+  if (!q || q.length < 4) return true;
+  return /موضوع اليوم|today'?s topic|bugünkü|خطوة بخطوة|step by step|علمني|teach me|öğret/i.test(q) &&
+    !/(كهرب|electric|statik|photosynth|رياضيات|math|كيمياء|chem|فيزياء|physic|تاريخ|history)/i.test(q);
+}
+
 function normalizeClassroomLanguage(raw?: string | null): "ar" | "tr" | "en" {
   const lang = (raw || "en").toLowerCase().slice(0, 2);
   if (lang === "ar" || lang === "ku") return "ar";
@@ -585,22 +773,23 @@ export function buildCompactAiTeacherPrompt(input: {
   studentBlurb?: string;
 }): string {
   return [
-    "You are U Learn AI Teacher. Teach with a live whiteboard. Return ONLY valid JSON.",
+    "You are U Learn AI Teacher in a live classroom. Return ONLY valid JSON (no markdown).",
     languageInstruction(input.language),
-    "language must be exactly ar, tr, or en. Speech and board text must be entirely in that language.",
-    "CRITICAL: speech[].text and write_text text are PLAIN human sentences only — NEVER keys like language:, lesson_title:, text:, time:.",
-    "Arabic: RTL — write_text x near 1700–1820. English/Turkish: LTR — write_text x near 100–220.",
-    "For EACH speech cue: exactly ONE short write_text line (max 12 words) PLUS at least one draw_line/draw_arrow/draw_circle/draw_rectangle/highlight that illustrates the idea.",
-    "Never put more than one write_text line for the same moment. Draw like a real teacher: progressive shapes, arrows connecting ideas.",
+    "language must be exactly ar, tr, or en. ALL speech and board text in that language.",
+    "Teach a REAL subject from the student topic — never talk about the UI, writing pace, or 'one line at a time'.",
+    "CRITICAL: speech[].text and write_text are PLAIN human sentences/phrases only — NEVER schema keys.",
+    "Arabic RTL: write_text x ≈ 1700–1820. English/Turkish LTR: write_text x ≈ 100–220.",
+    "Put diagrams on the OPPOSITE side of the text (diagrams x ≈ 350–650 for Arabic, x ≈ 1300–1700 for en/tr).",
+    "For EACH speech cue: exactly ONE short write_text note (max 8 words) PLUS 1–2 draw_* shapes that illustrate THAT idea.",
+    "Draw like a teacher: circles for concepts, arrows for cause→effect, rectangles for examples. Progressive, not cluttered.",
+    "Never duplicate the lesson title on every line. Never stack highlight bars over text.",
     input.studentBlurb ? `Learner: ${input.studentBlurb}` : "",
-    "Schema keys: language, lesson_title, objective, speech, whiteboard, quiz, summary.",
-    "speech: 5-8 items {time:ms, text}. whiteboard: actions synced to same times.",
-    "Allowed actions: open_new_board, write_text, draw_line, draw_arrow, draw_circle, draw_rectangle, highlight, wait.",
-    "write_text parameters: {text, x, y, color?, size?, align?} — plain words only.",
-    "draw_* use numeric coords 0..1920 x 0..1080.",
-    "Keep each speech cue to ONE short sentence. Voice-first classroom: student will interrupt by talking.",
-    "quiz: 1-3 items. summary: 3 short bullets.",
-    "No markdown fences. No commentary.",
+    "Schema: language, lesson_title, objective, speech, whiteboard, quiz, summary.",
+    "speech: 5–7 items {time:ms, text: one short spoken sentence}.",
+    "whiteboard actions: open_new_board, write_text, draw_line, draw_arrow, draw_circle, draw_rectangle, underline, wait.",
+    "write_text: {text,x,y,color?,size?,align?}. draw_*: numeric coords 0..1920 x 0..1080.",
+    "quiz: 1–2 items. summary: 3 short bullets.",
+    "No commentary outside JSON.",
   ]
     .filter(Boolean)
     .join("\n");

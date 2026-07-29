@@ -67,9 +67,10 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
     return list;
   }
 
-  String get _title =>
-      widget.lesson['lesson_title']?.toString() ?? 'Lesson';
-  String get _objective => widget.lesson['objective']?.toString() ?? '';
+  String get _title {
+    final raw = widget.lesson['lesson_title']?.toString() ?? 'Lesson';
+    return _cleanBoardText(raw) ?? raw;
+  }
   String get _lang {
     final raw = (widget.lesson['language']?.toString() ?? 'en').toLowerCase();
     if (raw.startsWith('ar') || raw.startsWith('ku')) return 'ar';
@@ -363,20 +364,23 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
     final progress = _speech.isEmpty
         ? 0.0
         : (math.min(_speechIndex + 1, _speech.length) / _speech.length);
+    final caption = _caption.isEmpty
+        ? '…'
+        : (_cleanBoardText(_caption) ?? _caption);
 
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF0B1220), Color(0xFF111827), Color(0xFF0A1628)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF070B14), Color(0xFF0F172A), Color(0xFF0A1628)],
         ),
         borderRadius: BorderRadius.circular(28),
         border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
+            color: Colors.black.withValues(alpha: 0.4),
             blurRadius: 40,
             offset: const Offset(0, 18),
           ),
@@ -386,361 +390,351 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'U Learn · ${l10n.t('mobile.ai.aiTeacherClassroom')}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.2,
-                          color: Color(0xFF7DD3FC),
-                        ),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.06),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                      ),
-                      child: Text(
-                        _phaseLabel(l10n),
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _title,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                    height: 1.2,
-                  ),
-                ),
-                if (_objective.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    '${l10n.t('mobile.ai.aiTeacherObjective')}: $_objective',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.white.withValues(alpha: 0.62),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Text(
-                      l10n.t('mobile.ai.aiTeacherProgress'),
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white.withValues(alpha: 0.5),
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      _speech.isEmpty
-                          ? '0/0'
-                          : '${math.min(_speechIndex + 1, _speech.length)}/${_speech.length}',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white.withValues(alpha: 0.55),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 6,
-                    backgroundColor: Colors.white.withValues(alpha: 0.1),
-                    valueColor: const AlwaysStoppedAnimation(Color(0xFF38BDF8)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          AspectRatio(
-            aspectRatio: 16 / 10,
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF7FAFC),
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.28),
-                    blurRadius: 24,
-                    offset: const Offset(0, 12),
-                  ),
-                ],
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  CustomPaint(
-                    painter: _ClassroomBoardPainter(
-                      items: List.of(_items),
-                      clockMs: _clockMs,
-                      rtl: _rtl,
-                    ),
-                    child: const SizedBox.expand(),
-                  ),
-                  if (_phase == _Phase.idle)
-                    Material(
-                      color: Colors.black.withValues(alpha: 0.42),
-                      child: InkWell(
-                        onTap: () => _runLesson(0),
-                        child: Center(
-                          child: Container(
-                            margin: const EdgeInsets.all(20),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 22,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0B1220).withValues(alpha: 0.94),
-                              borderRadius: BorderRadius.circular(28),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.14),
-                              ),
-                            ),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 68,
-                                  height: 68,
-                                  decoration: const BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: [Color(0xFF38BDF8), Color(0xFF34D399)],
-                                    ),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.play_arrow_rounded,
-                                    size: 38,
-                                    color: Color(0xFF0B1220),
-                                  ),
-                                ),
-                                const SizedBox(height: 14),
-                                Text(
-                                  l10n.t('mobile.ai.aiTeacherTapToBegin'),
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  l10n.t('mobile.ai.aiTeacherTapHint'),
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.7),
-                                    fontSize: 12,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  l10n.t('mobile.ai.aiTeacherInterruptHint'),
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.45),
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (_listeningAsk || _phase == _Phase.answering)
-                    Container(
-                      color: Colors.black.withValues(alpha: 0.28),
-                      alignment: Alignment.center,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF0B1220).withValues(alpha: 0.92),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white24),
-                        ),
-                        child: Text(
-                          _listeningAsk
-                              ? l10n.t('mobile.ai.aiTeacherListening')
-                              : l10n.t('mobile.ai.aiTeacherReply'),
-                          style: const TextStyle(
-                            color: Color(0xFFBAE6FD),
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        l10n.t('mobile.ai.aiTeacherVoice'),
+                        'U Learn · ${l10n.t('mobile.ai.aiTeacherClassroom')}',
                         style: const TextStyle(
-                          fontSize: 11,
+                          fontSize: 10,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 1.1,
                           color: Color(0xFF7DD3FC),
                         ),
                       ),
-                      const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          l10n.t('mobile.ai.aiTeacherLiveVoice'),
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF6EE7B7),
-                          ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    _caption.isEmpty
-                        ? '…'
-                        : (_cleanBoardText(_caption) ?? _caption),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.07),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    _phaseLabel(l10n),
                     style: const TextStyle(
-                      fontSize: 15,
-                      height: 1.4,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
                       color: Colors.white,
-                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                  if (_teacherReply != null) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF38BDF8).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: const Color(0xFF38BDF8).withValues(alpha: 0.25),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            l10n.t('mobile.ai.aiTeacherReply'),
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              color: Color(0xFF7DD3FC),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _teacherReply!,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              height: 1.35,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+                ),
+              ],
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                minHeight: 4,
+                value: progress.clamp(0.0, 1.0),
+                backgroundColor: Colors.white.withValues(alpha: 0.08),
+                valueColor: const AlwaysStoppedAnimation(Color(0xFF38BDF8)),
               ),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                alignment: WrapAlignment.center,
-                children: [
-                  if (_phase == _Phase.idle || _phase == _Phase.completed)
-                    _actionChip(
-                      l10n.t('mobile.ai.aiTeacherStart'),
-                      onTap: () => _runLesson(0),
-                      filled: true,
-                    ),
-                  if (_phase == _Phase.teaching)
-                    _actionChip(
-                      l10n.t('mobile.ai.aiTeacherPause'),
-                      onTap: _pause,
-                    ),
-                  if (_phase == _Phase.paused || _phase == _Phase.answering)
-                    _actionChip(
-                      _teacherReply != null
-                          ? l10n.t('mobile.ai.aiTeacherContinue')
-                          : l10n.t('mobile.ai.aiTeacherResume'),
-                      onTap: _resume,
-                      filled: true,
-                    ),
-                  _actionChip(
-                    _listeningAsk
-                        ? l10n.t('mobile.ai.aiTeacherListening')
-                        : l10n.t('mobile.ai.aiTeacherAsk'),
-                    onTap: _listeningAsk || _asking ? null : _listenAsk,
-                    accent: true,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: AspectRatio(
+              aspectRatio: 16 / 11,
+              child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(22),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF38BDF8).withValues(alpha: 0.18),
+                        blurRadius: 28,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
                   ),
-                ],
+                  clipBehavior: Clip.antiAlias,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      CustomPaint(
+                        painter: _ClassroomBoardPainter(
+                          items: List.of(_items),
+                          clockMs: _clockMs,
+                          rtl: _rtl,
+                        ),
+                        child: const SizedBox.expand(),
+                      ),
+                      Positioned(
+                        left: 10,
+                        right: 10,
+                        bottom: 10,
+                        child: AnimatedOpacity(
+                          opacity: _phase == _Phase.idle ? 0 : 1,
+                          duration: const Duration(milliseconds: 250),
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0B1220).withValues(alpha: 0.82),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 7,
+                                      height: 7,
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFF34D399),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      l10n.t('mobile.ai.aiTeacherLiveVoice'),
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF6EE7B7),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  caption,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    height: 1.3,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                if (_teacherReply != null) ...[
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    _teacherReply!,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Color(0xFFBAE6FD),
+                                      fontSize: 12,
+                                      height: 1.3,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (_phase == _Phase.idle)
+                        Material(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          child: InkWell(
+                            onTap: () => _runLesson(0),
+                            child: Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 78,
+                                    height: 78,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      gradient: const LinearGradient(
+                                        colors: [Color(0xFF38BDF8), Color(0xFF34D399)],
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(0xFF38BDF8)
+                                              .withValues(alpha: 0.45),
+                                          blurRadius: 24,
+                                        ),
+                                      ],
+                                    ),
+                                    child: const Icon(
+                                      Icons.play_arrow_rounded,
+                                      size: 44,
+                                      color: Color(0xFF0B1220),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  Text(
+                                    l10n.t('mobile.ai.aiTeacherTapToBegin'),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 28),
+                                    child: Text(
+                                      l10n.t('mobile.ai.aiTeacherInterruptHint'),
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(alpha: 0.65),
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (_listeningAsk || _phase == _Phase.answering)
+                        Container(
+                          color: Colors.black.withValues(alpha: 0.35),
+                          alignment: Alignment.center,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 88,
+                                height: 88,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: _listeningAsk
+                                      ? const Color(0xFFFBBF24)
+                                      : const Color(0xFF38BDF8),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: (_listeningAsk
+                                              ? const Color(0xFFFBBF24)
+                                              : const Color(0xFF38BDF8))
+                                          .withValues(alpha: 0.45),
+                                      blurRadius: 28,
+                                    ),
+                                  ],
+                                ),
+                                child: Icon(
+                                  _listeningAsk ? Icons.mic_rounded : Icons.auto_awesome,
+                                  size: 40,
+                                  color: const Color(0xFF0B1220),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                _listeningAsk
+                                    ? l10n.t('mobile.ai.aiTeacherListening')
+                                    : l10n.t('mobile.ai.aiTeacherReply'),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+            child: Row(
+              children: [
+                if (_phase == _Phase.teaching)
+                  _roundIcon(
+                    icon: Icons.pause_rounded,
+                    label: l10n.t('mobile.ai.aiTeacherPause'),
+                    onTap: _pause,
+                  )
+                else if (_phase == _Phase.paused || _phase == _Phase.answering)
+                  _roundIcon(
+                    icon: Icons.play_arrow_rounded,
+                    label: _teacherReply != null
+                        ? l10n.t('mobile.ai.aiTeacherContinue')
+                        : l10n.t('mobile.ai.aiTeacherResume'),
+                    onTap: _resume,
+                    filled: true,
+                  )
+                else if (_phase == _Phase.idle || _phase == _Phase.completed)
+                  _roundIcon(
+                    icon: Icons.play_arrow_rounded,
+                    label: l10n.t('mobile.ai.aiTeacherStart'),
+                    onTap: () => _runLesson(0),
+                    filled: true,
+                  )
+                else
+                  const SizedBox(width: 56),
+                const Spacer(),
+                GestureDetector(
+                  onTap: _listeningAsk || _asking ? null : _listenAsk,
+                  child: Column(
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: 72,
+                        height: 72,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: _listeningAsk
+                                ? const [Color(0xFFFBBF24), Color(0xFFF59E0B)]
+                                : const [Color(0xFF38BDF8), Color(0xFF34D399)],
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: (_listeningAsk
+                                      ? const Color(0xFFFBBF24)
+                                      : const Color(0xFF38BDF8))
+                                  .withValues(alpha: 0.4),
+                              blurRadius: 20,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          _listeningAsk ? Icons.mic_rounded : Icons.mic_none_rounded,
+                          size: 34,
+                          color: const Color(0xFF0B1220),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _listeningAsk
+                            ? l10n.t('mobile.ai.aiTeacherListening')
+                            : l10n.t('mobile.ai.aiTeacherAsk'),
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Spacer(),
+                const SizedBox(width: 56),
+              ],
             ),
           ),
           if (_phase == _Phase.completed && summary.isNotEmpty)
@@ -748,11 +742,11 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(14),
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.04),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -760,18 +754,18 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
                     Text(
                       l10n.t('mobile.ai.aiTeacherSummary'),
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 11,
                         fontWeight: FontWeight.w800,
-                        color: Colors.white.withValues(alpha: 0.7),
+                        color: Colors.white.withValues(alpha: 0.65),
                       ),
                     ),
                     const SizedBox(height: 6),
-                    ...summary.map(
+                    ...summary.take(3).map(
                       (s) => Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
+                        padding: const EdgeInsets.only(bottom: 3),
                         child: Text(
-                          '• ${s.toString()}',
-                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                          '• ${_cleanBoardText(s) ?? s.toString()}',
+                          style: const TextStyle(color: Colors.white, fontSize: 12),
                         ),
                       ),
                     ),
@@ -781,14 +775,14 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
             ),
           if (_phase == _Phase.completed && quiz.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(14),
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.04),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -796,56 +790,48 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
                     Text(
                       l10n.t('mobile.ai.aiTeacherQuiz'),
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 11,
                         fontWeight: FontWeight.w800,
-                        color: Colors.white.withValues(alpha: 0.7),
+                        color: Colors.white.withValues(alpha: 0.65),
                       ),
                     ),
-                    ...List.generate(quiz.length.clamp(0, 5), (qi) {
+                    ...List.generate(quiz.length.clamp(0, 2), (qi) {
                       final q = quiz[qi];
                       if (q is! Map) return const SizedBox.shrink();
                       final map = Map<String, dynamic>.from(q);
                       final reveal = _quizReveal[qi] == true;
                       return Padding(
                         padding: const EdgeInsets.only(top: 8),
-                        child: Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.22),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${qi + 1}. ${map['question'] ?? ''}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () => setState(
+                                () => _quizReveal[qi] = !reveal,
+                              ),
+                              child: Text(
+                                reveal
+                                    ? l10n.t('mobile.ai.aiTeacherHideAnswer')
+                                    : l10n.t('mobile.ai.aiTeacherShowAnswer'),
+                              ),
+                            ),
+                            if (reveal)
                               Text(
-                                '${qi + 1}. ${map['question'] ?? ''}',
+                                '${map['answer'] ?? ''}',
                                 style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF6EE7B7),
+                                  fontSize: 12,
                                 ),
                               ),
-                              TextButton(
-                                onPressed: () => setState(
-                                  () => _quizReveal[qi] = !reveal,
-                                ),
-                                child: Text(
-                                  reveal
-                                      ? l10n.t('mobile.ai.aiTeacherHideAnswer')
-                                      : l10n.t('mobile.ai.aiTeacherShowAnswer'),
-                                ),
-                              ),
-                              if (reveal)
-                                Text(
-                                  '${map['answer'] ?? ''}',
-                                  style: const TextStyle(
-                                    color: Color(0xFF6EE7B7),
-                                    fontSize: 13,
-                                  ),
-                                ),
-                            ],
-                          ),
+                          ],
                         ),
                       );
                     }),
@@ -858,38 +844,51 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
     );
   }
 
-  Widget _actionChip(
-    String label, {
-    VoidCallback? onTap,
+  Widget _roundIcon({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
     bool filled = false,
-    bool accent = false,
   }) {
-    return Material(
-      color: filled
-          ? const Color(0xFF38BDF8)
-          : accent
-              ? const Color(0xFFFBBF24).withValues(alpha: 0.16)
-              : Colors.white.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: filled
+                  ? const Color(0xFF38BDF8)
+                  : Colors.white.withValues(alpha: 0.1),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+            ),
+            child: Icon(
+              icon,
               color: filled ? const Color(0xFF0B1220) : Colors.white,
             ),
           ),
-        ),
+          const SizedBox(height: 4),
+          SizedBox(
+            width: 64,
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white60,
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
-
 
 enum _Phase { idle, teaching, paused, answering, completed }
 

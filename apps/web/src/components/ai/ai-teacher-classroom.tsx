@@ -1037,14 +1037,8 @@ export function AiTeacherClassroom({
             </span>
           </div>
           <h4 className="mt-1 truncate text-lg font-semibold leading-tight tracking-tight text-white sm:text-xl">
-            {lesson.lesson_title}
+            {cleanBoardText(lesson.lesson_title) || lesson.lesson_title}
           </h4>
-          {lesson.objective ? (
-            <p className="mt-1 line-clamp-2 text-sm text-slate-400">
-              <span className="font-medium text-slate-300">{labels.objective}: </span>
-              {lesson.objective}
-            </p>
-          ) : null}
         </div>
 
         <div className="flex w-full max-w-xs flex-col gap-1.5 sm:w-40">
@@ -1226,12 +1220,6 @@ export function AiTeacherClassroom({
           })}
         </svg>
 
-        {isWriting ? (
-          <div className="absolute bottom-3 start-3 rounded-full bg-slate-900/75 px-3 py-1 text-[11px] font-semibold text-sky-200 backdrop-blur transition-opacity">
-            {labels.writing}
-          </div>
-        ) : null}
-
         {phase === "ready" ? (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-gradient-to-b from-slate-950/50 via-slate-950/35 to-slate-900/55 backdrop-blur-[2px] transition-opacity">
             <button
@@ -1261,42 +1249,56 @@ export function AiTeacherClassroom({
 
         {(phase === "listening" || phase === "answering") && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/35 backdrop-blur-[1px]">
-            <div className="rounded-2xl border border-white/10 bg-slate-950/90 px-5 py-3.5 text-sm font-semibold text-sky-100 shadow-xl">
-              {phase === "listening" ? labels.listening : labels.teacherReply}
+            <div className="flex flex-col items-center gap-3 rounded-3xl border border-white/10 bg-slate-950/90 px-6 py-5 shadow-xl">
+              <span
+                className={cn(
+                  "flex h-16 w-16 items-center justify-center rounded-full text-slate-950 shadow-lg",
+                  phase === "listening"
+                    ? "bg-amber-400 shadow-amber-400/30"
+                    : "bg-sky-400 shadow-sky-400/30"
+                )}
+              >
+                <svg viewBox="0 0 24 24" className="h-8 w-8 fill-current" aria-hidden>
+                  {phase === "listening" ? (
+                    <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
+                  ) : (
+                    <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8L12 2z" />
+                  )}
+                </svg>
+              </span>
+              <div className="text-sm font-semibold text-sky-100">
+                {phase === "listening" ? labels.listening : labels.teacherReply}
+              </div>
             </div>
           </div>
         )}
-      </div>
 
-      {/* Caption dock */}
-      <div className="relative z-10 mx-3 mt-3 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 backdrop-blur-md sm:mx-4">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-300/85">
-            {phase === "completed" ? labels.summary : labels.voice}
-          </p>
-          {soundEnabled ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-300">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-              {labels.liveVoice}
-            </span>
-          ) : null}
-        </div>
-        <p
-          key={caption}
-          className="mt-1.5 text-[16px] leading-relaxed text-slate-50 transition-opacity duration-300 sm:text-[17px]"
-        >
-          {cleanBoardText(caption) || "…"}
-        </p>
-        {teacherReply ? (
-          <div className="mt-3 rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-2">
-            <p className="text-[11px] font-semibold text-sky-300">{labels.teacherReply}</p>
-            <p className="mt-1 text-sm text-slate-100">{teacherReply}</p>
+        {/* Live caption overlay on the board */}
+        {phase !== "ready" ? (
+          <div className="absolute inset-x-3 bottom-3 z-10 rounded-2xl border border-white/15 bg-slate-950/80 px-3.5 py-2.5 backdrop-blur-md sm:inset-x-4">
+            <div className="flex items-center gap-2">
+              {soundEnabled ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+                  {labels.liveVoice}
+                </span>
+              ) : null}
+              {isWriting ? (
+                <span className="text-[10px] font-semibold text-sky-300">{labels.writing}</span>
+              ) : null}
+            </div>
+            <p key={caption} className="mt-1 text-[15px] font-medium leading-snug text-white sm:text-base">
+              {cleanBoardText(caption) || "…"}
+            </p>
+            {teacherReply ? (
+              <p className="mt-1.5 text-sm text-sky-200">{teacherReply}</p>
+            ) : null}
           </div>
         ) : null}
       </div>
 
       {/* Voice-first control bar */}
-      <div className="relative z-10 mx-3 mt-3 mb-3 flex flex-wrap items-center justify-center gap-2 rounded-[22px] border border-white/12 bg-white/[0.07] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl sm:mx-4">
+      <div className="relative z-10 mx-3 mt-3 mb-3 flex items-center justify-center gap-4 rounded-[22px] border border-white/12 bg-white/[0.07] p-3 backdrop-blur-xl sm:mx-4">
         {phase === "ready" || phase === "completed" ? (
           <button
             type="button"
@@ -1309,10 +1311,14 @@ export function AiTeacherClassroom({
         {phase === "teaching" ? (
           <button
             type="button"
-            className="rounded-full border border-white/20 bg-white/5 px-4 py-2 text-xs font-semibold"
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-white/5"
             onClick={pauseTeaching}
+            aria-label={labels.pause}
+            title={labels.pause}
           >
-            {labels.pause}
+            <svg viewBox="0 0 24 24" className="h-5 w-5 fill-current" aria-hidden>
+              <path d="M8 5h3v14H8V5zm5 0h3v14h-3V5z" />
+            </svg>
           </button>
         ) : null}
         {phase === "paused" || phase === "answering" ? (
@@ -1327,14 +1333,18 @@ export function AiTeacherClassroom({
         <button
           type="button"
           className={cn(
-            "rounded-full px-5 py-2.5 text-sm font-bold transition",
+            "flex h-16 w-16 items-center justify-center rounded-full text-slate-950 transition",
             phase === "listening"
-              ? "bg-amber-400 text-amber-950 shadow-lg shadow-amber-500/30"
-              : "border border-amber-300/40 bg-amber-400/15 text-amber-50"
+              ? "bg-amber-400 shadow-lg shadow-amber-500/40"
+              : "bg-gradient-to-br from-sky-400 to-emerald-400 shadow-lg shadow-sky-500/30"
           )}
           onClick={() => startListening()}
+          aria-label={phase === "listening" ? labels.listening : labels.ask}
+          title={phase === "listening" ? labels.listening : labels.ask}
         >
-          {phase === "listening" ? labels.listening : labels.ask}
+          <svg viewBox="0 0 24 24" className="h-7 w-7 fill-current" aria-hidden>
+            <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
+          </svg>
         </button>
       </div>
       {phase === "completed" && lesson.summary?.length > 0 && (
