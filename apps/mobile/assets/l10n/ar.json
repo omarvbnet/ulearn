@@ -991,6 +991,7 @@
       "aiTeacherInterruptHint": "يمكنك المقاطعة في أي وقت",
       "aiTeacherListening": "أستمع إليك…",
       "aiTeacherLiveVoice": "صوت مباشر",
+      "aiTeacherVoiceMissing": "صوت المعلم غير متاح. اطلب من المسؤول تعيين VOICE_TTS (ElevenLabs/OpenAI).",
       "aiTeacherObjective": "الهدف",
       "aiTeacherProgress": "التقدم",
       "aiTeacherPhaseReady": "جاهز",

@@ -1250,8 +1250,8 @@ export default function StudentAiPage() {
               {classroomOverlayLabels(locale).closeBoard}
             </Button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-3 md:p-5">
-            <div className="mx-auto max-w-6xl">
+          <div className="min-h-0 flex-1 overflow-hidden p-0 md:p-2">
+            <div className="mx-auto h-full max-w-none">
               <AiTeacherClassroom
                 lesson={activeClassroom}
                 locale={locale}

@@ -533,16 +533,13 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                   ),
                 ),
                 Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
-                    child: AiTeacherClassroom(
+                  child: AiTeacherClassroom(
+                    lesson: lesson,
+                    onAskTeacher: (question, pausedIndex) =>
+                        _askClassroomTeacher(
+                      question: question,
+                      pausedIndex: pausedIndex,
                       lesson: lesson,
-                      onAskTeacher: (question, pausedIndex) =>
-                          _askClassroomTeacher(
-                        question: question,
-                        pausedIndex: pausedIndex,
-                        lesson: lesson,
-                      ),
                     ),
                   ),
                 ),

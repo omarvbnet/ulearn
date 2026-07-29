@@ -991,6 +991,7 @@
       "aiTeacherInterruptHint": "İstediğin zaman soru sorabilirsin",
       "aiTeacherListening": "Dinliyorum…",
       "aiTeacherLiveVoice": "Canlı ses",
+      "aiTeacherVoiceMissing": "Öğretmen sesi yok. Yöneticiden VOICE_TTS (ElevenLabs/OpenAI) atamasını isteyin.",
       "aiTeacherObjective": "Hedef",
       "aiTeacherProgress": "İlerleme",
       "aiTeacherPhaseReady": "Hazır",

@@ -6,6 +6,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:just_audio/just_audio.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 import 'package:provider/provider.dart';
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
@@ -25,7 +27,8 @@ class AiTeacherClassroom extends StatefulWidget {
   State<AiTeacherClassroom> createState() => _AiTeacherClassroomState();
 }
 
-class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
+class _AiTeacherClassroomState extends State<AiTeacherClassroom>
+    with TickerProviderStateMixin {
   static const _boardW = 1920.0;
   static const _boardH = 1080.0;
 
@@ -46,6 +49,10 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
   final _speechStt = stt.SpeechToText();
   var _clockMs = 0.0;
   Timer? _paintTimer;
+  late final AnimationController _micPulse;
+  var _soundLevel = 0.0;
+  String? _ttsError;
+  var _voiceBusy = false;
 
   List<Map<String, dynamic>> get _speech {
     final raw = widget.lesson['speech'];
@@ -83,11 +90,17 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
   @override
   void initState() {
     super.initState();
+    _micPulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
     _paintTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
-      if (!mounted || _phase != _Phase.teaching) return;
-      setState(() {
-        _clockMs = DateTime.now().millisecondsSinceEpoch.toDouble();
-      });
+      if (!mounted) return;
+      if (_phase == _Phase.teaching || _items.any((i) => i.progress(_clockMs) < 1)) {
+        setState(() {
+          _clockMs = DateTime.now().millisecondsSinceEpoch.toDouble();
+        });
+      }
     });
   }
 
@@ -96,6 +109,7 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
     _cancelled = true;
     _runId++;
     _paintTimer?.cancel();
+    _micPulse.dispose();
     unawaited(_speechStt.stop());
     unawaited(_audio.stop());
     unawaited(_audio.dispose());
@@ -103,37 +117,61 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
   }
 
   Future<void> _speak(String text) async {
-    final clean = _cleanBoardText(text) ?? '';
+    final clean = _cleanBoardText(text) ?? text.trim();
     if (clean.isEmpty) return;
+    _voiceBusy = true;
     try {
-      await _audio.stop();
-    } catch (_) {}
-    // Admin VOICE_TTS only — never device/system voices.
-    await _speakCloud(clean);
+      try {
+        await _audio.stop();
+      } catch (_) {}
+      final ok = await _speakCloud(clean);
+      if (!ok && mounted) {
+        setState(() => _ttsError = 'voice');
+      } else if (mounted && _ttsError != null) {
+        setState(() => _ttsError = null);
+      }
+    } finally {
+      _voiceBusy = false;
+    }
   }
 
   Future<bool> _speakCloud(String text) async {
     if (!mounted) return false;
+    File? tmp;
     try {
       final api = context.read<ApiClient>();
       final data = await api.post('/api/ai/tts', {
         'text': text,
         'language': _lang,
       });
-      final b64 = data['dataBase64']?.toString();
-      final mime = data['mimeType']?.toString() ?? 'audio/mpeg';
+      final nested = data['data'];
+      final nestedMap = nested is Map ? Map<String, dynamic>.from(nested) : null;
+      final b64 =
+          (data['dataBase64'] ?? nestedMap?['dataBase64'])?.toString();
+      final mime =
+          (data['mimeType'] ?? nestedMap?['mimeType'])?.toString() ??
+              'audio/mpeg';
       if (b64 == null || b64.isEmpty) return false;
       final bytes = Uint8List.fromList(base64Decode(b64));
-      await _audio.setAudioSource(
-        AudioSource.uri(Uri.dataFromBytes(bytes, mimeType: mime)),
-      );
+      // iOS/Android: data-URI sources are unreliable for large MP3 — use a temp file.
+      final dir = await getTemporaryDirectory();
+      final ext = mime.contains('wav') ? 'wav' : 'mp3';
+      tmp = File('${dir.path}/ulearn_tts_${DateTime.now().microsecondsSinceEpoch}.$ext');
+      await tmp.writeAsBytes(bytes, flush: true);
+      await _audio.setVolume(1.0);
+      await _audio.setFilePath(tmp.path);
       await _audio.play();
-      await _audio.playerStateStream.firstWhere(
-        (s) => s.processingState == ProcessingState.completed,
+      // Wait until playback really finishes (not idle-before-play).
+      await _audio.processingStateStream.firstWhere(
+        (s) => s == ProcessingState.completed,
       );
       return true;
     } catch (_) {
       return false;
+    } finally {
+      try {
+        await tmp?.delete();
+      } catch (_) {}
     }
   }
 
@@ -163,15 +201,31 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
       _listeningAsk = true;
       _phase = _Phase.answering;
       _teacherReply = null;
+      _soundLevel = 0;
     });
+    unawaited(_micPulse.repeat(reverse: true));
     await _speechStt.listen(
+      onSoundLevelChange: (level) {
+        if (!mounted) return;
+        setState(() => _soundLevel = level.clamp(0, 50) / 50.0);
+      },
       onResult: (result) async {
-        if (!result.finalResult) return;
+        if (!result.finalResult) {
+          if (mounted && result.recognizedWords.trim().isNotEmpty) {
+            setState(() => _listeningAsk = true);
+          }
+          return;
+        }
         final q = (_cleanBoardText(result.recognizedWords) ??
                 result.recognizedWords.trim());
         await _speechStt.stop();
         if (!mounted) return;
-        setState(() => _listeningAsk = false);
+        _micPulse.stop();
+        _micPulse.value = 0;
+        setState(() {
+          _listeningAsk = false;
+          _soundLevel = 0;
+        });
         if (q.isEmpty) {
           setState(() => _phase = _Phase.paused);
           return;
@@ -181,7 +235,7 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
       listenOptions: stt.SpeechListenOptions(
         listenFor: const Duration(seconds: 20),
         pauseFor: const Duration(seconds: 3),
-        partialResults: false,
+        partialResults: true,
         localeId: _lang == 'ar'
             ? 'ar_SA'
             : _lang == 'tr'
@@ -200,33 +254,54 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
   void _applyBoardUntil(num untilMs) {
     final board = _whiteboard;
     var next = _boardApplied;
-    while (next < board.length && _num(board[next]['time']) <= untilMs) {
-      next++;
+    if (next >= board.length) return;
+    final now = DateTime.now().millisecondsSinceEpoch.toDouble();
+    var penAt = now;
+    for (final item in _items) {
+      if (item.kind == _Kind.text) {
+        penAt = math.max(penAt, item.bornAt + item.writeMs + 320);
+      }
     }
-    if (next == _boardApplied) return;
-    final rebuilt = <_BoardItem>[];
-    final born = DateTime.now().millisecondsSinceEpoch.toDouble();
-    var penAt = born;
-    for (var i = 0; i < next; i++) {
-      final cue = board[i];
+    var added = false;
+    while (next < board.length && _num(board[next]['time']) <= untilMs) {
+      final cue = board[next];
       final action =
           (cue['action']?.toString() ?? '').toLowerCase().replaceAll(' ', '_');
       final isText = action == 'write_text' ||
           action == 'draw_formula' ||
           action == 'draw_equation';
-      final start = isText ? penAt : born + i * 40;
-      final before = rebuilt.length;
-      _applyCue(rebuilt, cue, i, start, _rtl);
-      if (isText && rebuilt.length > before) {
-        final last = rebuilt.last;
-        penAt = last.bornAt + last.writeMs + 280;
+      final start = isText ? penAt : now + (next - _boardApplied) * 50.0;
+      final before = _items.length;
+      // open_new_board / clear clears the list inside _applyCue
+      _applyCue(_items, cue, next, start, _rtl);
+      if (action == 'clear_board' || action == 'open_new_board') {
+        penAt = DateTime.now().millisecondsSinceEpoch.toDouble();
+      } else if (isText && _items.length > before) {
+        final last = _items.last;
+        penAt = last.bornAt + last.writeMs + 320;
       }
+      next++;
+      added = true;
     }
+    if (!added) return;
     _boardApplied = next;
-    _items
-      ..clear()
-      ..addAll(rebuilt);
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {
+        _clockMs = DateTime.now().millisecondsSinceEpoch.toDouble();
+      });
+    }
+  }
+
+  Future<void> _waitBoardCatchUp() async {
+    // Let handwriting / strokes finish so lines never cut off mid-word.
+    for (var i = 0; i < 120; i++) {
+      if (_cancelled) return;
+      final now = DateTime.now().millisecondsSinceEpoch.toDouble();
+      final pending = _items.any((it) => it.progress(now) < 0.995);
+      if (!pending) return;
+      if (mounted) setState(() => _clockMs = now);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+    }
   }
 
   void _resetBoard() {
@@ -269,12 +344,12 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
           _caption = text;
         });
       }
-      _applyBoardUntil(tMs + 200);
-
+      // Reveal this beat's writing/drawing, then speak like a real teacher.
+      _applyBoardUntil(tMs + 900);
       final speakFuture = _speak(text);
-      final duration = _estimateMs(text);
       final start = DateTime.now();
-      while (DateTime.now().difference(start).inMilliseconds < duration + 800) {
+      final maxWait = _estimateMs(text) + 6000;
+      while (DateTime.now().difference(start).inMilliseconds < maxWait) {
         if (runId != _runId || _cancelled) {
           await _audio.stop();
           return;
@@ -282,12 +357,18 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
         await _waitWhilePaused();
         if (_paused) continue;
         final elapsed = DateTime.now().difference(start).inMilliseconds;
-        final span = math.max(900, (nextTime - tMs).toInt());
-        _applyBoardUntil(tMs + math.min(span, elapsed + 400));
-        await Future<void>.delayed(const Duration(milliseconds: 50));
+        final span = math.max(1200, (nextTime - tMs).toInt());
+        _applyBoardUntil(tMs + math.min(span, elapsed + 600));
+        final playing = _voiceBusy || _audio.playing;
+        if (!playing && elapsed > 1500) {
+          // Speech finished (or failed) — finish remaining board for this beat.
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 40));
       }
       await speakFuture;
       _applyBoardUntil(nextTime);
+      await _waitBoardCatchUp();
     }
 
     if (runId != _runId || _cancelled) return;
@@ -305,7 +386,15 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
     _paused = true;
     unawaited(_speechStt.stop());
     unawaited(_audio.stop());
-    if (mounted) setState(() => _phase = _Phase.paused);
+    _micPulse.stop();
+    _micPulse.value = 0;
+    if (mounted) {
+      setState(() {
+        _phase = _Phase.paused;
+        _listeningAsk = false;
+        _soundLevel = 0;
+      });
+    }
   }
 
   void _resume() {
@@ -451,14 +540,13 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
             ),
           ),
           const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: AspectRatio(
-              aspectRatio: 16 / 11,
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Container(
                   decoration: BoxDecoration(
                     color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(22),
+                    borderRadius: BorderRadius.circular(18),
                     boxShadow: [
                       BoxShadow(
                         color: const Color(0xFF38BDF8).withValues(alpha: 0.18),
@@ -690,32 +778,87 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
                   onTap: _listeningAsk || _asking ? null : _listenAsk,
                   child: Column(
                     children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        width: 72,
-                        height: 72,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            colors: _listeningAsk
-                                ? const [Color(0xFFFBBF24), Color(0xFFF59E0B)]
-                                : const [Color(0xFF38BDF8), Color(0xFF34D399)],
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: (_listeningAsk
-                                      ? const Color(0xFFFBBF24)
-                                      : const Color(0xFF38BDF8))
-                                  .withValues(alpha: 0.4),
-                              blurRadius: 20,
-                              offset: const Offset(0, 8),
+                      AnimatedBuilder(
+                        animation: _micPulse,
+                        builder: (context, child) {
+                          final pulse = _listeningAsk
+                              ? 1.0 + (_micPulse.value * 0.18) + (_soundLevel * 0.35)
+                              : 1.0;
+                          final ring = _listeningAsk
+                              ? 0.35 + _micPulse.value * 0.45 + _soundLevel * 0.4
+                              : 0.0;
+                          return SizedBox(
+                            width: 92,
+                            height: 92,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                if (_listeningAsk) ...[
+                                  Transform.scale(
+                                    scale: 1.15 + _micPulse.value * 0.35 + _soundLevel * 0.5,
+                                    child: Container(
+                                      width: 88,
+                                      height: 88,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: const Color(0xFFFBBF24)
+                                              .withValues(alpha: ring.clamp(0.15, 0.85)),
+                                          width: 3,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Transform.scale(
+                                    scale: 1.4 + _micPulse.value * 0.45 + _soundLevel * 0.6,
+                                    child: Container(
+                                      width: 88,
+                                      height: 88,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: const Color(0xFFF59E0B)
+                                              .withValues(alpha: (ring * 0.55).clamp(0.08, 0.5)),
+                                          width: 2,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                Transform.scale(
+                                  scale: pulse,
+                                  child: child,
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
-                        child: Icon(
-                          _listeningAsk ? Icons.mic_rounded : Icons.mic_none_rounded,
-                          size: 34,
-                          color: const Color(0xFF0B1220),
+                          );
+                        },
+                        child: Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              colors: _listeningAsk
+                                  ? const [Color(0xFFFBBF24), Color(0xFFF59E0B)]
+                                  : const [Color(0xFF38BDF8), Color(0xFF34D399)],
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: (_listeningAsk
+                                        ? const Color(0xFFFBBF24)
+                                        : const Color(0xFF38BDF8))
+                                    .withValues(alpha: 0.45),
+                                blurRadius: _listeningAsk ? 28 : 18,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            _listeningAsk ? Icons.mic_rounded : Icons.mic_none_rounded,
+                            size: 34,
+                            color: const Color(0xFF0B1220),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -737,6 +880,19 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
               ],
             ),
           ),
+          if (_ttsError != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                l10n.t('mobile.ai.aiTeacherVoiceMissing'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFFFCA5A5),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
           if (_phase == _Phase.completed && summary.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
@@ -986,7 +1142,8 @@ double _handJitter(int seed, int i, [double amp = 4.5]) {
 
 int _writeMsForText(String text) {
   final n = text.length;
-  return math.max(700, math.min(4800, n * 48));
+  // Slower, teacher-like handwriting so every character finishes on the board.
+  return math.max(1100, math.min(6500, n * 72));
 }
 
 void _applyCue(
@@ -1268,7 +1425,9 @@ class _ClassroomBoardPainter extends CustomPainter {
             Paint()..color = item.color.withValues(alpha: 0.35 * p),
           );
         case _Kind.text:
-          final chars = math.max(1, (item.text.length * p).floor());
+          final chars = p >= 0.995
+              ? item.text.length
+              : math.max(1, (item.text.length * p).ceil());
           final shown = item.text.substring(0, chars);
           final dir = item.alignRight || rtl
               ? TextDirection.rtl

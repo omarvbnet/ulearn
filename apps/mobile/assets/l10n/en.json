@@ -1002,6 +1002,7 @@
       "aiTeacherInterruptHint": "Interrupt anytime by voice or text",
       "aiTeacherListening": "Listening…",
       "aiTeacherLiveVoice": "Live voice",
+      "aiTeacherVoiceMissing": "AI voice is unavailable. Ask admin to assign VOICE_TTS (ElevenLabs/OpenAI).",
       "aiTeacherObjective": "Objective",
       "aiTeacherProgress": "Progress",
       "aiTeacherPhaseReady": "Ready",

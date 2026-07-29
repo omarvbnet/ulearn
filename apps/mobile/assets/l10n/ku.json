@@ -992,6 +992,7 @@
       "aiTeacherInterruptHint": "لە هەر کاتێک دەتوانیت بپرسیت",
       "aiTeacherListening": "گوێت لێدەگرم…",
       "aiTeacherLiveVoice": "دەنگی ڕاستەوخۆ",
+      "aiTeacherVoiceMissing": "دەنگی مامۆستا بەردەست نییە. داوای VOICE_TTS بکە لە بەڕێوەبەر.",
       "aiTeacherObjective": "ئامانج",
       "aiTeacherProgress": "پێشکەوتن",
       "aiTeacherPhaseReady": "ئامادە",

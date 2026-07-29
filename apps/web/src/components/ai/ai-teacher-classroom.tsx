@@ -106,6 +106,7 @@ type Labels = {
   tapToBegin: string;
   tapHint: string;
   liveVoice: string;
+  voiceMissing: string;
   phaseReady: string;
   phaseTeaching: string;
   phasePaused: string;
@@ -154,6 +155,7 @@ function t(locale: string): Labels {
       tapToBegin: "اضغط لبدء الدرس المباشر",
       tapHint: "سيتحدث المعلم ويرسم على السبورة معاً",
       liveVoice: "صوت مباشر",
+      voiceMissing: "صوت المعلم غير متاح. عيّن VOICE_TTS (ElevenLabs/OpenAI) من لوحة الإدارة.",
       phaseReady: "جاهز",
       phaseTeaching: "يشرح",
       phasePaused: "متوقف",
@@ -193,6 +195,7 @@ function t(locale: string): Labels {
       tapToBegin: "Canlı derse başlamak için dokun",
       tapHint: "Öğretmen konuşurken tahtaya çizer",
       liveVoice: "Canlı ses",
+      voiceMissing: "Öğretmen sesi yok. Yönetim panelinden VOICE_TTS (ElevenLabs/OpenAI) atayın.",
       phaseReady: "Hazır",
       phaseTeaching: "Anlatıyor",
       phasePaused: "Duraklatıldı",
@@ -231,6 +234,7 @@ function t(locale: string): Labels {
     tapToBegin: "Tap to begin live lesson",
     tapHint: "Teacher speaks while drawing on the board",
     liveVoice: "Live voice",
+    voiceMissing: "AI voice unavailable. Assign VOICE_TTS (ElevenLabs/OpenAI) in admin.",
     phaseReady: "Ready",
     phaseTeaching: "Teaching",
     phasePaused: "Paused",
@@ -352,8 +356,8 @@ function estimateSpeakMs(text: string): number {
 }
 
 function writeDurationForText(text: string): number {
-  // Slower, more human handwriting pace
-  return Math.max(700, Math.min(4800, text.length * 48));
+  // Slower, more human handwriting pace — finish every character.
+  return Math.max(1100, Math.min(6500, text.length * 72));
 }
 
 function strokeWriteMs(kind: "line" | "arrow" | "circle" | "rect" | "highlight"): number {
@@ -583,7 +587,13 @@ type SpeechRecognitionLike = {
   interimResults: boolean;
   start: () => void;
   stop: () => void;
-  onresult: ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onresult:
+    | ((ev: {
+        results: ArrayLike<
+          ArrayLike<{ transcript: string }> & { isFinal?: boolean }
+        >;
+      }) => void)
+    | null;
   onerror: (() => void) | null;
   onend: (() => void) | null;
 };
@@ -599,6 +609,8 @@ function getSpeechRecognition(): (new () => SpeechRecognitionLike) | null {
 
 /** Keep a strong ref so Chrome does not GC mid-playback. */
 let activeCloudAudio: HTMLAudioElement | null = null;
+let activeCloudObjectUrl: string | null = null;
+let voiceBusy = false;
 
 function clearTtsWatch() {
   if (typeof window === "undefined") return;
@@ -607,6 +619,13 @@ function clearTtsWatch() {
     clearInterval(w.__ulearnTtsTimer);
     w.__ulearnTtsTimer = undefined;
   }
+}
+
+function base64ToBlob(b64: string, mimeType: string): Blob {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mimeType || "audio/mpeg" });
 }
 
 async function fetchCloudSpeech(
@@ -624,13 +643,13 @@ async function fetchCloudSpeech(
       mimeType?: string;
       dataBase64?: string;
       durationMs?: number;
+      data?: { mimeType?: string; dataBase64?: string; durationMs?: number };
     };
-    if (!data.dataBase64 || !data.mimeType) return null;
-    return {
-      mimeType: data.mimeType,
-      dataBase64: data.dataBase64,
-      durationMs: data.durationMs,
-    };
+    const mimeType = data.mimeType || data.data?.mimeType;
+    const dataBase64 = data.dataBase64 || data.data?.dataBase64;
+    const durationMs = data.durationMs ?? data.data?.durationMs;
+    if (!dataBase64 || !mimeType) return null;
+    return { mimeType, dataBase64, durationMs };
   } catch {
     return null;
   }
@@ -660,6 +679,8 @@ export function AiTeacherClassroom({
   const [quizReveal, setQuizReveal] = useState<Record<number, boolean>>({});
   const [asking, setAsking] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [micLevel, setMicLevel] = useState(0);
 
   const cancelledRef = useRef(false);
   const pausedRef = useRef(false);
@@ -697,6 +718,7 @@ export function AiTeacherClassroom({
 
   const stopVoice = useCallback(() => {
     clearTtsWatch();
+    voiceBusy = false;
     if (activeCloudAudio) {
       try {
         activeCloudAudio.pause();
@@ -706,53 +728,83 @@ export function AiTeacherClassroom({
       }
       activeCloudAudio = null;
     }
+    if (activeCloudObjectUrl) {
+      try {
+        URL.revokeObjectURL(activeCloudObjectUrl);
+      } catch {
+        /* ignore */
+      }
+      activeCloudObjectUrl = null;
+    }
   }, []);
 
   const unlockVoice = useCallback(() => {
     // Unlock audio playback for admin VOICE_TTS (cloud) — no device TTS.
     soundEnabledRef.current = true;
     setSoundEnabled(true);
+    setVoiceError(null);
     return true;
   }, []);
 
   const speak = useCallback(
     async (text: string) => {
       if (!soundEnabledRef.current) return;
-      const clean = cleanBoardText(text);
+      const clean = cleanBoardText(text) || text.trim();
       if (!clean) return;
 
       stopVoice();
+      voiceBusy = true;
       const lang = normalizeClassroomLang(lesson.language || locale);
-      // Admin VOICE_TTS only — never browser device voices.
-      const cloud = await fetchCloudSpeech(clean, lang);
-      if (!cloud) return;
-      await new Promise<void>((resolve) => {
-        const audio = new Audio(`data:${cloud.mimeType};base64,${cloud.dataBase64}`);
-        activeCloudAudio = audio;
-        let settled = false;
-        const finish = () => {
-          if (settled) return;
-          settled = true;
-          if (activeCloudAudio === audio) activeCloudAudio = null;
-          resolve();
-        };
-        const safety = window.setTimeout(
-          finish,
-          (cloud.durationMs || estimateSpeakMs(clean)) + 4000
-        );
-        audio.onended = () => {
-          window.clearTimeout(safety);
-          finish();
-        };
-        audio.onerror = () => {
-          window.clearTimeout(safety);
-          finish();
-        };
-        audio.play().catch(() => {
-          window.clearTimeout(safety);
-          finish();
+      try {
+        const cloud = await fetchCloudSpeech(clean, lang);
+        if (!cloud) {
+          setVoiceError("missing");
+          return;
+        }
+        setVoiceError(null);
+        const blob = base64ToBlob(cloud.dataBase64, cloud.mimeType);
+        const url = URL.createObjectURL(blob);
+        activeCloudObjectUrl = url;
+        await new Promise<void>((resolve) => {
+          const audio = new Audio(url);
+          audio.preload = "auto";
+          audio.volume = 1;
+          activeCloudAudio = audio;
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            if (activeCloudAudio === audio) activeCloudAudio = null;
+            if (activeCloudObjectUrl === url) {
+              try {
+                URL.revokeObjectURL(url);
+              } catch {
+                /* ignore */
+              }
+              activeCloudObjectUrl = null;
+            }
+            resolve();
+          };
+          const safety = window.setTimeout(
+            finish,
+            (cloud.durationMs || estimateSpeakMs(clean)) + 5000
+          );
+          audio.onended = () => {
+            window.clearTimeout(safety);
+            finish();
+          };
+          audio.onerror = () => {
+            window.clearTimeout(safety);
+            finish();
+          };
+          void audio.play().catch(() => {
+            window.clearTimeout(safety);
+            finish();
+          });
         });
-      });
+      } finally {
+        voiceBusy = false;
+      }
     },
     [lesson.language, locale, stopVoice]
   );
@@ -856,7 +908,7 @@ export function AiTeacherClassroom({
         }
 
         const start = nowMs();
-        const maxWait = estimateSpeakMs(cue.text) + 2500;
+        const maxWait = estimateSpeakMs(cue.text) + 8000;
 
         while (nowMs() - start < maxWait) {
           if (runId !== runIdRef.current || cancelledRef.current) {
@@ -867,12 +919,13 @@ export function AiTeacherClassroom({
           if (pausedRef.current) continue;
 
           const elapsed = nowMs() - start;
-          const span = Math.max(900, nextTime - cue.time);
-          applyBoardUntil(cue.time + Math.min(span, elapsed + 400));
+          const span = Math.max(1400, nextTime - cue.time);
+          applyBoardUntil(cue.time + Math.min(span, elapsed + 700));
 
           if (useVoice) {
-            const speaking = Boolean(activeCloudAudio && !activeCloudAudio.paused);
-            if (!speaking && elapsed > 700) break;
+            const speaking =
+              voiceBusy || Boolean(activeCloudAudio && !activeCloudAudio.paused);
+            if (!speaking && elapsed > 1600) break;
           } else if (elapsed >= Math.min(span, estimateSpeakMs(cue.text))) {
             break;
           }
@@ -881,6 +934,14 @@ export function AiTeacherClassroom({
 
         await speakPromise;
         applyBoardUntil(nextTime);
+        // Finish any in-flight handwriting so text is never cut mid-word.
+        for (let w = 0; w < 100; w++) {
+          const unfinished = boardItemsRef.current.some(
+            (it) => progressOf(it, nowMs()) < 0.995
+          );
+          if (!unfinished) break;
+          await new Promise((r) => setTimeout(r, 40));
+        }
       }
 
       if (runId !== runIdRef.current || cancelledRef.current) return;
@@ -932,32 +993,46 @@ export function AiTeacherClassroom({
   function startListening() {
     pauseTeaching();
     setPhase("listening");
+    setMicLevel(0.35);
     const Ctor = getSpeechRecognition();
     if (!Ctor) {
       setPhase("paused");
+      setMicLevel(0);
       return;
     }
     try {
       const rec = new Ctor();
       rec.lang = speechLang(lesson.language || locale);
       rec.continuous = false;
-      rec.interimResults = false;
+      rec.interimResults = true;
       rec.onresult = (ev) => {
-        const parts: string[] = [];
+        let interim = "";
+        let finalText = "";
         for (let i = 0; i < ev.results.length; i++) {
-          const alt = ev.results[i]?.[0]?.transcript;
-          if (alt) parts.push(alt);
+          const row = ev.results[i];
+          const alt = row?.[0]?.transcript || "";
+          if (row?.isFinal) finalText += alt;
+          else interim += alt;
         }
-        const q = parts.join(" ").trim();
-        if (q) void submitQuestionWithText(q);
+        const level = Math.min(1, ((finalText || interim).length % 24) / 18 + 0.35);
+        setMicLevel(level);
+        const q = (finalText || "").trim();
+        if (q) {
+          setMicLevel(0);
+          void submitQuestionWithText(q);
+        }
       };
-      rec.onerror = () => setPhase("paused");
+      rec.onerror = () => {
+        setMicLevel(0);
+        setPhase("paused");
+      };
       rec.onend = () => {
-        /* submit handles phase */
+        setMicLevel(0);
       };
       recognitionRef.current = rec;
       rec.start();
     } catch {
+      setMicLevel(0);
       setPhase("paused");
     }
   }
@@ -1012,7 +1087,7 @@ export function AiTeacherClassroom({
 
   return (
     <div
-      className="relative overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(165deg,#0b1220_0%,#111827_42%,#0a1628_100%)] text-slate-100 shadow-[0_40px_100px_-40px_rgba(0,0,0,0.75)]"
+      className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-none border-0 bg-[linear-gradient(165deg,#0b1220_0%,#111827_42%,#0a1628_100%)] text-slate-100 sm:rounded-[28px] sm:border sm:border-white/10 sm:shadow-[0_40px_100px_-40px_rgba(0,0,0,0.75)]"
       dir={dir}
     >
       {/* Ambient glow */}
@@ -1059,12 +1134,13 @@ export function AiTeacherClassroom({
         </div>
       </div>
 
-      {/* Board stage */}
-      <div className="relative z-10 mx-3 mt-3 overflow-hidden rounded-[22px] border border-white/10 bg-[#f7fafc] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_20px_50px_-30px_rgba(0,0,0,0.55)] sm:mx-4">
+      {/* Board stage — fills remaining viewport */}
+      <div className="relative z-10 mx-2 mt-2 min-h-0 flex-1 overflow-hidden rounded-[18px] border border-white/10 bg-[#f7fafc] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_20px_50px_-30px_rgba(0,0,0,0.55)] sm:mx-4 sm:mt-3 sm:rounded-[22px]">
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-12 bg-gradient-to-b from-slate-900/10 to-transparent" />
         <svg
           viewBox={`0 0 ${BOARD_W} ${BOARD_H}`}
-          className="aspect-[16/10] h-auto w-full"
+          className="h-full w-full"
+          preserveAspectRatio="xMidYMid meet"
           role="img"
           aria-label={lesson.lesson_title}
         >
@@ -1116,7 +1192,10 @@ export function AiTeacherClassroom({
             }
 
             if (item.kind === "text") {
-              const chars = Math.max(1, Math.floor(item.text.length * p));
+              const chars =
+                p >= 0.995
+                  ? item.text.length
+                  : Math.max(1, Math.ceil(item.text.length * p));
               const shown = item.text.slice(0, chars);
               const rtlText = item.align === "right" || boardRtl;
               return (
@@ -1332,21 +1411,47 @@ export function AiTeacherClassroom({
         ) : null}
         <button
           type="button"
-          className={cn(
-            "flex h-16 w-16 items-center justify-center rounded-full text-slate-950 transition",
-            phase === "listening"
-              ? "bg-amber-400 shadow-lg shadow-amber-500/40"
-              : "bg-gradient-to-br from-sky-400 to-emerald-400 shadow-lg shadow-sky-500/30"
-          )}
+          className="relative flex h-20 w-20 items-center justify-center"
           onClick={() => startListening()}
           aria-label={phase === "listening" ? labels.listening : labels.ask}
           title={phase === "listening" ? labels.listening : labels.ask}
         >
-          <svg viewBox="0 0 24 24" className="h-7 w-7 fill-current" aria-hidden>
-            <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
-          </svg>
+          {phase === "listening" ? (
+            <>
+              <span
+                className="absolute inset-0 rounded-full border-2 border-amber-300/70 animate-ping"
+                style={{ transform: `scale(${1.05 + micLevel * 0.45})` }}
+              />
+              <span
+                className="absolute inset-1 rounded-full border border-amber-200/50"
+                style={{ transform: `scale(${1.1 + micLevel * 0.7})`, opacity: 0.35 + micLevel * 0.5 }}
+              />
+            </>
+          ) : null}
+          <span
+            className={cn(
+              "relative flex h-16 w-16 items-center justify-center rounded-full text-slate-950 transition",
+              phase === "listening"
+                ? "bg-amber-400 shadow-lg shadow-amber-500/40"
+                : "bg-gradient-to-br from-sky-400 to-emerald-400 shadow-lg shadow-sky-500/30"
+            )}
+            style={
+              phase === "listening"
+                ? { transform: `scale(${1 + micLevel * 0.18})` }
+                : undefined
+            }
+          >
+            <svg viewBox="0 0 24 24" className="h-7 w-7 fill-current" aria-hidden>
+              <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
+            </svg>
+          </span>
         </button>
       </div>
+      {voiceError ? (
+        <p className="relative z-10 mx-4 mb-2 text-center text-[11px] font-semibold text-rose-300">
+          {labels.voiceMissing}
+        </p>
+      ) : null}
       {phase === "completed" && lesson.summary?.length > 0 && (
         <div className="relative z-10 mx-3 mb-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 sm:mx-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
