@@ -39,6 +39,36 @@ export type SearchFilters = {
 };
 
 export class VectorSearchService {
+  /** Avoid noisy Prisma logs: pre-check whether pgvector column exists. */
+  private static _embeddingVecAvailable: boolean | null = null;
+
+  private static async embeddingVecExists(): Promise<boolean> {
+    if (this._embeddingVecAvailable !== null) {
+      return this._embeddingVecAvailable;
+    }
+    try {
+      const rows = await prisma.$queryRawUnsafe<
+        Array<{ exists: boolean }>
+      >(
+        `
+        SELECT EXISTS(
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'KbChunk'
+            AND column_name = 'embedding_vec'
+        ) AS exists
+        `
+      );
+      this._embeddingVecAvailable = Boolean(rows?.[0]?.exists);
+    } catch {
+      // If anything goes wrong (no permissions, different DB, etc.),
+      // fall back to JS cosine similarity using the Float[] mirror.
+      this._embeddingVecAvailable = false;
+    }
+    return this._embeddingVecAvailable;
+  }
+
   static async search(
     queryEmbedding: number[],
     filters: SearchFilters = {}
@@ -73,6 +103,12 @@ export class VectorSearchService {
     topK: number,
     minSim: number
   ): Promise<RetrievedChunk[]> {
+    // Some environments (staging/prod) may not have applied the pgvector migration yet.
+    // Check once and prefer the existing JS fallback to avoid noisy raw-query errors.
+    if (!(await this.embeddingVecExists())) {
+      return this.fallbackSearch(queryEmbedding, filters, topK, minSim);
+    }
+
     try {
       const vec = `[${queryEmbedding.join(",")}]`;
       const params: unknown[] = [vec];
