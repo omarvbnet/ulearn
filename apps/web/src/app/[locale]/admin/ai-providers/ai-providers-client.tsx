@@ -84,6 +84,7 @@ const PROVIDER_TYPES = [
   { value: "DEEPSEEK", label: "DeepSeek" },
   { value: "JINA", label: "Jina AI (Embeddings / DeepSearch)" },
   { value: "FLUX", label: "FLUX.1 Kontext Max (BFL Images)" },
+  { value: "ELEVENLABS", label: "ElevenLabs (AI Teacher Voice)" },
   { value: "OPENAI_COMPATIBLE", label: "OpenAI Compatible (custom)" },
 ] as const;
 
@@ -138,6 +139,15 @@ const MODELS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
     { value: "flux-2-pro", label: "FLUX.2 Pro" },
     { value: "flux-2-max", label: "FLUX.2 Max" },
   ],
+  ELEVENLABS: [
+    {
+      value: "eleven_multilingual_v2",
+      label: "eleven_multilingual_v2 (recommended · ar / tr / en)",
+    },
+    { value: "eleven_turbo_v2_5", label: "eleven_turbo_v2_5 (faster · 32 langs)" },
+    { value: "eleven_flash_v2_5", label: "eleven_flash_v2_5 (lowest latency)" },
+    { value: "eleven_v3", label: "eleven_v3 (highest quality)" },
+  ],
   OPENAI_COMPATIBLE: [
     { value: "gpt-4o-mini", label: "gpt-4o-mini (compatible)" },
     { value: "deepseek-chat", label: "deepseek-chat" },
@@ -153,6 +163,7 @@ const DEFAULT_BASE_URL: Record<string, string> = {
   DEEPSEEK: "https://api.deepseek.com/v1",
   JINA: "https://api.jina.ai/v1",
   FLUX: "https://api.bfl.ai",
+  ELEVENLABS: "https://api.elevenlabs.io",
   OPENAI_COMPATIBLE: "",
 };
 
@@ -164,6 +175,7 @@ const DEFAULT_MODEL: Record<string, string> = {
   DEEPSEEK: "deepseek-chat",
   JINA: "jina-embeddings-v4",
   FLUX: "flux-kontext-max",
+  ELEVENLABS: "eleven_multilingual_v2",
   OPENAI_COMPATIBLE: "gpt-4o-mini",
 };
 
@@ -183,6 +195,8 @@ export function AiProvidersClient() {
     customModel: "",
     apiKey: "",
     baseUrl: DEFAULT_BASE_URL.GEMINI,
+    /** Optional ElevenLabs voice id (stored as apiVersion). */
+    voiceId: "",
     isDefault: true,
   });
 
@@ -228,6 +242,7 @@ export function AiProvidersClient() {
       type,
       model: nextModel,
       customModel: "",
+      voiceId: type === "ELEVENLABS" ? f.voiceId : "",
       baseUrl: DEFAULT_BASE_URL[type] ?? f.baseUrl,
       name:
         f.name === "Gemini Default" ||
@@ -275,6 +290,10 @@ export function AiProvidersClient() {
           model,
           baseUrl: form.baseUrl || undefined,
           apiKey: form.apiKey || undefined,
+          apiVersion:
+            form.type === "ELEVENLABS" && form.voiceId.trim()
+              ? form.voiceId.trim()
+              : undefined,
           isDefault: form.isDefault,
         }),
       });
@@ -554,6 +573,14 @@ export function AiProvidersClient() {
           value={form.baseUrl}
           onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
         />
+        {form.type === "ELEVENLABS" ? (
+          <input
+            className="input"
+            placeholder="Voice ID (optional · from elevenlabs.io/app/voice-library)"
+            value={form.voiceId}
+            onChange={(e) => setForm({ ...form, voiceId: e.target.value })}
+          />
+        ) : null}
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -586,8 +613,18 @@ export function AiProvidersClient() {
           </a>{" "}
           (default <code>api.bfl.ai</code>) — assign to{" "}
           <code>AI_CREATIVE_IMAGE</code> for educational drawings, infographics, and image
-          edits. Embedding models → EMBEDDING; <code>jina-deepsearch-v1</code> → AI Creative /
-          chat (PPT/text).
+          edits. ElevenLabs uses keys from{" "}
+          <a
+            className="underline"
+            href="https://elevenlabs.io/app/settings/api-keys"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            elevenlabs.io
+          </a>{" "}
+          (default <code>api.elevenlabs.io</code>) — assign to <code>VOICE_TTS</code> for AI
+          Teacher classroom speech (ar / tr / en). Embedding models → EMBEDDING;{" "}
+          <code>jina-deepsearch-v1</code> → AI Creative / chat (PPT/text).
         </p>
         <button
           className="btn btn-primary sm:col-span-2 lg:col-span-3"
@@ -658,7 +695,7 @@ export function AiProvidersClient() {
 
       <PageHeader
         title="Module assignments"
-        description="Route each AI module to a provider. EMBEDDING: Gemini/OpenAI/Jina. AI_CREATIVE_IMAGE: FLUX. VOICE_TTS: OpenAI tts-1-hd for AI Teacher classroom speech (ar / tr / en)."
+        description="Route each AI module to a provider. EMBEDDING: Gemini/OpenAI/Jina. AI_CREATIVE_IMAGE: FLUX. VOICE_TTS: ElevenLabs (preferred) or OpenAI TTS for AI Teacher classroom speech (ar / tr / en)."
       />
       <div className="card space-y-3 p-4">
         {MODULES.map((moduleKey) => {
@@ -701,7 +738,12 @@ export function AiProvidersClient() {
               ) : null}
               {moduleKey === "VOICE_TTS" && options.length === 0 ? (
                 <span className="text-xs text-amber-700">
-                  Add an OpenAI provider (tts-1-hd) for classroom voice in Arabic, Turkish, and English.
+                  Add ElevenLabs or OpenAI TTS for classroom voice in Arabic, Turkish, and English.
+                </span>
+              ) : null}
+              {moduleKey === "VOICE_TTS" && options.length > 0 ? (
+                <span className="text-xs text-muted">
+                  Prefer ElevenLabs multilingual for natural ar / tr / en classroom speech
                 </span>
               ) : null}
               {moduleKey === "AI_CREATIVE_IMAGE" && options.length === 0 ? (

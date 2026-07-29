@@ -130,7 +130,7 @@ export class AiProviderService {
     } else if (moduleKey === "VOICE_TTS") {
       if (!providerSupportsSpeech(provider.type)) {
         throw new Error(
-          `${provider.type} (${provider.name}) cannot run TTS. Assign VOICE_TTS to OpenAI (tts-1-hd / gpt-4o-mini-tts) or an OpenAI-compatible speech endpoint.`
+          `${provider.type} (${provider.name}) cannot run TTS. Assign VOICE_TTS to ElevenLabs or OpenAI (tts-1-hd / gpt-4o-mini-tts).`
         );
       }
     } else if (moduleKey !== "EMBEDDING" && !providerSupportsChat(provider.type, provider.model)) {
@@ -230,7 +230,7 @@ export class AiProviderService {
         preferTypes: opts?.preferTypes?.length
           ? opts.preferTypes
           : ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE", "JINA"],
-        skipTypes: [...(opts?.skipTypes || []), "DEEPSEEK", "KIMI", "ANTHROPIC", "FLUX"],
+        skipTypes: [...(opts?.skipTypes || []), "DEEPSEEK", "KIMI", "ANTHROPIC", "FLUX", "ELEVENLABS"],
       };
       opts = embedOpts;
     } else if (moduleKey === "AI_CREATIVE_IMAGE") {
@@ -245,13 +245,14 @@ export class AiProviderService {
           "GEMINI",
           "OPENAI",
           "OPENAI_COMPATIBLE",
+          "ELEVENLABS",
         ],
       };
     } else if (moduleKey === "VOICE_TTS") {
       opts = {
         preferTypes: opts?.preferTypes?.length
           ? opts.preferTypes
-          : ["OPENAI", "OPENAI_COMPATIBLE"],
+          : ["ELEVENLABS", "OPENAI", "OPENAI_COMPATIBLE"],
         skipTypes: [
           ...(opts?.skipTypes || []),
           "FLUX",
@@ -272,13 +273,14 @@ export class AiProviderService {
           ...(opts?.skipTypes || []),
           "FLUX",
           "JINA",
+          "ELEVENLABS",
         ],
       };
     } else if (moduleKey) {
-      // Chat modules: never use FLUX (image-only).
+      // Chat modules: never use FLUX (image-only) or ElevenLabs (voice-only).
       opts = {
         ...opts,
-        skipTypes: [...(opts?.skipTypes || []), "FLUX"],
+        skipTypes: [...(opts?.skipTypes || []), "FLUX", "ELEVENLABS"],
       };
     }
     if (opts?.preferTypes?.length) {
@@ -307,7 +309,7 @@ export class AiProviderService {
       }
       if (moduleKey === "VOICE_TTS" && !providerSupportsSpeech(provider.type)) {
         lastError = new Error(
-          `${provider.type} (${provider.name}) cannot run TTS. Assign VOICE_TTS to OpenAI.`
+          `${provider.type} (${provider.name}) cannot run TTS. Assign VOICE_TTS to ElevenLabs or OpenAI.`
         );
         continue;
       }
@@ -501,6 +503,7 @@ function estimateCost(type: string, tokensIn: number, tokensOut: number): number
     DEEPSEEK: { in: 0.00000014, out: 0.00000028 },
     JINA: { in: 0.00000002, out: 0 },
     FLUX: { in: 0.00008, out: 0 },
+    ELEVENLABS: { in: 0.00003, out: 0 },
   };
   const r = rates[type] || rates.GEMINI;
   return tokensIn * r.in + tokensOut * r.out;

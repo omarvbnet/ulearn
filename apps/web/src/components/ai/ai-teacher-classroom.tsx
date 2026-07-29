@@ -106,15 +106,32 @@ type Labels = {
   writing: string;
   tapToBegin: string;
   tapHint: string;
+  liveVoice: string;
+  phaseReady: string;
+  phaseTeaching: string;
+  phasePaused: string;
+  phaseListening: string;
+  phaseAnswering: string;
+  phaseCompleted: string;
+  progress: string;
+  closeAsk: string;
 };
 
+function normalizeUiLocale(locale?: string | null): "ar" | "tr" | "en" {
+  const lang = (locale || "en").toLowerCase().slice(0, 2);
+  if (lang === "ar" || lang === "ku") return "ar";
+  if (lang === "tr") return "tr";
+  return "en";
+}
+
 function t(locale: string): Labels {
-  if (locale === "ar") {
+  const ui = normalizeUiLocale(locale);
+  if (ui === "ar") {
     return {
       classroom: "الفصل المباشر",
       voice: "صوت",
       text: "نص",
-      start: "ابدأ الدرس بالصوت",
+      start: "ابدأ الدرس",
       pause: "إيقاف مؤقت",
       resume: "متابعة",
       ask: "اسأل المعلم",
@@ -131,20 +148,29 @@ function t(locale: string): Labels {
       teacherReply: "رد المعلم",
       interruptHint: "يمكنك المقاطعة في أي وقت",
       completed: "أحسنت! انتهينا من هذا الجزء. هل تريد مثالاً آخر؟",
-      enableSound: "تفعيل صوت المعلم",
+      enableSound: "تفعيل الصوت",
       soundOn: "الصوت يعمل",
       soundOff: "الصوت متوقف",
       writing: "يكتب على السبورة…",
       tapToBegin: "اضغط لبدء الدرس المباشر",
       tapHint: "سيتحدث المعلم ويرسم على السبورة معاً",
+      liveVoice: "صوت مباشر",
+      phaseReady: "جاهز",
+      phaseTeaching: "يشرح",
+      phasePaused: "متوقف",
+      phaseListening: "يستمع",
+      phaseAnswering: "يجيب",
+      phaseCompleted: "اكتمل",
+      progress: "التقدم",
+      closeAsk: "إغلاق",
     };
   }
-  if (locale === "tr") {
+  if (ui === "tr") {
     return {
       classroom: "Canlı sınıf",
       voice: "Ses",
       text: "Metin",
-      start: "Dersi sesle başlat",
+      start: "Dersi başlat",
       pause: "Duraklat",
       resume: "Devam",
       ask: "Öğretmene sor",
@@ -161,49 +187,28 @@ function t(locale: string): Labels {
       teacherReply: "Öğretmen yanıtı",
       interruptHint: "İstediğin zaman soru sorabilirsin",
       completed: "Harika! Bu bölüm bitti. Başka bir örnek ister misin?",
-      enableSound: "Öğretmen sesini aç",
+      enableSound: "Sesi aç",
       soundOn: "Ses açık",
       soundOff: "Ses kapalı",
       writing: "Tahtaya yazıyor…",
       tapToBegin: "Canlı derse başlamak için dokun",
       tapHint: "Öğretmen konuşurken tahtaya çizer",
-    };
-  }
-  if (locale === "ku") {
-    return {
-      classroom: "پۆلی ڕاستەوخۆ",
-      voice: "دەنگ",
-      text: "دەق",
-      start: "وانە بە دەنگ دەستپێبکە",
-      pause: "وەستان",
-      resume: "بەردەوامبوون",
-      ask: "پرسیار لە مامۆستا بکە",
-      listening: "گوێت لێدەگرم…",
-      stopListen: "وەستانی گوێگرتن",
-      send: "ناردن",
-      continue: "بەردەوامی وانە",
-      objective: "ئامانج",
-      quiz: "تاقیکردنەوەی کورت",
-      summary: "پوختە",
-      showAnswer: "وەڵام پیشان بدە",
-      hideAnswer: "وەڵام بشارەوە",
-      placeholder: "پرسیارەکەت بنووسە…",
-      teacherReply: "وەڵامی مامۆستا",
-      interruptHint: "لە هەر کاتێک دەتوانیت بپرسیت",
-      completed: "زۆر باش! ئەم بەشە تەواو بوو.",
-      enableSound: "دەنگی مامۆستا چالاک بکە",
-      soundOn: "دەنگ کارا",
-      soundOff: "دەنگ ناکارا",
-      writing: "لەسەر تەختە دەنووسێت…",
-      tapToBegin: "بۆ دەستپێکردنی وانە دەست لێبدە",
-      tapHint: "مامۆستا قسە دەکات و لەسەر تەختە دەکێشێت",
+      liveVoice: "Canlı ses",
+      phaseReady: "Hazır",
+      phaseTeaching: "Anlatıyor",
+      phasePaused: "Duraklatıldı",
+      phaseListening: "Dinliyor",
+      phaseAnswering: "Yanıtlıyor",
+      phaseCompleted: "Tamamlandı",
+      progress: "İlerleme",
+      closeAsk: "Kapat",
     };
   }
   return {
     classroom: "Live classroom",
     voice: "Voice",
     text: "Text",
-    start: "Start lesson with voice",
+    start: "Start lesson",
     pause: "Pause",
     resume: "Resume",
     ask: "Ask teacher",
@@ -220,13 +225,33 @@ function t(locale: string): Labels {
     teacherReply: "Teacher reply",
     interruptHint: "Interrupt anytime by voice or text",
     completed: "Well done! This part is complete. Want another example?",
-    enableSound: "Enable teacher voice",
+    enableSound: "Enable sound",
     soundOn: "Sound on",
     soundOff: "Sound off",
     writing: "Writing on the board…",
     tapToBegin: "Tap to begin live lesson",
     tapHint: "Teacher speaks while drawing on the board",
+    liveVoice: "Live voice",
+    phaseReady: "Ready",
+    phaseTeaching: "Teaching",
+    phasePaused: "Paused",
+    phaseListening: "Listening",
+    phaseAnswering: "Answering",
+    phaseCompleted: "Completed",
+    progress: "Progress",
+    closeAsk: "Close",
   };
+}
+
+export function classroomOverlayLabels(locale?: string | null) {
+  const ui = normalizeUiLocale(locale);
+  if (ui === "ar") {
+    return { classroom: "الفصل المباشر", closeBoard: "إغلاق السبورة" };
+  }
+  if (ui === "tr") {
+    return { classroom: "Canlı sınıf", closeBoard: "Tahtayı kapat" };
+  }
+  return { classroom: "Live classroom", closeBoard: "Close board" };
 }
 
 function resolveColor(raw: unknown, fallback = "#1e293b"): string {
@@ -1091,129 +1116,86 @@ export function AiTeacherClassroom({
     }
   }
 
-  const dir = isRtlLang(lesson.language || locale) ? "rtl" : "ltr";
+  const uiLocale = normalizeUiLocale(locale);
+  const dir = uiLocale === "ar" ? "rtl" : "ltr";
   const boardRtl = isRtlLang(lesson.language || locale);
 
   const isWriting = board.some((b) => progressOf(b, clock) < 1) && phase === "teaching";
+  const progressPct = speech.length
+    ? Math.round(((Math.min(speechIndex + 1, speech.length)) / speech.length) * 100)
+    : 0;
+
+  const phaseLabel =
+    phase === "teaching"
+      ? labels.phaseTeaching
+      : phase === "paused"
+        ? labels.phasePaused
+        : phase === "listening"
+          ? labels.phaseListening
+          : phase === "answering"
+            ? labels.phaseAnswering
+            : phase === "completed"
+              ? labels.phaseCompleted
+              : labels.phaseReady;
 
   return (
     <div
-      className="relative overflow-hidden rounded-2xl border border-emerald-400/20 bg-[radial-gradient(ellipse_at_top,_#10261f_0%,_#071018_55%,_#050b12_100%)] text-slate-100 shadow-[0_25px_80px_-20px_rgba(16,185,129,0.35)]"
+      className="relative overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(165deg,#0b1220_0%,#111827_42%,#0a1628_100%)] text-slate-100 shadow-[0_40px_100px_-40px_rgba(0,0,0,0.75)]"
       dir={dir}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2.5">
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-300/90">
-            U Learn · {labels.classroom}
-          </p>
-          <h4 className="truncate text-base font-semibold leading-tight tracking-tight">
+      {/* Ambient glow */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-24 start-1/4 h-64 w-64 rounded-full bg-sky-500/10 blur-3xl"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -bottom-20 end-0 h-56 w-56 rounded-full bg-amber-400/10 blur-3xl"
+      />
+
+      {/* Top bar */}
+      <div className="relative z-10 flex flex-wrap items-start justify-between gap-3 border-b border-white/8 px-4 py-3.5 sm:px-5">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-300/90">
+              U Learn · {labels.classroom}
+            </p>
+            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-[10px] font-semibold text-slate-200">
+              {phaseLabel}
+            </span>
+          </div>
+          <h4 className="mt-1 truncate text-lg font-semibold leading-tight tracking-tight text-white sm:text-xl">
             {lesson.lesson_title}
           </h4>
           {lesson.objective ? (
-            <p className="mt-0.5 line-clamp-1 text-xs text-slate-400">
+            <p className="mt-1 line-clamp-2 text-sm text-slate-400">
               <span className="font-medium text-slate-300">{labels.objective}: </span>
               {lesson.objective}
             </p>
           ) : null}
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <div className="flex rounded-full border border-white/15 bg-white/5 p-0.5 text-xs">
-            <button
-              type="button"
-              className={cn(
-                "rounded-full px-2.5 py-1 font-semibold transition",
-                mode === "voice"
-                  ? "bg-emerald-500/30 text-emerald-50"
-                  : "text-slate-400"
-              )}
-              onClick={() => unlockVoice()}
-            >
-              {labels.voice}
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "rounded-full px-2.5 py-1 font-semibold transition",
-                mode === "text"
-                  ? "bg-emerald-500/30 text-emerald-50"
-                  : "text-slate-400"
-              )}
-              onClick={() => {
-                stopVoice();
-                soundEnabledRef.current = false;
-                setSoundEnabled(false);
-                setMode("text");
-                modeRef.current = "text";
-              }}
-            >
-              {labels.text}
-            </button>
+
+        <div className="flex w-full max-w-xs flex-col gap-1.5 sm:w-40">
+          <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            <span>{labels.progress}</span>
+            <span>
+              {speech.length
+                ? `${Math.min(speechIndex + 1, speech.length)}/${speech.length}`
+                : "0/0"}
+            </span>
           </div>
-          <button
-            type="button"
-            className={cn(
-              "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-              soundEnabled
-                ? "border-emerald-400/40 bg-emerald-500/20 text-emerald-100"
-                : "border-amber-400/40 bg-amber-400/15 text-amber-100"
-            )}
-            onClick={() => {
-              if (soundEnabled) {
-                stopVoice();
-                soundEnabledRef.current = false;
-                setSoundEnabled(false);
-              } else {
-                unlockVoice();
-              }
-            }}
-          >
-            {soundEnabled ? labels.soundOn : labels.enableSound}
-          </button>
-          {phase === "ready" || phase === "completed" ? (
-            <button
-              type="button"
-              className="rounded-full bg-emerald-400 px-3.5 py-1.5 text-xs font-bold text-emerald-950 shadow-lg shadow-emerald-500/25"
-              onClick={() => startWithVoice()}
-            >
-              {labels.start}
-            </button>
-          ) : null}
-          {phase === "teaching" ? (
-            <button
-              type="button"
-              className="rounded-full border border-white/20 px-3 py-1.5 text-xs font-semibold"
-              onClick={pauseTeaching}
-            >
-              {labels.pause}
-            </button>
-          ) : null}
-          {phase === "paused" || phase === "answering" ? (
-            <button
-              type="button"
-              className="rounded-full bg-emerald-400 px-3 py-1.5 text-xs font-bold text-emerald-950"
-              onClick={resumeTeaching}
-            >
-              {teacherReply ? labels.continue : labels.resume}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="rounded-full border border-amber-400/40 bg-amber-400/10 px-3 py-1.5 text-xs font-semibold text-amber-100"
-            onClick={() => {
-              if (mode === "voice") startListening();
-              else {
-                pauseTeaching();
-                setAskOpen(true);
-              }
-            }}
-          >
-            {phase === "listening" ? labels.listening : labels.ask}
-          </button>
+          <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 transition-[width] duration-500 ease-out"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
         </div>
       </div>
 
-      <div className="relative mx-3 mt-3 overflow-hidden rounded-2xl border border-emerald-500/15 bg-[#f4f7fb] shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-emerald-950/15 to-transparent" />
+      {/* Board stage */}
+      <div className="relative z-10 mx-3 mt-3 overflow-hidden rounded-[22px] border border-white/10 bg-[#f7fafc] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_20px_50px_-30px_rgba(0,0,0,0.55)] sm:mx-4">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-12 bg-gradient-to-b from-slate-900/10 to-transparent" />
         <svg
           viewBox={`0 0 ${BOARD_W} ${BOARD_H}`}
           className="aspect-[16/10] h-auto w-full"
@@ -1291,7 +1273,7 @@ export function AiTeacherClassroom({
                 >
                   {shown}
                   {p < 1 ? (
-                    <tspan fill="#10b981" fontWeight={700}>
+                    <tspan fill="#0ea5e9" fontWeight={700}>
                       |
                     </tspan>
                   ) : null}
@@ -1373,32 +1355,32 @@ export function AiTeacherClassroom({
         </svg>
 
         {isWriting ? (
-          <div className="absolute bottom-3 start-3 rounded-full bg-slate-900/70 px-3 py-1 text-[11px] font-semibold text-emerald-200 backdrop-blur">
+          <div className="absolute bottom-3 start-3 rounded-full bg-slate-900/75 px-3 py-1 text-[11px] font-semibold text-sky-200 backdrop-blur transition-opacity">
             {labels.writing}
           </div>
         ) : null}
 
         {phase === "ready" ? (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-gradient-to-b from-slate-950/55 via-slate-950/40 to-emerald-950/50 backdrop-blur-[2px]">
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-gradient-to-b from-slate-950/50 via-slate-950/35 to-slate-900/55 backdrop-blur-[2px] transition-opacity">
             <button
               type="button"
               onClick={() => startWithVoice()}
-              className="group mx-4 flex max-w-md flex-col items-center gap-3 rounded-3xl border border-emerald-300/30 bg-slate-950/85 px-8 py-7 text-center shadow-[0_20px_60px_-15px_rgba(16,185,129,0.55)] transition hover:scale-[1.02] hover:border-emerald-300/50"
+              className="group mx-4 flex max-w-md flex-col items-center gap-3 rounded-[28px] border border-white/15 bg-slate-950/90 px-8 py-8 text-center shadow-[0_30px_80px_-20px_rgba(14,165,233,0.45)] transition duration-300 hover:scale-[1.02] hover:border-sky-300/40"
             >
-              <span className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-400 text-emerald-950 shadow-lg shadow-emerald-400/40 transition group-hover:scale-105">
+              <span className="flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-full bg-gradient-to-br from-sky-400 to-emerald-400 text-slate-950 shadow-lg shadow-sky-400/30 transition group-hover:scale-105">
                 <svg
                   viewBox="0 0 24 24"
-                  className="ms-0.5 h-8 w-8 fill-current"
+                  className="ms-0.5 h-9 w-9 fill-current"
                   aria-hidden
                 >
                   <path d="M8 5.14v13.72L19 12 8 5.14z" />
                 </svg>
               </span>
-              <span className="text-lg font-bold tracking-tight text-white">
+              <span className="text-xl font-bold tracking-tight text-white">
                 {labels.tapToBegin}
               </span>
-              <span className="text-sm text-emerald-100/80">{labels.tapHint}</span>
-              <span className="text-[11px] font-medium text-slate-400">
+              <span className="text-sm text-slate-300">{labels.tapHint}</span>
+              <span className="text-[11px] font-medium text-slate-500">
                 {labels.interruptHint}
               </span>
             </button>
@@ -1406,63 +1388,179 @@ export function AiTeacherClassroom({
         ) : null}
 
         {(phase === "listening" || phase === "answering") && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-            <div className="rounded-2xl bg-slate-950/90 px-4 py-3 text-sm font-semibold text-emerald-100">
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/35 backdrop-blur-[1px]">
+            <div className="rounded-2xl border border-white/10 bg-slate-950/90 px-5 py-3.5 text-sm font-semibold text-sky-100 shadow-xl">
               {phase === "listening" ? labels.listening : labels.teacherReply}
             </div>
           </div>
         )}
       </div>
 
-      <div className="mx-3 mt-3 mb-3 rounded-2xl border border-emerald-400/15 bg-white/[0.06] px-3 py-2.5">
+      {/* Caption dock */}
+      <div className="relative z-10 mx-3 mt-3 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 backdrop-blur-md sm:mx-4">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-300/80">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-300/85">
             {phase === "completed"
               ? labels.summary
               : mode === "voice"
                 ? labels.voice
                 : labels.text}
-            {speech.length
-              ? ` · ${Math.min(speechIndex + 1, speech.length)}/${speech.length}`
-              : ""}
           </p>
           {voiceReady && soundEnabled ? (
-            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300/90">
-              Live voice
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-300">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+              {labels.liveVoice}
             </span>
           ) : null}
         </div>
-        <p className="mt-1 text-[15px] leading-relaxed text-slate-50">{caption || "…"}</p>
+        <p
+          key={caption}
+          className="mt-1.5 text-[16px] leading-relaxed text-slate-50 transition-opacity duration-300 sm:text-[17px]"
+        >
+          {caption || "…"}
+        </p>
       </div>
 
+      {/* Glass control bar */}
+      <div className="relative z-10 mx-3 mt-3 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-[22px] border border-white/12 bg-white/[0.07] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl sm:mx-4">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex rounded-full border border-white/10 bg-black/20 p-0.5 text-xs">
+            <button
+              type="button"
+              className={cn(
+                "rounded-full px-3 py-1.5 font-semibold transition",
+                mode === "voice"
+                  ? "bg-white/15 text-white"
+                  : "text-slate-400 hover:text-slate-200"
+              )}
+              onClick={() => unlockVoice()}
+            >
+              {labels.voice}
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "rounded-full px-3 py-1.5 font-semibold transition",
+                mode === "text"
+                  ? "bg-white/15 text-white"
+                  : "text-slate-400 hover:text-slate-200"
+              )}
+              onClick={() => {
+                stopVoice();
+                soundEnabledRef.current = false;
+                setSoundEnabled(false);
+                setMode("text");
+                modeRef.current = "text";
+              }}
+            >
+              {labels.text}
+            </button>
+          </div>
+          <button
+            type="button"
+            className={cn(
+              "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+              soundEnabled
+                ? "border-emerald-400/35 bg-emerald-500/15 text-emerald-100"
+                : "border-amber-400/35 bg-amber-400/10 text-amber-100"
+            )}
+            onClick={() => {
+              if (soundEnabled) {
+                stopVoice();
+                soundEnabledRef.current = false;
+                setSoundEnabled(false);
+              } else {
+                unlockVoice();
+              }
+            }}
+          >
+            {soundEnabled ? labels.soundOn : labels.enableSound}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {phase === "ready" || phase === "completed" ? (
+            <button
+              type="button"
+              className="rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 px-4 py-2 text-xs font-bold text-slate-950 shadow-lg shadow-sky-500/25 transition hover:brightness-110"
+              onClick={() => startWithVoice()}
+            >
+              {labels.start}
+            </button>
+          ) : null}
+          {phase === "teaching" ? (
+            <button
+              type="button"
+              className="rounded-full border border-white/20 bg-white/5 px-4 py-2 text-xs font-semibold transition hover:bg-white/10"
+              onClick={pauseTeaching}
+            >
+              {labels.pause}
+            </button>
+          ) : null}
+          {phase === "paused" || phase === "answering" ? (
+            <button
+              type="button"
+              className="rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 px-4 py-2 text-xs font-bold text-slate-950 shadow-lg shadow-sky-500/20"
+              onClick={resumeTeaching}
+            >
+              {teacherReply ? labels.continue : labels.resume}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="rounded-full border border-amber-300/35 bg-amber-400/10 px-4 py-2 text-xs font-semibold text-amber-50 transition hover:bg-amber-400/20"
+            onClick={() => {
+              if (mode === "voice") startListening();
+              else {
+                pauseTeaching();
+                setAskOpen(true);
+              }
+            }}
+          >
+            {phase === "listening" ? labels.listening : labels.ask}
+          </button>
+        </div>
+      </div>
+
+      {/* Ask slide-over panel */}
       {askOpen && (
-        <div className="mx-3 mb-3 space-y-2 rounded-2xl border border-amber-400/30 bg-amber-400/5 p-3">
+        <div className="relative z-20 mx-3 mb-4 space-y-3 rounded-[22px] border border-amber-300/25 bg-gradient-to-b from-amber-400/10 to-slate-950/80 p-4 shadow-2xl backdrop-blur-md sm:mx-4">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-amber-100">{labels.ask}</p>
+            <button
+              type="button"
+              className="rounded-full border border-white/15 px-2.5 py-1 text-[11px] font-semibold text-slate-300"
+              onClick={() => setAskOpen(false)}
+            >
+              {labels.closeAsk}
+            </button>
+          </div>
           <textarea
             value={askText}
             onChange={(e) => setAskText(e.target.value)}
-            rows={2}
+            rows={3}
             placeholder={labels.placeholder}
-            className="w-full resize-none rounded-xl border border-white/15 bg-slate-950/50 px-3 py-2 text-sm outline-none focus:border-emerald-400/50"
+            className="w-full resize-none rounded-2xl border border-white/12 bg-slate-950/60 px-3.5 py-3 text-sm outline-none transition focus:border-sky-400/50"
           />
           <div className="flex justify-end gap-2">
             <button
               type="button"
               disabled={!askText.trim() || asking}
               onClick={() => void submitQuestion()}
-              className="rounded-full bg-emerald-400 px-3 py-1.5 text-xs font-bold text-emerald-950 disabled:opacity-50"
+              className="rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 px-4 py-2 text-xs font-bold text-slate-950 disabled:opacity-50"
             >
               {asking ? "…" : labels.send}
             </button>
           </div>
           {teacherReply ? (
-            <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-sm">
-              <p className="text-[11px] font-semibold text-emerald-300">
+            <div className="rounded-2xl border border-sky-400/20 bg-sky-500/10 px-3.5 py-3 text-sm">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-300">
                 {labels.teacherReply}
               </p>
-              <p className="mt-1 text-slate-100">{teacherReply}</p>
+              <p className="mt-1.5 leading-relaxed text-slate-100">{teacherReply}</p>
               <button
                 type="button"
-                className="mt-2 text-xs font-semibold text-emerald-200 underline"
+                className="mt-3 text-xs font-semibold text-sky-200 underline"
                 onClick={resumeTeaching}
               >
                 {labels.continue}
@@ -1473,9 +1571,11 @@ export function AiTeacherClassroom({
       )}
 
       {phase === "completed" && lesson.summary?.length > 0 && (
-        <div className="mx-3 mb-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
-          <p className="text-xs font-semibold text-slate-300">{labels.summary}</p>
-          <ul className="mt-1 list-disc space-y-1 ps-4 text-sm text-slate-200">
+        <div className="relative z-10 mx-3 mb-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 sm:mx-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+            {labels.summary}
+          </p>
+          <ul className="mt-2 list-disc space-y-1.5 ps-4 text-sm text-slate-200">
             {lesson.summary.map((s, i) => (
               <li key={i}>{cleanBoardText(s) || s}</li>
             ))}
@@ -1484,18 +1584,20 @@ export function AiTeacherClassroom({
       )}
 
       {phase === "completed" && lesson.quiz?.length > 0 && (
-        <div className="mx-3 mb-3 space-y-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
-          <p className="text-xs font-semibold text-slate-300">{labels.quiz}</p>
+        <div className="relative z-10 mx-3 mb-4 space-y-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 sm:mx-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+            {labels.quiz}
+          </p>
           {lesson.quiz.map((q, qi) => (
             <div
               key={qi}
-              className="rounded-xl border border-white/10 bg-slate-950/40 p-2.5"
+              className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"
             >
               <p className="text-sm font-medium">
                 {qi + 1}. {q.question}
               </p>
               {q.choices?.length > 0 && (
-                <ul className="mt-1 space-y-1 text-sm text-slate-300">
+                <ul className="mt-1.5 space-y-1 text-sm text-slate-300">
                   {q.choices.map((c, ci) => (
                     <li key={ci}>
                       {String.fromCharCode(65 + ci)}. {c}
@@ -1505,7 +1607,7 @@ export function AiTeacherClassroom({
               )}
               <button
                 type="button"
-                className="mt-2 text-xs font-semibold text-emerald-300 hover:underline"
+                className="mt-2 text-xs font-semibold text-sky-300 hover:underline"
                 onClick={() =>
                   setQuizReveal((prev) => ({ ...prev, [qi]: !prev[qi] }))
                 }
@@ -1513,7 +1615,7 @@ export function AiTeacherClassroom({
                 {quizReveal[qi] ? labels.hideAnswer : labels.showAnswer}
               </button>
               {quizReveal[qi] ? (
-                <p className="mt-1 text-sm text-emerald-200">{q.answer}</p>
+                <p className="mt-1.5 text-sm text-emerald-200">{q.answer}</p>
               ) : null}
             </div>
           ))}

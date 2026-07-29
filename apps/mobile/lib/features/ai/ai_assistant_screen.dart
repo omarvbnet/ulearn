@@ -467,6 +467,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
 
   Future<void> _openLiveClassroom(Map<String, dynamic> lesson) async {
     if (!mounted) return;
+    final l10n = context.l10n;
     await showGeneralDialog(
       context: context,
       barrierDismissible: false,
@@ -475,34 +476,65 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       pageBuilder: (ctx, a1, a2) {
         return SafeArea(
           child: Material(
-            color: const Color(0xFF050B14),
+            color: const Color(0xFF070B14),
             child: Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.28),
+                    border: Border(
+                      bottom: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.1),
+                      ),
+                    ),
+                  ),
                   child: Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          lesson['lesson_title']?.toString() ??
-                              context.l10n.t('mobile.ai.aiTeacherClassroom'),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 16,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'U Learn · ${l10n.t('mobile.ai.aiTeacherClassroom')}',
+                              style: const TextStyle(
+                                color: Color(0xFF7DD3FC),
+                                fontWeight: FontWeight.w800,
+                                fontSize: 11,
+                                letterSpacing: 1.1,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              lesson['lesson_title']?.toString() ??
+                                  l10n.t('mobile.ai.aiTeacherClassroom'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      IconButton(
+                      TextButton(
                         onPressed: () => Navigator.of(ctx).pop(),
-                        icon: const Icon(Icons.close, color: Colors.white),
+                        child: Text(
+                          l10n.t('mobile.ai.aiTeacherCloseBoard'),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 ),
                 Expanded(
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
                     child: AiTeacherClassroom(
                       lesson: lesson,
                       onAskTeacher: (question, pausedIndex) =>

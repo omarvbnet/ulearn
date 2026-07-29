@@ -1779,6 +1779,8 @@ enum AiProviderType {
   DEEPSEEK
   JINA
   FLUX
+  /// ElevenLabs text-to-speech (AI Teacher classroom voice)
+  ELEVENLABS
 }
 
 enum AiProviderStatus {

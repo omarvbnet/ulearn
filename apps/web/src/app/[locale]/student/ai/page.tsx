@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, PageHeader } from "@/components/ui";
 import {
   AiTeacherClassroom,
+  classroomOverlayLabels,
 } from "@/components/ai/ai-teacher-classroom";
 import type { AiTeacherLessonView } from "@/components/ai/ai-teacher-lesson-card";
 import { useT } from "@/i18n/client";
@@ -1212,10 +1213,14 @@ export default function StudentAiPage() {
                   : pickerMode === "ai_teacher"
                     ? locale === "ar"
                       ? "ابدأ درس المعلم الصوتي"
-                      : "Start voice board lesson"
-                  : locale === "ar"
-                    ? "شرح مع رسم الأشكال"
-                    : "Explain with shapes"}
+                      : locale === "tr"
+                        ? "Sesli tahta dersini başlat"
+                        : "Start voice board lesson"
+                    : locale === "ar"
+                      ? "شرح مع رسم الأشكال"
+                      : locale === "tr"
+                        ? "Şekillerle açıkla"
+                        : "Explain with shapes"}
               </Button>
             </div>
           </Card>
@@ -1223,22 +1228,26 @@ export default function StudentAiPage() {
       )}
 
       {activeClassroom && (
-        <div className="fixed inset-0 z-[60] flex flex-col bg-[#050b14]">
-          <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
-                U Learn · {locale === "ar" ? "الفصل المباشر" : "Live classroom"}
+        <div
+          className="fixed inset-0 z-[60] flex flex-col bg-[#070b14]"
+          dir={locale === "ar" || locale === "ku" ? "rtl" : "ltr"}
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-black/30 px-4 py-3 backdrop-blur-md">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-300">
+                U Learn · {classroomOverlayLabels(locale).classroom}
               </p>
-              <h2 className="text-base font-semibold text-white">
+              <h2 className="truncate text-base font-semibold text-white">
                 {activeClassroom.lesson_title}
               </h2>
             </div>
             <Button
               type="button"
               variant="outline"
+              className="shrink-0 border-white/20 bg-white/5 text-white hover:bg-white/10"
               onClick={() => setActiveClassroom(null)}
             >
-              {locale === "ar" ? "إغلاق السبورة" : "Close board"}
+              {classroomOverlayLabels(locale).closeBoard}
             </Button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3 md:p-5">

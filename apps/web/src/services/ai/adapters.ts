@@ -680,6 +680,124 @@ export class AnthropicAdapter implements AiProviderAdapter {
   }
 }
 
+/** Default ElevenLabs public voices (multilingual-capable). */
+const ELEVENLABS_VOICES: Record<"ar" | "tr" | "en", string> = {
+  ar: "EXAVITQu4vr4xnSDxMaL", // Sarah
+  tr: "JBFqnCBsd6RMkjVDRZzb", // George
+  en: "onwK4e9ZLuTAKqWW03F9", // Daniel
+};
+
+function normalizeElevenLabsBase(baseUrl?: string | null): string {
+  const raw = (baseUrl || "https://api.elevenlabs.io").replace(/\/$/, "");
+  return raw.replace(/\/v1$/i, "");
+}
+
+function elevenLabsModelId(model?: string | null): string {
+  const m = (model || "").trim();
+  if (/^eleven[_-]/i.test(m)) return m;
+  return "eleven_multilingual_v2";
+}
+
+function elevenLabsVoiceId(
+  config: ProviderConfig,
+  input: SpeechSynthesisInput
+): string {
+  const override = (input.voice || config.apiVersion || "").trim();
+  if (override && !/^eleven[_-]/i.test(override)) return override;
+  // If admin put a voice id in the model field (custom), use it.
+  const model = (config.model || "").trim();
+  if (model && !/^eleven[_-]/i.test(model) && model.length >= 16) return model;
+  const lang = (input.language || "en").toLowerCase().slice(0, 2);
+  if (lang === "ar" || lang === "ku") return ELEVENLABS_VOICES.ar;
+  if (lang === "tr") return ELEVENLABS_VOICES.tr;
+  return ELEVENLABS_VOICES.en;
+}
+
+export class ElevenLabsAdapter implements AiProviderAdapter {
+  readonly type = "ELEVENLABS";
+
+  async chat(_config: ProviderConfig, _messages: ChatMessage[]): Promise<ChatResult> {
+    throw new Error(
+      "ElevenLabs is voice-only. Assign ELEVENLABS to VOICE_TTS for AI Teacher classroom speech."
+    );
+  }
+
+  async embed(_config: ProviderConfig, _text: string): Promise<EmbeddingResult> {
+    throw new Error("ElevenLabs does not provide embeddings — use Gemini, OpenAI, or Jina.");
+  }
+
+  async synthesizeSpeech(
+    config: ProviderConfig,
+    input: SpeechSynthesisInput
+  ): Promise<SpeechSynthesisResult> {
+    const text = input.text.trim().slice(0, 4000);
+    if (!text) throw new Error("Empty speech text");
+    const voiceId = elevenLabsVoiceId(config, input);
+    const modelId = elevenLabsModelId(config.model);
+    const base = normalizeElevenLabsBase(config.baseUrl);
+    const url = `${base}/v1/text-to-speech/${encodeURIComponent(voiceId)}`;
+    const lang = (input.language || "en").toLowerCase().slice(0, 2);
+    const languageCode = lang === "ku" ? "ar" : lang === "ar" || lang === "tr" || lang === "en" ? lang : "en";
+
+    const body: Record<string, unknown> = {
+      text,
+      model_id: modelId,
+      voice_settings: {
+        stability: 0.42,
+        similarity_boost: 0.8,
+        style: 0.15,
+        use_speaker_boost: true,
+      },
+    };
+    // language_code is supported on turbo/flash/v3 (ignored on multilingual_v2).
+    if (!/multilingual_v2/i.test(modelId)) {
+      body.language_code = languageCode;
+    }
+
+    const res = await fetchJson(
+      url,
+      {
+        method: "POST",
+        headers: {
+          Accept: "audio/mpeg",
+          "Content-Type": "application/json",
+          "xi-api-key": config.apiKey,
+        },
+        body: JSON.stringify(body),
+      },
+      Math.max(config.timeoutMs || 30000, 60000)
+    );
+    if (!res.ok) {
+      const raw = await res.text().catch(() => "");
+      throw new Error(
+        `ElevenLabs TTS failed (${res.status}) at ${url}${raw ? `: ${raw.slice(0, 220)}` : ""}`
+      );
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    const words = text.split(/\s+/).filter(Boolean).length;
+    return {
+      mimeType: "audio/mpeg",
+      dataBase64: buf.toString("base64"),
+      durationMs: Math.max(1500, Math.min(45000, words * 380)),
+    };
+  }
+
+  async testConnection(config: ProviderConfig) {
+    try {
+      await this.synthesizeSpeech(config, {
+        text: "OK",
+        language: "en",
+      });
+      return { ok: true, message: "ElevenLabs TTS connection OK" };
+    } catch (e) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "ElevenLabs test failed",
+      };
+    }
+  }
+}
+
 export function getAdapter(type: string): AiProviderAdapter {
   switch (type) {
     case "GEMINI":
@@ -696,6 +814,8 @@ export function getAdapter(type: string): AiProviderAdapter {
       return new JinaAdapter();
     case "FLUX":
       return new FluxAdapter();
+    case "ELEVENLABS":
+      return new ElevenLabsAdapter();
     case "ANTHROPIC":
       return new AnthropicAdapter();
     default:
@@ -721,6 +841,8 @@ export function defaultBaseUrlForType(type: string): string | null {
       return "https://api.jina.ai/v1";
     case "FLUX":
       return "https://api.bfl.ai";
+    case "ELEVENLABS":
+      return "https://api.elevenlabs.io";
     default:
       return null;
   }
@@ -745,13 +867,13 @@ export function jinaDefaultBaseUrl(model: string): string {
 /** True when this provider can run the EMBEDDING module. */
 export function providerSupportsEmbeddings(type: string, model?: string): boolean {
   if (type === "JINA") return isJinaEmbeddingModel(model || "jina-embeddings-v4");
-  if (type === "FLUX") return false;
+  if (type === "FLUX" || type === "ELEVENLABS") return false;
   return type === "GEMINI" || type === "OPENAI" || type === "OPENAI_COMPATIBLE";
 }
 
 /** True when this provider can run chat / completion modules. */
 export function providerSupportsChat(type: string, model?: string): boolean {
-  if (type === "FLUX") return false;
+  if (type === "FLUX" || type === "ELEVENLABS") return false;
   if (type === "JINA") return isJinaDeepSearchModel(model || "");
   return true;
 }
@@ -761,9 +883,9 @@ export function providerSupportsImageGeneration(type: string): boolean {
   return type === "FLUX";
 }
 
-/** True when this provider can run VOICE_TTS (OpenAI-compatible /audio/speech). */
+/** True when this provider can run VOICE_TTS (OpenAI speech or ElevenLabs). */
 export function providerSupportsSpeech(type: string): boolean {
-  return type === "OPENAI" || type === "OPENAI_COMPATIBLE";
+  return type === "OPENAI" || type === "OPENAI_COMPATIBLE" || type === "ELEVENLABS";
 }
 
 function defaultChatModel(type: string): string {
