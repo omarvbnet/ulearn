@@ -3,6 +3,10 @@
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, PageHeader } from "@/components/ui";
+import {
+  AiTeacherLessonCard,
+  type AiTeacherLessonView,
+} from "@/components/ai/ai-teacher-lesson-card";
 import { useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +17,7 @@ type ChatMsg = {
   exam?: PracticeExam | null;
   examDone?: boolean;
   result?: ExamResult | null;
+  aiTeacherLesson?: AiTeacherLessonView | null;
   file?: {
     fileName: string;
     mimeType?: string;
@@ -271,7 +276,8 @@ export default function StudentAiPage() {
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          text: data.answer || "",
+          text: data.aiTeacherLesson ? "" : data.answer || "",
+          aiTeacherLesson: (data.aiTeacherLesson as AiTeacherLessonView) || null,
           file: edited
             ? {
                 fileName: edited.fileName,
@@ -290,6 +296,53 @@ export default function StudentAiPage() {
           id: crypto.randomUUID(),
           role: "assistant",
           text: e instanceof Error ? e.message : "Chat failed",
+        },
+      ]);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function sendAiTeacherLesson(question?: string) {
+    const q = (question ?? input).trim();
+    if (!q || sending) return;
+    setSending(true);
+    setInput("");
+    setMessages((m) => [
+      ...m,
+      { id: crypto.randomUUID(), role: "user", text: q },
+    ]);
+    try {
+      const res = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: q,
+          language: locale,
+          conversationId: conversationId || undefined,
+          mode: "ai_teacher",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "AI Teacher failed");
+      setConversationId(data.conversationId || conversationId);
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          text: data.aiTeacherLesson ? "" : data.answer || "",
+          aiTeacherLesson: (data.aiTeacherLesson as AiTeacherLessonView) || null,
+        },
+      ]);
+      void loadHistory();
+    } catch (e) {
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          text: e instanceof Error ? e.message : "AI Teacher failed",
         },
       ]);
     } finally {
@@ -606,6 +659,12 @@ export default function StudentAiPage() {
                     {m.text}
                   </div>
                 ) : null}
+                {m.aiTeacherLesson ? (
+                  <AiTeacherLessonCard
+                    lesson={m.aiTeacherLesson}
+                    locale={locale}
+                  />
+                ) : null}
                 {m.file ? (
                   <div className="space-y-2">
                     {(m.file.mimeType || "").startsWith("image/") ||
@@ -643,6 +702,21 @@ export default function StudentAiPage() {
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" onClick={openExamPicker} disabled={sending}>
               {t.student.aiGenerateExam}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={sending || !input.trim()}
+              onClick={() => void sendAiTeacherLesson()}
+              className="border-violet-500/40 text-violet-200 hover:bg-violet-500/10"
+            >
+              {locale === "ar"
+                ? "معلم السبورة AI"
+                : locale === "tr"
+                  ? "AI Tahta Öğretmeni"
+                  : locale === "ku"
+                    ? "مامۆستای تەختەی AI"
+                    : "AI Teacher (board)"}
             </Button>
             <label className="cursor-pointer rounded-lg border border-border px-3 py-2 text-sm hover:bg-white/5">
               Attach

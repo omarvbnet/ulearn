@@ -10,6 +10,12 @@ import {
   extractFollowUps,
 } from "./tutoring-prompt";
 import {
+  aiTeacherLessonToMarkdown,
+  buildAiTeacherSystemPrompt,
+  parseAiTeacherLesson,
+  type AiTeacherLesson,
+} from "./ai-teacher-prompt";
+import {
   languageInstruction,
   unavailableAnswer,
   type ChatAttachmentInput,
@@ -58,8 +64,14 @@ export class AiChatService {
     language?: string | null;
     lesson?: string | null;
     attachments?: ChatAttachmentInput[];
-    /** chat | practice_quiz | edit | explain_observe | from_materials */
-    mode?: "chat" | "practice_quiz" | "edit" | "explain_observe" | "from_materials";
+    /** chat | practice_quiz | edit | explain_observe | from_materials | ai_teacher */
+    mode?:
+      | "chat"
+      | "practice_quiz"
+      | "edit"
+      | "explain_observe"
+      | "from_materials"
+      | "ai_teacher";
     /** KB document ids for practice quiz / explain-observe material selection. */
     documentIds?: string[];
     /** Chapter/section title within the selected material. */
@@ -204,6 +216,27 @@ export class AiChatService {
         }
         throw e;
       }
+    }
+
+    // Individual option: whiteboard-first AI Teacher (strict JSON lessons).
+    if (input.mode === "ai_teacher") {
+      return this.runAiTeacherLesson({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        question,
+        language,
+        stageId,
+        subjectId,
+        subjectIds,
+        profile,
+        memory,
+        isCert,
+        studentName,
+        stageName,
+        interestNames,
+        grade,
+        attachments,
+      });
     }
 
     // Creative Studio: attachments are the escape hatch for external files.
@@ -905,6 +938,220 @@ export class AiChatService {
     });
   }
 
+  /**
+   * U Learn AI Teacher — individual whiteboard lesson option.
+   * Asks the model for strict JSON (speech + board actions + quiz).
+   */
+  private static async runAiTeacherLesson(input: {
+    userId: string;
+    conversationId?: string;
+    question: string;
+    language: string;
+    stageId: string | null;
+    subjectId: string | null;
+    subjectIds?: string[];
+    profile: {
+      role?: string | null;
+    } | null;
+    memory: Awaited<ReturnType<typeof StudentMemoryService.getOrCreate>>;
+    isCert: boolean;
+    studentName: string | null;
+    stageName: string | null;
+    interestNames: string[];
+    grade: string | number | null;
+    attachments: ChatAttachmentInput[];
+  }) {
+    const memoryBlurb = StudentMemoryService.toPromptBlurb({
+      ...input.memory,
+      examResults: input.memory.examResults,
+    });
+    const isLearner =
+      input.profile?.role === "STUDENT" ||
+      input.profile?.role === "CERTIFICATE_USER";
+    const learningCtx = isLearner
+      ? await StudentLearningContextService.build({
+          userId: input.userId,
+          language: input.language,
+          stageId: input.stageId,
+          subjectIds: input.subjectId
+            ? [input.subjectId]
+            : input.subjectIds,
+          role: input.profile?.role,
+        })
+      : null;
+
+    const studentBlurb = [
+      input.studentName ? `Student name: ${input.studentName}` : null,
+      input.stageName
+        ? input.isCert
+          ? `Professional track: ${input.stageName}`
+          : `Educational stage: ${input.stageName}`
+        : null,
+      input.interestNames.length
+        ? `Areas of interest: ${input.interestNames.join(", ")}`
+        : null,
+      input.grade != null && String(input.grade).trim()
+        ? `Grade: ${String(input.grade)}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("; ");
+
+    let materialContext = "";
+    try {
+      const emb = await EmbeddingService.embedText(input.question, input.userId);
+      if (emb?.length) {
+        const hits = await VectorSearchService.search(emb, {
+          educationalStageId: input.stageId,
+          subjectId: input.subjectId,
+          subjectIds: input.subjectId ? undefined : input.subjectIds,
+          topK: TOP_K,
+          minSimilarity: MIN_SIMILARITY,
+          preferLanguage: input.language,
+          stageStrict: true,
+        });
+        if (hits.length) {
+          materialContext = compressContext(hits);
+        }
+      }
+    } catch {
+      /* optional grounding */
+    }
+
+    const processed =
+      input.attachments.length > 0
+        ? await processAttachments(input.attachments, input.userId)
+        : { textExcerpt: "", imageParts: [] as ChatContentPart[] };
+
+    const system = [
+      buildAiTeacherSystemPrompt({
+        language: input.language,
+        studentBlurb: studentBlurb || undefined,
+        memoryBlurb: memoryBlurb || undefined,
+        learningCtxBlurb: learningCtx?.promptBlurb || undefined,
+      }),
+      materialContext
+        ? `\nOptional curriculum excerpts (use when relevant; do not invent citations):\n${materialContext}`
+        : "",
+      processed.textExcerpt
+        ? `\nStudent attachment text:\n${processed.textExcerpt}`
+        : "",
+      "",
+      "Return ONLY the JSON object for this teaching request. No markdown.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const history = input.conversationId
+      ? await prisma.aiMessage.findMany({
+          where: { conversationId: input.conversationId },
+          orderBy: { createdAt: "desc" },
+          take: 8,
+          select: { role: true, content: true },
+        })
+      : [];
+
+    const userParts: ChatContentPart[] = [...processed.imageParts];
+    const messages: ChatMessage[] = [
+      { role: "system", content: system },
+      ...history.reverse().map((m) => ({
+        role: (m.role === "ASSISTANT" ? "assistant" : "user") as
+          | "assistant"
+          | "user",
+        content: m.content,
+      })),
+      {
+        role: "user",
+        content: [
+          "Teach me this topic as U Learn AI Teacher (whiteboard lesson JSON):",
+          input.question,
+        ].join("\n"),
+        parts: userParts.length ? userParts : undefined,
+      },
+    ];
+
+    const result = await AiProviderService.chat(
+      "TEACHING_ASSISTANT",
+      messages,
+      input.userId
+    );
+    const raw = result.text.trim();
+    let lesson = parseAiTeacherLesson(raw);
+
+    // One repair pass if the model returned prose / broken JSON.
+    if (!lesson) {
+      const repair = await AiProviderService.chat(
+        "TEACHING_ASSISTANT",
+        [
+          {
+            role: "system",
+            content:
+              "Convert the teaching content into valid U Learn AI Teacher JSON only. No markdown fences.",
+          },
+          {
+            role: "user",
+            content: `Topic: ${input.question}\n\nDraft:\n${raw.slice(0, 12000)}`,
+          },
+        ],
+        input.userId
+      );
+      lesson = parseAiTeacherLesson(repair.text);
+    }
+
+    if (!lesson) {
+      const fail =
+        input.language === "ar"
+          ? "تعذر تجهيز درس السبورة الآن. أعد المحاولة بصياغة أوضح للموضوع."
+          : input.language === "tr"
+            ? "Tahta dersi şu an hazırlanamadı. Konuyu daha net yazıp tekrar deneyin."
+            : input.language === "ku"
+              ? "وانەی تەختە ئامادە نەبوو. بابەتەکە ڕوونتر بنووسە و دووبارە هەوڵ بدە."
+              : "Could not prepare the whiteboard lesson. Try rephrasing the topic.";
+      return this.persistTurn({
+        userId: input.userId,
+        conversationId: input.conversationId,
+        question: input.question,
+        answer: fail,
+        citations: [],
+        fromCache: false,
+        attachmentNames: input.attachments.map((a) => a.fileName),
+      });
+    }
+
+    // Prefer student’s UI language when model omits it.
+    if (!lesson.language) lesson.language = input.language;
+
+    void StudentMemoryService.recordQuestion(
+      input.userId,
+      input.question,
+      input.subjectId
+    );
+
+    const answer = aiTeacherLessonToMarkdown(lesson);
+    return this.persistTurn({
+      userId: input.userId,
+      conversationId: input.conversationId,
+      question: input.question,
+      answer,
+      citations: [],
+      fromCache: false,
+      attachmentNames: input.attachments.map((a) => a.fileName),
+      aiTeacherLesson: lesson,
+      followUps: [
+        input.language === "ar"
+          ? "مثال آخر أبسط من فضلك"
+          : input.language === "tr"
+            ? "Daha basit başka bir örnek isterim"
+            : "Give me another simpler example",
+        input.language === "ar"
+          ? "اشرح بمزيد من التفصيل"
+          : input.language === "tr"
+            ? "Daha ayrıntılı anlat"
+            : "Explain in more detail",
+      ],
+    });
+  }
+
   /** Merge / design / image tools triggered from natural chat + attachments. */
   private static async runCreativeInChat(input: {
     userId: string;
@@ -1375,6 +1622,7 @@ export class AiChatService {
     examAttemptId?: string;
     courseSuggestions?: unknown;
     followUps?: string[];
+    aiTeacherLesson?: AiTeacherLesson;
   }) {
     let conversationId = input.conversationId;
     if (!conversationId) {
@@ -1414,6 +1662,9 @@ export class AiChatService {
         ? { courseSuggestions: input.courseSuggestions }
         : {}),
       ...(input.followUps?.length ? { followUps: input.followUps } : {}),
+      ...(input.aiTeacherLesson
+        ? { aiTeacherLesson: input.aiTeacherLesson }
+        : {}),
     };
 
     const assistant = await prisma.aiMessage.create({
@@ -1437,6 +1688,7 @@ export class AiChatService {
       practiceQuiz: input.practiceQuiz,
       examAttemptId: input.examAttemptId,
       courseSuggestions: input.courseSuggestions,
+      aiTeacherLesson: input.aiTeacherLesson,
     };
   }
 }

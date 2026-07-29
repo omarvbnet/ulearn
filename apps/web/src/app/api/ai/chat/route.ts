@@ -24,7 +24,16 @@ const schema = z.object({
   courseId: z.string().optional(),
   language: z.string().max(16).optional(),
   lesson: z.string().optional(),
-  mode: z.enum(["chat", "practice_quiz", "edit", "explain_observe", "from_materials"]).optional(),
+  mode: z
+    .enum([
+      "chat",
+      "practice_quiz",
+      "edit",
+      "explain_observe",
+      "from_materials",
+      "ai_teacher",
+    ])
+    .optional(),
   documentIds: z.array(z.string()).max(20).optional(),
   /** Chapter/section within the selected material */
   chapterHeading: z.string().max(200).nullable().optional(),

@@ -204,14 +204,21 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             if (t.isNotEmpty) followUps.add(t);
           }
         }
+        final lessonRaw = citationsMap?['aiTeacherLesson'];
+        final aiTeacherLesson = lessonRaw is Map
+            ? Map<String, dynamic>.from(lessonRaw)
+            : null;
         final content = m['content']?.toString() ?? '';
         bubbles.add(
           _ChatBubble(
             role: role == 'user' ? 'user' : 'assistant',
-            text: AiMessageContent.stripFollowUpMarkers(content),
+            text: aiTeacherLesson != null
+                ? ''
+                : AiMessageContent.stripFollowUpMarkers(content),
             exam: exam != null && exam.examAttemptId.isNotEmpty ? exam : null,
             examCompleted: exam != null,
             examResult: examResult,
+            aiTeacherLesson: aiTeacherLesson,
             courseSuggestions: suggestions,
             followUps: followUps.isNotEmpty
                 ? followUps
@@ -406,6 +413,79 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     }
   }
 
+  Future<void> _sendAiTeacher() async {
+    final q = _controller.text.trim();
+    if (q.isEmpty || _sending) return;
+    setState(() {
+      _sending = true;
+      _messages.add(_ChatBubble(role: 'user', text: q));
+      _controller.clear();
+    });
+    _scrollToEnd();
+    try {
+      final api = context.read<ApiClient>();
+      final auth = context.read<AuthProvider>();
+      final locale = context.read<LocaleProvider>().code.toLowerCase();
+      final data = await api.post('/api/ai/chat', {
+        'question': q,
+        'language': locale,
+        'mode': 'ai_teacher',
+        if (_conversationId != null) 'conversationId': _conversationId,
+        ..._stagePayload(auth),
+      });
+      if (!mounted) return;
+      if (data['needsUpgrade'] == true) {
+        setState(() => _aiLocked = true);
+        await _openUpgrade();
+        return;
+      }
+      final lessonRaw = data['aiTeacherLesson'];
+      final lesson = lessonRaw is Map
+          ? Map<String, dynamic>.from(lessonRaw)
+          : null;
+      final answer = data['answer']?.toString() ?? '';
+      final followUpsRaw = data['followUps'];
+      final followUps = <String>[];
+      if (followUpsRaw is List) {
+        for (final f in followUpsRaw) {
+          final t = f?.toString().trim() ?? '';
+          if (t.isNotEmpty) followUps.add(t);
+        }
+      }
+      setState(() {
+        _conversationId =
+            data['conversationId']?.toString() ?? _conversationId;
+        _messages.add(
+          _ChatBubble(
+            role: 'assistant',
+            text: lesson != null
+                ? ''
+                : AiMessageContent.stripFollowUpMarkers(answer),
+            followUps: followUps,
+            aiTeacherLesson: lesson,
+          ),
+        );
+      });
+      _scrollToEnd();
+      await _loadConversations();
+    } catch (e) {
+      if (!mounted) return;
+      _toast(e is ApiException ? e.message : context.l10n.t('mobile.ai.errorGeneric'));
+      setState(() {
+        _messages.add(
+          _ChatBubble(
+            role: 'assistant',
+            text: e is ApiException
+                ? e.message
+                : context.l10n.t('mobile.ai.errorGeneric'),
+          ),
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
   Future<void> _send() async {
     final q = _controller.text.trim();
     if ((q.isEmpty && _pending.isEmpty) || _sending) return;
@@ -526,7 +606,13 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       if (followUps.isEmpty) {
         followUps.addAll(AiMessageContent.inferFollowUps(answer));
       }
-      final cleanAnswer = AiMessageContent.stripFollowUpMarkers(answer);
+      final lessonRaw = data['aiTeacherLesson'];
+      final aiTeacherLesson = lessonRaw is Map
+          ? Map<String, dynamic>.from(lessonRaw)
+          : null;
+      final cleanAnswer = aiTeacherLesson != null
+          ? ''
+          : AiMessageContent.stripFollowUpMarkers(answer);
 
       Uint8List? editedPreview;
       final editedMime = edited?['mimeType']?.toString();
@@ -574,6 +660,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             editedImageBytes: editedPreview,
             followUps: followUps,
             courseSuggestions: suggestions,
+            aiTeacherLesson: aiTeacherLesson,
           ),
         );
       });
@@ -1230,6 +1317,36 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                                     _send();
                                                   },
                                           ),
+                                        if (m.aiTeacherLesson != null) ...[
+                                          if (m.text.isNotEmpty)
+                                            const SizedBox(height: 8),
+                                          _AiTeacherLessonCard(
+                                            lesson: m.aiTeacherLesson!,
+                                          ),
+                                          if (m.followUps.isNotEmpty) ...[
+                                            const SizedBox(height: 8),
+                                            Wrap(
+                                              spacing: 8,
+                                              runSpacing: 8,
+                                              children: m.followUps.map((p) {
+                                                return ActionChip(
+                                                  label: Text(
+                                                    p,
+                                                    style: const TextStyle(
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                  onPressed: _sending
+                                                      ? null
+                                                      : () {
+                                                          _controller.text = p;
+                                                          _sendAiTeacher();
+                                                        },
+                                                );
+                                              }).toList(),
+                                            ),
+                                          ],
+                                        ],
                                         if (m.editedImageBytes != null) ...[
                                           const SizedBox(height: 10),
                                           ClipRRect(
@@ -1556,6 +1673,27 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                     },
                     backgroundColor: AppTheme.card,
                     side: BorderSide(color: AppTheme.cardBorder),
+                  ),
+                  const SizedBox(width: 8),
+                  ActionChip(
+                    avatar: const Icon(Icons.slideshow_rounded, size: 16),
+                    label: Text(
+                      context.l10n.t('mobile.ai.aiTeacher'),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    onPressed: _sending
+                        ? null
+                        : () {
+                            final q = _controller.text.trim().isNotEmpty
+                                ? _controller.text.trim()
+                                : context.l10n.t('mobile.ai.aiTeacherPrompt');
+                            _controller.text = q;
+                            _sendAiTeacher();
+                          },
+                    backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
+                    side: BorderSide(
+                      color: AppTheme.accent.withValues(alpha: 0.45),
+                    ),
                   ),
                 ],
               ),
@@ -2238,6 +2376,7 @@ class _ChatBubble {
     this.examResult,
     this.courseSuggestions = const [],
     this.followUps = const [],
+    this.aiTeacherLesson,
     this.selectableMaterials = const [],
     this.selectableChapters = const [],
     this.pendingMaterialQuestion,
@@ -2261,12 +2400,167 @@ class _ChatBubble {
   final Map<String, dynamic>? examResult;
   final List<Map<String, dynamic>> courseSuggestions;
   final List<String> followUps;
+  final Map<String, dynamic>? aiTeacherLesson;
   final List<Map<String, dynamic>> selectableMaterials;
   final List<Map<String, dynamic>> selectableChapters;
   final String? pendingMaterialQuestion;
   final String? pendingMode;
   final List<String> pendingDocumentIds;
   final int? pendingCount;
+}
+
+class _AiTeacherLessonCard extends StatelessWidget {
+  const _AiTeacherLessonCard({required this.lesson});
+
+  final Map<String, dynamic> lesson;
+
+  String _fmt(num? ms) {
+    final s = ((ms ?? 0).toInt().clamp(0, 1 << 30)) ~/ 1000;
+    final m = s ~/ 60;
+    final r = s % 60;
+    return '$m:${r.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = lesson['lesson_title']?.toString() ?? 'Lesson';
+    final objective = lesson['objective']?.toString() ?? '';
+    final speech = (lesson['speech'] as List?) ?? const [];
+    final board = (lesson['whiteboard'] as List?) ?? const [];
+    final summary = (lesson['summary'] as List?) ?? const [];
+    final quiz = (lesson['quiz'] as List?) ?? const [];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF7C3AED).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFF7C3AED).withValues(alpha: 0.35),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            context.l10n.t('mobile.ai.aiTeacher'),
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFFA78BFA),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.foreground,
+            ),
+          ),
+          if (objective.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              objective,
+              style: TextStyle(fontSize: 13, color: AppTheme.muted),
+            ),
+          ],
+          if (speech.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              context.l10n.t('mobile.ai.aiTeacherSpeech'),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.muted,
+              ),
+            ),
+            const SizedBox(height: 6),
+            ...speech.take(8).map((s) {
+              if (s is! Map) return const SizedBox.shrink();
+              final map = Map<String, dynamic>.from(s);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '${_fmt(map['time'] as num?)}  ${map['text'] ?? ''}',
+                  style: TextStyle(fontSize: 13, color: AppTheme.foreground),
+                ),
+              );
+            }),
+            if (speech.length > 8)
+              Text(
+                '+${speech.length - 8}',
+                style: TextStyle(fontSize: 12, color: AppTheme.muted),
+              ),
+          ],
+          if (board.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              '${context.l10n.t('mobile.ai.aiTeacherBoard')} (${board.length})',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.muted,
+              ),
+            ),
+            const SizedBox(height: 4),
+            ...board.take(6).map((a) {
+              if (a is! Map) return const SizedBox.shrink();
+              final map = Map<String, dynamic>.from(a);
+              final params = map['parameters'];
+              final text = params is Map ? params['text']?.toString() : null;
+              return Text(
+                '${_fmt(map['time'] as num?)} · ${map['action'] ?? ''}'
+                '${text != null && text.isNotEmpty ? ' — $text' : ''}',
+                style: TextStyle(fontSize: 11, color: AppTheme.muted),
+              );
+            }),
+          ],
+          if (summary.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              context.l10n.t('mobile.ai.aiTeacherSummary'),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.muted,
+              ),
+            ),
+            ...summary.map(
+              (s) => Text(
+                '• ${s.toString()}',
+                style: TextStyle(fontSize: 13, color: AppTheme.foreground),
+              ),
+            ),
+          ],
+          if (quiz.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              context.l10n.t('mobile.ai.aiTeacherQuiz'),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.muted,
+              ),
+            ),
+            ...quiz.take(3).map((q) {
+              if (q is! Map) return const SizedBox.shrink();
+              final map = Map<String, dynamic>.from(q);
+              return Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  '${map['question'] ?? ''}',
+                  style: TextStyle(fontSize: 13, color: AppTheme.foreground),
+                ),
+              );
+            }),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class _CourseSuggestionsStrip extends StatelessWidget {
