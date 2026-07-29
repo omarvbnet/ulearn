@@ -84,6 +84,8 @@ PODS:
   - flutter_to_airplay (0.0.1):
     - Flutter
     - Mux-Stats-AVPlayer
+  - flutter_tts (0.0.1):
+    - Flutter
   - fvp (0.36.1):
     - Flutter
     - FlutterMacOS
@@ -180,6 +182,7 @@ DEPENDENCIES:
   - flutter_native_splash (from `.symlinks/plugins/flutter_native_splash/ios`)
   - flutter_secure_storage (from `.symlinks/plugins/flutter_secure_storage/ios`)
   - flutter_to_airplay (from `.symlinks/plugins/flutter_to_airplay/ios`)
+  - flutter_tts (from `.symlinks/plugins/flutter_tts/ios`)
   - fvp (from `.symlinks/plugins/fvp/darwin`)
   - gal (from `.symlinks/plugins/gal/darwin`)
   - in_app_purchase_storekit (from `.symlinks/plugins/in_app_purchase_storekit/darwin`)
@@ -240,6 +243,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/flutter_secure_storage/ios"
   flutter_to_airplay:
     :path: ".symlinks/plugins/flutter_to_airplay/ios"
+  flutter_tts:
+    :path: ".symlinks/plugins/flutter_tts/ios"
   fvp:
     :path: ".symlinks/plugins/fvp/darwin"
   gal:
@@ -292,6 +297,7 @@ SPEC CHECKSUMS:
   flutter_native_splash: df59bb2e1421aa0282cb2e95618af4dcb0c56c29
   flutter_secure_storage: d33dac7ae2ea08509be337e775f6b59f1ff45f12
   flutter_to_airplay: 3194fe6e4ca6ba1d9529c3c4194c32b9610d990f
+  flutter_tts: 91ad1884033cd95ef6e9338754adad54f01f090f
   fvp: 31bd2864ea7d58413f843a87e4168f9d609bf4e3
   gal: 6a522c75909f1244732d4596d11d6a2f86ff37a5
   GoogleDataTransport: aae35b7ea0c09004c3797d53c8c41f66f219d6a7

@@ -13,6 +13,7 @@ import {
   buildCompactAiTeacherPrompt,
   normalizeAiTeacherLesson,
   parseAiTeacherLesson,
+  sanitizeClassroomPlainText,
   type AiTeacherLesson,
 } from "./ai-teacher-prompt";
 import {
@@ -1163,24 +1164,33 @@ export class AiChatService {
     const raw = result.text.trim();
     let lesson = parseAiTeacherLesson(raw);
 
-    // Hard fallback — no extra LLM repair (those caused multi-minute delays).
+    // Hard fallback — NEVER strip JSON braces into key:value speech (that leaked on boards).
     if (!lesson) {
-      const source = raw
-        .replace(/```[\s\S]*?```/g, " ")
-        .replace(/[{}\[\]"]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-      const sentences = (source || input.question)
-        .split(/(?<=[.!؟!])/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 12 && !s.startsWith("{"))
-        .slice(0, 6);
-      const speech = (sentences.length ? sentences : [input.question]).map(
-        (text, i) => ({
-          time: i * 7000,
-          text: text.slice(0, 220),
-        })
-      );
+      const q = sanitizeClassroomPlainText(input.question, 160) || input.question.slice(0, 160);
+      const lines =
+        input.language === "ar"
+          ? [
+              "مرحباً، لنبدأ درس اليوم معاً.",
+              q,
+              "سأكتب على السبورة سطراً واحداً في كل مرة.",
+              "راقب الرسم بينما أشرح.",
+              "هل تريد مثالاً أبسط؟",
+            ]
+          : input.language === "tr"
+            ? [
+                "Merhaba, bugünkü derse birlikte başlayalım.",
+                q,
+                "Tahtaya her seferinde yalnızca bir satır yazacağım.",
+                "Anlatırken çizimleri izle.",
+                "Daha basit bir örnek ister misin?",
+              ]
+            : [
+                "Hello — let's start today's lesson together.",
+                q,
+                "I will write only one board line at a time.",
+                "Watch the drawings while I explain.",
+                "Want a simpler example?",
+              ];
       lesson = normalizeAiTeacherLesson({
         language: input.language || "en",
         lesson_title:
@@ -1188,18 +1198,12 @@ export class AiChatService {
             ? "درس تفاعلي"
             : input.language === "tr"
               ? "Etkileşimli Ders"
-              : input.language === "ku"
-                ? "وانەی هاوکاری"
-                : "Interactive Lesson",
-        objective: input.question.slice(0, 160),
-        speech,
+              : "Interactive Lesson",
+        objective: q,
+        speech: lines.map((text, i) => ({ time: i * 7000, text })),
         whiteboard: [],
         quiz: [],
-        summary: [
-          input.language === "ar"
-            ? "يمكنني الآن إكمال الشرح خطوة بخطوة."
-            : "I can continue step by step with more examples.",
-        ],
+        summary: [q].filter(Boolean),
       });
     }
 

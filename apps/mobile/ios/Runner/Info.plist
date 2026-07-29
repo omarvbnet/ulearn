@@ -42,7 +42,9 @@
 	<key>NSCameraUsageDescription</key>
 	<string>U Learn may use the camera so you can take a profile photo, capture a national ID during registration, or attach images for AI Creative and course materials.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>U Learn may use the microphone when teachers record or upload lesson videos and related educational media.</string>
+	<string>U Learn may use the microphone when teachers record or upload lesson videos, and when students talk to the AI Teacher in live classroom.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>U Learn uses speech recognition so students can ask the AI Teacher by talking during live classroom lessons.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>U Learn needs permission to save generated educational images and downloads to your Photos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

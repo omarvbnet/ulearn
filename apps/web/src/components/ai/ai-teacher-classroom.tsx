@@ -7,7 +7,6 @@ import type { AiTeacherLessonView } from "./ai-teacher-lesson-card";
 const BOARD_W = 1920;
 const BOARD_H = 1080;
 
-type Mode = "voice" | "text";
 type Phase =
   | "ready"
   | "teaching"
@@ -323,14 +322,28 @@ function cleanBoardText(raw: unknown): string {
       return "";
     }
   }
-  if (/^["']?(text|x|y|color|size|action|parameters|cx|cy|width)["']?\s*:/i.test(s)) {
+  // Block schema dumps that leaked from failed JSON fallbacks
+  if (
+    /\b(language|lesson_title|objective|whiteboard|speech|quiz|summary|parameters|action)\s*:/i.test(
+      s
+    )
+  ) {
+    return "";
+  }
+  s = s
+    .replace(/,?\s*text\s*:\s*/gi, " ")
+    .replace(/,?\s*time\s*:\s*\d+/gi, " ")
+    .trim();
+  if (/^["']?(text|x|y|color|size|action|parameters|cx|cy|width|time)["']?\s*:/i.test(s)) {
     return "";
   }
   if (/"x"\s*:/.test(s) && /"y"\s*:/.test(s)) return "";
   if (s.includes('"parameters"') || s.includes('"action"')) return "";
-  // Strip accidental code fences
   s = s.replace(/^```[\w]*\n?/, "").replace(/\n?```$/, "").trim();
-  return s.slice(0, 180);
+  const first = (s.split(/\n/)[0] || s).split(/(?<=[.!?؟。])\s+/)[0] || s;
+  s = first.replace(/\s+/g, " ").trim();
+  if (s.length < 2) return "";
+  return s.slice(0, 90);
 }
 
 function estimateSpeakMs(text: string): number {
@@ -584,22 +597,7 @@ function getSpeechRecognition(): (new () => SpeechRecognitionLike) | null {
   return w.SpeechRecognition || w.webkitSpeechRecognition || null;
 }
 
-function pickVoice(lang: string): SpeechSynthesisVoice | null {
-  if (typeof window === "undefined" || !window.speechSynthesis) return null;
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return null;
-  const primary = lang.slice(0, 2).toLowerCase();
-  return (
-    voices.find((v) => v.lang?.toLowerCase() === lang.toLowerCase()) ||
-    voices.find((v) => v.lang?.toLowerCase().startsWith(primary)) ||
-    voices.find((v) => v.default) ||
-    voices[0] ||
-    null
-  );
-}
-
-/** Keep a strong ref so Chrome does not GC the utterance mid-speech. */
-let activeUtterance: SpeechSynthesisUtterance | null = null;
+/** Keep a strong ref so Chrome does not GC mid-playback. */
 let activeCloudAudio: HTMLAudioElement | null = null;
 
 function clearTtsWatch() {
@@ -609,20 +607,6 @@ function clearTtsWatch() {
     clearInterval(w.__ulearnTtsTimer);
     w.__ulearnTtsTimer = undefined;
   }
-}
-
-function startTtsWatch() {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
-  clearTtsWatch();
-  const w = window as unknown as { __ulearnTtsTimer?: ReturnType<typeof setInterval> };
-  // Chrome quirk: speechSynthesis pauses silently after ~15s without resume().
-  w.__ulearnTtsTimer = setInterval(() => {
-    try {
-      if (window.speechSynthesis.speaking) window.speechSynthesis.resume();
-    } catch {
-      /* ignore */
-    }
-  }, 3500);
 }
 
 async function fetchCloudSpeech(
@@ -667,19 +651,15 @@ export function AiTeacherClassroom({
   }) => Promise<string>;
 }) {
   const labels = useMemo(() => t(locale), [locale]);
-  const [mode, setMode] = useState<Mode>("voice");
   const [phase, setPhase] = useState<Phase>("ready");
   const [board, setBoard] = useState<BoardItem[]>([]);
   const [clock, setClock] = useState(0);
   const [caption, setCaption] = useState("");
   const [speechIndex, setSpeechIndex] = useState(0);
-  const [askOpen, setAskOpen] = useState(false);
-  const [askText, setAskText] = useState("");
   const [teacherReply, setTeacherReply] = useState<string | null>(null);
   const [quizReveal, setQuizReveal] = useState<Record<number, boolean>>({});
   const [asking, setAsking] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(false);
-  const [voiceReady, setVoiceReady] = useState(false);
 
   const cancelledRef = useRef(false);
   const pausedRef = useRef(false);
@@ -690,16 +670,15 @@ export function AiTeacherClassroom({
   const rafRef = useRef<number | null>(null);
   const boardItemsRef = useRef<BoardItem[]>([]);
   const soundEnabledRef = useRef(false);
-  const modeRef = useRef<Mode>("voice");
 
   const speech = useMemo(
     () =>
       (lesson.speech || [])
         .map((s) => ({
           time: Math.max(0, Number(s.time) || 0),
-          text: cleanBoardText(s.text) || String(s.text || "").trim(),
+          text: cleanBoardText(s.text),
         }))
-        .filter((s) => s.text && !s.text.startsWith("{")),
+        .filter((s) => Boolean(s.text)),
     [lesson.speech]
   );
 
@@ -718,7 +697,6 @@ export function AiTeacherClassroom({
 
   const stopVoice = useCallback(() => {
     clearTtsWatch();
-    activeUtterance = null;
     if (activeCloudAudio) {
       try {
         activeCloudAudio.pause();
@@ -728,147 +706,55 @@ export function AiTeacherClassroom({
       }
       activeCloudAudio = null;
     }
-    if (typeof window !== "undefined" && window.speechSynthesis) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {
-        /* ignore */
-      }
-    }
   }, []);
 
   const unlockVoice = useCallback(() => {
-    // Prefer cloud AI voice; still warm device TTS as fallback unlock.
-    if (typeof window !== "undefined" && window.speechSynthesis) {
-      const synth = window.speechSynthesis;
-      synth.getVoices();
-      try {
-        const warm = new SpeechSynthesisUtterance(" ");
-        warm.volume = 0;
-        warm.rate = 2;
-        warm.lang = speechLang(locale);
-        activeUtterance = warm;
-        synth.speak(warm);
-        synth.resume();
-      } catch {
-        /* cloud path still works */
-      }
-    }
+    // Unlock audio playback for admin VOICE_TTS (cloud) — no device TTS.
     soundEnabledRef.current = true;
     setSoundEnabled(true);
-    setVoiceReady(true);
-    setMode("voice");
-    modeRef.current = "voice";
     return true;
-  }, [locale]);
-
-  const speakDevice = useCallback(
-    (text: string) =>
-      new Promise<void>((resolve) => {
-        if (typeof window === "undefined" || !window.speechSynthesis) {
-          resolve();
-          return;
-        }
-        const clean = cleanBoardText(text) || text.trim();
-        if (!clean) {
-          resolve();
-          return;
-        }
-        const synth = window.speechSynthesis;
-        try {
-          synth.cancel();
-        } catch {
-          /* ignore */
-        }
-        const utter = new SpeechSynthesisUtterance(clean);
-        activeUtterance = utter;
-        const lang = speechLang(lesson.language || locale);
-        utter.lang = lang;
-        utter.rate = 0.94;
-        utter.pitch = 1;
-        utter.volume = 1;
-        const voice = pickVoice(lang);
-        if (voice) utter.voice = voice;
-
-        let settled = false;
-        const finish = () => {
-          if (settled) return;
-          settled = true;
-          clearTtsWatch();
-          if (activeUtterance === utter) activeUtterance = null;
-          resolve();
-        };
-        const safety = window.setTimeout(finish, estimateSpeakMs(clean) + 5000);
-        utter.onend = () => {
-          window.clearTimeout(safety);
-          finish();
-        };
-        utter.onerror = () => {
-          window.clearTimeout(safety);
-          finish();
-        };
-
-        startTtsWatch();
-        try {
-          synth.speak(utter);
-          synth.resume();
-          window.setTimeout(() => {
-            try {
-              synth.resume();
-            } catch {
-              /* ignore */
-            }
-          }, 80);
-        } catch {
-          window.clearTimeout(safety);
-          finish();
-        }
-      }),
-    [lesson.language, locale]
-  );
+  }, []);
 
   const speak = useCallback(
     async (text: string) => {
-      if (!soundEnabledRef.current || modeRef.current !== "voice") return;
-      const clean = cleanBoardText(text) || text.trim();
+      if (!soundEnabledRef.current) return;
+      const clean = cleanBoardText(text);
       if (!clean) return;
 
       stopVoice();
       const lang = normalizeClassroomLang(lesson.language || locale);
+      // Admin VOICE_TTS only — never browser device voices.
       const cloud = await fetchCloudSpeech(clean, lang);
-      if (cloud) {
-        await new Promise<void>((resolve) => {
-          const audio = new Audio(`data:${cloud.mimeType};base64,${cloud.dataBase64}`);
-          activeCloudAudio = audio;
-          let settled = false;
-          const finish = () => {
-            if (settled) return;
-            settled = true;
-            if (activeCloudAudio === audio) activeCloudAudio = null;
-            resolve();
-          };
-          const safety = window.setTimeout(
-            finish,
-            (cloud.durationMs || estimateSpeakMs(clean)) + 4000
-          );
-          audio.onended = () => {
-            window.clearTimeout(safety);
-            finish();
-          };
-          audio.onerror = () => {
-            window.clearTimeout(safety);
-            finish();
-          };
-          audio.play().catch(() => {
-            window.clearTimeout(safety);
-            finish();
-          });
+      if (!cloud) return;
+      await new Promise<void>((resolve) => {
+        const audio = new Audio(`data:${cloud.mimeType};base64,${cloud.dataBase64}`);
+        activeCloudAudio = audio;
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          if (activeCloudAudio === audio) activeCloudAudio = null;
+          resolve();
+        };
+        const safety = window.setTimeout(
+          finish,
+          (cloud.durationMs || estimateSpeakMs(clean)) + 4000
+        );
+        audio.onended = () => {
+          window.clearTimeout(safety);
+          finish();
+        };
+        audio.onerror = () => {
+          window.clearTimeout(safety);
+          finish();
+        };
+        audio.play().catch(() => {
+          window.clearTimeout(safety);
+          finish();
         });
-        return;
-      }
-      await speakDevice(clean);
+      });
     },
-    [lesson.language, locale, speakDevice, stopVoice]
+    [lesson.language, locale, stopVoice]
   );
 
   const setBoardSmooth = useCallback((items: BoardItem[]) => {
@@ -876,7 +762,7 @@ export function AiTeacherClassroom({
     setBoard(items);
   }, []);
 
-  /** Append only new cues (keeps handwriting animation on prior strokes). */
+  /** Append cues with pen timing so only one write_text line animates at a time. */
   const applyBoardUntil = useCallback(
     (untilMs: number) => {
       let next = boardAppliedRef.current;
@@ -884,14 +770,23 @@ export function AiTeacherClassroom({
       let acc = boardItemsRef.current;
       let changed = false;
       const rtl = isRtlLang(lesson.language || locale);
+      let penAt = born;
       while (next < whiteboard.length && whiteboard[next]!.time <= untilMs) {
-        acc = applyCue(
-          acc,
-          whiteboard[next]!,
-          next,
-          born + (next - boardAppliedRef.current) * 55,
-          rtl
-        );
+        const cue = whiteboard[next]!;
+        const action = String(cue.action || "").toLowerCase();
+        const isText =
+          action === "write_text" ||
+          action === "draw_formula" ||
+          action === "draw_equation";
+        const start = isText ? penAt : born + (next - boardAppliedRef.current) * 40;
+        const before = acc.length;
+        acc = applyCue(acc, cue, next, start, rtl);
+        if (isText && acc.length > before) {
+          const last = acc[acc.length - 1];
+          if (last?.kind === "text") {
+            penAt = last.bornAt + last.writeMs + 280;
+          }
+        }
         next += 1;
         changed = true;
       }
@@ -919,20 +814,6 @@ export function AiTeacherClassroom({
     };
   }, []);
 
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    const load = () => {
-      if (window.speechSynthesis.getVoices().length) setVoiceReady(true);
-    };
-    load();
-    window.speechSynthesis.addEventListener("voiceschanged", load);
-    return () => window.speechSynthesis.removeEventListener("voiceschanged", load);
-  }, []);
-
-  useEffect(() => {
-    modeRef.current = mode;
-  }, [mode]);
-
   const waitWhilePaused = useCallback(async () => {
     while (pausedRef.current && !cancelledRef.current) {
       await new Promise((r) => setTimeout(r, 80));
@@ -946,7 +827,6 @@ export function AiTeacherClassroom({
       pausedRef.current = false;
       setPhase("teaching");
       setTeacherReply(null);
-      setAskOpen(false);
 
       if (fromIndex === 0) {
         resetBoardProgress();
@@ -965,7 +845,7 @@ export function AiTeacherClassroom({
           speech[i + 1]?.time ?? cue.time + estimateSpeakMs(cue.text);
         applyBoardUntil(cue.time + 200);
 
-        const useVoice = modeRef.current === "voice" && soundEnabledRef.current;
+        const useVoice = soundEnabledRef.current;
         // Speak ASAP (especially first cue) so it stays tied to the tap gesture.
         const speakPromise = useVoice ? speak(cue.text) : Promise.resolve();
 
@@ -976,12 +856,7 @@ export function AiTeacherClassroom({
         }
 
         const start = nowMs();
-        const maxWait = useVoice
-          ? estimateSpeakMs(cue.text) + 2500
-          : Math.max(
-              1600,
-              Math.min(estimateSpeakMs(cue.text), nextTime - cue.time || 3500)
-            );
+        const maxWait = estimateSpeakMs(cue.text) + 2500;
 
         while (nowMs() - start < maxWait) {
           if (runId !== runIdRef.current || cancelledRef.current) {
@@ -996,10 +871,7 @@ export function AiTeacherClassroom({
           applyBoardUntil(cue.time + Math.min(span, elapsed + 400));
 
           if (useVoice) {
-            const speaking =
-              Boolean(activeCloudAudio && !activeCloudAudio.paused) ||
-              window.speechSynthesis?.speaking ||
-              window.speechSynthesis?.pending;
+            const speaking = Boolean(activeCloudAudio && !activeCloudAudio.paused);
             if (!speaking && elapsed > 700) break;
           } else if (elapsed >= Math.min(span, estimateSpeakMs(cue.text))) {
             break;
@@ -1015,7 +887,7 @@ export function AiTeacherClassroom({
       applyBoardUntil(Number.POSITIVE_INFINITY);
       setPhase("completed");
       setCaption(labels.completed);
-      if (modeRef.current === "voice" && soundEnabledRef.current) {
+      if (soundEnabledRef.current) {
         await speak(labels.completed);
       }
     },
@@ -1051,7 +923,6 @@ export function AiTeacherClassroom({
   }
 
   function resumeTeaching() {
-    setAskOpen(false);
     setTeacherReply(null);
     pausedRef.current = false;
     setPhase("teaching");
@@ -1060,34 +931,39 @@ export function AiTeacherClassroom({
 
   function startListening() {
     pauseTeaching();
-    setAskOpen(true);
     setPhase("listening");
     const Ctor = getSpeechRecognition();
-    if (!Ctor || mode !== "voice") return;
+    if (!Ctor) {
+      setPhase("paused");
+      return;
+    }
     try {
       const rec = new Ctor();
       rec.lang = speechLang(lesson.language || locale);
       rec.continuous = false;
-      rec.interimResults = true;
+      rec.interimResults = false;
       rec.onresult = (ev) => {
         const parts: string[] = [];
         for (let i = 0; i < ev.results.length; i++) {
           const alt = ev.results[i]?.[0]?.transcript;
           if (alt) parts.push(alt);
         }
-        setAskText(parts.join(" ").trim());
+        const q = parts.join(" ").trim();
+        if (q) void submitQuestionWithText(q);
       };
       rec.onerror = () => setPhase("paused");
-      rec.onend = () => setPhase("paused");
+      rec.onend = () => {
+        /* submit handles phase */
+      };
       recognitionRef.current = rec;
       rec.start();
     } catch {
-      /* text fallback */
+      setPhase("paused");
     }
   }
 
-  async function submitQuestion() {
-    const q = askText.trim();
+  async function submitQuestionWithText(qRaw: string) {
+    const q = cleanBoardText(qRaw) || qRaw.trim();
     if (!q || asking) return;
     recognitionRef.current?.stop();
     setAsking(true);
@@ -1095,10 +971,7 @@ export function AiTeacherClassroom({
     pauseTeaching();
     try {
       const spokenSoFar = speech.slice(0, speechIdxRef.current + 1).map((s) => s.text);
-      let reply =
-        locale === "ar"
-          ? "سؤال ممتاز. دعنا نوضح هذه النقطة ثم نكمل من حيث توقفنا."
-          : "Excellent question. Let’s clarify this, then continue from where we paused.";
+      let reply = labels.completed;
       if (onAskTeacher) {
         reply = await onAskTeacher({
           question: q,
@@ -1107,9 +980,8 @@ export function AiTeacherClassroom({
           lessonTitle: lesson.lesson_title,
         });
       }
-      setTeacherReply(reply);
-      setAskText("");
-      if (modeRef.current === "voice" && soundEnabledRef.current) await speak(reply);
+      setTeacherReply(cleanBoardText(reply) || reply);
+      if (soundEnabledRef.current) await speak(reply);
     } finally {
       setAsking(false);
       setPhase("paused");
@@ -1400,13 +1272,9 @@ export function AiTeacherClassroom({
       <div className="relative z-10 mx-3 mt-3 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 backdrop-blur-md sm:mx-4">
         <div className="flex items-center justify-between gap-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-300/85">
-            {phase === "completed"
-              ? labels.summary
-              : mode === "voice"
-                ? labels.voice
-                : labels.text}
+            {phase === "completed" ? labels.summary : labels.voice}
           </p>
-          {voiceReady && soundEnabled ? (
+          {soundEnabled ? (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-300">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
               {labels.liveVoice}
@@ -1417,159 +1285,58 @@ export function AiTeacherClassroom({
           key={caption}
           className="mt-1.5 text-[16px] leading-relaxed text-slate-50 transition-opacity duration-300 sm:text-[17px]"
         >
-          {caption || "…"}
+          {cleanBoardText(caption) || "…"}
         </p>
+        {teacherReply ? (
+          <div className="mt-3 rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-2">
+            <p className="text-[11px] font-semibold text-sky-300">{labels.teacherReply}</p>
+            <p className="mt-1 text-sm text-slate-100">{teacherReply}</p>
+          </div>
+        ) : null}
       </div>
 
-      {/* Glass control bar */}
-      <div className="relative z-10 mx-3 mt-3 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-[22px] border border-white/12 bg-white/[0.07] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl sm:mx-4">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <div className="flex rounded-full border border-white/10 bg-black/20 p-0.5 text-xs">
-            <button
-              type="button"
-              className={cn(
-                "rounded-full px-3 py-1.5 font-semibold transition",
-                mode === "voice"
-                  ? "bg-white/15 text-white"
-                  : "text-slate-400 hover:text-slate-200"
-              )}
-              onClick={() => unlockVoice()}
-            >
-              {labels.voice}
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "rounded-full px-3 py-1.5 font-semibold transition",
-                mode === "text"
-                  ? "bg-white/15 text-white"
-                  : "text-slate-400 hover:text-slate-200"
-              )}
-              onClick={() => {
-                stopVoice();
-                soundEnabledRef.current = false;
-                setSoundEnabled(false);
-                setMode("text");
-                modeRef.current = "text";
-              }}
-            >
-              {labels.text}
-            </button>
-          </div>
+      {/* Voice-first control bar */}
+      <div className="relative z-10 mx-3 mt-3 mb-3 flex flex-wrap items-center justify-center gap-2 rounded-[22px] border border-white/12 bg-white/[0.07] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl sm:mx-4">
+        {phase === "ready" || phase === "completed" ? (
           <button
             type="button"
-            className={cn(
-              "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-              soundEnabled
-                ? "border-emerald-400/35 bg-emerald-500/15 text-emerald-100"
-                : "border-amber-400/35 bg-amber-400/10 text-amber-100"
-            )}
-            onClick={() => {
-              if (soundEnabled) {
-                stopVoice();
-                soundEnabledRef.current = false;
-                setSoundEnabled(false);
-              } else {
-                unlockVoice();
-              }
-            }}
+            className="rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 px-5 py-2.5 text-sm font-bold text-slate-950 shadow-lg shadow-sky-500/25"
+            onClick={() => startWithVoice()}
           >
-            {soundEnabled ? labels.soundOn : labels.enableSound}
+            {labels.start}
           </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          {phase === "ready" || phase === "completed" ? (
-            <button
-              type="button"
-              className="rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 px-4 py-2 text-xs font-bold text-slate-950 shadow-lg shadow-sky-500/25 transition hover:brightness-110"
-              onClick={() => startWithVoice()}
-            >
-              {labels.start}
-            </button>
-          ) : null}
-          {phase === "teaching" ? (
-            <button
-              type="button"
-              className="rounded-full border border-white/20 bg-white/5 px-4 py-2 text-xs font-semibold transition hover:bg-white/10"
-              onClick={pauseTeaching}
-            >
-              {labels.pause}
-            </button>
-          ) : null}
-          {phase === "paused" || phase === "answering" ? (
-            <button
-              type="button"
-              className="rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 px-4 py-2 text-xs font-bold text-slate-950 shadow-lg shadow-sky-500/20"
-              onClick={resumeTeaching}
-            >
-              {teacherReply ? labels.continue : labels.resume}
-            </button>
-          ) : null}
+        ) : null}
+        {phase === "teaching" ? (
           <button
             type="button"
-            className="rounded-full border border-amber-300/35 bg-amber-400/10 px-4 py-2 text-xs font-semibold text-amber-50 transition hover:bg-amber-400/20"
-            onClick={() => {
-              if (mode === "voice") startListening();
-              else {
-                pauseTeaching();
-                setAskOpen(true);
-              }
-            }}
+            className="rounded-full border border-white/20 bg-white/5 px-4 py-2 text-xs font-semibold"
+            onClick={pauseTeaching}
           >
-            {phase === "listening" ? labels.listening : labels.ask}
+            {labels.pause}
           </button>
-        </div>
+        ) : null}
+        {phase === "paused" || phase === "answering" ? (
+          <button
+            type="button"
+            className="rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 px-4 py-2 text-xs font-bold text-slate-950"
+            onClick={resumeTeaching}
+          >
+            {teacherReply ? labels.continue : labels.resume}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className={cn(
+            "rounded-full px-5 py-2.5 text-sm font-bold transition",
+            phase === "listening"
+              ? "bg-amber-400 text-amber-950 shadow-lg shadow-amber-500/30"
+              : "border border-amber-300/40 bg-amber-400/15 text-amber-50"
+          )}
+          onClick={() => startListening()}
+        >
+          {phase === "listening" ? labels.listening : labels.ask}
+        </button>
       </div>
-
-      {/* Ask slide-over panel */}
-      {askOpen && (
-        <div className="relative z-20 mx-3 mb-4 space-y-3 rounded-[22px] border border-amber-300/25 bg-gradient-to-b from-amber-400/10 to-slate-950/80 p-4 shadow-2xl backdrop-blur-md sm:mx-4">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-amber-100">{labels.ask}</p>
-            <button
-              type="button"
-              className="rounded-full border border-white/15 px-2.5 py-1 text-[11px] font-semibold text-slate-300"
-              onClick={() => setAskOpen(false)}
-            >
-              {labels.closeAsk}
-            </button>
-          </div>
-          <textarea
-            value={askText}
-            onChange={(e) => setAskText(e.target.value)}
-            rows={3}
-            placeholder={labels.placeholder}
-            className="w-full resize-none rounded-2xl border border-white/12 bg-slate-950/60 px-3.5 py-3 text-sm outline-none transition focus:border-sky-400/50"
-          />
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              disabled={!askText.trim() || asking}
-              onClick={() => void submitQuestion()}
-              className="rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 px-4 py-2 text-xs font-bold text-slate-950 disabled:opacity-50"
-            >
-              {asking ? "…" : labels.send}
-            </button>
-          </div>
-          {teacherReply ? (
-            <div className="rounded-2xl border border-sky-400/20 bg-sky-500/10 px-3.5 py-3 text-sm">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-300">
-                {labels.teacherReply}
-              </p>
-              <p className="mt-1.5 leading-relaxed text-slate-100">{teacherReply}</p>
-              <button
-                type="button"
-                className="mt-3 text-xs font-semibold text-sky-200 underline"
-                onClick={resumeTeaching}
-              >
-                {labels.continue}
-              </button>
-            </div>
-          ) : null}
-        </div>
-      )}
-
       {phase === "completed" && lesson.summary?.length > 0 && (
         <div className="relative z-10 mx-3 mb-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 sm:mx-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
