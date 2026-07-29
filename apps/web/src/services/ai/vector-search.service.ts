@@ -38,8 +38,19 @@ export type SearchFilters = {
   documentIds?: string[];
 };
 
+function isMissingEmbeddingVecError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  return (
+    msg.includes("embedding_vec") &&
+    (msg.includes("42703") || msg.includes("does not exist"))
+  );
+}
+
 export class VectorSearchService {
-  /** Avoid noisy Prisma logs: pre-check whether pgvector column exists. */
+  /**
+   * Avoid noisy Prisma logs: never query embedding_vec unless we know it exists.
+   * Cache stays false for the process lifetime after a missing-column failure.
+   */
   private static _embeddingVecAvailable: boolean | null = null;
 
   private static async embeddingVecExists(): Promise<boolean> {
@@ -47,9 +58,9 @@ export class VectorSearchService {
       return this._embeddingVecAvailable;
     }
     try {
-      const rows = await prisma.$queryRawUnsafe<
-        Array<{ exists: boolean }>
-      >(
+      // information_schema avoids a failing SELECT on a missing column
+      // (Prisma logs prisma:error for failed raw queries even when caught).
+      const rows = await prisma.$queryRawUnsafe<Array<{ exists: boolean }>>(
         `
         SELECT EXISTS(
           SELECT 1
@@ -62,11 +73,13 @@ export class VectorSearchService {
       );
       this._embeddingVecAvailable = Boolean(rows?.[0]?.exists);
     } catch {
-      // If anything goes wrong (no permissions, different DB, etc.),
-      // fall back to JS cosine similarity using the Float[] mirror.
       this._embeddingVecAvailable = false;
     }
     return this._embeddingVecAvailable;
+  }
+
+  private static markEmbeddingVecUnavailable() {
+    this._embeddingVecAvailable = false;
   }
 
   static async search(
@@ -79,22 +92,37 @@ export class VectorSearchService {
 
     // Stage-strict: try this stage's materials first, then unscoped fallback.
     if (stageId && filters.stageStrict !== false) {
-      const stageHits = await this.searchOnce(queryEmbedding, {
-        ...filters,
-        educationalStageId: stageId,
-        _stageMode: "exact",
-      }, topK, minSim);
+      const stageHits = await this.searchOnce(
+        queryEmbedding,
+        {
+          ...filters,
+          educationalStageId: stageId,
+          _stageMode: "exact",
+        },
+        topK,
+        minSim
+      );
       if (stageHits.length) return stageHits;
 
-      const unscoped = await this.searchOnce(queryEmbedding, {
-        ...filters,
-        educationalStageId: null,
-        _stageMode: "nullOnly",
-      }, topK, minSim);
+      const unscoped = await this.searchOnce(
+        queryEmbedding,
+        {
+          ...filters,
+          educationalStageId: null,
+          _stageMode: "nullOnly",
+        },
+        topK,
+        minSim
+      );
       return unscoped;
     }
 
-    return this.searchOnce(queryEmbedding, { ...filters, _stageMode: "legacy" }, topK, minSim);
+    return this.searchOnce(
+      queryEmbedding,
+      { ...filters, _stageMode: "legacy" },
+      topK,
+      minSim
+    );
   }
 
   private static async searchOnce(
@@ -103,8 +131,8 @@ export class VectorSearchService {
     topK: number,
     minSim: number
   ): Promise<RetrievedChunk[]> {
-    // Some environments (staging/prod) may not have applied the pgvector migration yet.
-    // Check once and prefer the existing JS fallback to avoid noisy raw-query errors.
+    // Some environments may not have applied the pgvector migration yet.
+    // Prefer JS fallback so Prisma never logs a raw-query 42703.
     if (!(await this.embeddingVecExists())) {
       return this.fallbackSearch(queryEmbedding, filters, topK, minSim);
     }
@@ -137,11 +165,15 @@ export class VectorSearchService {
         }
       } else if (filters.subjectId) {
         params.push(filters.subjectId);
-        clauses.push(`AND (d."subjectId" = $${params.length} OR d."subjectId" IS NULL)`);
+        clauses.push(
+          `AND (d."subjectId" = $${params.length} OR d."subjectId" IS NULL)`
+        );
       }
       if (filters.courseId) {
         params.push(filters.courseId);
-        clauses.push(`AND (d."courseId" = $${params.length} OR d."courseId" IS NULL)`);
+        clauses.push(
+          `AND (d."courseId" = $${params.length} OR d."courseId" IS NULL)`
+        );
       }
       if (filters.instructorId) {
         params.push(filters.instructorId);
@@ -200,7 +232,10 @@ export class VectorSearchService {
         topK,
         minSim
       );
-    } catch {
+    } catch (err) {
+      if (isMissingEmbeddingVecError(err)) {
+        this.markEmbeddingVecUnavailable();
+      }
       return this.fallbackSearch(queryEmbedding, filters, topK, minSim);
     }
   }
@@ -246,7 +281,9 @@ export class VectorSearchService {
           ? { OR: [{ courseId: filters.courseId }, { courseId: null }] }
           : {}),
         ...(filters.instructorId ? { instructorId: filters.instructorId } : {}),
-        ...(filters.documentIds?.length ? { id: { in: filters.documentIds } } : {}),
+        ...(filters.documentIds?.length
+          ? { id: { in: filters.documentIds } }
+          : {}),
       },
       select: { id: true, fileName: true },
       take: 200,
@@ -264,7 +301,10 @@ export class VectorSearchService {
         documentId: c.documentId,
         text: c.text,
         pageNumber: c.pageNumber,
-        similarity: EmbeddingService.cosineSimilarity(queryEmbedding, c.embedding),
+        similarity: EmbeddingService.cosineSimilarity(
+          queryEmbedding,
+          c.embedding
+        ),
         fileName: docMap.get(c.documentId) || "document",
         metadata: (c.metadata as Record<string, unknown>) || {},
       }))
@@ -274,6 +314,10 @@ export class VectorSearchService {
   }
 
   static async syncEmbeddingVec(chunkId: string, embedding: number[]) {
+    // Never issue UPDATE embedding_vec unless the column exists — Prisma still
+    // emits prisma:error for caught raw-query failures.
+    if (!(await this.embeddingVecExists())) return;
+
     const vec = `[${embedding.join(",")}]`;
     try {
       await prisma.$executeRaw`
@@ -281,7 +325,10 @@ export class VectorSearchService {
         SET embedding_vec = ${vec}::vector
         WHERE id = ${chunkId}
       `;
-    } catch {
+    } catch (err) {
+      if (isMissingEmbeddingVecError(err)) {
+        this.markEmbeddingVecUnavailable();
+      }
       // pgvector column may not exist yet — Prisma Float[] is enough for fallback.
     }
   }
