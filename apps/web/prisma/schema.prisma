@@ -1796,6 +1796,8 @@ enum AiModuleKey {
   PROFESSOR_DOCUMENT
   AI_CREATIVE
   AI_CREATIVE_IMAGE
+  /// Cloud text-to-speech for AI Teacher classroom (ar / tr / en)
+  VOICE_TTS
 }
 
 enum KbSourceType {

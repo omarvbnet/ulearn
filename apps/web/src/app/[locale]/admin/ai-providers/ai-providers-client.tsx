@@ -8,6 +8,7 @@ import {
   providerSupportsChat,
   providerSupportsEmbeddings,
   providerSupportsImageGeneration,
+  providerSupportsSpeech,
 } from "@/services/ai/adapters";
 
 type Provider = {
@@ -59,7 +60,21 @@ const MODULES = [
   "PROFESSOR_DOCUMENT",
   "AI_CREATIVE",
   "AI_CREATIVE_IMAGE",
+  "VOICE_TTS",
 ] as const;
+
+const MODULE_LABELS: Record<(typeof MODULES)[number], string> = {
+  TEACHING_ASSISTANT: "U Learn AI Teacher",
+  EXAM_GENERATOR: "Exam Generator",
+  OCR_ANALYSIS: "OCR Analysis",
+  EMBEDDING: "Embedding",
+  RECOMMENDATION: "Recommendation",
+  PROFESSOR_CONTENT: "Professor Content",
+  PROFESSOR_DOCUMENT: "Professor Document",
+  AI_CREATIVE: "AI Creative (Text/PPT)",
+  AI_CREATIVE_IMAGE: "AI Creative (Image)",
+  VOICE_TTS: "AI Teacher Voice (TTS)",
+};
 
 const PROVIDER_TYPES = [
   { value: "GEMINI", label: "Google Gemini" },
@@ -87,6 +102,9 @@ const MODELS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
     { value: "gpt-4.1", label: "gpt-4.1" },
     { value: "gpt-4.1-mini", label: "gpt-4.1-mini" },
     { value: "o4-mini", label: "o4-mini" },
+    { value: "tts-1-hd", label: "tts-1-hd (AI Teacher voice)" },
+    { value: "tts-1", label: "tts-1 (AI Teacher voice · faster)" },
+    { value: "gpt-4o-mini-tts", label: "gpt-4o-mini-tts (AI Teacher voice)" },
     { value: "text-embedding-3-small", label: "text-embedding-3-small (embeddings)" },
   ],
   ANTHROPIC: [
@@ -319,6 +337,10 @@ export function AiProvidersClient() {
             if (moduleKey === "AI_CREATIVE_IMAGE") {
               const flux = providers.find((p) => providerSupportsImageGeneration(p.type));
               return flux ? { moduleKey, providerId: flux.id } : null;
+            }
+            if (moduleKey === "VOICE_TTS") {
+              const voice = providers.find((p) => providerSupportsSpeech(p.type));
+              return voice ? { moduleKey, providerId: voice.id } : null;
             }
             if (moduleKey === "EMBEDDING") {
               const emb = providers.find((p) =>
@@ -636,7 +658,7 @@ export function AiProvidersClient() {
 
       <PageHeader
         title="Module assignments"
-        description="Route each AI module to a provider. EMBEDDING: Gemini/OpenAI/Jina embeddings. AI_CREATIVE: chat (text/PPT). AI_CREATIVE_IMAGE: FLUX.1 Kontext Max for educational drawings, infographics, edits."
+        description="Route each AI module to a provider. EMBEDDING: Gemini/OpenAI/Jina. AI_CREATIVE_IMAGE: FLUX. VOICE_TTS: OpenAI tts-1-hd for AI Teacher classroom speech (ar / tr / en)."
       />
       <div className="card space-y-3 p-4">
         {MODULES.map((moduleKey) => {
@@ -646,10 +668,14 @@ export function AiProvidersClient() {
               ? providers.filter((p) => providerSupportsEmbeddings(p.type, p.model))
               : moduleKey === "AI_CREATIVE_IMAGE"
                 ? providers.filter((p) => providerSupportsImageGeneration(p.type))
-                : providers.filter((p) => providerSupportsChat(p.type, p.model));
+                : moduleKey === "VOICE_TTS"
+                  ? providers.filter((p) => providerSupportsSpeech(p.type))
+                  : providers.filter((p) => providerSupportsChat(p.type, p.model));
           return (
             <label key={moduleKey} className="flex flex-wrap items-center gap-3 text-sm">
-              <span className="w-48 font-medium">{moduleKey}</span>
+              <span className="w-48 font-medium" title={moduleKey}>
+                {MODULE_LABELS[moduleKey]}
+              </span>
               <select
                 className="input max-w-md flex-1"
                 value={current}
@@ -671,6 +697,11 @@ export function AiProvidersClient() {
               {moduleKey === "EMBEDDING" && options.length === 0 ? (
                 <span className="text-xs text-amber-700">
                   Add Gemini, OpenAI, or Jina embeddings first — DeepSeek cannot embed.
+                </span>
+              ) : null}
+              {moduleKey === "VOICE_TTS" && options.length === 0 ? (
+                <span className="text-xs text-amber-700">
+                  Add an OpenAI provider (tts-1-hd) for classroom voice in Arabic, Turkish, and English.
                 </span>
               ) : null}
               {moduleKey === "AI_CREATIVE_IMAGE" && options.length === 0 ? (

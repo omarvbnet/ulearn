@@ -37,6 +37,21 @@ export type ImageGenerationResult = {
   tokensIn?: number;
 };
 
+export type SpeechSynthesisInput = {
+  text: string;
+  /** ar | tr | en (ku falls back to ar-style voice) */
+  language?: string | null;
+  /** Optional OpenAI-compatible voice id (alloy, nova, …) */
+  voice?: string | null;
+};
+
+export type SpeechSynthesisResult = {
+  mimeType: string;
+  dataBase64: string;
+  /** Approximate spoken duration hint in ms (client may refine). */
+  durationMs?: number;
+};
+
 export type ProviderConfig = {
   apiKey: string;
   baseUrl?: string | null;
@@ -59,6 +74,11 @@ export interface AiProviderAdapter {
     config: ProviderConfig,
     input: ImageGenerationInput
   ): Promise<ImageGenerationResult>;
+  /** Optional: cloud TTS for AI Teacher classroom (OpenAI / compatible). */
+  synthesizeSpeech?(
+    config: ProviderConfig,
+    input: SpeechSynthesisInput
+  ): Promise<SpeechSynthesisResult>;
 }
 
 export const EMBEDDING_DIMS = 768;

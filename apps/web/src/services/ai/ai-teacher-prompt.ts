@@ -80,6 +80,8 @@ export function buildAiTeacherSystemPrompt(input: {
     "Your mission is not to answer questions, but to ensure the student fully understands the topic through visual explanation, synchronized speech, progressive drawing, and interactive teaching.",
     "This is an individual teaching option — behave like a real teacher standing in front of a classroom, never like a chatbot.",
     languageInstruction(input.language),
+    "Classroom languages are ONLY: ar (Arabic), tr (Turkish), en (English). Set JSON language to exactly one of those codes.",
+    "All speech[].text and all whiteboard write_text / formula text MUST be entirely in that language — never mix languages.",
     input.studentBlurb ? `Know this learner: ${input.studentBlurb}` : "",
     input.memoryBlurb ? `Learning memory: ${input.memoryBlurb}` : "",
     input.learningCtxBlurb
@@ -93,6 +95,12 @@ export function buildAiTeacherSystemPrompt(input: {
     "=== TEACHING RULES ===",
     "Always begin with: (1) Greeting (2) Lesson objective (3) Brief overview (4) Start teaching immediately.",
     "Never provide long paragraphs. Teach progressively. Explain one concept at a time. Never reveal the full lesson instantly.",
+    "",
+    "=== LANGUAGE & BOARD ALIGNMENT ===",
+    "Arabic (ar): RTL. Place write_text near the RIGHT side (x ≈ 1600–1820). Titles/definitions align right. Speech natural Modern Standard Arabic.",
+    "English (en) and Turkish (tr): LTR. Place write_text near the LEFT side (x ≈ 100–220). Titles/definitions align left.",
+    "Never put Arabic text on the left margin or English/Turkish text on the far right as if RTL.",
+    "Draw diagrams with human-like strokes: progressive lines, arrows that connect ideas, spaced handwriting, varied colors.",
     "",
     "=== WHITEBOARD-FIRST ===",
     "The whiteboard is the primary teaching surface.",
@@ -140,7 +148,7 @@ export function buildAiTeacherSystemPrompt(input: {
     "Mathematics: solve step by step, never skip calculations, highlight the current operation, draw figures, explain every transformation.",
     "Science: draw diagrams, explain processes visually, animate via progressive drawing.",
     "Programming: write code gradually, explain every line, visualize algorithms with flowcharts when possible.",
-    "Languages: support Arabic, English, Turkish (and Kurdish when the student prefers it). Detect preferred language. Use correct grammar and level-appropriate vocabulary.",
+    "Languages: support Arabic, English, and Turkish. Detect preferred language among ar/tr/en. Use correct grammar and level-appropriate vocabulary.",
     "",
     "=== ADAPTIVE TEACHING ===",
     "Estimate knowledge. Adjust depth, vocabulary, example difficulty, drawing complexity, and speed.",
@@ -152,9 +160,9 @@ export function buildAiTeacherSystemPrompt(input: {
     "Continuously infer learning style tendencies (visual, practical, step-by-step, fast/slow, theory-first, example-first) and adapt teaching strategy.",
     "",
     "=== BOARD ANIMATION ===",
-    "Write naturally. Simulate realistic handwriting. Move the virtual pen smoothly.",
-    "Draw shapes progressively. Highlight important information. Erase mistakes naturally when appropriate.",
-    "Use different colors to distinguish concepts.",
+    "Write like a human teacher: natural handwriting pace, progressive reveal, slight spacing between ideas, connect concepts with arrows and underlines.",
+    "Draw shapes progressively as if a real pen is moving. Highlight important information. Erase mistakes naturally when appropriate.",
+    "Use different colors to distinguish concepts. Prefer clear diagrams over dense paragraphs.",
     "",
     "=== LESSON STRUCTURE ===",
     "Greeting → Objective → Concept → Visual Explanation → Example → Practice → Correction → Summary → Mini Quiz → Encouragement.",
@@ -327,6 +335,10 @@ export function parseAiTeacherLesson(raw: string): AiTeacherLesson | null {
  * Each speech cue gets a fixed window; board actions are distributed into those windows.
  */
 export function normalizeAiTeacherLesson(lesson: AiTeacherLesson): AiTeacherLesson {
+  const language = normalizeClassroomLanguage(lesson.language);
+  const rtl = language === "ar";
+  const textX = rtl ? 1780 : 120;
+
   const speech = lesson.speech
     .map((s) => ({
       time: Math.max(0, Number(s.time) || 0),
@@ -334,7 +346,7 @@ export function normalizeAiTeacherLesson(lesson: AiTeacherLesson): AiTeacherLess
     }))
     .filter((s) => s.text && !s.text.startsWith("{") && !s.text.startsWith("["));
 
-  if (!speech.length) return lesson;
+  if (!speech.length) return { ...lesson, language };
 
   const SEGMENT_MS = 7000;
   const syncedSpeech = speech.slice(0, 10).map((s, i) => ({
@@ -375,10 +387,11 @@ export function normalizeAiTeacherLesson(lesson: AiTeacherLesson): AiTeacherLess
         action: "write_text",
         parameters: {
           text: s.text.slice(0, 90),
-          x: 110,
+          x: textX,
           y: 140 + i * 95,
           size: 30,
           color: i === 0 ? "blue" : "black",
+          align: rtl ? "right" : "left",
         },
       });
     });
@@ -400,6 +413,27 @@ export function normalizeAiTeacherLesson(lesson: AiTeacherLesson): AiTeacherLess
           params.text = t.slice(0, 120);
         }
       }
+      if (
+        (a.action === "write_text" ||
+          a.action === "draw_formula" ||
+          a.action === "draw_equation") &&
+        (params.x == null || !Number.isFinite(Number(params.x)))
+      ) {
+        params.x = textX;
+      }
+      // Nudge mis-aligned text toward language side
+      if (
+        (a.action === "write_text" ||
+          a.action === "draw_formula" ||
+          a.action === "draw_equation") &&
+        params.x != null &&
+        Number.isFinite(Number(params.x))
+      ) {
+        const x = Number(params.x);
+        if (rtl && x < 700) params.x = Math.max(x, textX - 80);
+        if (!rtl && x > 1400) params.x = Math.min(x, textX + 80);
+        params.align = rtl ? "right" : "left";
+      }
       board.push({
         time: syncedSpeech[seg]!.time + 350 + slot * 550,
         action: a.action,
@@ -412,7 +446,7 @@ export function normalizeAiTeacherLesson(lesson: AiTeacherLesson): AiTeacherLess
 
   return {
     ...lesson,
-    language: lesson.language || "en",
+    language,
     lesson_title: lesson.lesson_title || "Lesson",
     objective: lesson.objective || "",
     speech: syncedSpeech,
@@ -420,6 +454,13 @@ export function normalizeAiTeacherLesson(lesson: AiTeacherLesson): AiTeacherLess
     quiz: (lesson.quiz || []).slice(0, 4),
     summary: (lesson.summary || []).slice(0, 5),
   };
+}
+
+function normalizeClassroomLanguage(raw?: string | null): "ar" | "tr" | "en" {
+  const lang = (raw || "en").toLowerCase().slice(0, 2);
+  if (lang === "ar" || lang === "ku") return "ar";
+  if (lang === "tr") return "tr";
+  return "en";
 }
 
 /** Compact system prompt for fast classroom generation (single LLM call). */
@@ -430,12 +471,14 @@ export function buildCompactAiTeacherPrompt(input: {
   return [
     "You are U Learn AI Teacher. Teach with a live whiteboard. Return ONLY valid JSON.",
     languageInstruction(input.language),
+    "language must be exactly ar, tr, or en. Speech and board text must be entirely in that language.",
+    "Arabic: RTL — write_text x near 1700–1820. English/Turkish: LTR — write_text x near 100–220.",
     input.studentBlurb ? `Learner: ${input.studentBlurb}` : "",
     "Schema keys: language, lesson_title, objective, speech, whiteboard, quiz, summary.",
     "speech: 5-8 items {time:ms, text}. whiteboard: actions synced to same times.",
     "Allowed actions: open_new_board, write_text, draw_line, draw_arrow, draw_circle, draw_rectangle, highlight, wait.",
-    "write_text parameters: {text, x, y, color?, size?} — text must be plain words, NEVER JSON.",
-    "draw_* use numeric coords 0..1920 x 0..1080.",
+    "write_text parameters: {text, x, y, color?, size?, align?} — text must be plain words, NEVER JSON.",
+    "draw_* use numeric coords 0..1920 x 0..1080. Draw like a human teacher: progressive, clear, colorful.",
     "Keep speech short (1-2 sentences each). Match each speech step with board drawings.",
     "quiz: 1-3 items. summary: 3 short bullets.",
     "No markdown fences. No commentary.",

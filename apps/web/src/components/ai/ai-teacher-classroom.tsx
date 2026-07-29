@@ -27,6 +27,10 @@ type BoardItem =
       size: number;
       bornAt: number;
       writeMs: number;
+      /** Language-aware alignment for board text. */
+      align: "left" | "right";
+      /** Stable seed for handwriting jitter. */
+      seed: number;
     }
   | {
       kind: "line" | "arrow";
@@ -252,10 +256,21 @@ function num(v: unknown, fallback = 0): number {
 }
 
 function speechLang(code?: string): string {
-  if (code === "ar") return "ar-SA";
-  if (code === "tr") return "tr-TR";
-  if (code === "ku") return "ku";
+  const lang = normalizeClassroomLang(code);
+  if (lang === "ar") return "ar-SA";
+  if (lang === "tr") return "tr-TR";
   return "en-US";
+}
+
+function normalizeClassroomLang(code?: string | null): "ar" | "tr" | "en" {
+  const lang = (code || "en").toLowerCase().slice(0, 2);
+  if (lang === "ar" || lang === "ku") return "ar";
+  if (lang === "tr") return "tr";
+  return "en";
+}
+
+function isRtlLang(code?: string | null): boolean {
+  return normalizeClassroomLang(code) === "ar";
 }
 
 /** Never draw raw JSON / parameter dumps on the board. */
@@ -299,7 +314,41 @@ function estimateSpeakMs(text: string): number {
 }
 
 function writeDurationForText(text: string): number {
-  return Math.max(350, Math.min(2800, text.length * 28));
+  // Slower, more human handwriting pace
+  return Math.max(700, Math.min(4800, text.length * 48));
+}
+
+function strokeWriteMs(kind: "line" | "arrow" | "circle" | "rect" | "highlight"): number {
+  switch (kind) {
+    case "highlight":
+      return 420;
+    case "line":
+      return 900;
+    case "arrow":
+      return 1100;
+    case "circle":
+      return 1300;
+    case "rect":
+      return 1200;
+  }
+}
+
+/** Deterministic wobble so strokes feel hand-drawn, not CAD-perfect. */
+function handJitter(seed: number, i: number, amp = 4.5): number {
+  const x = Math.sin(seed * 12.9898 + i * 78.233) * 43758.5453;
+  return ((x - Math.floor(x)) * 2 - 1) * amp;
+}
+
+function humanLinePath(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  seed: number
+): string {
+  const mx = (x1 + x2) / 2 + handJitter(seed, 1, 10);
+  const my = (y1 + y2) / 2 + handJitter(seed, 2, 10);
+  return `M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`;
 }
 
 function nowMs() {
@@ -310,11 +359,13 @@ function applyCue(
   items: BoardItem[],
   cue: AiTeacherLessonView["whiteboard"][number],
   idx: number,
-  bornAt: number
+  bornAt: number,
+  rtl: boolean
 ): BoardItem[] {
   const p = cue.parameters || {};
   const action = String(cue.action || "").toLowerCase().replace(/\s+/g, "_");
   const id = `${cue.time}-${action}-${idx}`;
+  const seed = idx * 97 + Math.round(Number(cue.time) || 0);
 
   if (action === "clear_board" || action === "open_new_board") return [];
   if (
@@ -334,18 +385,27 @@ function applyCue(
   if (action === "write_text" || action === "draw_formula" || action === "draw_equation") {
     const text = cleanBoardText(p.text ?? p.latex ?? p.content ?? p.title);
     if (!text) return items;
+    const align =
+      p.align === "right" || p.align === "left"
+        ? (p.align as "left" | "right")
+        : rtl
+          ? "right"
+          : "left";
+    const defaultX = align === "right" ? 1780 : 120;
     return [
       ...items,
       {
         kind: "text",
         id,
         text,
-        x: num(p.x, 100),
-        y: num(p.y, 120),
+        x: num(p.x, defaultX),
+        y: num(p.y, 120) + handJitter(seed, 3, 2.2),
         color: resolveColor(p.color, "#1e3a8a"),
         size: Math.max(18, Math.min(56, num(p.size, 30))),
         bornAt,
         writeMs: writeDurationForText(text),
+        align,
+        seed,
       },
     ];
   }
@@ -356,14 +416,14 @@ function applyCue(
       {
         kind: "line",
         id,
-        x1: num(p.x1, 0),
-        y1: num(p.y1, 0),
-        x2: num(p.x2, 100),
-        y2: num(p.y2, 100),
+        x1: num(p.x1, 0) + handJitter(seed, 1, 2),
+        y1: num(p.y1, 0) + handJitter(seed, 2, 2),
+        x2: num(p.x2, 100) + handJitter(seed, 3, 2),
+        y2: num(p.y2, 100) + handJitter(seed, 4, 2),
         color: resolveColor(p.color, "#334155"),
-        width: num(p.width, 3),
+        width: num(p.width, 3.2),
         bornAt,
-        writeMs: 420,
+        writeMs: strokeWriteMs("line"),
       },
     ];
   }
@@ -374,14 +434,14 @@ function applyCue(
       {
         kind: "arrow",
         id,
-        x1: num(p.x1, 0),
-        y1: num(p.y1, 0),
-        x2: num(p.x2, 100),
-        y2: num(p.y2, 100),
+        x1: num(p.x1, 0) + handJitter(seed, 1, 2),
+        y1: num(p.y1, 0) + handJitter(seed, 2, 2),
+        x2: num(p.x2, 100) + handJitter(seed, 3, 2),
+        y2: num(p.y2, 100) + handJitter(seed, 4, 2),
         color: resolveColor(p.color, "#ca8a04"),
-        width: num(p.width, 3),
+        width: num(p.width, 3.2),
         bornAt,
-        writeMs: 480,
+        writeMs: strokeWriteMs("arrow"),
       },
     ];
   }
@@ -393,13 +453,13 @@ function applyCue(
         {
           kind: "circle",
           id,
-          cx: num(p.cx, 200),
-          cy: num(p.cy, 200),
+          cx: num(p.cx, 200) + handJitter(seed, 1, 3),
+          cy: num(p.cy, 200) + handJitter(seed, 2, 3),
           r: num(p.r, 40),
           color: resolveColor(p.color, "#dc2626"),
-          width: num(p.width, 3),
+          width: num(p.width, 3.2),
           bornAt,
-          writeMs: 520,
+          writeMs: strokeWriteMs("circle"),
         },
       ];
     }
@@ -416,9 +476,9 @@ function applyCue(
         cy: (y1 + y2) / 2,
         r: Math.max(8, Math.hypot(x2 - x1, y2 - y1) / 2),
         color: resolveColor(p.color, "#dc2626"),
-        width: num(p.width, 3),
+        width: num(p.width, 3.2),
         bornAt,
-        writeMs: 520,
+        writeMs: strokeWriteMs("circle"),
       },
     ];
   }
@@ -433,14 +493,14 @@ function applyCue(
       {
         kind: "rect",
         id,
-        x: Math.min(x1, x2),
-        y: Math.min(y1, y2),
+        x: Math.min(x1, x2) + handJitter(seed, 1, 2),
+        y: Math.min(y1, y2) + handJitter(seed, 2, 2),
         w: Math.abs(x2 - x1) || 120,
         h: Math.abs(y2 - y1) || 80,
         color: resolveColor(p.color, "#92400e"),
-        width: num(p.width, 3),
+        width: num(p.width, 3.2),
         bornAt,
-        writeMs: 500,
+        writeMs: strokeWriteMs("rect"),
       },
     ];
   }
@@ -461,7 +521,7 @@ function applyCue(
         h: Math.abs(y2 - y1) || 36,
         color: resolveColor(p.color, "#fde047"),
         bornAt,
-        writeMs: 280,
+        writeMs: strokeWriteMs("highlight"),
       },
     ];
   }
@@ -515,6 +575,7 @@ function pickVoice(lang: string): SpeechSynthesisVoice | null {
 
 /** Keep a strong ref so Chrome does not GC the utterance mid-speech. */
 let activeUtterance: SpeechSynthesisUtterance | null = null;
+let activeCloudAudio: HTMLAudioElement | null = null;
 
 function clearTtsWatch() {
   if (typeof window === "undefined") return;
@@ -537,6 +598,33 @@ function startTtsWatch() {
       /* ignore */
     }
   }, 3500);
+}
+
+async function fetchCloudSpeech(
+  text: string,
+  language: string
+): Promise<{ mimeType: string; dataBase64: string; durationMs?: number } | null> {
+  try {
+    const res = await fetch("/api/ai/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, language: normalizeClassroomLang(language) }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      mimeType?: string;
+      dataBase64?: string;
+      durationMs?: number;
+    };
+    if (!data.dataBase64 || !data.mimeType) return null;
+    return {
+      mimeType: data.mimeType,
+      dataBase64: data.dataBase64,
+      durationMs: data.durationMs,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function AiTeacherClassroom({
@@ -606,6 +694,15 @@ export function AiTeacherClassroom({
   const stopVoice = useCallback(() => {
     clearTtsWatch();
     activeUtterance = null;
+    if (activeCloudAudio) {
+      try {
+        activeCloudAudio.pause();
+        activeCloudAudio.src = "";
+      } catch {
+        /* ignore */
+      }
+      activeCloudAudio = null;
+    }
     if (typeof window !== "undefined" && window.speechSynthesis) {
       try {
         window.speechSynthesis.cancel();
@@ -616,24 +713,21 @@ export function AiTeacherClassroom({
   }, []);
 
   const unlockVoice = useCallback(() => {
-    if (typeof window === "undefined" || !window.speechSynthesis) {
-      soundEnabledRef.current = false;
-      setSoundEnabled(false);
-      return false;
-    }
-    const synth = window.speechSynthesis;
-    synth.getVoices();
-    try {
-      // Must call speak() synchronously inside the user click — unlocks TTS for the session.
-      const warm = new SpeechSynthesisUtterance(" ");
-      warm.volume = 0;
-      warm.rate = 2;
-      warm.lang = speechLang(locale);
-      activeUtterance = warm;
-      synth.speak(warm);
-      synth.resume();
-    } catch {
-      /* still mark enabled */
+    // Prefer cloud AI voice; still warm device TTS as fallback unlock.
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      const synth = window.speechSynthesis;
+      synth.getVoices();
+      try {
+        const warm = new SpeechSynthesisUtterance(" ");
+        warm.volume = 0;
+        warm.rate = 2;
+        warm.lang = speechLang(locale);
+        activeUtterance = warm;
+        synth.speak(warm);
+        synth.resume();
+      } catch {
+        /* cloud path still works */
+      }
     }
     soundEnabledRef.current = true;
     setSoundEnabled(true);
@@ -643,15 +737,10 @@ export function AiTeacherClassroom({
     return true;
   }, [locale]);
 
-  const speak = useCallback(
+  const speakDevice = useCallback(
     (text: string) =>
       new Promise<void>((resolve) => {
-        if (
-          typeof window === "undefined" ||
-          !window.speechSynthesis ||
-          !soundEnabledRef.current ||
-          modeRef.current !== "voice"
-        ) {
+        if (typeof window === "undefined" || !window.speechSynthesis) {
           resolve();
           return;
         }
@@ -713,6 +802,50 @@ export function AiTeacherClassroom({
     [lesson.language, locale]
   );
 
+  const speak = useCallback(
+    async (text: string) => {
+      if (!soundEnabledRef.current || modeRef.current !== "voice") return;
+      const clean = cleanBoardText(text) || text.trim();
+      if (!clean) return;
+
+      stopVoice();
+      const lang = normalizeClassroomLang(lesson.language || locale);
+      const cloud = await fetchCloudSpeech(clean, lang);
+      if (cloud) {
+        await new Promise<void>((resolve) => {
+          const audio = new Audio(`data:${cloud.mimeType};base64,${cloud.dataBase64}`);
+          activeCloudAudio = audio;
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            if (activeCloudAudio === audio) activeCloudAudio = null;
+            resolve();
+          };
+          const safety = window.setTimeout(
+            finish,
+            (cloud.durationMs || estimateSpeakMs(clean)) + 4000
+          );
+          audio.onended = () => {
+            window.clearTimeout(safety);
+            finish();
+          };
+          audio.onerror = () => {
+            window.clearTimeout(safety);
+            finish();
+          };
+          audio.play().catch(() => {
+            window.clearTimeout(safety);
+            finish();
+          });
+        });
+        return;
+      }
+      await speakDevice(clean);
+    },
+    [lesson.language, locale, speakDevice, stopVoice]
+  );
+
   const setBoardSmooth = useCallback((items: BoardItem[]) => {
     boardItemsRef.current = items;
     setBoard(items);
@@ -725,8 +858,15 @@ export function AiTeacherClassroom({
       const born = nowMs();
       let acc = boardItemsRef.current;
       let changed = false;
+      const rtl = isRtlLang(lesson.language || locale);
       while (next < whiteboard.length && whiteboard[next]!.time <= untilMs) {
-        acc = applyCue(acc, whiteboard[next]!, next, born + (next - boardAppliedRef.current) * 45);
+        acc = applyCue(
+          acc,
+          whiteboard[next]!,
+          next,
+          born + (next - boardAppliedRef.current) * 55,
+          rtl
+        );
         next += 1;
         changed = true;
       }
@@ -734,7 +874,7 @@ export function AiTeacherClassroom({
       boardAppliedRef.current = next;
       setBoardSmooth(acc);
     },
-    [setBoardSmooth, whiteboard]
+    [setBoardSmooth, whiteboard, lesson.language, locale]
   );
 
   const resetBoardProgress = useCallback(() => {
@@ -832,6 +972,7 @@ export function AiTeacherClassroom({
 
           if (useVoice) {
             const speaking =
+              Boolean(activeCloudAudio && !activeCloudAudio.paused) ||
               window.speechSynthesis?.speaking ||
               window.speechSynthesis?.pending;
             if (!speaking && elapsed > 700) break;
@@ -950,13 +1091,8 @@ export function AiTeacherClassroom({
     }
   }
 
-  const dir =
-    lesson.language === "ar" ||
-    lesson.language === "ku" ||
-    locale === "ar" ||
-    locale === "ku"
-      ? "rtl"
-      : "ltr";
+  const dir = isRtlLang(lesson.language || locale) ? "rtl" : "ltr";
+  const boardRtl = isRtlLang(lesson.language || locale);
 
   const isWriting = board.some((b) => progressOf(b, clock) < 1) && phase === "teaching";
 
@@ -1134,6 +1270,7 @@ export function AiTeacherClassroom({
             if (item.kind === "text") {
               const chars = Math.max(1, Math.floor(item.text.length * p));
               const shown = item.text.slice(0, chars);
+              const rtlText = item.align === "right" || boardRtl;
               return (
                 <text
                   key={item.id}
@@ -1141,9 +1278,16 @@ export function AiTeacherClassroom({
                   y={item.y}
                   fill={item.color}
                   fontSize={item.size}
-                  fontFamily="'Segoe UI', Tahoma, 'Noto Naskh Arabic', Arial, sans-serif"
+                  fontFamily={
+                    rtlText
+                      ? "'Noto Naskh Arabic', 'Segoe UI', Tahoma, Arial, sans-serif"
+                      : "'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+                  }
                   fontWeight={600}
-                  opacity={0.35 + 0.65 * p}
+                  opacity={0.4 + 0.6 * p}
+                  textAnchor={rtlText ? "end" : "start"}
+                  direction={rtlText ? "rtl" : "ltr"}
+                  style={{ unicodeBidi: "plaintext" }}
                 >
                   {shown}
                   {p < 1 ? (
@@ -1188,7 +1332,8 @@ export function AiTeacherClassroom({
                   strokeWidth={item.width}
                   strokeDasharray={peri}
                   strokeDashoffset={peri * (1 - p)}
-                  strokeLinejoin="miter"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
                   filter="url(#softInk)"
                 />
               );
@@ -1196,26 +1341,27 @@ export function AiTeacherClassroom({
 
             const x2 = item.x1 + (item.x2 - item.x1) * p;
             const y2 = item.y1 + (item.y2 - item.y1) * p;
+            const seed =
+              Number.parseInt(item.id.replace(/\D/g, "").slice(-6) || "1", 10) || 1;
             return (
               <g key={item.id}>
-                <line
-                  x1={item.x1}
-                  y1={item.y1}
-                  x2={x2}
-                  y2={y2}
+                <path
+                  d={humanLinePath(item.x1, item.y1, x2, y2, seed)}
+                  fill="none"
                   stroke={item.color}
                   strokeWidth={item.width}
                   strokeLinecap="round"
+                  strokeLinejoin="round"
                   filter="url(#softInk)"
                 />
                 {item.kind === "arrow" && p > 0.85 ? (
                   <polygon
                     points={(() => {
-                      const angle = Math.atan2(item.y2 - item.y1, item.x2 - item.x1);
+                      const angle = Math.atan2(y2 - item.y1, x2 - item.x1);
                       const size = 14 + item.width;
                       const a1 = angle - Math.PI / 7;
                       const a2 = angle + Math.PI / 7;
-                      return `${item.x2},${item.y2} ${item.x2 - size * Math.cos(a1)},${item.y2 - size * Math.sin(a1)} ${item.x2 - size * Math.cos(a2)},${item.y2 - size * Math.sin(a2)}`;
+                      return `${x2},${y2} ${x2 - size * Math.cos(a1)},${y2 - size * Math.sin(a1)} ${x2 - size * Math.cos(a2)},${y2 - size * Math.sin(a2)}`;
                     })()}
                     fill={item.color}
                     opacity={(p - 0.85) / 0.15}

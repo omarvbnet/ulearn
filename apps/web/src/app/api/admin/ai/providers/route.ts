@@ -7,7 +7,7 @@ function providerCreateError(e: unknown) {
   const msg = e instanceof Error ? e.message : "Create failed";
   if (/JINA|FLUX|AiProviderType|AiModuleKey|enum/i.test(msg)) {
     return error(
-      'Database enum missing. Run SQL: ALTER TYPE "AiProviderType" ADD VALUE IF NOT EXISTS \'FLUX\'; ALTER TYPE "AiModuleKey" ADD VALUE IF NOT EXISTS \'AI_CREATIVE_IMAGE\';',
+      'Database enum missing. Run SQL: ALTER TYPE "AiProviderType" ADD VALUE IF NOT EXISTS \'FLUX\'; ALTER TYPE "AiModuleKey" ADD VALUE IF NOT EXISTS \'AI_CREATIVE_IMAGE\'; ALTER TYPE "AiModuleKey" ADD VALUE IF NOT EXISTS \'VOICE_TTS\';',
       500,
       "DB_MIGRATION"
     );

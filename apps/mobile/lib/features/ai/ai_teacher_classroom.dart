@@ -1,8 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:provider/provider.dart';
+import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 
 /// Live AI Teacher classroom: animated board + captions + voice + interrupt/resume.
@@ -40,7 +45,10 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
   var _cancelled = false;
   var _runId = 0;
   final _tts = FlutterTts();
+  final _audio = AudioPlayer();
   var _ttsReady = false;
+  var _clockMs = 0.0;
+  Timer? _paintTimer;
 
   List<Map<String, dynamic>> get _speech {
     final raw = widget.lesson['speech'];
@@ -65,13 +73,25 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
   String get _title =>
       widget.lesson['lesson_title']?.toString() ?? 'Lesson';
   String get _objective => widget.lesson['objective']?.toString() ?? '';
-  String get _lang =>
-      (widget.lesson['language']?.toString() ?? 'en').toLowerCase();
+  String get _lang {
+    final raw = (widget.lesson['language']?.toString() ?? 'en').toLowerCase();
+    if (raw.startsWith('ar') || raw.startsWith('ku')) return 'ar';
+    if (raw.startsWith('tr')) return 'tr';
+    return 'en';
+  }
+
+  bool get _rtl => _lang == 'ar';
 
   @override
   void initState() {
     super.initState();
     _initTts();
+    _paintTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
+      if (!mounted || _phase != _Phase.teaching) return;
+      setState(() {
+        _clockMs = DateTime.now().millisecondsSinceEpoch.toDouble();
+      });
+    });
   }
 
   Future<void> _initTts() async {
@@ -84,9 +104,7 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
           ? 'ar-SA'
           : _lang == 'tr'
               ? 'tr-TR'
-              : _lang == 'ku'
-                  ? 'ku'
-                  : 'en-US';
+              : 'en-US';
       await _tts.setLanguage(code);
       _ttsReady = true;
     } catch (_) {
@@ -98,20 +116,59 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
   void dispose() {
     _cancelled = true;
     _runId++;
+    _paintTimer?.cancel();
     unawaited(_tts.stop());
+    unawaited(_audio.stop());
+    unawaited(_audio.dispose());
     _askCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _speak(String text) async {
-    if (!_modeVoice || !_ttsReady) return;
+    if (!_modeVoice) return;
     final clean = _cleanBoardText(text) ?? text.trim();
     if (clean.isEmpty) return;
     try {
       await _tts.stop();
+      await _audio.stop();
+    } catch (_) {}
+
+    final cloudOk = await _speakCloud(clean);
+    if (cloudOk) return;
+
+    if (!_ttsReady) return;
+    try {
+      await _tts.setLanguage(
+        _lang == 'ar' ? 'ar-SA' : _lang == 'tr' ? 'tr-TR' : 'en-US',
+      );
       await _tts.speak(clean);
     } catch (_) {
       /* captions still work */
+    }
+  }
+
+  Future<bool> _speakCloud(String text) async {
+    if (!mounted) return false;
+    try {
+      final api = context.read<ApiClient>();
+      final data = await api.post('/api/ai/tts', {
+        'text': text,
+        'language': _lang,
+      });
+      final b64 = data['dataBase64']?.toString();
+      final mime = data['mimeType']?.toString() ?? 'audio/mpeg';
+      if (b64 == null || b64.isEmpty) return false;
+      final bytes = Uint8List.fromList(base64Decode(b64));
+      await _audio.setAudioSource(
+        AudioSource.uri(Uri.dataFromBytes(bytes, mimeType: mime)),
+      );
+      await _audio.play();
+      await _audio.playerStateStream.firstWhere(
+        (s) => s.processingState == ProcessingState.completed,
+      );
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -129,8 +186,9 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
     }
     if (next == _boardApplied) return;
     final rebuilt = <_BoardItem>[];
+    final born = DateTime.now().millisecondsSinceEpoch.toDouble();
     for (var i = 0; i < next; i++) {
-      _applyCue(rebuilt, board[i], i);
+      _applyCue(rebuilt, board[i], i, born + i * 55, _rtl);
     }
     _boardApplied = next;
     _items
@@ -187,6 +245,7 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
       while (DateTime.now().difference(start).inMilliseconds < duration + 800) {
         if (runId != _runId || _cancelled) {
           await _tts.stop();
+          await _audio.stop();
           return;
         }
         await _waitWhilePaused();
@@ -222,6 +281,7 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
   void _pause() {
     _paused = true;
     unawaited(_tts.stop());
+    unawaited(_audio.stop());
     if (mounted) setState(() => _phase = _Phase.paused);
   }
 
@@ -368,7 +428,11 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
                 fit: StackFit.expand,
                 children: [
                   CustomPaint(
-                    painter: _ClassroomBoardPainter(items: List.of(_items)),
+                    painter: _ClassroomBoardPainter(
+                      items: List.of(_items),
+                      clockMs: _clockMs,
+                      rtl: _rtl,
+                    ),
                     child: const SizedBox.expand(),
                   ),
                   if (_phase == _Phase.idle)
@@ -754,13 +818,30 @@ Color _color(dynamic raw, [Color fallback = const Color(0xFF1E293B)]) {
   return fallback;
 }
 
-void _applyCue(List<_BoardItem> items, Map<String, dynamic> cue, int idx) {
+double _handJitter(int seed, int i, [double amp = 4.5]) {
+  final x = math.sin(seed * 12.9898 + i * 78.233) * 43758.5453;
+  return (x - x.floor()) * 2 * amp - amp;
+}
+
+int _writeMsForText(String text) {
+  final n = text.length;
+  return math.max(700, math.min(4800, n * 48));
+}
+
+void _applyCue(
+  List<_BoardItem> items,
+  Map<String, dynamic> cue,
+  int idx,
+  double bornAt,
+  bool rtl,
+) {
   final p = cue['parameters'] is Map
       ? Map<String, dynamic>.from(cue['parameters'] as Map)
       : <String, dynamic>{};
   final action =
       (cue['action']?.toString() ?? '').toLowerCase().replaceAll(' ', '_');
   final id = '${cue['time']}-$action-$idx';
+  final seed = idx * 97 + _num(cue['time']).toInt();
 
   if (action == 'clear_board' || action == 'open_new_board') {
     items.clear();
@@ -776,14 +857,20 @@ void _applyCue(List<_BoardItem> items, Map<String, dynamic> cue, int idx) {
       action == 'draw_equation') {
     final text = _cleanBoardText(p['text'] ?? p['latex'] ?? p['content'] ?? p['title']);
     if (text == null || text.isEmpty) return;
+    final defaultX = rtl ? 1780.0 : 120.0;
+    final alignRight = rtl || p['align']?.toString() == 'right';
     items.add(
       _BoardItem.text(
         id: id,
         text: text,
-        x: _num(p['x']).toDouble(),
-        y: _num(p['y']).toDouble(),
+        x: _num(p['x'], defaultX).toDouble(),
+        y: _num(p['y'], 120).toDouble() + _handJitter(seed, 3, 2.2),
         color: _color(p['color'], const Color(0xFF1E3A8A)),
-        size: _num(p['size'], 28).toDouble(),
+        size: _num(p['size'], 28).toDouble().clamp(18, 56),
+        bornAt: bornAt,
+        writeMs: _writeMsForText(text).toDouble(),
+        seed: seed,
+        alignRight: alignRight,
       ),
     );
     return;
@@ -792,13 +879,16 @@ void _applyCue(List<_BoardItem> items, Map<String, dynamic> cue, int idx) {
     items.add(
       _BoardItem.line(
         id: id,
-        x1: _num(p['x1']).toDouble(),
-        y1: _num(p['y1']).toDouble(),
-        x2: _num(p['x2']).toDouble(),
-        y2: _num(p['y2']).toDouble(),
+        x1: _num(p['x1']).toDouble() + _handJitter(seed, 1, 2),
+        y1: _num(p['y1']).toDouble() + _handJitter(seed, 2, 2),
+        x2: _num(p['x2']).toDouble() + _handJitter(seed, 3, 2),
+        y2: _num(p['y2']).toDouble() + _handJitter(seed, 4, 2),
         color: _color(p['color']),
-        width: _num(p['width'], 3).toDouble(),
+        width: _num(p['width'], 3.2).toDouble(),
         arrow: false,
+        bornAt: bornAt,
+        writeMs: 900,
+        seed: seed,
       ),
     );
     return;
@@ -807,13 +897,16 @@ void _applyCue(List<_BoardItem> items, Map<String, dynamic> cue, int idx) {
     items.add(
       _BoardItem.line(
         id: id,
-        x1: _num(p['x1']).toDouble(),
-        y1: _num(p['y1']).toDouble(),
-        x2: _num(p['x2']).toDouble(),
-        y2: _num(p['y2']).toDouble(),
+        x1: _num(p['x1']).toDouble() + _handJitter(seed, 1, 2),
+        y1: _num(p['y1']).toDouble() + _handJitter(seed, 2, 2),
+        x2: _num(p['x2']).toDouble() + _handJitter(seed, 3, 2),
+        y2: _num(p['y2']).toDouble() + _handJitter(seed, 4, 2),
         color: _color(p['color'], const Color(0xFFCA8A04)),
-        width: _num(p['width'], 3).toDouble(),
+        width: _num(p['width'], 3.2).toDouble(),
         arrow: true,
+        bornAt: bornAt,
+        writeMs: 1100,
+        seed: seed,
       ),
     );
     return;
@@ -823,11 +916,14 @@ void _applyCue(List<_BoardItem> items, Map<String, dynamic> cue, int idx) {
       items.add(
         _BoardItem.circle(
           id: id,
-          cx: _num(p['cx'], 200).toDouble(),
-          cy: _num(p['cy'], 200).toDouble(),
+          cx: _num(p['cx'], 200).toDouble() + _handJitter(seed, 1, 3),
+          cy: _num(p['cy'], 200).toDouble() + _handJitter(seed, 2, 3),
           r: _num(p['r'], 40).toDouble(),
           color: _color(p['color'], const Color(0xFFDC2626)),
-          width: _num(p['width'], 3).toDouble(),
+          width: _num(p['width'], 3.2).toDouble(),
+          bornAt: bornAt,
+          writeMs: 1300,
+          seed: seed,
         ),
       );
     }
@@ -841,12 +937,15 @@ void _applyCue(List<_BoardItem> items, Map<String, dynamic> cue, int idx) {
     items.add(
       _BoardItem.rect(
         id: id,
-        x: math.min(x1, x2),
-        y: math.min(y1, y2),
+        x: math.min(x1, x2) + _handJitter(seed, 1, 2),
+        y: math.min(y1, y2) + _handJitter(seed, 2, 2),
         w: (x2 - x1).abs().clamp(8, 2000),
         h: (y2 - y1).abs().clamp(8, 2000),
         color: _color(p['color'], const Color(0xFF92400E)),
-        width: _num(p['width'], 3).toDouble(),
+        width: _num(p['width'], 3.2).toDouble(),
+        bornAt: bornAt,
+        writeMs: 1200,
+        seed: seed,
       ),
     );
     return;
@@ -864,6 +963,9 @@ void _applyCue(List<_BoardItem> items, Map<String, dynamic> cue, int idx) {
         w: (x2 - x1).abs().clamp(8, 2000),
         h: (y2 - y1).abs().clamp(8, 2000),
         color: _color(p['color'], const Color(0xFFFDE047)),
+        bornAt: bornAt,
+        writeMs: 420,
+        seed: seed,
       ),
     );
   }
@@ -877,6 +979,10 @@ class _BoardItem {
     required this.y,
     required this.color,
     required this.size,
+    required this.bornAt,
+    required this.writeMs,
+    required this.seed,
+    required this.alignRight,
   }) : kind = _Kind.text;
 
   _BoardItem.line({
@@ -888,6 +994,9 @@ class _BoardItem {
     required this.color,
     required this.width,
     required this.arrow,
+    required this.bornAt,
+    required this.writeMs,
+    required this.seed,
   }) : kind = _Kind.line;
 
   _BoardItem.circle({
@@ -897,6 +1006,9 @@ class _BoardItem {
     required this.r,
     required this.color,
     required this.width,
+    required this.bornAt,
+    required this.writeMs,
+    required this.seed,
   }) : kind = _Kind.circle;
 
   _BoardItem.rect({
@@ -907,6 +1019,9 @@ class _BoardItem {
     required this.h,
     required this.color,
     required this.width,
+    required this.bornAt,
+    required this.writeMs,
+    required this.seed,
   }) : kind = _Kind.rect;
 
   _BoardItem.highlight({
@@ -916,6 +1031,9 @@ class _BoardItem {
     required this.w,
     required this.h,
     required this.color,
+    required this.bornAt,
+    required this.writeMs,
+    required this.seed,
   }) : kind = _Kind.highlight,
        width = 0;
 
@@ -928,15 +1046,32 @@ class _BoardItem {
   double size = 28;
   double width = 3;
   bool arrow = false;
+  bool alignRight = false;
+  double bornAt = 0;
+  double writeMs = 600;
+  int seed = 1;
   Color color = const Color(0xFF1E293B);
+
+  double progress(double clockMs) {
+    final p = (clockMs - bornAt) / math.max(1, writeMs);
+    return p.clamp(0.0, 1.0);
+  }
 }
 
 enum _Kind { text, line, circle, rect, highlight }
 
 class _ClassroomBoardPainter extends CustomPainter {
-  _ClassroomBoardPainter({required this.items});
+  _ClassroomBoardPainter({
+    required this.items,
+    required this.clockMs,
+    required this.rtl,
+  });
 
   final List<_BoardItem> items;
+  final double clockMs;
+  final bool rtl;
+
+  double _ease(double t) => 1 - math.pow(1 - t, 2.4).toDouble();
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -963,69 +1098,101 @@ class _ClassroomBoardPainter extends CustomPainter {
     }
 
     for (final item in items) {
+      final p = _ease(item.progress(clockMs <= 0 ? item.bornAt + item.writeMs : clockMs));
+      if (p <= 0) continue;
       switch (item.kind) {
         case _Kind.highlight:
           canvas.drawRect(
-            Rect.fromLTWH(item.x, item.y, item.w, item.h),
-            Paint()..color = item.color.withValues(alpha: 0.45),
+            Rect.fromLTWH(item.x, item.y, item.w * p, item.h),
+            Paint()..color = item.color.withValues(alpha: 0.35 * p),
           );
         case _Kind.text:
+          final chars = math.max(1, (item.text.length * p).floor());
+          final shown = item.text.substring(0, chars);
+          final dir = item.alignRight || rtl
+              ? TextDirection.rtl
+              : TextDirection.ltr;
           final tp = TextPainter(
             text: TextSpan(
-              text: item.text,
+              text: shown,
               style: TextStyle(
-                color: item.color,
+                color: item.color.withValues(alpha: 0.4 + 0.6 * p),
                 fontSize: item.size,
                 fontWeight: FontWeight.w600,
               ),
             ),
-            textDirection: TextDirection.rtl,
+            textDirection: dir,
+            textAlign: dir == TextDirection.rtl ? TextAlign.right : TextAlign.left,
           )..layout(maxWidth: 1600);
-          tp.paint(canvas, Offset(item.x, item.y - item.size));
+          final paintX = dir == TextDirection.rtl ? item.x - tp.width : item.x;
+          tp.paint(canvas, Offset(paintX, item.y - item.size));
         case _Kind.circle:
-          canvas.drawCircle(
-            Offset(item.cx, item.cy),
-            item.r,
-            Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = item.width
-              ..color = item.color,
-          );
-        case _Kind.rect:
-          canvas.drawRect(
-            Rect.fromLTWH(item.x, item.y, item.w, item.h),
-            Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = item.width
-              ..color = item.color,
-          );
-        case _Kind.line:
           final paint = Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = item.width
             ..strokeCap = StrokeCap.round
             ..color = item.color;
-          canvas.drawLine(Offset(item.x1, item.y1), Offset(item.x2, item.y2), paint);
-          if (item.arrow) {
-            final angle = math.atan2(item.y2 - item.y1, item.x2 - item.x1);
+          final rect = Rect.fromCircle(center: Offset(item.cx, item.cy), radius: item.r);
+          canvas.drawArc(rect, -math.pi / 2, 2 * math.pi * p, false, paint);
+        case _Kind.rect:
+          final peri = 2 * (item.w + item.h);
+          final path = Path()
+            ..addRect(Rect.fromLTWH(item.x, item.y, item.w, item.h));
+          for (final metric in path.computeMetrics()) {
+            final extract = metric.extractPath(0, metric.length * p);
+            canvas.drawPath(
+              extract,
+              Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = item.width
+                ..strokeCap = StrokeCap.round
+                ..strokeJoin = StrokeJoin.round
+                ..color = item.color,
+            );
+          }
+          // silence unused
+          assert(peri >= 0);
+        case _Kind.line:
+          final x2 = item.x1 + (item.x2 - item.x1) * p;
+          final y2 = item.y1 + (item.y2 - item.y1) * p;
+          final mx = (item.x1 + x2) / 2 + _handJitter(item.seed, 1, 10);
+          final my = (item.y1 + y2) / 2 + _handJitter(item.seed, 2, 10);
+          final path = Path()
+            ..moveTo(item.x1, item.y1)
+            ..quadraticBezierTo(mx, my, x2, y2);
+          final paint = Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = item.width
+            ..strokeCap = StrokeCap.round
+            ..color = item.color;
+          canvas.drawPath(path, paint);
+          if (item.arrow && p > 0.85) {
+            final angle = math.atan2(y2 - item.y1, x2 - item.x1);
             const size = 16.0;
-            final path = Path()
-              ..moveTo(item.x2, item.y2)
+            final head = Path()
+              ..moveTo(x2, y2)
               ..lineTo(
-                item.x2 - size * math.cos(angle - 0.4),
-                item.y2 - size * math.sin(angle - 0.4),
+                x2 - size * math.cos(angle - 0.4),
+                y2 - size * math.sin(angle - 0.4),
               )
               ..lineTo(
-                item.x2 - size * math.cos(angle + 0.4),
-                item.y2 - size * math.sin(angle + 0.4),
+                x2 - size * math.cos(angle + 0.4),
+                y2 - size * math.sin(angle + 0.4),
               )
               ..close();
-            canvas.drawPath(path, Paint()..color = item.color);
+            canvas.drawPath(
+              head,
+              Paint()
+                ..color = item.color.withValues(alpha: ((p - 0.85) / 0.15).clamp(0.0, 1.0)),
+            );
           }
       }
     }
   }
 
   @override
-  bool shouldRepaint(covariant _ClassroomBoardPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _ClassroomBoardPainter oldDelegate) =>
+      oldDelegate.clockMs != clockMs ||
+      oldDelegate.rtl != rtl ||
+      oldDelegate.items != items;
 }

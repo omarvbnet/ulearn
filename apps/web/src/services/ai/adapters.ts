@@ -6,6 +6,8 @@ import type {
   ImageGenerationInput,
   ImageGenerationResult,
   ProviderConfig,
+  SpeechSynthesisInput,
+  SpeechSynthesisResult,
 } from "./types";
 import { EMBEDDING_DIMS } from "./types";
 
@@ -269,6 +271,53 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
     return {
       embedding: truncateOrPad(values),
       tokensIn: usage?.total_tokens ?? Math.ceil(text.length / 4),
+    };
+  }
+
+  async synthesizeSpeech(
+    config: ProviderConfig,
+    input: SpeechSynthesisInput
+  ): Promise<SpeechSynthesisResult> {
+    const text = input.text.trim().slice(0, 4000);
+    if (!text) throw new Error("Empty speech text");
+    const lang = (input.language || "en").toLowerCase().slice(0, 2);
+    const voice =
+      input.voice?.trim() ||
+      (lang === "ar" ? "nova" : lang === "tr" ? "onyx" : "alloy");
+    const model = /tts|speech|gpt-4o-mini-tts/i.test(config.model)
+      ? config.model
+      : "tts-1-hd";
+    const url = `${this.base(config)}/audio/speech`;
+    const res = await fetchJson(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          input: text,
+          voice,
+          response_format: "mp3",
+          speed: 0.98,
+        }),
+      },
+      Math.max(config.timeoutMs || 30000, 60000)
+    );
+    if (!res.ok) {
+      const raw = await res.text().catch(() => "");
+      throw new Error(
+        `${this.type} TTS failed (${res.status}) at ${url}${raw ? `: ${raw.slice(0, 200)}` : ""}`
+      );
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    const words = text.split(/\s+/).filter(Boolean).length;
+    return {
+      mimeType: "audio/mpeg",
+      dataBase64: buf.toString("base64"),
+      durationMs: Math.max(1500, Math.min(45000, words * 380)),
     };
   }
 
@@ -710,6 +759,11 @@ export function providerSupportsChat(type: string, model?: string): boolean {
 /** True when this provider can run AI_CREATIVE_IMAGE (raster generate/edit). */
 export function providerSupportsImageGeneration(type: string): boolean {
   return type === "FLUX";
+}
+
+/** True when this provider can run VOICE_TTS (OpenAI-compatible /audio/speech). */
+export function providerSupportsSpeech(type: string): boolean {
+  return type === "OPENAI" || type === "OPENAI_COMPATIBLE";
 }
 
 function defaultChatModel(type: string): string {

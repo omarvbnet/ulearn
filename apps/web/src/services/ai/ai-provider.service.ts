@@ -1,8 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import type { AiModuleKey, AiProvider, AiProviderType } from "@prisma/client";
 import { decryptSecret, encryptSecret } from "./crypto";
-import { defaultBaseUrlForType, getAdapter, jinaDefaultBaseUrl, normalizeOpenAiCompatibleBase, providerSupportsChat, providerSupportsEmbeddings, providerSupportsImageGeneration } from "./adapters";
-import type { ChatMessage, ImageGenerationInput, ProviderConfig } from "./types";
+import { defaultBaseUrlForType, getAdapter, jinaDefaultBaseUrl, normalizeOpenAiCompatibleBase, providerSupportsChat, providerSupportsEmbeddings, providerSupportsImageGeneration, providerSupportsSpeech } from "./adapters";
+import type { ChatMessage, ImageGenerationInput, ProviderConfig, SpeechSynthesisInput } from "./types";
 
 function toConfig(p: AiProvider, apiKey: string): ProviderConfig {
   const openAiCompat =
@@ -127,6 +127,12 @@ export class AiProviderService {
           `${provider.type} (${provider.name}) cannot generate images. Assign AI_CREATIVE_IMAGE to FLUX.1 Kontext Max (Black Forest Labs).`
         );
       }
+    } else if (moduleKey === "VOICE_TTS") {
+      if (!providerSupportsSpeech(provider.type)) {
+        throw new Error(
+          `${provider.type} (${provider.name}) cannot run TTS. Assign VOICE_TTS to OpenAI (tts-1-hd / gpt-4o-mini-tts) or an OpenAI-compatible speech endpoint.`
+        );
+      }
     } else if (moduleKey !== "EMBEDDING" && !providerSupportsChat(provider.type, provider.model)) {
       throw new Error(
         `${provider.type} (${provider.name}) cannot run chat. Use a chat provider or jina-deepsearch-v1 for AI Creative text/PPT.`
@@ -241,6 +247,21 @@ export class AiProviderService {
           "OPENAI_COMPATIBLE",
         ],
       };
+    } else if (moduleKey === "VOICE_TTS") {
+      opts = {
+        preferTypes: opts?.preferTypes?.length
+          ? opts.preferTypes
+          : ["OPENAI", "OPENAI_COMPATIBLE"],
+        skipTypes: [
+          ...(opts?.skipTypes || []),
+          "FLUX",
+          "JINA",
+          "ANTHROPIC",
+          "DEEPSEEK",
+          "KIMI",
+          "GEMINI",
+        ],
+      };
     } else if (moduleKey === "AI_CREATIVE") {
       // Document text (PDF/PPT/Word) must come from DeepSeek chat — not FLUX/Jina/Gemini.
       opts = {
@@ -284,7 +305,18 @@ export class AiProviderService {
         );
         continue;
       }
-      if (moduleKey !== "EMBEDDING" && moduleKey !== "AI_CREATIVE_IMAGE" && !providerSupportsChat(provider.type, provider.model)) {
+      if (moduleKey === "VOICE_TTS" && !providerSupportsSpeech(provider.type)) {
+        lastError = new Error(
+          `${provider.type} (${provider.name}) cannot run TTS. Assign VOICE_TTS to OpenAI.`
+        );
+        continue;
+      }
+      if (
+        moduleKey !== "EMBEDDING" &&
+        moduleKey !== "AI_CREATIVE_IMAGE" &&
+        moduleKey !== "VOICE_TTS" &&
+        !providerSupportsChat(provider.type, provider.model)
+      ) {
         lastError = new Error(
           `${provider.type} (${provider.name}) is embedding-only. Use jina-deepsearch-v1 for chat / AI Creative.`
         );
@@ -425,6 +457,33 @@ export class AiProviderService {
         tokensIn: result.tokensIn ?? 0,
         latencyMs: Date.now() - started,
         costEstimate: 0.08,
+      },
+    });
+    return { ...result, providerId: provider.id };
+  }
+
+  /** Cloud TTS for AI Teacher classroom (ar / tr / en). */
+  static async synthesizeSpeech(input: SpeechSynthesisInput, userId?: string) {
+    const started = Date.now();
+    const { result, provider } = await this.withFallback(
+      "VOICE_TTS",
+      async (p, config) => {
+        const adapter = getAdapter(p.type);
+        if (!adapter.synthesizeSpeech) {
+          throw new Error(`${p.type} does not support speech synthesis`);
+        }
+        return adapter.synthesizeSpeech(config, input);
+      }
+    );
+    await prisma.aiUsageLog.create({
+      data: {
+        providerId: provider.id,
+        userId,
+        moduleKey: "VOICE_TTS",
+        success: true,
+        tokensIn: Math.ceil((input.text?.length || 0) / 4),
+        latencyMs: Date.now() - started,
+        costEstimate: 0.015,
       },
     });
     return { ...result, providerId: provider.id };
