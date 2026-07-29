@@ -304,7 +304,8 @@ export class AiChatService {
     if (
       learnerCreative &&
       !skipMaterialGate &&
-      (practiceQuiz ||
+      (aiTeacher ||
+        practiceQuiz ||
         explainObserve ||
         wantsGroundedAnswer ||
         creativeNeedsMaterial ||

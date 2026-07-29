@@ -605,6 +605,12 @@ export function AiTeacherClassroom({
 
   // Auto-start classroom when lesson mounts (real class feel).
   useEffect(() => {
+    if (!speech.length) {
+      setPhase("completed");
+      setCaption(lesson.objective || lesson.lesson_title || "");
+      applyBoardUntil(Number.POSITIVE_INFINITY);
+      return;
+    }
     void runLesson(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lesson.lesson_title, lesson.speech?.length]);

@@ -65,6 +65,35 @@ export default function StudentHomePage() {
 
       <CertificateInsightsEditor />
 
+      <Link href={`/${locale}/student/ai`} className="mb-6 block">
+        <Card className="card-hover overflow-hidden border-emerald-500/30 bg-gradient-to-br from-emerald-500/15 to-transparent">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+                U Learn AI Teacher
+              </p>
+              <h3 className="text-lg font-semibold">
+                {locale === "ar"
+                  ? "الفصل المباشر (سبورة + صوت)"
+                  : locale === "tr"
+                    ? "Canlı sınıf (tahta + ses)"
+                    : locale === "ku"
+                      ? "پۆلی ڕاستەوخۆ (تەختە + دەنگ)"
+                      : "Live AI Classroom (board + voice)"}
+              </h3>
+              <p className="mt-1 text-sm text-muted">
+                {locale === "ar"
+                  ? "افتح مساعد الذكاء، اضغط معلم السبورة، اختر المادة، وابدأ الدرس التفاعلي."
+                  : "Open AI Assistant, tap AI Teacher (board), pick a material, then start the live lesson."}
+              </p>
+            </div>
+            <span className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-bold text-emerald-950">
+              {locale === "ar" ? "ابدأ الآن" : "Start now"}
+            </span>
+          </div>
+        </Card>
+      </Link>
+
       {aiExamStats && (
         <Link href={`/${locale}/student/ai`} className="mb-6 block">
           <Card className="card-hover overflow-hidden border-accent/25 bg-gradient-to-br from-accent/10 to-transparent">
