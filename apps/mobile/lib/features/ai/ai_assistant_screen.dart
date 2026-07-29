@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import 'package:ulearn/core/widgets/glass.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/ai/ai_exam_panel.dart';
 import 'package:ulearn/features/ai/ai_message_content.dart';
+import 'package:ulearn/features/ai/ai_teacher_classroom.dart';
 import 'package:ulearn/features/ai/ai_upgrade.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
 
@@ -212,10 +214,13 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             ? Map<String, dynamic>.from(lessonRaw)
             : null;
         final content = m['content']?.toString() ?? '';
+        final hideDump = aiTeacherLesson != null ||
+            content.contains('### Lesson (spoken)') ||
+            content.contains('### Board actions');
         bubbles.add(
           _ChatBubble(
             role: role == 'user' ? 'user' : 'assistant',
-            text: aiTeacherLesson != null
+            text: hideDump
                 ? ''
                 : AiMessageContent.stripFollowUpMarkers(content),
             exam: exam != null && exam.examAttemptId.isNotEmpty ? exam : null,
@@ -418,6 +423,46 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       if (!mounted) return;
       _toast(e.toString());
     }
+  }
+
+  Future<String> _askClassroomTeacher({
+    required String question,
+    required int pausedIndex,
+    required Map<String, dynamic> lesson,
+  }) async {
+    final api = context.read<ApiClient>();
+    final auth = context.read<AuthProvider>();
+    final locale = context.read<LocaleProvider>().code.toLowerCase();
+    final title = lesson['lesson_title']?.toString() ?? 'Lesson';
+    final speech = (lesson['speech'] as List?) ?? const [];
+    final spoken = <String>[];
+    for (var i = 0; i <= pausedIndex && i < speech.length; i++) {
+      final s = speech[i];
+      if (s is Map && s['text'] != null) spoken.add(s['text'].toString());
+    }
+    final prompt = [
+      'You are U Learn AI Teacher in a live classroom. The student interrupted the lesson.',
+      'Answer briefly like a professional teacher. Do NOT restart. Do NOT return JSON.',
+      'Lesson title: $title',
+      'Paused after step ${pausedIndex + 1}.',
+      if (spoken.isNotEmpty)
+        'Already taught:\n- ${spoken.skip(math.max(0, spoken.length - 4)).join('\n- ')}',
+      'Student question: $question',
+      'End by saying you will continue from where you paused.',
+    ].join('\n');
+    final data = await api.post('/api/ai/chat', {
+      'question': prompt,
+      'language': locale,
+      'mode': 'chat',
+      if (_conversationId != null) 'conversationId': _conversationId,
+      ..._stagePayload(auth),
+    });
+    final answer = data['answer']?.toString().trim() ?? '';
+    return answer.isNotEmpty
+        ? answer
+        : (locale == 'ar'
+            ? 'سؤال ممتاز. دعنا نكمل من حيث توقفنا.'
+            : 'Excellent question. Let’s continue from where we paused.');
   }
 
   Future<void> _sendAiTeacher() async {
@@ -1405,8 +1450,15 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                                   null) ...[
                                                 if (m.text.isNotEmpty)
                                                   const SizedBox(height: 8),
-                                                _AiTeacherLessonCard(
+                                                AiTeacherClassroom(
                                                   lesson: m.aiTeacherLesson!,
+                                                  onAskTeacher:
+                                                      (question, pausedIndex) =>
+                                                          _askClassroomTeacher(
+                                                    question: question,
+                                                    pausedIndex: pausedIndex,
+                                                    lesson: m.aiTeacherLesson!,
+                                                  ),
                                                 ),
                                                 if (m.followUps.isNotEmpty) ...[
                                                   const SizedBox(height: 8),
@@ -2547,160 +2599,6 @@ class _ChatBubble {
   final String? pendingMode;
   final List<String> pendingDocumentIds;
   final int? pendingCount;
-}
-
-class _AiTeacherLessonCard extends StatelessWidget {
-  const _AiTeacherLessonCard({required this.lesson});
-
-  final Map<String, dynamic> lesson;
-
-  String _fmt(num? ms) {
-    final s = ((ms ?? 0).toInt().clamp(0, 1 << 30)) ~/ 1000;
-    final m = s ~/ 60;
-    final r = s % 60;
-    return '$m:${r.toString().padLeft(2, '0')}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final title = lesson['lesson_title']?.toString() ?? 'Lesson';
-    final objective = lesson['objective']?.toString() ?? '';
-    final speech = (lesson['speech'] as List?) ?? const [];
-    final board = (lesson['whiteboard'] as List?) ?? const [];
-    final summary = (lesson['summary'] as List?) ?? const [];
-    final quiz = (lesson['quiz'] as List?) ?? const [];
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF7C3AED).withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: const Color(0xFF7C3AED).withValues(alpha: 0.35),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            context.l10n.t('mobile.ai.aiTeacher'),
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              color: Color(0xFFA78BFA),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.foreground,
-            ),
-          ),
-          if (objective.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              objective,
-              style: TextStyle(fontSize: 13, color: AppTheme.muted),
-            ),
-          ],
-          if (speech.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(
-              context.l10n.t('mobile.ai.aiTeacherSpeech'),
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.muted,
-              ),
-            ),
-            const SizedBox(height: 6),
-            ...speech.take(8).map((s) {
-              if (s is! Map) return const SizedBox.shrink();
-              final map = Map<String, dynamic>.from(s);
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  '${_fmt(map['time'] as num?)}  ${map['text'] ?? ''}',
-                  style: TextStyle(fontSize: 13, color: AppTheme.foreground),
-                ),
-              );
-            }),
-            if (speech.length > 8)
-              Text(
-                '+${speech.length - 8}',
-                style: TextStyle(fontSize: 12, color: AppTheme.muted),
-              ),
-          ],
-          if (board.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Text(
-              '${context.l10n.t('mobile.ai.aiTeacherBoard')} (${board.length})',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.muted,
-              ),
-            ),
-            const SizedBox(height: 4),
-            ...board.take(6).map((a) {
-              if (a is! Map) return const SizedBox.shrink();
-              final map = Map<String, dynamic>.from(a);
-              final params = map['parameters'];
-              final text = params is Map ? params['text']?.toString() : null;
-              return Text(
-                '${_fmt(map['time'] as num?)} · ${map['action'] ?? ''}'
-                '${text != null && text.isNotEmpty ? ' — $text' : ''}',
-                style: TextStyle(fontSize: 11, color: AppTheme.muted),
-              );
-            }),
-          ],
-          if (summary.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Text(
-              context.l10n.t('mobile.ai.aiTeacherSummary'),
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.muted,
-              ),
-            ),
-            ...summary.map(
-              (s) => Text(
-                '• ${s.toString()}',
-                style: TextStyle(fontSize: 13, color: AppTheme.foreground),
-              ),
-            ),
-          ],
-          if (quiz.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Text(
-              context.l10n.t('mobile.ai.aiTeacherQuiz'),
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.muted,
-              ),
-            ),
-            ...quiz.take(3).map((q) {
-              if (q is! Map) return const SizedBox.shrink();
-              final map = Map<String, dynamic>.from(q);
-              return Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  '${map['question'] ?? ''}',
-                  style: TextStyle(fontSize: 13, color: AppTheme.foreground),
-                ),
-              );
-            }),
-          ],
-        ],
-      ),
-    );
-  }
 }
 
 class _CourseSuggestionsStrip extends StatelessWidget {

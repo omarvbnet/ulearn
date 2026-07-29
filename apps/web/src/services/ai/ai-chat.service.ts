@@ -10,7 +10,6 @@ import {
   extractFollowUps,
 } from "./tutoring-prompt";
 import {
-  aiTeacherLessonToMarkdown,
   buildAiTeacherSystemPrompt,
   parseAiTeacherLesson,
   type AiTeacherLesson,
@@ -1309,7 +1308,16 @@ export class AiChatService {
       input.subjectId
     );
 
-    const answer = aiTeacherLessonToMarkdown(lesson);
+    // Keep chat history short — the live classroom player uses aiTeacherLesson JSON.
+    // Never surface the markdown dump as the student-facing lesson body.
+    const answer =
+      input.language === "ar"
+        ? `الفصل المباشر جاهز: ${lesson.lesson_title}`
+        : input.language === "tr"
+          ? `Canlı sınıf hazır: ${lesson.lesson_title}`
+          : input.language === "ku"
+            ? `پۆلی ڕاستەوخۆ ئامادەیە: ${lesson.lesson_title}`
+            : `Live classroom ready: ${lesson.lesson_title}`;
     return this.persistTurn({
       userId: input.userId,
       conversationId: input.conversationId,

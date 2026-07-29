@@ -4,11 +4,30 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, PageHeader } from "@/components/ui";
 import {
-  AiTeacherLessonCard,
-  type AiTeacherLessonView,
-} from "@/components/ai/ai-teacher-lesson-card";
+  AiTeacherClassroom,
+} from "@/components/ai/ai-teacher-classroom";
+import type { AiTeacherLessonView } from "@/components/ai/ai-teacher-lesson-card";
 import { useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
+
+function looksLikeAiTeacherMarkdownDump(text: string): boolean {
+  return (
+    /###\s*Lesson\s*\(spoken\)/i.test(text) ||
+    /###\s*Board actions/i.test(text) ||
+    /###\s*Lesson\s*\(spoken\)|###\s*الملخص|Board actions/i.test(text)
+  );
+}
+
+function lessonFromCitations(
+  citations: unknown
+): AiTeacherLessonView | null {
+  if (!citations || typeof citations !== "object") return null;
+  const raw = (citations as { aiTeacherLesson?: unknown }).aiTeacherLesson;
+  if (!raw || typeof raw !== "object") return null;
+  const lesson = raw as AiTeacherLessonView;
+  if (!Array.isArray(lesson.speech) || lesson.speech.length === 0) return null;
+  return lesson;
+}
 
 type ChatMsg = {
   id: string;
@@ -372,6 +391,42 @@ export default function StudentAiPage() {
     }
   }
 
+  async function askClassroomTeacher(input: {
+    question: string;
+    pausedSpeechIndex: number;
+    spokenSoFar: string[];
+    lessonTitle: string;
+  }): Promise<string> {
+    const contextPrompt = [
+      "You are U Learn AI Teacher in a live classroom. The student interrupted the lesson.",
+      "Answer briefly like a professional teacher standing at the board.",
+      "Do NOT restart the lesson. Do NOT return JSON. Plain spoken teacher reply only.",
+      `Lesson title: ${input.lessonTitle}`,
+      `Paused after step ${input.pausedSpeechIndex + 1}.`,
+      input.spokenSoFar.length
+        ? `What was already taught:\n- ${input.spokenSoFar.slice(-4).join("\n- ")}`
+        : "",
+      `Student question: ${input.question}`,
+      "End by saying you will continue from where you paused.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const res = await fetch("/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: contextPrompt,
+        language: locale,
+        conversationId: conversationId || undefined,
+        mode: "chat",
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed");
+    if (data.conversationId) setConversationId(data.conversationId);
+    return String(data.answer || "").trim() || "Excellent question. Let’s continue.";
+  }
+
   async function openConversation(id: string) {
     setSending(true);
     try {
@@ -386,16 +441,22 @@ export default function StudentAiPage() {
         citations?: {
           practiceQuiz?: PracticeExam;
           review?: Array<{ text: string; isCorrect: boolean }>;
+          aiTeacherLesson?: AiTeacherLessonView;
         };
       }>;
       setMessages(
         msgs.map((m) => {
           const practice = m.citations?.practiceQuiz;
           const hasReview = Array.isArray(m.citations?.review);
+          const aiTeacherLesson = lessonFromCitations(m.citations);
+          const raw = m.content || "";
+          const hideDump =
+            Boolean(aiTeacherLesson) || looksLikeAiTeacherMarkdownDump(raw);
           return {
             id: m.id,
             role: m.role === "USER" ? "user" : "assistant",
-            text: m.content,
+            text: hideDump ? "" : raw,
+            aiTeacherLesson,
             exam: practice || null,
             examDone: Boolean(practice),
             result: hasReview
@@ -690,9 +751,10 @@ export default function StudentAiPage() {
                   </div>
                 ) : null}
                 {m.aiTeacherLesson ? (
-                  <AiTeacherLessonCard
+                  <AiTeacherClassroom
                     lesson={m.aiTeacherLesson}
                     locale={locale}
+                    onAskTeacher={askClassroomTeacher}
                   />
                 ) : null}
                 {m.file ? (
