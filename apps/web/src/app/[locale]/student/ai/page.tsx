@@ -718,6 +718,22 @@ export default function StudentAiPage() {
             <Card className="space-y-3 border-dashed">
               <p className="text-center text-muted">{t.student.aiEmpty}</p>
               <div className="flex flex-wrap justify-center gap-2">
+                <button
+                  type="button"
+                  disabled={sending}
+                  onClick={() => void sendAiTeacherLesson()}
+                  className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/25"
+                >
+                  {locale === "ar"
+                    ? "ابدأ فصل المعلم AI (سبورة + صوت)"
+                    : locale === "tr"
+                      ? "AI Tahta Sınıfını Başlat"
+                      : locale === "ku"
+                        ? "پۆلی مامۆستای AI دەستپێبکە"
+                        : "Start AI Teacher classroom (board + voice)"}
+                </button>
+              </div>
+              <div className="flex flex-wrap justify-center gap-2">
                 {quickPrompts.map((p) => (
                   <button
                     key={p}

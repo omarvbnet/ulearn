@@ -1822,43 +1822,13 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                           },
                         ),
                 ),
-                if (_pending.isEmpty && _messages.isNotEmpty)
+                if (_pending.isEmpty)
                   SizedBox(
                     height: 40,
                     child: ListView(
                       scrollDirection: Axis.horizontal,
                       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                       children: [
-                        ActionChip(
-                          label: Text(
-                            context.l10n.t('mobile.ai.promptSummary'),
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          onPressed: () {
-                            _controller.text = context.l10n.t(
-                              'mobile.ai.promptSummary',
-                            );
-                            _send();
-                          },
-                          backgroundColor: AppTheme.card,
-                          side: BorderSide(color: AppTheme.cardBorder),
-                        ),
-                        const SizedBox(width: 8),
-                        ActionChip(
-                          label: Text(
-                            context.l10n.t('mobile.ai.promptMinistry'),
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          onPressed: () {
-                            _controller.text = context.l10n.t(
-                              'mobile.ai.promptMinistry',
-                            );
-                            _send();
-                          },
-                          backgroundColor: AppTheme.card,
-                          side: BorderSide(color: AppTheme.cardBorder),
-                        ),
-                        const SizedBox(width: 8),
                         ActionChip(
                           avatar: const Icon(Icons.slideshow_rounded, size: 16),
                           label: Text(
@@ -1883,6 +1853,38 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                             color: AppTheme.accent.withValues(alpha: 0.45),
                           ),
                         ),
+                        if (_messages.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          ActionChip(
+                            label: Text(
+                              context.l10n.t('mobile.ai.promptSummary'),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            onPressed: () {
+                              _controller.text = context.l10n.t(
+                                'mobile.ai.promptSummary',
+                              );
+                              _send();
+                            },
+                            backgroundColor: AppTheme.card,
+                            side: BorderSide(color: AppTheme.cardBorder),
+                          ),
+                          const SizedBox(width: 8),
+                          ActionChip(
+                            label: Text(
+                              context.l10n.t('mobile.ai.promptMinistry'),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            onPressed: () {
+                              _controller.text = context.l10n.t(
+                                'mobile.ai.promptMinistry',
+                              );
+                              _send();
+                            },
+                            backgroundColor: AppTheme.card,
+                            side: BorderSide(color: AppTheme.cardBorder),
+                          ),
+                        ],
                       ],
                     ),
                   ),
