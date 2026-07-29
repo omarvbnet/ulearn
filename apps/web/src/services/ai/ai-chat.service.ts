@@ -1078,7 +1078,7 @@ export class AiChatService {
     const raw = result.text.trim();
     let lesson = parseAiTeacherLesson(raw);
 
-    // One repair pass if the model returned prose / broken JSON.
+    // First repair pass if the model returned prose / broken JSON.
     if (!lesson) {
       const repair = await AiProviderService.chat(
         "TEACHING_ASSISTANT",
@@ -1086,7 +1086,7 @@ export class AiChatService {
           {
             role: "system",
             content:
-              "Convert the teaching content into valid U Learn AI Teacher JSON only. No markdown fences.",
+              "Convert the teaching content into valid U Learn AI Teacher JSON only. No markdown fences, no extra keys.",
           },
           {
             role: "user",
@@ -1096,6 +1096,80 @@ export class AiChatService {
         input.userId
       );
       lesson = parseAiTeacherLesson(repair.text);
+    }
+
+    // Second repair pass with strict schema reminder.
+    if (!lesson) {
+      const repair2 = await AiProviderService.chat(
+        "TEACHING_ASSISTANT",
+        [
+          {
+            role: "system",
+            content: [
+              "Return ONLY valid JSON for U Learn AI Teacher.",
+              "Required keys exactly: language, lesson_title, objective, speech, whiteboard, quiz, summary.",
+              "speech must be an array of { time:number, text:string } with at least 1 item.",
+              "whiteboard must be an array of { time:number, action:string, parameters:object }.",
+              "Do not include markdown fences or explanations.",
+            ].join("\n"),
+          },
+          {
+            role: "user",
+            content: `Topic: ${input.question}\n\nInvalid attempt:\n${raw.slice(0, 8000)}`,
+          },
+        ],
+        input.userId
+      );
+      lesson = parseAiTeacherLesson(repair2.text);
+    }
+
+    // Hard fallback: synthesize a minimal valid lesson from available text.
+    if (!lesson) {
+      const source = raw || input.question;
+      const sentences = source
+        .replace(/\s+/g, " ")
+        .split(/(?<=[.!؟!])/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 6);
+      const speech = (sentences.length ? sentences : [input.question]).map((text, i) => ({
+        time: i * 5000,
+        text,
+      }));
+      const whiteboard = speech.map((s, i) => ({
+        time: s.time,
+        action: "write_text",
+        parameters: {
+          text: s.text.slice(0, 120),
+          x: 120,
+          y: 120 + i * 90,
+          size: 34,
+        },
+      }));
+      lesson = {
+        language: input.language || "en",
+        lesson_title:
+          input.language === "ar"
+            ? "درس تفاعلي"
+            : input.language === "tr"
+              ? "Etkileşimli Ders"
+              : input.language === "ku"
+                ? "وانەی هاوکاری"
+                : "Interactive Lesson",
+        objective: input.question,
+        speech,
+        whiteboard,
+        quiz: [],
+        summary: [
+          input.language === "ar"
+            ? "يمكنني الآن إكمال الشرح خطوة بخطوة مع أمثلة إضافية."
+            : input.language === "tr"
+              ? "İstersen şimdi adım adım ek örneklerle devam edebilirim."
+              : input.language === "ku"
+                ? "دەتوانم ئێستا هەنگاو بە هەنگاو بە نموونەی زیاتر درێژە بدەم."
+                : "I can now continue step by step with more examples.",
+        ],
+      };
     }
 
     if (!lesson) {
