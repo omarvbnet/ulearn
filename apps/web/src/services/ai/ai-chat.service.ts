@@ -50,6 +50,42 @@ export class AiChatService {
     });
   }
 
+  /**
+   * Dedicated live-classroom entry (not chat).
+   * Always returns either material selection OR a structured aiTeacherLesson.
+   */
+  static async teacherClassroom(input: {
+    userId: string;
+    question?: string;
+    conversationId?: string;
+    language?: string | null;
+    stageId?: string | null;
+    subjectId?: string | null;
+    subjectIds?: string[];
+    documentIds?: string[];
+    chapterHeading?: string | null;
+    chunkFrom?: number | null;
+    chunkTo?: number | null;
+  }) {
+    return this.chat({
+      userId: input.userId,
+      question:
+        (input.question || "").trim() ||
+        "Teach this selected material as an interactive whiteboard lesson with spoken explanation",
+      conversationId: input.conversationId,
+      language: input.language,
+      stageId: input.stageId,
+      subjectId: input.subjectId,
+      subjectIds: input.subjectIds,
+      documentIds: input.documentIds,
+      chapterHeading: input.chapterHeading,
+      chunkFrom: input.chunkFrom,
+      chunkTo: input.chunkTo,
+      mode: "ai_teacher",
+      attachments: [],
+    });
+  }
+
   static async chat(input: {
     userId: string;
     question: string;
@@ -1281,23 +1317,59 @@ export class AiChatService {
     }
 
     if (!lesson) {
-      const fail =
-        input.language === "ar"
-          ? "تعذر تجهيز درس السبورة الآن. أعد المحاولة بصياغة أوضح للموضوع."
-          : input.language === "tr"
-            ? "Tahta dersi şu an hazırlanamadı. Konuyu daha net yazıp tekrar deneyin."
-            : input.language === "ku"
-              ? "وانەی تەختە ئامادە نەبوو. بابەتەکە ڕوونتر بنووسە و دووبارە هەوڵ بدە."
-              : "Could not prepare the whiteboard lesson. Try rephrasing the topic.";
-      return this.persistTurn({
-        userId: input.userId,
-        conversationId: input.conversationId,
-        question: input.question,
-        answer: fail,
-        citations: [],
-        fromCache: false,
-        attachmentNames: input.attachments.map((a) => a.fileName),
-      });
+      // Never fall back to plain chat — always open a minimal live classroom.
+      lesson = {
+        language: input.language || "en",
+        lesson_title:
+          input.language === "ar"
+            ? "درس تفاعلي"
+            : input.language === "tr"
+              ? "Etkileşimli Ders"
+              : input.language === "ku"
+                ? "وانەی هاوکاری"
+                : "Interactive Lesson",
+        objective: input.question,
+        speech: [
+          {
+            time: 0,
+            text:
+              input.language === "ar"
+                ? `مرحباً! سنشرح معاً: ${input.question}`
+                : `Hello! Let's learn together: ${input.question}`,
+          },
+          {
+            time: 5000,
+            text:
+              input.language === "ar"
+                ? "تابع معي على السبورة، ويمكنك سؤالي في أي وقت."
+                : "Follow me on the board, and you can ask me anytime.",
+          },
+        ],
+        whiteboard: [
+          {
+            time: 0,
+            action: "open_new_board",
+            parameters: { title: input.question.slice(0, 80) },
+          },
+          {
+            time: 1000,
+            action: "write_text",
+            parameters: {
+              text: input.question.slice(0, 80),
+              x: 120,
+              y: 140,
+              size: 36,
+              color: "blue",
+            },
+          },
+        ],
+        quiz: [],
+        summary: [
+          input.language === "ar"
+            ? "يمكننا الآن المتابعة بأمثلة إضافية."
+            : "We can now continue with more examples.",
+        ],
+      };
     }
 
     // Prefer student’s UI language when model omits it.

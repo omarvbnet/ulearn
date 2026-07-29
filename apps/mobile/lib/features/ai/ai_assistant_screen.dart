@@ -465,9 +465,69 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             : 'Excellent question. Let’s continue from where we paused.');
   }
 
+  Future<void> _openLiveClassroom(Map<String, dynamic> lesson) async {
+    if (!mounted) return;
+    await showGeneralDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierLabel: 'classroom',
+      barrierColor: Colors.black87,
+      pageBuilder: (ctx, a1, a2) {
+        return SafeArea(
+          child: Material(
+            color: const Color(0xFF050B14),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          lesson['lesson_title']?.toString() ??
+                              context.l10n.t('mobile.ai.aiTeacherClassroom'),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        icon: const Icon(Icons.close, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                    child: AiTeacherClassroom(
+                      lesson: lesson,
+                      onAskTeacher: (question, pausedIndex) =>
+                          _askClassroomTeacher(
+                        question: question,
+                        pausedIndex: pausedIndex,
+                        lesson: lesson,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _sendAiTeacher() async {
-    final q = _controller.text.trim();
-    if (q.isEmpty || _sending) return;
+    final typed = _controller.text.trim();
+    final q = typed.isNotEmpty
+        ? typed
+        : context.l10n.t('mobile.ai.aiTeacherPrompt');
+    if (_sending) return;
     setState(() {
       _sending = true;
       _messages.add(_ChatBubble(role: 'user', text: q));
@@ -478,10 +538,9 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       final api = context.read<ApiClient>();
       final auth = context.read<AuthProvider>();
       final locale = context.read<LocaleProvider>().code.toLowerCase();
-      final data = await api.post('/api/ai/chat', {
+      final data = await api.post('/api/ai/teacher', {
         'question': q,
         'language': locale,
-        'mode': 'ai_teacher',
         if (_conversationId != null) 'conversationId': _conversationId,
         ..._stagePayload(auth),
       });
@@ -537,29 +596,32 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       final lesson = lessonRaw is Map
           ? Map<String, dynamic>.from(lessonRaw)
           : null;
-      final answer = data['answer']?.toString() ?? '';
-      final followUpsRaw = data['followUps'];
-      final followUps = <String>[];
-      if (followUpsRaw is List) {
-        for (final f in followUpsRaw) {
-          final t = f?.toString().trim() ?? '';
-          if (t.isNotEmpty) followUps.add(t);
-        }
+      if (lesson == null) {
+        setState(() {
+          _conversationId =
+              data['conversationId']?.toString() ?? _conversationId;
+          _messages.add(
+            _ChatBubble(
+              role: 'assistant',
+              text: data['answer']?.toString() ??
+                  context.l10n.t('mobile.ai.errorGeneric'),
+            ),
+          );
+        });
+        return;
       }
       setState(() {
         _conversationId = data['conversationId']?.toString() ?? _conversationId;
         _messages.add(
           _ChatBubble(
             role: 'assistant',
-            text: lesson != null
-                ? ''
-                : AiMessageContent.stripFollowUpMarkers(answer),
-            followUps: followUps,
+            text: '',
             aiTeacherLesson: lesson,
           ),
         );
       });
       _scrollToEnd();
+      await _openLiveClassroom(lesson);
       await _loadConversations();
     } catch (e) {
       if (!mounted) return;
@@ -846,12 +908,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       final payload = <String, dynamic>{
         'question': question,
         'language': locale,
-        if (!isCreative)
-          'mode': isPractice
-              ? 'practice_quiz'
-              : isAiTeacher
-              ? 'ai_teacher'
-              : 'explain_observe',
+        if (!isCreative && !isAiTeacher)
+          'mode': isPractice ? 'practice_quiz' : 'explain_observe',
         'documentIds': documentIds,
         if (chapterHeading != null && chapterHeading.isNotEmpty)
           'chapterHeading': chapterHeading,
@@ -861,11 +919,38 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         if (_conversationId != null) 'conversationId': _conversationId,
         ..._stagePayload(auth),
       };
-      final data = await api.post('/api/ai/chat', payload);
+      final data = isAiTeacher
+          ? await api.post('/api/ai/teacher', payload)
+          : await api.post('/api/ai/chat', payload);
       if (!mounted) return;
 
       if (data['needsChapterSelection'] == true) {
         _showChapterSelectionBubble(data, question);
+        return;
+      }
+
+      if (isAiTeacher) {
+        final lessonRaw = data['aiTeacherLesson'];
+        final lesson = lessonRaw is Map
+            ? Map<String, dynamic>.from(lessonRaw)
+            : null;
+        setState(() {
+          _conversationId =
+              data['conversationId']?.toString() ?? _conversationId;
+          _messages.add(
+            _ChatBubble(
+              role: 'assistant',
+              text: lesson != null
+                  ? ''
+                  : (data['answer']?.toString() ?? unavailable),
+              aiTeacherLesson: lesson,
+            ),
+          );
+        });
+        if (lesson != null) {
+          await _openLiveClassroom(lesson);
+        }
+        _loadConversations();
         return;
       }
 
@@ -1450,14 +1535,24 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                                   null) ...[
                                                 if (m.text.isNotEmpty)
                                                   const SizedBox(height: 8),
-                                                AiTeacherClassroom(
-                                                  lesson: m.aiTeacherLesson!,
-                                                  onAskTeacher:
-                                                      (question, pausedIndex) =>
-                                                          _askClassroomTeacher(
-                                                    question: question,
-                                                    pausedIndex: pausedIndex,
-                                                    lesson: m.aiTeacherLesson!,
+                                                FilledButton.icon(
+                                                  onPressed: () =>
+                                                      _openLiveClassroom(
+                                                    m.aiTeacherLesson!,
+                                                  ),
+                                                  icon: const Icon(
+                                                    Icons.slideshow_rounded,
+                                                  ),
+                                                  label: Text(
+                                                    context.l10n.t(
+                                                      'mobile.ai.aiTeacherClassroom',
+                                                    ),
+                                                  ),
+                                                  style: FilledButton.styleFrom(
+                                                    backgroundColor:
+                                                        const Color(0xFF10B981),
+                                                    foregroundColor:
+                                                        const Color(0xFF064E3B),
                                                   ),
                                                 ),
                                                 if (m.followUps.isNotEmpty) ...[
