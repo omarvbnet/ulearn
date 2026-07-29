@@ -1,4 +1,4 @@
-import { languageInstruction } from "./types";
+import { accentInstruction } from "./voice-accent";
 
 /**
  * U Learn AI Teacher — whiteboard-first teaching (individual student option).
@@ -71,6 +71,7 @@ export type AiTeacherLesson = {
 
 export function buildAiTeacherSystemPrompt(input: {
   language?: string | null;
+  countryCode?: string | null;
   studentBlurb?: string;
   memoryBlurb?: string;
   learningCtxBlurb?: string;
@@ -79,7 +80,7 @@ export function buildAiTeacherSystemPrompt(input: {
     "You are U Learn AI for students, an elite AI educator that teaches students through an interactive whiteboard experience.",
     "Your mission is not to answer questions, but to ensure the student fully understands the topic through visual explanation, synchronized speech, progressive drawing, and interactive teaching.",
     "This is an individual teaching option — behave like a real teacher standing in front of a classroom, never like a chatbot.",
-    languageInstruction(input.language),
+    accentInstruction(input.language, input.countryCode),
     "Classroom languages are ONLY: ar (Arabic), tr (Turkish), en (English). Set JSON language to exactly one of those codes.",
     "All speech[].text and all whiteboard write_text / formula text MUST be entirely in that language — never mix languages.",
     input.studentBlurb ? `Know this learner: ${input.studentBlurb}` : "",
@@ -770,12 +771,13 @@ function normalizeClassroomLanguage(raw?: string | null): "ar" | "tr" | "en" {
 /** Compact system prompt for fast classroom generation (single LLM call). */
 export function buildCompactAiTeacherPrompt(input: {
   language?: string | null;
+  countryCode?: string | null;
   studentBlurb?: string;
 }): string {
   return [
     "You are U Learn AI Teacher in a live classroom. Return ONLY valid JSON (no markdown).",
-    languageInstruction(input.language),
-    "language must be exactly ar, tr, or en. ALL speech and board text in that language.",
+    accentInstruction(input.language, input.countryCode),
+    "language must be exactly ar, tr, or en (use ar for Kurdish board/speech locale mapping when needed). ALL speech and board text match the student's selected language.",
     "Teach a REAL subject from the student topic — never talk about the UI, writing pace, or 'one line at a time'.",
     "CRITICAL: speech[].text and write_text are PLAIN human sentences/phrases only — NEVER schema keys.",
     "Arabic RTL: write_text x ≈ 1700–1820. English/Turkish LTR: write_text x ≈ 100–220.",
@@ -804,6 +806,7 @@ export type ClassroomInterruptResult = {
 /** Fast interrupt reply: spoken answer + board drawings for the student's question. */
 export function buildClassroomInterruptPrompt(input: {
   language?: string | null;
+  countryCode?: string | null;
   lessonTitle?: string;
   pausedIndex?: number;
   spokenSoFar?: string[];
@@ -812,7 +815,7 @@ export function buildClassroomInterruptPrompt(input: {
   const rtl = language === "ar";
   return [
     "You are U Learn AI Teacher in a LIVE classroom. The student just interrupted by speaking.",
-    languageInstruction(input.language),
+    accentInstruction(input.language, input.countryCode),
     "Reply like ChatGPT voice mode + a human teacher at a whiteboard: warm, clear, concise.",
     "Return ONLY valid JSON (no markdown): {\"answer\":\"...\",\"board\":[...]}",
     "answer: 2–4 short spoken sentences in the classroom language. Answer the question directly. End by saying you will continue the lesson.",

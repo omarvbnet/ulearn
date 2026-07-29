@@ -104,8 +104,18 @@ export class AiChatService {
     if (!question) {
       throw new Error("Empty question");
     }
+    const profile = await prisma.user.findUnique({
+      where: { id: input.userId },
+      select: {
+        locale: true,
+        country: { select: { code: true } },
+      },
+    });
+    const language = input.language || profile?.locale || "en";
+    const countryCode = profile?.country?.code ?? null;
     const system = buildClassroomInterruptPrompt({
-      language: input.language,
+      language,
+      countryCode,
       lessonTitle: input.lessonTitle,
       pausedIndex: input.pausedSpeechIndex,
       spokenSoFar: input.spokenSoFar,
@@ -123,18 +133,18 @@ export class AiChatService {
       input.userId
     );
     const parsed =
-      parseClassroomInterrupt(result.text, input.language) ||
+      parseClassroomInterrupt(result.text, language) ||
       parseClassroomInterrupt(
         JSON.stringify({
           answer:
-            input.language === "ar"
+            language === "ar" || language === "ku"
               ? "سؤال ممتاز. هذه الفكرة باختصار، وسنكمل من حيث توقفنا."
-              : input.language === "tr"
+              : language === "tr"
                 ? "Harika soru. Kısaca bu fikir şöyle; kaldığımız yerden devam edeceğiz."
                 : "Great question. Here is the idea briefly — then we continue where we paused.",
           board: [],
         }),
-        input.language
+        language
       );
 
     return {
@@ -202,6 +212,7 @@ export class AiChatService {
         fullLegalName: true,
         locale: true,
         role: true,
+        country: { select: { code: true } },
         studentProfile: {
           select: {
             educationalStageId: true,
@@ -243,6 +254,7 @@ export class AiChatService {
     });
 
     const language = normalizeLang(input.language || profile?.locale);
+    const countryCode = profile?.country?.code ?? null;
     const isCert = profile?.role === "CERTIFICATE_USER";
     const interestSubjects =
       profile?.certificateProfile?.interests.map((i) => i.subject) ?? [];
@@ -463,6 +475,7 @@ export class AiChatService {
             conversationId: input.conversationId,
             question,
             language,
+            countryCode,
             stageId,
             subjectId,
             subjectIds,
@@ -573,6 +586,7 @@ export class AiChatService {
             conversationId: input.conversationId,
             question,
             language,
+            countryCode,
             stageId,
             subjectId,
             subjectIds,
@@ -630,6 +644,7 @@ export class AiChatService {
           conversationId: input.conversationId,
           question,
           language,
+          countryCode,
           stageId,
           subjectId,
           subjectIds,
@@ -704,6 +719,7 @@ export class AiChatService {
         conversationId: input.conversationId,
         question,
         language,
+        countryCode,
         stageId,
         subjectId,
         subjectIds,
@@ -1136,9 +1152,21 @@ export class AiChatService {
     chapterHeading?: string;
     chunkFrom?: number | null;
     chunkTo?: number | null;
+    countryCode?: string | null;
   }) {
+    const countryCode =
+      input.countryCode ??
+      (
+        await prisma.user.findUnique({
+          where: { id: input.userId },
+          select: { country: { select: { code: true } } },
+        })
+      )?.country?.code ??
+      null;
+
     const studentBlurb = [
       input.studentName ? `Student: ${input.studentName}` : null,
+      countryCode ? `Country: ${countryCode}` : null,
       input.stageName
         ? input.isCert
           ? `Track: ${input.stageName}`
@@ -1185,6 +1213,7 @@ export class AiChatService {
     const system = [
       buildCompactAiTeacherPrompt({
         language: input.language,
+        countryCode,
         studentBlurb: studentBlurb || undefined,
       }),
       materialContext

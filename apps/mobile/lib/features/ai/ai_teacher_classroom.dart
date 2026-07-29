@@ -59,6 +59,8 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
   var _handlingInterrupt = false;
   final _hzBars = List<double>.filled(18, 0.12);
   Timer? _hzTimer;
+  String? _speechLocale;
+  String? _selectedLanguage;
 
   List<Map<String, dynamic>> get _speech {
     final raw = widget.lesson['speech'];
@@ -91,6 +93,22 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
     return 'en';
   }
 
+  String get _ttsLanguage {
+    final selected = (_selectedLanguage ?? context.localeCode).toLowerCase();
+    if (selected.startsWith('ku')) return 'ku';
+    if (selected.startsWith('ar')) return 'ar';
+    if (selected.startsWith('tr')) return 'tr';
+    return _lang;
+  }
+
+  String get _sttLocaleId {
+    final tag = (_speechLocale ?? '').replaceAll('-', '_');
+    if (tag.length >= 2) return tag;
+    if (_lang == 'ar') return 'ar_SA';
+    if (_lang == 'tr') return 'tr_TR';
+    return 'en_US';
+  }
+
   bool get _rtl => _lang == 'ar';
 
   @override
@@ -108,6 +126,29 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
         });
       }
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_loadVoiceProfile());
+    });
+  }
+
+  Future<void> _loadVoiceProfile() async {
+    if (!mounted) return;
+    try {
+      final api = context.read<ApiClient>();
+      final locale = context.localeCode.toLowerCase();
+      _selectedLanguage = locale;
+      final data = await api.get(
+        '/api/ai/voice-profile?language=${Uri.encodeQueryComponent(locale)}',
+      );
+      final nested = data['data'];
+      final nestedMap = nested is Map ? Map<String, dynamic>.from(nested) : null;
+      final speechLocale =
+          (data['speechLocale'] ?? nestedMap?['speechLocale'])?.toString();
+      if (!mounted || speechLocale == null || speechLocale.isEmpty) return;
+      setState(() => _speechLocale = speechLocale);
+    } catch (_) {
+      /* TTS route still resolves country server-side */
+    }
   }
 
   @override
@@ -149,10 +190,17 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
       final api = context.read<ApiClient>();
       final data = await api.post('/api/ai/tts', {
         'text': text,
-        'language': _lang,
+        'language': _ttsLanguage,
       });
       final nested = data['data'];
       final nestedMap = nested is Map ? Map<String, dynamic>.from(nested) : null;
+      final speechLocale =
+          (data['speechLocale'] ?? nestedMap?['speechLocale'])?.toString();
+      if (speechLocale != null &&
+          speechLocale.isNotEmpty &&
+          speechLocale != _speechLocale) {
+        _speechLocale = speechLocale;
+      }
       final b64 =
           (data['dataBase64'] ?? nestedMap?['dataBase64'])?.toString();
       final mime =
@@ -259,11 +307,7 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
         listenFor: const Duration(seconds: 30),
         pauseFor: const Duration(seconds: 2),
         partialResults: true,
-        localeId: _lang == 'ar'
-            ? 'ar_SA'
-            : _lang == 'tr'
-                ? 'tr_TR'
-                : 'en_US',
+        localeId: _sttLocaleId,
       ),
     );
   }

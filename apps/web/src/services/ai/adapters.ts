@@ -10,6 +10,7 @@ import type {
   SpeechSynthesisResult,
 } from "./types";
 import { EMBEDDING_DIMS } from "./types";
+import { resolveTeacherVoice } from "./voice-accent";
 
 function truncateOrPad(vec: number[], dim = EMBEDDING_DIMS): number[] {
   if (vec.length === dim) return vec;
@@ -280,10 +281,12 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
   ): Promise<SpeechSynthesisResult> {
     const text = input.text.trim().slice(0, 4000);
     if (!text) throw new Error("Empty speech text");
-    const lang = (input.language || "en").toLowerCase().slice(0, 2);
-    const voice =
-      input.voice?.trim() ||
-      (lang === "ar" ? "nova" : lang === "tr" ? "onyx" : "alloy");
+    const resolved = resolveTeacherVoice({
+      language: input.language,
+      countryCode: input.countryCode,
+      voiceOverride: input.voice,
+    });
+    const voice = resolved.openaiVoice;
     const model = /tts|speech|gpt-4o-mini-tts/i.test(config.model)
       ? config.model
       : "tts-1-hd";
@@ -680,13 +683,6 @@ export class AnthropicAdapter implements AiProviderAdapter {
   }
 }
 
-/** Default ElevenLabs public voices (multilingual-capable). */
-const ELEVENLABS_VOICES: Record<"ar" | "tr" | "en", string> = {
-  ar: "EXAVITQu4vr4xnSDxMaL", // Sarah
-  tr: "JBFqnCBsd6RMkjVDRZzb", // George
-  en: "onwK4e9ZLuTAKqWW03F9", // Daniel
-};
-
 function normalizeElevenLabsBase(baseUrl?: string | null): string {
   const raw = (baseUrl || "https://api.elevenlabs.io").replace(/\/$/, "");
   return raw.replace(/\/v1$/i, "");
@@ -696,21 +692,6 @@ function elevenLabsModelId(model?: string | null): string {
   const m = (model || "").trim();
   if (/^eleven[_-]/i.test(m)) return m;
   return "eleven_multilingual_v2";
-}
-
-function elevenLabsVoiceId(
-  config: ProviderConfig,
-  input: SpeechSynthesisInput
-): string {
-  const override = (input.voice || config.apiVersion || "").trim();
-  if (override && !/^eleven[_-]/i.test(override)) return override;
-  // If admin put a voice id in the model field (custom), use it.
-  const model = (config.model || "").trim();
-  if (model && !/^eleven[_-]/i.test(model) && model.length >= 16) return model;
-  const lang = (input.language || "en").toLowerCase().slice(0, 2);
-  if (lang === "ar" || lang === "ku") return ELEVENLABS_VOICES.ar;
-  if (lang === "tr") return ELEVENLABS_VOICES.tr;
-  return ELEVENLABS_VOICES.en;
 }
 
 export class ElevenLabsAdapter implements AiProviderAdapter {
@@ -732,12 +713,20 @@ export class ElevenLabsAdapter implements AiProviderAdapter {
   ): Promise<SpeechSynthesisResult> {
     const text = input.text.trim().slice(0, 4000);
     if (!text) throw new Error("Empty speech text");
-    const voiceId = elevenLabsVoiceId(config, input);
+    const resolved = resolveTeacherVoice({
+      language: input.language,
+      countryCode: input.countryCode,
+      voiceOverride: input.voice || config.apiVersion,
+    });
+    // Admin model field can still force a custom ElevenLabs voice id.
+    const modelField = (config.model || "").trim();
+    const voiceId =
+      modelField && !/^eleven[_-]/i.test(modelField) && modelField.length >= 16
+        ? modelField
+        : resolved.elevenLabsVoiceId;
     const modelId = elevenLabsModelId(config.model);
     const base = normalizeElevenLabsBase(config.baseUrl);
     const url = `${base}/v1/text-to-speech/${encodeURIComponent(voiceId)}`;
-    const lang = (input.language || "en").toLowerCase().slice(0, 2);
-    const languageCode = lang === "ku" ? "ar" : lang === "ar" || lang === "tr" || lang === "en" ? lang : "en";
 
     const body: Record<string, unknown> = {
       text,
@@ -751,7 +740,7 @@ export class ElevenLabsAdapter implements AiProviderAdapter {
     };
     // language_code is supported on turbo/flash/v3 (ignored on multilingual_v2).
     if (!/multilingual_v2/i.test(modelId)) {
-      body.language_code = languageCode;
+      body.language_code = resolved.elevenLanguageCode;
     }
 
     const res = await fetchJson(
@@ -787,6 +776,7 @@ export class ElevenLabsAdapter implements AiProviderAdapter {
       await this.synthesizeSpeech(config, {
         text: "OK",
         language: "en",
+        countryCode: "US",
       });
       return { ok: true, message: "ElevenLabs TTS connection OK" };
     } catch (e) {

@@ -283,7 +283,10 @@ function num(v: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function speechLang(code?: string): string {
+function speechLang(code?: string, speechLocale?: string | null): string {
+  if (speechLocale && /^[a-z]{2}(-[A-Z]{2})?$/i.test(speechLocale)) {
+    return speechLocale;
+  }
   const lang = normalizeClassroomLang(code);
   if (lang === "ar") return "ar-SA";
   if (lang === "tr") return "tr-TR";
@@ -293,6 +296,14 @@ function speechLang(code?: string): string {
 function normalizeClassroomLang(code?: string | null): "ar" | "tr" | "en" {
   const lang = (code || "en").toLowerCase().slice(0, 2);
   if (lang === "ar" || lang === "ku") return "ar";
+  if (lang === "tr") return "tr";
+  return "en";
+}
+
+function selectedSpeechLanguage(code?: string | null): "ar" | "tr" | "en" | "ku" {
+  const lang = (code || "en").toLowerCase().slice(0, 2);
+  if (lang === "ar") return "ar";
+  if (lang === "ku") return "ku";
   if (lang === "tr") return "tr";
   return "en";
 }
@@ -631,25 +642,72 @@ function base64ToBlob(b64: string, mimeType: string): Blob {
 async function fetchCloudSpeech(
   text: string,
   language: string
-): Promise<{ mimeType: string; dataBase64: string; durationMs?: number } | null> {
+): Promise<{
+  mimeType: string;
+  dataBase64: string;
+  durationMs?: number;
+  speechLocale?: string;
+} | null> {
   try {
     const res = await fetch("/api/ai/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, language: normalizeClassroomLang(language) }),
+      body: JSON.stringify({
+        text,
+        language: selectedSpeechLanguage(language),
+      }),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as {
       mimeType?: string;
       dataBase64?: string;
       durationMs?: number;
-      data?: { mimeType?: string; dataBase64?: string; durationMs?: number };
+      speechLocale?: string;
+      data?: {
+        mimeType?: string;
+        dataBase64?: string;
+        durationMs?: number;
+        speechLocale?: string;
+      };
     };
     const mimeType = data.mimeType || data.data?.mimeType;
     const dataBase64 = data.dataBase64 || data.data?.dataBase64;
     const durationMs = data.durationMs ?? data.data?.durationMs;
+    const speechLocale = data.speechLocale || data.data?.speechLocale;
     if (!dataBase64 || !mimeType) return null;
-    return { mimeType, dataBase64, durationMs };
+    return { mimeType, dataBase64, durationMs, speechLocale };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchVoiceProfile(language: string): Promise<{
+  speechLocale: string;
+  accent: string;
+  countryCode: string | null;
+} | null> {
+  try {
+    const res = await fetch(
+      `/api/ai/voice-profile?language=${encodeURIComponent(selectedSpeechLanguage(language))}`
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      speechLocale?: string;
+      accent?: string;
+      countryCode?: string | null;
+      data?: {
+        speechLocale?: string;
+        accent?: string;
+        countryCode?: string | null;
+      };
+    };
+    const speechLocale = data.speechLocale || data.data?.speechLocale;
+    if (!speechLocale) return null;
+    return {
+      speechLocale,
+      accent: data.accent || data.data?.accent || "default",
+      countryCode: data.countryCode ?? data.data?.countryCode ?? null,
+    };
   } catch {
     return null;
   }
@@ -683,6 +741,8 @@ export function AiTeacherClassroom({
   const [micLevel, setMicLevel] = useState(0);
   const [hzBars, setHzBars] = useState<number[]>(() => Array.from({ length: 18 }, () => 0.12));
   const [handsFree, setHandsFree] = useState(true);
+  const [speechLocale, setSpeechLocale] = useState<string | null>(null);
+  const speechLocaleRef = useRef<string | null>(null);
 
   const cancelledRef = useRef(false);
   const pausedRef = useRef(false);
@@ -832,12 +892,16 @@ export function AiTeacherClassroom({
 
       stopVoice();
       voiceBusy = true;
-      const lang = normalizeClassroomLang(lesson.language || locale);
+      const lang = selectedSpeechLanguage(locale || lesson.language);
       try {
         const cloud = await fetchCloudSpeech(clean, lang);
         if (!cloud) {
           setVoiceError("missing");
           return;
+        }
+        if (cloud.speechLocale) {
+          speechLocaleRef.current = cloud.speechLocale;
+          setSpeechLocale(cloud.speechLocale);
         }
         setVoiceError(null);
         const blob = base64ToBlob(cloud.dataBase64, cloud.mimeType);
@@ -1091,6 +1155,19 @@ export function AiTeacherClassroom({
   }, [phase]);
 
   useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const profile = await fetchVoiceProfile(locale || lesson.language || "en");
+      if (cancelled || !profile) return;
+      speechLocaleRef.current = profile.speechLocale;
+      setSpeechLocale(profile.speechLocale);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [locale, lesson.language]);
+
+  useEffect(() => {
     return () => {
       cancelledRef.current = true;
       runIdRef.current += 1;
@@ -1109,7 +1186,10 @@ export function AiTeacherClassroom({
     stopAlwaysListen();
     try {
       const rec = new Ctor();
-      rec.lang = speechLang(lesson.language || locale);
+      rec.lang = speechLang(
+        locale || lesson.language,
+        speechLocaleRef.current || speechLocale
+      );
       rec.continuous = true;
       rec.interimResults = true;
       rec.onresult = (ev) => {

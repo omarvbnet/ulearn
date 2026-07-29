@@ -1,5 +1,7 @@
 /** Unified AI provider adapter — business logic never imports vendor SDKs directly. */
 
+import { accentInstruction } from "./voice-accent";
+
 export type ChatContentPart =
   | { type: "text"; text: string }
   | { type: "image"; mimeType: string; dataBase64: string };
@@ -39,9 +41,11 @@ export type ImageGenerationResult = {
 
 export type SpeechSynthesisInput = {
   text: string;
-  /** ar | tr | en (ku falls back to ar-style voice) */
+  /** ar | tr | en (ku falls back via voice-accent resolver) */
   language?: string | null;
-  /** Optional OpenAI-compatible voice id (alloy, nova, …) */
+  /** ISO country code (IQ, TR, SA, …) — shapes accent/voice */
+  countryCode?: string | null;
+  /** Optional provider voice override (OpenAI name or ElevenLabs id) */
   voice?: string | null;
 };
 
@@ -99,18 +103,11 @@ export function unavailableAnswer(language?: string | null): string {
   }
 }
 
-export function languageInstruction(language?: string | null): string {
-  const lang = (language || "en").toLowerCase().slice(0, 2);
-  switch (lang) {
-    case "ar":
-      return "You MUST reply entirely in Arabic (العربية). Do not switch to English unless the user explicitly asks.";
-    case "ku":
-      return "You MUST reply entirely in Kurdish (کوردی). Do not switch to English unless the user explicitly asks.";
-    case "tr":
-      return "You MUST reply entirely in Turkish. Do not switch to English unless the user explicitly asks.";
-    default:
-      return "You MUST reply entirely in English.";
-  }
+export function languageInstruction(
+  language?: string | null,
+  countryCode?: string | null
+): string {
+  return accentInstruction(language, countryCode);
 }
 
 export type ChatAttachmentInput = {
