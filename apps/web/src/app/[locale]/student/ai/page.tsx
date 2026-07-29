@@ -90,6 +90,7 @@ export default function StudentAiPage() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [activeClassroom, setActiveClassroom] =
     useState<AiTeacherLessonView | null>(null);
+  const [preparingClassroom, setPreparingClassroom] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   const quickPrompts =
@@ -354,6 +355,7 @@ export default function StudentAiPage() {
     const q = opts.question.trim();
     if (sending) return;
     setSending(true);
+    setPreparingClassroom(true);
     if (opts.addUserBubble !== false) {
       setMessages((m) => [
         ...m,
@@ -457,6 +459,7 @@ export default function StudentAiPage() {
       ]);
     } finally {
       setSending(false);
+      setPreparingClassroom(false);
     }
   }
 
@@ -1022,7 +1025,17 @@ export default function StudentAiPage() {
               </div>
             </div>
           ))}
-          {sending && <p className="text-sm text-muted">{t.student.aiThinking}</p>}
+          {sending && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-100/90">
+              {preparingClassroom
+                ? locale === "ar"
+                  ? "جارٍ تجهيز الفصل المباشر والسبورة…"
+                  : locale === "tr"
+                    ? "Canlı sınıf ve tahta hazırlanıyor…"
+                    : "Preparing live classroom & board…"
+                : t.student.aiThinking}
+            </div>
+          )}
           <div ref={endRef} />
         </div>
 

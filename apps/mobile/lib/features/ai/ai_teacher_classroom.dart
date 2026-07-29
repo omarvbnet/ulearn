@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 
-/// Live AI Teacher classroom: animated board + captions + interrupt/resume.
+/// Live AI Teacher classroom: animated board + captions + voice + interrupt/resume.
 class AiTeacherClassroom extends StatefulWidget {
   const AiTeacherClassroom({
     super.key,
@@ -38,6 +39,8 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
   var _paused = false;
   var _cancelled = false;
   var _runId = 0;
+  final _tts = FlutterTts();
+  var _ttsReady = false;
 
   List<Map<String, dynamic>> get _speech {
     final raw = widget.lesson['speech'];
@@ -68,17 +71,48 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _runLesson(0);
-    });
+    _initTts();
+  }
+
+  Future<void> _initTts() async {
+    try {
+      await _tts.setSpeechRate(0.48);
+      await _tts.setVolume(1.0);
+      await _tts.setPitch(1.0);
+      await _tts.awaitSpeakCompletion(true);
+      final code = _lang == 'ar'
+          ? 'ar-SA'
+          : _lang == 'tr'
+              ? 'tr-TR'
+              : _lang == 'ku'
+                  ? 'ku'
+                  : 'en-US';
+      await _tts.setLanguage(code);
+      _ttsReady = true;
+    } catch (_) {
+      _ttsReady = false;
+    }
   }
 
   @override
   void dispose() {
     _cancelled = true;
     _runId++;
+    unawaited(_tts.stop());
     _askCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _speak(String text) async {
+    if (!_modeVoice || !_ttsReady) return;
+    final clean = _cleanBoardText(text) ?? text.trim();
+    if (clean.isEmpty) return;
+    try {
+      await _tts.stop();
+      await _tts.speak(clean);
+    } catch (_) {
+      /* captions still work */
+    }
   }
 
   Future<void> _waitWhilePaused() async {
@@ -132,11 +166,12 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
       if (runId != _runId || _cancelled) return;
 
       final cue = speech[i];
-      final text = cue['text']?.toString() ?? '';
+      final text = _cleanBoardText(cue['text']) ?? cue['text']?.toString() ?? '';
+      if (text.isEmpty) continue;
       final tMs = _num(cue['time']);
       final nextTime = i + 1 < speech.length
           ? _num(speech[i + 1]['time'])
-          : double.infinity;
+          : tMs + _estimateMs(text);
 
       if (mounted) {
         setState(() {
@@ -144,37 +179,49 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
           _caption = text;
         });
       }
-      _applyBoardUntil(tMs);
+      _applyBoardUntil(tMs + 200);
 
+      final speakFuture = _speak(text);
       final duration = _estimateMs(text);
       final start = DateTime.now();
-      while (DateTime.now().difference(start).inMilliseconds < duration) {
-        if (runId != _runId || _cancelled) return;
+      while (DateTime.now().difference(start).inMilliseconds < duration + 800) {
+        if (runId != _runId || _cancelled) {
+          await _tts.stop();
+          return;
+        }
         await _waitWhilePaused();
         if (_paused) continue;
         final elapsed = DateTime.now().difference(start).inMilliseconds;
-        _applyBoardUntil(tMs + elapsed);
-        await Future<void>.delayed(const Duration(milliseconds: 80));
+        final span = math.max(900, (nextTime - tMs).toInt());
+        _applyBoardUntil(tMs + math.min(span, elapsed + 400));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        if (!_modeVoice) {
+          if (elapsed >= math.min(span, duration)) break;
+        }
       }
-      _applyBoardUntil(nextTime.isFinite ? nextTime : tMs + 60000);
+      await speakFuture;
+      _applyBoardUntil(nextTime);
     }
 
     if (runId != _runId || _cancelled) return;
     _applyBoardUntil(double.infinity);
     if (!mounted) return;
     final done = context.l10n.t('mobile.ai.aiTeacherCompleted');
+    final doneText = done == 'mobile.ai.aiTeacherCompleted'
+        ? (_lang == 'ar'
+            ? 'أحسنت! انتهينا من هذا الجزء.'
+            : 'Well done! This part is complete.')
+        : done;
     setState(() {
       _phase = _Phase.completed;
-      _caption = done == 'mobile.ai.aiTeacherCompleted'
-          ? (_lang == 'ar'
-              ? 'أحسنت! انتهينا من هذا الجزء.'
-              : 'Well done! This part is complete.')
-          : done;
+      _caption = doneText;
     });
+    await _speak(doneText);
   }
 
   void _pause() {
     _paused = true;
+    unawaited(_tts.stop());
     if (mounted) setState(() => _phase = _Phase.paused);
   }
 
@@ -207,6 +254,7 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
         _askCtrl.clear();
         _phase = _Phase.paused;
       });
+      await _speak(reply);
     } finally {
       if (mounted) setState(() => _asking = false);
     }
@@ -315,9 +363,77 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.white24),
               ),
-              child: CustomPaint(
-                painter: _ClassroomBoardPainter(items: List.of(_items)),
-                child: const SizedBox.expand(),
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  CustomPaint(
+                    painter: _ClassroomBoardPainter(items: List.of(_items)),
+                    child: const SizedBox.expand(),
+                  ),
+                  if (_phase == _Phase.idle)
+                    Material(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      child: InkWell(
+                        onTap: () => _runLesson(0),
+                        child: Center(
+                          child: Container(
+                            margin: const EdgeInsets.all(20),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 22,
+                              vertical: 18,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF071018).withValues(alpha: 0.92),
+                              borderRadius: BorderRadius.circular(22),
+                              border: Border.all(
+                                color: const Color(0xFF34D399).withValues(alpha: 0.4),
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 56,
+                                  height: 56,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF34D399),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.play_arrow_rounded,
+                                    size: 34,
+                                    color: Color(0xFF052E1C),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  l10n.t('mobile.ai.aiTeacherStart'),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _lang == 'ar'
+                                      ? 'سيتحدث المعلم ويرسم على السبورة معاً'
+                                      : 'Teacher speaks while drawing on the board',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.7),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),

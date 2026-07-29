@@ -261,6 +261,8 @@ export function parseAiTeacherLesson(raw: string): AiTeacherLesson | null {
       const row = s as Record<string, unknown>;
       const text = asString(row.text).trim();
       if (!text) return null;
+      // Reject JSON dumps in speech
+      if (text.startsWith("{") || text.startsWith("[")) return null;
       return { time: Math.max(0, asNumber(row.time)), text };
     })
     .filter(Boolean) as AiTeacherSpeechCue[];
@@ -278,6 +280,13 @@ export function parseAiTeacherLesson(raw: string): AiTeacherLesson | null {
         row.parameters && typeof row.parameters === "object" && !Array.isArray(row.parameters)
           ? (row.parameters as Record<string, unknown>)
           : {};
+      // Clean text parameters so boards never show JSON
+      if (typeof parameters.text === "string") {
+        const t = parameters.text.trim();
+        if (t.startsWith("{") || t.startsWith("[")) {
+          parameters.text = "";
+        }
+      }
       return {
         time: Math.max(0, asNumber(row.time)),
         action,
@@ -302,7 +311,7 @@ export function parseAiTeacherLesson(raw: string): AiTeacherLesson | null {
 
   if (!speech.length) return null;
 
-  return {
+  return normalizeAiTeacherLesson({
     language: asString(o.language, "en") || "en",
     lesson_title: asString(o.lesson_title, asString(o.lessonTitle, "Lesson")),
     objective: asString(o.objective),
@@ -310,7 +319,129 @@ export function parseAiTeacherLesson(raw: string): AiTeacherLesson | null {
     whiteboard,
     quiz,
     summary: asStringArray(o.summary),
+  });
+}
+
+/**
+ * Force speech ↔ board timing alignment so drawings match explanations.
+ * Each speech cue gets a fixed window; board actions are distributed into those windows.
+ */
+export function normalizeAiTeacherLesson(lesson: AiTeacherLesson): AiTeacherLesson {
+  const speech = lesson.speech
+    .map((s) => ({
+      time: Math.max(0, Number(s.time) || 0),
+      text: String(s.text || "").trim(),
+    }))
+    .filter((s) => s.text && !s.text.startsWith("{") && !s.text.startsWith("["));
+
+  if (!speech.length) return lesson;
+
+  const SEGMENT_MS = 7000;
+  const syncedSpeech = speech.slice(0, 10).map((s, i) => ({
+    time: i * SEGMENT_MS,
+    text: s.text.slice(0, 280),
+  }));
+
+  const boardRaw = (lesson.whiteboard || [])
+    .map((a) => ({
+      time: Math.max(0, Number(a.time) || 0),
+      action: String(a.action || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "_"),
+      parameters:
+        a.parameters && typeof a.parameters === "object" && !Array.isArray(a.parameters)
+          ? { ...a.parameters }
+          : {},
+    }))
+    .filter((a) => a.action);
+
+  // Ensure opening title board action
+  const hasOpen = boardRaw.some((a) => a.action === "open_new_board");
+  const board: AiTeacherBoardCue[] = [];
+  if (!hasOpen) {
+    board.push({
+      time: 0,
+      action: "open_new_board",
+      parameters: { title: lesson.lesson_title },
+    });
+  }
+
+  if (!boardRaw.length) {
+    // Synthesize board lines from speech so visuals always match narration
+    syncedSpeech.forEach((s, i) => {
+      board.push({
+        time: s.time + 400,
+        action: "write_text",
+        parameters: {
+          text: s.text.slice(0, 90),
+          x: 110,
+          y: 140 + i * 95,
+          size: 30,
+          color: i === 0 ? "blue" : "black",
+        },
+      });
+    });
+  } else {
+    const usable = boardRaw.filter((a) => a.action !== "wait");
+    usable.forEach((a, i) => {
+      const seg = Math.min(
+        syncedSpeech.length - 1,
+        Math.floor((i / Math.max(1, usable.length)) * syncedSpeech.length)
+      );
+      const slot = i % Math.max(1, Math.ceil(usable.length / syncedSpeech.length));
+      const params = { ...a.parameters };
+      if (typeof params.text === "string") {
+        const t = params.text.trim();
+        if (!t || t.startsWith("{") || t.startsWith("[")) {
+          // Prefer matching speech text for this segment when model text is bad
+          params.text = syncedSpeech[seg]?.text.slice(0, 90) || "";
+        } else {
+          params.text = t.slice(0, 120);
+        }
+      }
+      board.push({
+        time: syncedSpeech[seg]!.time + 350 + slot * 550,
+        action: a.action,
+        parameters: params,
+      });
+    });
+  }
+
+  board.sort((a, b) => a.time - b.time);
+
+  return {
+    ...lesson,
+    language: lesson.language || "en",
+    lesson_title: lesson.lesson_title || "Lesson",
+    objective: lesson.objective || "",
+    speech: syncedSpeech,
+    whiteboard: board,
+    quiz: (lesson.quiz || []).slice(0, 4),
+    summary: (lesson.summary || []).slice(0, 5),
   };
+}
+
+/** Compact system prompt for fast classroom generation (single LLM call). */
+export function buildCompactAiTeacherPrompt(input: {
+  language?: string | null;
+  studentBlurb?: string;
+}): string {
+  return [
+    "You are U Learn AI Teacher. Teach with a live whiteboard. Return ONLY valid JSON.",
+    languageInstruction(input.language),
+    input.studentBlurb ? `Learner: ${input.studentBlurb}` : "",
+    "Schema keys: language, lesson_title, objective, speech, whiteboard, quiz, summary.",
+    "speech: 5-8 items {time:ms, text}. whiteboard: actions synced to same times.",
+    "Allowed actions: open_new_board, write_text, draw_line, draw_arrow, draw_circle, draw_rectangle, highlight, wait.",
+    "write_text parameters: {text, x, y, color?, size?} — text must be plain words, NEVER JSON.",
+    "draw_* use numeric coords 0..1920 x 0..1080.",
+    "Keep speech short (1-2 sentences each). Match each speech step with board drawings.",
+    "quiz: 1-3 items. summary: 3 short bullets.",
+    "No markdown fences. No commentary.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** Human-readable fallback for chat history when the board player is unavailable. */

@@ -100,6 +100,8 @@ type Labels = {
   soundOn: string;
   soundOff: string;
   writing: string;
+  tapToBegin: string;
+  tapHint: string;
 };
 
 function t(locale: string): Labels {
@@ -129,6 +131,8 @@ function t(locale: string): Labels {
       soundOn: "الصوت يعمل",
       soundOff: "الصوت متوقف",
       writing: "يكتب على السبورة…",
+      tapToBegin: "اضغط لبدء الدرس المباشر",
+      tapHint: "سيتحدث المعلم ويرسم على السبورة معاً",
     };
   }
   if (locale === "tr") {
@@ -157,6 +161,8 @@ function t(locale: string): Labels {
       soundOn: "Ses açık",
       soundOff: "Ses kapalı",
       writing: "Tahtaya yazıyor…",
+      tapToBegin: "Canlı derse başlamak için dokun",
+      tapHint: "Öğretmen konuşurken tahtaya çizer",
     };
   }
   if (locale === "ku") {
@@ -185,6 +191,8 @@ function t(locale: string): Labels {
       soundOn: "دەنگ کارا",
       soundOff: "دەنگ ناکارا",
       writing: "لەسەر تەختە دەنووسێت…",
+      tapToBegin: "بۆ دەستپێکردنی وانە دەست لێبدە",
+      tapHint: "مامۆستا قسە دەکات و لەسەر تەختە دەکێشێت",
     };
   }
   return {
@@ -212,6 +220,8 @@ function t(locale: string): Labels {
     soundOn: "Sound on",
     soundOff: "Sound off",
     writing: "Writing on the board…",
+    tapToBegin: "Tap to begin live lesson",
+    tapHint: "Teacher speaks while drawing on the board",
   };
 }
 
@@ -503,6 +513,32 @@ function pickVoice(lang: string): SpeechSynthesisVoice | null {
   );
 }
 
+/** Keep a strong ref so Chrome does not GC the utterance mid-speech. */
+let activeUtterance: SpeechSynthesisUtterance | null = null;
+
+function clearTtsWatch() {
+  if (typeof window === "undefined") return;
+  const w = window as unknown as { __ulearnTtsTimer?: ReturnType<typeof setInterval> };
+  if (w.__ulearnTtsTimer) {
+    clearInterval(w.__ulearnTtsTimer);
+    w.__ulearnTtsTimer = undefined;
+  }
+}
+
+function startTtsWatch() {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  clearTtsWatch();
+  const w = window as unknown as { __ulearnTtsTimer?: ReturnType<typeof setInterval> };
+  // Chrome quirk: speechSynthesis pauses silently after ~15s without resume().
+  w.__ulearnTtsTimer = setInterval(() => {
+    try {
+      if (window.speechSynthesis.speaking) window.speechSynthesis.resume();
+    } catch {
+      /* ignore */
+    }
+  }, 3500);
+}
+
 export function AiTeacherClassroom({
   lesson,
   locale = "en",
@@ -540,6 +576,8 @@ export function AiTeacherClassroom({
   const runIdRef = useRef(0);
   const rafRef = useRef<number | null>(null);
   const boardItemsRef = useRef<BoardItem[]>([]);
+  const soundEnabledRef = useRef(false);
+  const modeRef = useRef<Mode>("voice");
 
   const speech = useMemo(
     () =>
@@ -566,28 +604,42 @@ export function AiTeacherClassroom({
   );
 
   const stopVoice = useCallback(() => {
+    clearTtsWatch();
+    activeUtterance = null;
     if (typeof window !== "undefined" && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        /* ignore */
+      }
     }
   }, []);
 
-  const unlockVoice = useCallback(async () => {
+  const unlockVoice = useCallback(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) {
+      soundEnabledRef.current = false;
       setSoundEnabled(false);
       return false;
     }
-    // Warm voices list (Chrome loads async).
-    window.speechSynthesis.getVoices();
-    await new Promise((r) => setTimeout(r, 40));
-    const utter = new SpeechSynthesisUtterance(
-      locale === "ar" ? " " : locale === "tr" ? " " : " "
-    );
-    utter.volume = 0.01;
-    utter.rate = 1;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utter);
+    const synth = window.speechSynthesis;
+    synth.getVoices();
+    try {
+      // Must call speak() synchronously inside the user click — unlocks TTS for the session.
+      const warm = new SpeechSynthesisUtterance(" ");
+      warm.volume = 0;
+      warm.rate = 2;
+      warm.lang = speechLang(locale);
+      activeUtterance = warm;
+      synth.speak(warm);
+      synth.resume();
+    } catch {
+      /* still mark enabled */
+    }
+    soundEnabledRef.current = true;
     setSoundEnabled(true);
     setVoiceReady(true);
+    setMode("voice");
+    modeRef.current = "voice";
     return true;
   }, [locale]);
 
@@ -597,8 +649,8 @@ export function AiTeacherClassroom({
         if (
           typeof window === "undefined" ||
           !window.speechSynthesis ||
-          !soundEnabled ||
-          mode !== "voice"
+          !soundEnabledRef.current ||
+          modeRef.current !== "voice"
         ) {
           resolve();
           return;
@@ -608,26 +660,57 @@ export function AiTeacherClassroom({
           resolve();
           return;
         }
-        window.speechSynthesis.cancel();
+        const synth = window.speechSynthesis;
+        try {
+          synth.cancel();
+        } catch {
+          /* ignore */
+        }
         const utter = new SpeechSynthesisUtterance(clean);
+        activeUtterance = utter;
         const lang = speechLang(lesson.language || locale);
         utter.lang = lang;
-        utter.rate = 0.92;
+        utter.rate = 0.94;
         utter.pitch = 1;
+        utter.volume = 1;
         const voice = pickVoice(lang);
         if (voice) utter.voice = voice;
-        utter.onend = () => resolve();
-        utter.onerror = () => resolve();
-        // Chrome sometimes drops first utterance — tiny delay helps.
-        setTimeout(() => {
-          try {
-            window.speechSynthesis.speak(utter);
-          } catch {
-            resolve();
-          }
-        }, 30);
+
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          clearTtsWatch();
+          if (activeUtterance === utter) activeUtterance = null;
+          resolve();
+        };
+        const safety = window.setTimeout(finish, estimateSpeakMs(clean) + 5000);
+        utter.onend = () => {
+          window.clearTimeout(safety);
+          finish();
+        };
+        utter.onerror = () => {
+          window.clearTimeout(safety);
+          finish();
+        };
+
+        startTtsWatch();
+        try {
+          synth.speak(utter);
+          synth.resume();
+          window.setTimeout(() => {
+            try {
+              synth.resume();
+            } catch {
+              /* ignore */
+            }
+          }, 80);
+        } catch {
+          window.clearTimeout(safety);
+          finish();
+        }
       }),
-    [lesson.language, locale, mode, soundEnabled]
+    [lesson.language, locale]
   );
 
   const setBoardSmooth = useCallback((items: BoardItem[]) => {
@@ -635,19 +718,19 @@ export function AiTeacherClassroom({
     setBoard(items);
   }, []);
 
+  /** Append only new cues (keeps handwriting animation on prior strokes). */
   const applyBoardUntil = useCallback(
     (untilMs: number) => {
       let next = boardAppliedRef.current;
-      while (next < whiteboard.length && whiteboard[next]!.time <= untilMs) {
-        next += 1;
-      }
-      if (next === boardAppliedRef.current) return;
       const born = nowMs();
-      let acc: BoardItem[] = [];
-      for (let i = 0; i < next; i++) {
-        // Stagger birth slightly so multiple cues don't pop at once.
-        acc = applyCue(acc, whiteboard[i]!, i, born + i * 40);
+      let acc = boardItemsRef.current;
+      let changed = false;
+      while (next < whiteboard.length && whiteboard[next]!.time <= untilMs) {
+        acc = applyCue(acc, whiteboard[next]!, next, born + (next - boardAppliedRef.current) * 45);
+        next += 1;
+        changed = true;
       }
+      if (!changed) return;
       boardAppliedRef.current = next;
       setBoardSmooth(acc);
     },
@@ -681,6 +764,10 @@ export function AiTeacherClassroom({
     return () => window.speechSynthesis.removeEventListener("voiceschanged", load);
   }, []);
 
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
   const waitWhilePaused = useCallback(async () => {
     while (pausedRef.current && !cancelledRef.current) {
       await new Promise((r) => setTimeout(r, 80));
@@ -703,64 +790,73 @@ export function AiTeacherClassroom({
 
       for (let i = fromIndex; i < speech.length; i++) {
         if (runId !== runIdRef.current || cancelledRef.current) return;
-        await waitWhilePaused();
-        if (runId !== runIdRef.current || cancelledRef.current) return;
 
         const cue = speech[i]!;
         speechIdxRef.current = i;
         setSpeechIndex(i);
         setCaption(cue.text);
-        applyBoardUntil(cue.time);
 
-        const nextTime = speech[i + 1]?.time ?? Number.POSITIVE_INFINITY;
-        const speakPromise =
-          mode === "voice" && soundEnabled
-            ? speak(cue.text)
-            : Promise.resolve();
+        const nextTime =
+          speech[i + 1]?.time ?? cue.time + estimateSpeakMs(cue.text);
+        applyBoardUntil(cue.time + 200);
 
-        // Smooth board reveal during this spoken segment (no long waits).
+        const useVoice = modeRef.current === "voice" && soundEnabledRef.current;
+        // Speak ASAP (especially first cue) so it stays tied to the tap gesture.
+        const speakPromise = useVoice ? speak(cue.text) : Promise.resolve();
+
+        await waitWhilePaused();
+        if (runId !== runIdRef.current || cancelledRef.current) {
+          stopVoice();
+          return;
+        }
+
         const start = nowMs();
-        const span = Math.min(
-          estimateSpeakMs(cue.text),
-          Math.max(900, Number.isFinite(nextTime) ? nextTime - cue.time : 3500)
-        );
+        const maxWait = useVoice
+          ? estimateSpeakMs(cue.text) + 2500
+          : Math.max(
+              1600,
+              Math.min(estimateSpeakMs(cue.text), nextTime - cue.time || 3500)
+            );
 
-        while (nowMs() - start < span) {
+        while (nowMs() - start < maxWait) {
           if (runId !== runIdRef.current || cancelledRef.current) {
             stopVoice();
             return;
           }
           await waitWhilePaused();
           if (pausedRef.current) continue;
+
           const elapsed = nowMs() - start;
-          applyBoardUntil(cue.time + elapsed);
-          // Yield quickly for smooth handwriting (~60fps feel).
-          await new Promise((r) => setTimeout(r, 16));
-          if (mode === "voice" && soundEnabled) {
-            const stillSpeaking =
-              window.speechSynthesis?.speaking || window.speechSynthesis?.pending;
-            if (!stillSpeaking && elapsed > 500) break;
+          const span = Math.max(900, nextTime - cue.time);
+          applyBoardUntil(cue.time + Math.min(span, elapsed + 400));
+
+          if (useVoice) {
+            const speaking =
+              window.speechSynthesis?.speaking ||
+              window.speechSynthesis?.pending;
+            if (!speaking && elapsed > 700) break;
+          } else if (elapsed >= Math.min(span, estimateSpeakMs(cue.text))) {
+            break;
           }
+          await new Promise((r) => setTimeout(r, 32));
         }
 
         await speakPromise;
-        applyBoardUntil(
-          nextTime === Number.POSITIVE_INFINITY ? cue.time + 60_000 : nextTime
-        );
+        applyBoardUntil(nextTime);
       }
 
       if (runId !== runIdRef.current || cancelledRef.current) return;
       applyBoardUntil(Number.POSITIVE_INFINITY);
       setPhase("completed");
       setCaption(labels.completed);
-      if (mode === "voice" && soundEnabled) await speak(labels.completed);
+      if (modeRef.current === "voice" && soundEnabledRef.current) {
+        await speak(labels.completed);
+      }
     },
     [
       applyBoardUntil,
       labels.completed,
-      mode,
       resetBoardProgress,
-      soundEnabled,
       speak,
       speech,
       stopVoice,
@@ -777,9 +873,9 @@ export function AiTeacherClassroom({
     };
   }, [stopVoice]);
 
-  async function startWithVoice() {
-    await unlockVoice();
-    await runLesson(0);
+  function startWithVoice() {
+    unlockVoice();
+    void runLesson(0);
   }
 
   function pauseTeaching() {
@@ -847,7 +943,7 @@ export function AiTeacherClassroom({
       }
       setTeacherReply(reply);
       setAskText("");
-      if (mode === "voice" && soundEnabled) await speak(reply);
+      if (modeRef.current === "voice" && soundEnabledRef.current) await speak(reply);
     } finally {
       setAsking(false);
       setPhase("paused");
@@ -866,15 +962,15 @@ export function AiTeacherClassroom({
 
   return (
     <div
-      className="overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-b from-[#0b1220] to-[#071018] text-slate-100 shadow-2xl"
+      className="relative overflow-hidden rounded-2xl border border-emerald-400/20 bg-[radial-gradient(ellipse_at_top,_#10261f_0%,_#071018_55%,_#050b12_100%)] text-slate-100 shadow-[0_25px_80px_-20px_rgba(16,185,129,0.35)]"
       dir={dir}
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2.5">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-300/90">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-300/90">
             U Learn · {labels.classroom}
           </p>
-          <h4 className="truncate text-base font-semibold leading-tight">
+          <h4 className="truncate text-base font-semibold leading-tight tracking-tight">
             {lesson.lesson_title}
           </h4>
           {lesson.objective ? (
@@ -894,7 +990,7 @@ export function AiTeacherClassroom({
                   ? "bg-emerald-500/30 text-emerald-50"
                   : "text-slate-400"
               )}
-              onClick={() => void unlockVoice().then(() => setMode("voice"))}
+              onClick={() => unlockVoice()}
             >
               {labels.voice}
             </button>
@@ -908,7 +1004,10 @@ export function AiTeacherClassroom({
               )}
               onClick={() => {
                 stopVoice();
+                soundEnabledRef.current = false;
+                setSoundEnabled(false);
                 setMode("text");
+                modeRef.current = "text";
               }}
             >
               {labels.text}
@@ -925,9 +1024,10 @@ export function AiTeacherClassroom({
             onClick={() => {
               if (soundEnabled) {
                 stopVoice();
+                soundEnabledRef.current = false;
                 setSoundEnabled(false);
               } else {
-                void unlockVoice();
+                unlockVoice();
               }
             }}
           >
@@ -936,8 +1036,8 @@ export function AiTeacherClassroom({
           {phase === "ready" || phase === "completed" ? (
             <button
               type="button"
-              className="rounded-full bg-emerald-400 px-3.5 py-1.5 text-xs font-bold text-emerald-950 shadow-lg shadow-emerald-500/20"
-              onClick={() => void startWithVoice()}
+              className="rounded-full bg-emerald-400 px-3.5 py-1.5 text-xs font-bold text-emerald-950 shadow-lg shadow-emerald-500/25"
+              onClick={() => startWithVoice()}
             >
               {labels.start}
             </button>
@@ -976,14 +1076,8 @@ export function AiTeacherClassroom({
         </div>
       </div>
 
-      {!soundEnabled && phase === "ready" ? (
-        <div className="mx-3 mt-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-50">
-          {labels.enableSound} — {labels.interruptHint}
-        </div>
-      ) : null}
-
-      <div className="relative mx-3 mt-3 overflow-hidden rounded-2xl border border-white/10 bg-[#f7fafc] shadow-inner">
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-gradient-to-b from-black/10 to-transparent" />
+      <div className="relative mx-3 mt-3 overflow-hidden rounded-2xl border border-emerald-500/15 bg-[#f4f7fb] shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-emerald-950/15 to-transparent" />
         <svg
           viewBox={`0 0 ${BOARD_W} ${BOARD_H}`}
           className="aspect-[16/10] h-auto w-full"
@@ -1138,8 +1232,35 @@ export function AiTeacherClassroom({
           </div>
         ) : null}
 
+        {phase === "ready" ? (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-gradient-to-b from-slate-950/55 via-slate-950/40 to-emerald-950/50 backdrop-blur-[2px]">
+            <button
+              type="button"
+              onClick={() => startWithVoice()}
+              className="group mx-4 flex max-w-md flex-col items-center gap-3 rounded-3xl border border-emerald-300/30 bg-slate-950/85 px-8 py-7 text-center shadow-[0_20px_60px_-15px_rgba(16,185,129,0.55)] transition hover:scale-[1.02] hover:border-emerald-300/50"
+            >
+              <span className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-400 text-emerald-950 shadow-lg shadow-emerald-400/40 transition group-hover:scale-105">
+                <svg
+                  viewBox="0 0 24 24"
+                  className="ms-0.5 h-8 w-8 fill-current"
+                  aria-hidden
+                >
+                  <path d="M8 5.14v13.72L19 12 8 5.14z" />
+                </svg>
+              </span>
+              <span className="text-lg font-bold tracking-tight text-white">
+                {labels.tapToBegin}
+              </span>
+              <span className="text-sm text-emerald-100/80">{labels.tapHint}</span>
+              <span className="text-[11px] font-medium text-slate-400">
+                {labels.interruptHint}
+              </span>
+            </button>
+          </div>
+        ) : null}
+
         {(phase === "listening" || phase === "answering") && (
-          <div className="absolute inset-0 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
             <div className="rounded-2xl bg-slate-950/90 px-4 py-3 text-sm font-semibold text-emerald-100">
               {phase === "listening" ? labels.listening : labels.teacherReply}
             </div>
@@ -1147,9 +1268,9 @@ export function AiTeacherClassroom({
         )}
       </div>
 
-      <div className="mx-3 mt-3 mb-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
+      <div className="mx-3 mt-3 mb-3 rounded-2xl border border-emerald-400/15 bg-white/[0.06] px-3 py-2.5">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-300/80">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-300/80">
             {phase === "completed"
               ? labels.summary
               : mode === "voice"
@@ -1160,8 +1281,8 @@ export function AiTeacherClassroom({
               : ""}
           </p>
           {voiceReady && soundEnabled ? (
-            <span className="text-[10px] font-semibold text-emerald-300/70">
-              TTS
+            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300/90">
+              Live voice
             </span>
           ) : null}
         </div>

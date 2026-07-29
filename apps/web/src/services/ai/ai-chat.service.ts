@@ -10,7 +10,8 @@ import {
   extractFollowUps,
 } from "./tutoring-prompt";
 import {
-  buildAiTeacherSystemPrompt,
+  buildCompactAiTeacherPrompt,
+  normalizeAiTeacherLesson,
   parseAiTeacherLesson,
   type AiTeacherLesson,
 } from "./ai-teacher-prompt";
@@ -1054,8 +1055,8 @@ export class AiChatService {
   }
 
   /**
-   * U Learn AI Teacher — individual whiteboard lesson option.
-   * Asks the model for strict JSON (speech + board actions + quiz).
+   * U Learn AI Teacher — fast single-call whiteboard lesson.
+   * Skips repair LLM passes / heavy context so classroom opens quickly.
    */
   private static async runAiTeacherLesson(input: {
     userId: string;
@@ -1080,34 +1081,12 @@ export class AiChatService {
     chunkFrom?: number | null;
     chunkTo?: number | null;
   }) {
-    const memoryBlurb = StudentMemoryService.toPromptBlurb({
-      ...input.memory,
-      examResults: input.memory.examResults,
-    });
-    const isLearner =
-      input.profile?.role === "STUDENT" ||
-      input.profile?.role === "CERTIFICATE_USER";
-    const learningCtx = isLearner
-      ? await StudentLearningContextService.build({
-          userId: input.userId,
-          language: input.language,
-          stageId: input.stageId,
-          subjectIds: input.subjectId
-            ? [input.subjectId]
-            : input.subjectIds,
-          role: input.profile?.role,
-        })
-      : null;
-
     const studentBlurb = [
-      input.studentName ? `Student name: ${input.studentName}` : null,
+      input.studentName ? `Student: ${input.studentName}` : null,
       input.stageName
         ? input.isCert
-          ? `Professional track: ${input.stageName}`
-          : `Educational stage: ${input.stageName}`
-        : null,
-      input.interestNames.length
-        ? `Areas of interest: ${input.interestNames.join(", ")}`
+          ? `Track: ${input.stageName}`
+          : `Stage: ${input.stageName}`
         : null,
       input.grade != null && String(input.grade).trim()
         ? `Grade: ${String(input.grade)}`
@@ -1135,30 +1114,10 @@ export class AiChatService {
           chunkFrom: input.chunkFrom ?? undefined,
           chunkTo: input.chunkTo ?? undefined,
         });
-        materialContext = material?.text?.trim() ?? "";
+        // Keep material short — large context = slow LLM + longer “thinking”.
+        materialContext = (material?.text?.trim() ?? "").slice(0, 3200);
       } catch {
-        /* fallback below */
-      }
-    }
-    if (!materialContext) {
-      try {
-        const emb = await EmbeddingService.embedText(input.question, input.userId);
-        if (emb?.length) {
-          const hits = await VectorSearchService.search(emb, {
-            educationalStageId: input.stageId,
-            subjectId: input.subjectId,
-            subjectIds: input.subjectId ? undefined : input.subjectIds,
-            topK: TOP_K,
-            minSimilarity: MIN_SIMILARITY,
-            preferLanguage: input.language,
-            stageStrict: true,
-          });
-          if (hits.length) {
-            materialContext = compressContext(hits);
-          }
-        }
-      } catch {
-        /* optional grounding */
+        /* use topic-only below */
       }
     }
 
@@ -1168,47 +1127,29 @@ export class AiChatService {
         : { textExcerpt: "", imageParts: [] as ChatContentPart[] };
 
     const system = [
-      buildAiTeacherSystemPrompt({
+      buildCompactAiTeacherPrompt({
         language: input.language,
         studentBlurb: studentBlurb || undefined,
-        memoryBlurb: memoryBlurb || undefined,
-        learningCtxBlurb: learningCtx?.promptBlurb || undefined,
       }),
       materialContext
-        ? `\nOptional curriculum excerpts (use when relevant; do not invent citations):\n${materialContext}`
+        ? `\nCurriculum (use this; do not invent facts):\n${materialContext}`
         : "",
       processed.textExcerpt
-        ? `\nStudent attachment text:\n${processed.textExcerpt}`
+        ? `\nAttachment text:\n${processed.textExcerpt.slice(0, 1200)}`
         : "",
-      "",
-      "Return ONLY the JSON object for this teaching request. No markdown.",
     ]
       .filter(Boolean)
       .join("\n");
 
-    const history = input.conversationId
-      ? await prisma.aiMessage.findMany({
-          where: { conversationId: input.conversationId },
-          orderBy: { createdAt: "desc" },
-          take: 8,
-          select: { role: true, content: true },
-        })
-      : [];
-
     const userParts: ChatContentPart[] = [...processed.imageParts];
     const messages: ChatMessage[] = [
       { role: "system", content: system },
-      ...history.reverse().map((m) => ({
-        role: (m.role === "ASSISTANT" ? "assistant" : "user") as
-          | "assistant"
-          | "user",
-        content: m.content,
-      })),
       {
         role: "user",
         content: [
-          "Teach me this topic as U Learn AI Teacher (whiteboard lesson JSON):",
-          input.question,
+          "Teach this as a live whiteboard lesson. Return JSON only.",
+          `Topic: ${input.question}`,
+          "Use 5–7 short speech steps. Match each step with board drawings.",
         ].join("\n"),
         parts: userParts.length ? userParts : undefined,
       },
@@ -1222,75 +1163,25 @@ export class AiChatService {
     const raw = result.text.trim();
     let lesson = parseAiTeacherLesson(raw);
 
-    // First repair pass if the model returned prose / broken JSON.
+    // Hard fallback — no extra LLM repair (those caused multi-minute delays).
     if (!lesson) {
-      const repair = await AiProviderService.chat(
-        "TEACHING_ASSISTANT",
-        [
-          {
-            role: "system",
-            content:
-              "Convert the teaching content into valid U Learn AI Teacher JSON only. No markdown fences, no extra keys.",
-          },
-          {
-            role: "user",
-            content: `Topic: ${input.question}\n\nDraft:\n${raw.slice(0, 12000)}`,
-          },
-        ],
-        input.userId
-      );
-      lesson = parseAiTeacherLesson(repair.text);
-    }
-
-    // Second repair pass with strict schema reminder.
-    if (!lesson) {
-      const repair2 = await AiProviderService.chat(
-        "TEACHING_ASSISTANT",
-        [
-          {
-            role: "system",
-            content: [
-              "Return ONLY valid JSON for U Learn AI Teacher.",
-              "Required keys exactly: language, lesson_title, objective, speech, whiteboard, quiz, summary.",
-              "speech must be an array of { time:number, text:string } with at least 1 item.",
-              "whiteboard must be an array of { time:number, action:string, parameters:object }.",
-              "Do not include markdown fences or explanations.",
-            ].join("\n"),
-          },
-          {
-            role: "user",
-            content: `Topic: ${input.question}\n\nInvalid attempt:\n${raw.slice(0, 8000)}`,
-          },
-        ],
-        input.userId
-      );
-      lesson = parseAiTeacherLesson(repair2.text);
-    }
-
-    // Hard fallback: synthesize a minimal valid lesson from available text.
-    if (!lesson) {
-      const source = raw || input.question;
-      const sentences = source
+      const source = raw
+        .replace(/```[\s\S]*?```/g, " ")
+        .replace(/[{}\[\]"]/g, " ")
         .replace(/\s+/g, " ")
+        .trim();
+      const sentences = (source || input.question)
         .split(/(?<=[.!؟!])/)
         .map((s) => s.trim())
-        .filter(Boolean)
+        .filter((s) => s.length > 12 && !s.startsWith("{"))
         .slice(0, 6);
-      const speech = (sentences.length ? sentences : [input.question]).map((text, i) => ({
-        time: i * 5000,
-        text,
-      }));
-      const whiteboard = speech.map((s, i) => ({
-        time: s.time,
-        action: "write_text",
-        parameters: {
-          text: s.text.slice(0, 120),
-          x: 120,
-          y: 120 + i * 90,
-          size: 34,
-        },
-      }));
-      lesson = {
+      const speech = (sentences.length ? sentences : [input.question]).map(
+        (text, i) => ({
+          time: i * 7000,
+          text: text.slice(0, 220),
+        })
+      );
+      lesson = normalizeAiTeacherLesson({
         language: input.language || "en",
         lesson_title:
           input.language === "ar"
@@ -1300,79 +1191,19 @@ export class AiChatService {
               : input.language === "ku"
                 ? "وانەی هاوکاری"
                 : "Interactive Lesson",
-        objective: input.question,
+        objective: input.question.slice(0, 160),
         speech,
-        whiteboard,
+        whiteboard: [],
         quiz: [],
         summary: [
           input.language === "ar"
-            ? "يمكنني الآن إكمال الشرح خطوة بخطوة مع أمثلة إضافية."
-            : input.language === "tr"
-              ? "İstersen şimdi adım adım ek örneklerle devam edebilirim."
-              : input.language === "ku"
-                ? "دەتوانم ئێستا هەنگاو بە هەنگاو بە نموونەی زیاتر درێژە بدەم."
-                : "I can now continue step by step with more examples.",
+            ? "يمكنني الآن إكمال الشرح خطوة بخطوة."
+            : "I can continue step by step with more examples.",
         ],
-      };
+      });
     }
 
-    if (!lesson) {
-      // Never fall back to plain chat — always open a minimal live classroom.
-      lesson = {
-        language: input.language || "en",
-        lesson_title:
-          input.language === "ar"
-            ? "درس تفاعلي"
-            : input.language === "tr"
-              ? "Etkileşimli Ders"
-              : input.language === "ku"
-                ? "وانەی هاوکاری"
-                : "Interactive Lesson",
-        objective: input.question,
-        speech: [
-          {
-            time: 0,
-            text:
-              input.language === "ar"
-                ? `مرحباً! سنشرح معاً: ${input.question}`
-                : `Hello! Let's learn together: ${input.question}`,
-          },
-          {
-            time: 5000,
-            text:
-              input.language === "ar"
-                ? "تابع معي على السبورة، ويمكنك سؤالي في أي وقت."
-                : "Follow me on the board, and you can ask me anytime.",
-          },
-        ],
-        whiteboard: [
-          {
-            time: 0,
-            action: "open_new_board",
-            parameters: { title: input.question.slice(0, 80) },
-          },
-          {
-            time: 1000,
-            action: "write_text",
-            parameters: {
-              text: input.question.slice(0, 80),
-              x: 120,
-              y: 140,
-              size: 36,
-              color: "blue",
-            },
-          },
-        ],
-        quiz: [],
-        summary: [
-          input.language === "ar"
-            ? "يمكننا الآن المتابعة بأمثلة إضافية."
-            : "We can now continue with more examples.",
-        ],
-      };
-    }
-
-    // Prefer student’s UI language when model omits it.
+    lesson = normalizeAiTeacherLesson(lesson);
     if (!lesson.language) lesson.language = input.language;
 
     void StudentMemoryService.recordQuestion(
