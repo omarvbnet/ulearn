@@ -9,7 +9,7 @@ const BOARD_H = 1080;
 
 type Mode = "voice" | "text";
 type Phase =
-  | "idle"
+  | "ready"
   | "teaching"
   | "paused"
   | "listening"
@@ -25,6 +25,8 @@ type BoardItem =
       y: number;
       color: string;
       size: number;
+      bornAt: number;
+      writeMs: number;
     }
   | {
       kind: "line" | "arrow";
@@ -35,6 +37,8 @@ type BoardItem =
       y2: number;
       color: string;
       width: number;
+      bornAt: number;
+      writeMs: number;
     }
   | {
       kind: "circle";
@@ -44,6 +48,8 @@ type BoardItem =
       r: number;
       color: string;
       width: number;
+      bornAt: number;
+      writeMs: number;
     }
   | {
       kind: "rect";
@@ -54,6 +60,8 @@ type BoardItem =
       h: number;
       color: string;
       width: number;
+      bornAt: number;
+      writeMs: number;
     }
   | {
       kind: "highlight";
@@ -63,6 +71,8 @@ type BoardItem =
       w: number;
       h: number;
       color: string;
+      bornAt: number;
+      writeMs: number;
     };
 
 type Labels = {
@@ -86,6 +96,10 @@ type Labels = {
   teacherReply: string;
   interruptHint: string;
   completed: string;
+  enableSound: string;
+  soundOn: string;
+  soundOff: string;
+  writing: string;
 };
 
 function t(locale: string): Labels {
@@ -94,7 +108,7 @@ function t(locale: string): Labels {
       classroom: "الفصل المباشر",
       voice: "صوت",
       text: "نص",
-      start: "ابدأ الدرس",
+      start: "ابدأ الدرس بالصوت",
       pause: "إيقاف مؤقت",
       resume: "متابعة",
       ask: "اسأل المعلم",
@@ -109,8 +123,12 @@ function t(locale: string): Labels {
       hideAnswer: "إخفاء الإجابة",
       placeholder: "اكتب سؤالك للمعلم…",
       teacherReply: "رد المعلم",
-      interruptHint: "يمكنك المقاطعة في أي وقت بصوتك أو بالكتابة",
+      interruptHint: "يمكنك المقاطعة في أي وقت",
       completed: "أحسنت! انتهينا من هذا الجزء. هل تريد مثالاً آخر؟",
+      enableSound: "تفعيل صوت المعلم",
+      soundOn: "الصوت يعمل",
+      soundOff: "الصوت متوقف",
+      writing: "يكتب على السبورة…",
     };
   }
   if (locale === "tr") {
@@ -118,7 +136,7 @@ function t(locale: string): Labels {
       classroom: "Canlı sınıf",
       voice: "Ses",
       text: "Metin",
-      start: "Dersi başlat",
+      start: "Dersi sesle başlat",
       pause: "Duraklat",
       resume: "Devam",
       ask: "Öğretmene sor",
@@ -133,8 +151,12 @@ function t(locale: string): Labels {
       hideAnswer: "Cevabı gizle",
       placeholder: "Öğretmene sorunu yaz…",
       teacherReply: "Öğretmen yanıtı",
-      interruptHint: "İstediğin zaman sesinle veya yazarak soru sorabilirsin",
+      interruptHint: "İstediğin zaman soru sorabilirsin",
       completed: "Harika! Bu bölüm bitti. Başka bir örnek ister misin?",
+      enableSound: "Öğretmen sesini aç",
+      soundOn: "Ses açık",
+      soundOff: "Ses kapalı",
+      writing: "Tahtaya yazıyor…",
     };
   }
   if (locale === "ku") {
@@ -142,7 +164,7 @@ function t(locale: string): Labels {
       classroom: "پۆلی ڕاستەوخۆ",
       voice: "دەنگ",
       text: "دەق",
-      start: "دەستپێکردنی وانە",
+      start: "وانە بە دەنگ دەستپێبکە",
       pause: "وەستان",
       resume: "بەردەوامبوون",
       ask: "پرسیار لە مامۆستا بکە",
@@ -157,15 +179,19 @@ function t(locale: string): Labels {
       hideAnswer: "وەڵام بشارەوە",
       placeholder: "پرسیارەکەت بنووسە…",
       teacherReply: "وەڵامی مامۆستا",
-      interruptHint: "لە هەر کاتێک دەتوانیت بە دەنگ یان نووسین بپرسیت",
-      completed: "زۆر باش! ئەم بەشە تەواو بوو. نموونەیەکی تر دەتەوێت؟",
+      interruptHint: "لە هەر کاتێک دەتوانیت بپرسیت",
+      completed: "زۆر باش! ئەم بەشە تەواو بوو.",
+      enableSound: "دەنگی مامۆستا چالاک بکە",
+      soundOn: "دەنگ کارا",
+      soundOff: "دەنگ ناکارا",
+      writing: "لەسەر تەختە دەنووسێت…",
     };
   }
   return {
     classroom: "Live classroom",
     voice: "Voice",
     text: "Text",
-    start: "Start lesson",
+    start: "Start lesson with voice",
     pause: "Pause",
     resume: "Resume",
     ask: "Ask teacher",
@@ -182,6 +208,10 @@ function t(locale: string): Labels {
     teacherReply: "Teacher reply",
     interruptHint: "Interrupt anytime by voice or text",
     completed: "Well done! This part is complete. Want another example?",
+    enableSound: "Enable teacher voice",
+    soundOn: "Sound on",
+    soundOff: "Sound off",
+    writing: "Writing on the board…",
   };
 }
 
@@ -218,28 +248,81 @@ function speechLang(code?: string): string {
   return "en-US";
 }
 
-function estimateMs(text: string): number {
+/** Never draw raw JSON / parameter dumps on the board. */
+function cleanBoardText(raw: unknown): string {
+  if (raw == null) return "";
+  if (typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    for (const key of ["text", "content", "label", "title", "latex", "value"]) {
+      if (typeof o[key] === "string") return cleanBoardText(o[key]);
+    }
+    return "";
+  }
+  let s = String(raw).trim();
+  if (!s || s === "[object Object]" || s === "undefined" || s === "null") {
+    return "";
+  }
+  if (
+    (s.startsWith("{") && s.endsWith("}")) ||
+    (s.startsWith("[") && s.endsWith("]"))
+  ) {
+    try {
+      const parsed = JSON.parse(s) as unknown;
+      return cleanBoardText(parsed);
+    } catch {
+      return "";
+    }
+  }
+  if (/^["']?(text|x|y|color|size|action|parameters|cx|cy|width)["']?\s*:/i.test(s)) {
+    return "";
+  }
+  if (/"x"\s*:/.test(s) && /"y"\s*:/.test(s)) return "";
+  if (s.includes('"parameters"') || s.includes('"action"')) return "";
+  // Strip accidental code fences
+  s = s.replace(/^```[\w]*\n?/, "").replace(/\n?```$/, "").trim();
+  return s.slice(0, 180);
+}
+
+function estimateSpeakMs(text: string): number {
   const words = text.trim().split(/\s+/).filter(Boolean).length;
-  return Math.max(2200, Math.min(14000, words * 420));
+  return Math.max(1800, Math.min(12000, words * 380));
+}
+
+function writeDurationForText(text: string): number {
+  return Math.max(350, Math.min(2800, text.length * 28));
+}
+
+function nowMs() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
 function applyCue(
   items: BoardItem[],
   cue: AiTeacherLessonView["whiteboard"][number],
-  idx: number
+  idx: number,
+  bornAt: number
 ): BoardItem[] {
   const p = cue.parameters || {};
   const action = String(cue.action || "").toLowerCase().replace(/\s+/g, "_");
   const id = `${cue.time}-${action}-${idx}`;
 
-  if (action === "clear_board" || action === "open_new_board") {
-    return [];
-  }
-  if (action === "wait" || action === "change_color" || action === "change_pen_size") {
+  if (action === "clear_board" || action === "open_new_board") return [];
+  if (
+    action === "wait" ||
+    action === "change_color" ||
+    action === "change_pen_size" ||
+    action === "laser_pointer" ||
+    action === "pointer_move" ||
+    action === "zoom" ||
+    action === "pan" ||
+    action === "insert_image" ||
+    action === "insert_icon"
+  ) {
     return items;
   }
+
   if (action === "write_text" || action === "draw_formula" || action === "draw_equation") {
-    const text = String(p.text ?? p.latex ?? "").trim();
+    const text = cleanBoardText(p.text ?? p.latex ?? p.content ?? p.title);
     if (!text) return items;
     return [
       ...items,
@@ -247,13 +330,16 @@ function applyCue(
         kind: "text",
         id,
         text,
-        x: num(p.x, 80),
-        y: num(p.y, 80),
+        x: num(p.x, 100),
+        y: num(p.y, 120),
         color: resolveColor(p.color, "#1e3a8a"),
-        size: num(p.size, 28),
+        size: Math.max(18, Math.min(56, num(p.size, 30))),
+        bornAt,
+        writeMs: writeDurationForText(text),
       },
     ];
   }
+
   if (action === "draw_line" || action === "underline") {
     return [
       ...items,
@@ -266,9 +352,12 @@ function applyCue(
         y2: num(p.y2, 100),
         color: resolveColor(p.color, "#334155"),
         width: num(p.width, 3),
+        bornAt,
+        writeMs: 420,
       },
     ];
   }
+
   if (action === "draw_arrow") {
     return [
       ...items,
@@ -281,9 +370,12 @@ function applyCue(
         y2: num(p.y2, 100),
         color: resolveColor(p.color, "#ca8a04"),
         width: num(p.width, 3),
+        bornAt,
+        writeMs: 480,
       },
     ];
   }
+
   if (action === "draw_circle" || action === "circle") {
     if (p.cx != null || p.cy != null || p.r != null) {
       return [
@@ -296,6 +388,8 @@ function applyCue(
           r: num(p.r, 40),
           color: resolveColor(p.color, "#dc2626"),
           width: num(p.width, 3),
+          bornAt,
+          writeMs: 520,
         },
       ];
     }
@@ -313,9 +407,12 @@ function applyCue(
         r: Math.max(8, Math.hypot(x2 - x1, y2 - y1) / 2),
         color: resolveColor(p.color, "#dc2626"),
         width: num(p.width, 3),
+        bornAt,
+        writeMs: 520,
       },
     ];
   }
+
   if (action === "draw_rectangle" || action === "draw_rect") {
     const x1 = num(p.x1, num(p.x, 0));
     const y1 = num(p.y1, num(p.y, 0));
@@ -332,9 +429,12 @@ function applyCue(
         h: Math.abs(y2 - y1) || 80,
         color: resolveColor(p.color, "#92400e"),
         width: num(p.width, 3),
+        bornAt,
+        writeMs: 500,
       },
     ];
   }
+
   if (action === "highlight") {
     const x1 = num(p.x1, 0);
     const y1 = num(p.y1, 0);
@@ -350,39 +450,23 @@ function applyCue(
         w: Math.abs(x2 - x1) || 120,
         h: Math.abs(y2 - y1) || 36,
         color: resolveColor(p.color, "#fde047"),
+        bornAt,
+        writeMs: 280,
       },
     ];
   }
-  if (action === "erase") {
-    // Soft erase: drop last item if no region given.
-    return items.slice(0, Math.max(0, items.length - 1));
-  }
+
+  if (action === "erase") return items.slice(0, Math.max(0, items.length - 1));
   return items;
 }
 
-function ArrowHead({
-  x1,
-  y1,
-  x2,
-  y2,
-  color,
-  width,
-}: {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  color: string;
-  width: number;
-}) {
-  const angle = Math.atan2(y2 - y1, x2 - x1);
-  const size = 14 + width;
-  const a1 = angle - Math.PI / 7;
-  const a2 = angle + Math.PI / 7;
-  const p1 = `${x2},${y2}`;
-  const p2 = `${x2 - size * Math.cos(a1)},${y2 - size * Math.sin(a1)}`;
-  const p3 = `${x2 - size * Math.cos(a2)},${y2 - size * Math.sin(a2)}`;
-  return <polygon points={`${p1} ${p2} ${p3}`} fill={color} />;
+function progressOf(item: BoardItem, clock: number): number {
+  const p = (clock - item.bornAt) / Math.max(1, item.writeMs);
+  return Math.max(0, Math.min(1, p));
+}
+
+function easeOut(t: number) {
+  return 1 - Math.pow(1 - t, 2.4);
 }
 
 type SpeechRecognitionLike = {
@@ -405,6 +489,20 @@ function getSpeechRecognition(): (new () => SpeechRecognitionLike) | null {
   return w.SpeechRecognition || w.webkitSpeechRecognition || null;
 }
 
+function pickVoice(lang: string): SpeechSynthesisVoice | null {
+  if (typeof window === "undefined" || !window.speechSynthesis) return null;
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return null;
+  const primary = lang.slice(0, 2).toLowerCase();
+  return (
+    voices.find((v) => v.lang?.toLowerCase() === lang.toLowerCase()) ||
+    voices.find((v) => v.lang?.toLowerCase().startsWith(primary)) ||
+    voices.find((v) => v.default) ||
+    voices[0] ||
+    null
+  );
+}
+
 export function AiTeacherClassroom({
   lesson,
   locale = "en",
@@ -412,7 +510,6 @@ export function AiTeacherClassroom({
 }: {
   lesson: AiTeacherLessonView;
   locale?: string;
-  /** Called when student interrupts with a question. Return teacher reply text. */
   onAskTeacher?: (input: {
     question: string;
     pausedSpeechIndex: number;
@@ -422,8 +519,9 @@ export function AiTeacherClassroom({
 }) {
   const labels = useMemo(() => t(locale), [locale]);
   const [mode, setMode] = useState<Mode>("voice");
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [phase, setPhase] = useState<Phase>("ready");
   const [board, setBoard] = useState<BoardItem[]>([]);
+  const [clock, setClock] = useState(0);
   const [caption, setCaption] = useState("");
   const [speechIndex, setSpeechIndex] = useState(0);
   const [askOpen, setAskOpen] = useState(false);
@@ -431,18 +529,39 @@ export function AiTeacherClassroom({
   const [teacherReply, setTeacherReply] = useState<string | null>(null);
   const [quizReveal, setQuizReveal] = useState<Record<number, boolean>>({});
   const [asking, setAsking] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [voiceReady, setVoiceReady] = useState(false);
 
   const cancelledRef = useRef(false);
   const pausedRef = useRef(false);
-  const listeningRef = useRef(false);
   const speechIdxRef = useRef(0);
   const boardAppliedRef = useRef(0);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const runIdRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
+  const boardItemsRef = useRef<BoardItem[]>([]);
 
-  const speech = lesson.speech || [];
+  const speech = useMemo(
+    () =>
+      (lesson.speech || [])
+        .map((s) => ({
+          time: Math.max(0, Number(s.time) || 0),
+          text: cleanBoardText(s.text) || String(s.text || "").trim(),
+        }))
+        .filter((s) => s.text && !s.text.startsWith("{")),
+    [lesson.speech]
+  );
+
   const whiteboard = useMemo(
-    () => [...(lesson.whiteboard || [])].sort((a, b) => a.time - b.time),
+    () =>
+      [...(lesson.whiteboard || [])]
+        .map((a) => ({
+          ...a,
+          action: String(a.action || "").toLowerCase().replace(/\s+/g, "_"),
+          parameters:
+            a.parameters && typeof a.parameters === "object" ? a.parameters : {},
+        }))
+        .sort((a, b) => a.time - b.time),
     [lesson.whiteboard]
   );
 
@@ -452,53 +571,119 @@ export function AiTeacherClassroom({
     }
   }, []);
 
+  const unlockVoice = useCallback(async () => {
+    if (typeof window === "undefined" || !window.speechSynthesis) {
+      setSoundEnabled(false);
+      return false;
+    }
+    // Warm voices list (Chrome loads async).
+    window.speechSynthesis.getVoices();
+    await new Promise((r) => setTimeout(r, 40));
+    const utter = new SpeechSynthesisUtterance(
+      locale === "ar" ? " " : locale === "tr" ? " " : " "
+    );
+    utter.volume = 0.01;
+    utter.rate = 1;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utter);
+    setSoundEnabled(true);
+    setVoiceReady(true);
+    return true;
+  }, [locale]);
+
   const speak = useCallback(
-    (text: string, lang?: string) =>
+    (text: string) =>
       new Promise<void>((resolve) => {
-        if (typeof window === "undefined" || !window.speechSynthesis) {
+        if (
+          typeof window === "undefined" ||
+          !window.speechSynthesis ||
+          !soundEnabled ||
+          mode !== "voice"
+        ) {
+          resolve();
+          return;
+        }
+        const clean = cleanBoardText(text) || text.trim();
+        if (!clean) {
           resolve();
           return;
         }
         window.speechSynthesis.cancel();
-        const utter = new SpeechSynthesisUtterance(text);
-        utter.lang = speechLang(lang || lesson.language || locale);
-        utter.rate = 0.95;
+        const utter = new SpeechSynthesisUtterance(clean);
+        const lang = speechLang(lesson.language || locale);
+        utter.lang = lang;
+        utter.rate = 0.92;
+        utter.pitch = 1;
+        const voice = pickVoice(lang);
+        if (voice) utter.voice = voice;
         utter.onend = () => resolve();
         utter.onerror = () => resolve();
-        window.speechSynthesis.speak(utter);
+        // Chrome sometimes drops first utterance — tiny delay helps.
+        setTimeout(() => {
+          try {
+            window.speechSynthesis.speak(utter);
+          } catch {
+            resolve();
+          }
+        }, 30);
       }),
-    [lesson.language, locale]
+    [lesson.language, locale, mode, soundEnabled]
   );
+
+  const setBoardSmooth = useCallback((items: BoardItem[]) => {
+    boardItemsRef.current = items;
+    setBoard(items);
+  }, []);
 
   const applyBoardUntil = useCallback(
     (untilMs: number) => {
       let next = boardAppliedRef.current;
-      let items = null as BoardItem[] | null;
       while (next < whiteboard.length && whiteboard[next]!.time <= untilMs) {
-        if (!items) items = [];
-        // Rebuild from scratch for open_new_board/clear; otherwise append.
-        // Simpler: keep functional updates via accumulator from current applied count.
         next += 1;
       }
       if (next === boardAppliedRef.current) return;
+      const born = nowMs();
       let acc: BoardItem[] = [];
       for (let i = 0; i < next; i++) {
-        acc = applyCue(acc, whiteboard[i]!, i);
+        // Stagger birth slightly so multiple cues don't pop at once.
+        acc = applyCue(acc, whiteboard[i]!, i, born + i * 40);
       }
       boardAppliedRef.current = next;
-      setBoard(acc);
+      setBoardSmooth(acc);
     },
-    [whiteboard]
+    [setBoardSmooth, whiteboard]
   );
 
   const resetBoardProgress = useCallback(() => {
     boardAppliedRef.current = 0;
-    setBoard([]);
+    setBoardSmooth([]);
+  }, [setBoardSmooth]);
+
+  // 60fps clock for handwriting progress.
+  useEffect(() => {
+    const tick = () => {
+      setClock(nowMs());
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    const load = () => {
+      if (window.speechSynthesis.getVoices().length) setVoiceReady(true);
+    };
+    load();
+    window.speechSynthesis.addEventListener("voiceschanged", load);
+    return () => window.speechSynthesis.removeEventListener("voiceschanged", load);
   }, []);
 
   const waitWhilePaused = useCallback(async () => {
     while (pausedRef.current && !cancelledRef.current) {
-      await new Promise((r) => setTimeout(r, 120));
+      await new Promise((r) => setTimeout(r, 80));
     }
   }, []);
 
@@ -509,6 +694,7 @@ export function AiTeacherClassroom({
       pausedRef.current = false;
       setPhase("teaching");
       setTeacherReply(null);
+      setAskOpen(false);
 
       if (fromIndex === 0) {
         resetBoardProgress();
@@ -526,71 +712,59 @@ export function AiTeacherClassroom({
         setCaption(cue.text);
         applyBoardUntil(cue.time);
 
-        // Reveal board actions that happen during this spoken segment.
         const nextTime = speech[i + 1]?.time ?? Number.POSITIVE_INFINITY;
-        const midActions = whiteboard.filter(
-          (a) => a.time > cue.time && a.time < nextTime
+        const speakPromise =
+          mode === "voice" && soundEnabled
+            ? speak(cue.text)
+            : Promise.resolve();
+
+        // Smooth board reveal during this spoken segment (no long waits).
+        const start = nowMs();
+        const span = Math.min(
+          estimateSpeakMs(cue.text),
+          Math.max(900, Number.isFinite(nextTime) ? nextTime - cue.time : 3500)
         );
 
-        if (mode === "voice") {
-          const speakPromise = speak(cue.text);
-          // Progressively apply mid-segment board cues while speaking.
-          const start = performance.now();
-          const span = Math.max(800, nextTime - cue.time);
-          while (true) {
-            if (runId !== runIdRef.current || cancelledRef.current) {
-              stopVoice();
-              return;
-            }
-            await waitWhilePaused();
-            if (pausedRef.current) continue;
-            const elapsed = performance.now() - start;
-            const tMs = cue.time + Math.min(span, elapsed);
-            applyBoardUntil(tMs);
-            if (elapsed >= estimateMs(cue.text) && midActions.length === 0) break;
-            // Prefer waiting for speech end.
-            const stillSpeaking =
-              typeof window !== "undefined" &&
-              window.speechSynthesis &&
-              (window.speechSynthesis.speaking || window.speechSynthesis.pending);
-            if (!stillSpeaking && elapsed > 400) break;
-            await new Promise((r) => setTimeout(r, 80));
+        while (nowMs() - start < span) {
+          if (runId !== runIdRef.current || cancelledRef.current) {
+            stopVoice();
+            return;
           }
-          await speakPromise;
-        } else {
-          const duration = estimateMs(cue.text);
-          const start = performance.now();
-          while (performance.now() - start < duration) {
-            if (runId !== runIdRef.current || cancelledRef.current) return;
-            await waitWhilePaused();
-            if (pausedRef.current) continue;
-            const elapsed = performance.now() - start;
-            applyBoardUntil(cue.time + elapsed);
-            await new Promise((r) => setTimeout(r, 80));
+          await waitWhilePaused();
+          if (pausedRef.current) continue;
+          const elapsed = nowMs() - start;
+          applyBoardUntil(cue.time + elapsed);
+          // Yield quickly for smooth handwriting (~60fps feel).
+          await new Promise((r) => setTimeout(r, 16));
+          if (mode === "voice" && soundEnabled) {
+            const stillSpeaking =
+              window.speechSynthesis?.speaking || window.speechSynthesis?.pending;
+            if (!stillSpeaking && elapsed > 500) break;
           }
         }
 
-        applyBoardUntil(nextTime === Number.POSITIVE_INFINITY ? cue.time + 60_000 : nextTime);
+        await speakPromise;
+        applyBoardUntil(
+          nextTime === Number.POSITIVE_INFINITY ? cue.time + 60_000 : nextTime
+        );
       }
 
       if (runId !== runIdRef.current || cancelledRef.current) return;
       applyBoardUntil(Number.POSITIVE_INFINITY);
       setPhase("completed");
       setCaption(labels.completed);
-      if (mode === "voice") {
-        await speak(labels.completed);
-      }
+      if (mode === "voice" && soundEnabled) await speak(labels.completed);
     },
     [
       applyBoardUntil,
       labels.completed,
       mode,
       resetBoardProgress,
-      speech,
+      soundEnabled,
       speak,
+      speech,
       stopVoice,
       waitWhilePaused,
-      whiteboard,
     ]
   );
 
@@ -603,17 +777,10 @@ export function AiTeacherClassroom({
     };
   }, [stopVoice]);
 
-  // Auto-start classroom when lesson mounts (real class feel).
-  useEffect(() => {
-    if (!speech.length) {
-      setPhase("completed");
-      setCaption(lesson.objective || lesson.lesson_title || "");
-      applyBoardUntil(Number.POSITIVE_INFINITY);
-      return;
-    }
-    void runLesson(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lesson.lesson_title, lesson.speech?.length]);
+  async function startWithVoice() {
+    await unlockVoice();
+    await runLesson(0);
+  }
 
   function pauseTeaching() {
     pausedRef.current = true;
@@ -625,18 +792,14 @@ export function AiTeacherClassroom({
     setAskOpen(false);
     setTeacherReply(null);
     pausedRef.current = false;
-    if (phase === "paused" || phase === "answering" || phase === "listening") {
-      setPhase("teaching");
-      // Resume from current cue (re-speak current if needed).
-      void runLesson(speechIdxRef.current);
-    }
+    setPhase("teaching");
+    void runLesson(speechIdxRef.current);
   }
 
   function startListening() {
     pauseTeaching();
     setAskOpen(true);
     setPhase("listening");
-    listeningRef.current = true;
     const Ctor = getSpeechRecognition();
     if (!Ctor || mode !== "voice") return;
     try {
@@ -652,25 +815,13 @@ export function AiTeacherClassroom({
         }
         setAskText(parts.join(" ").trim());
       };
-      rec.onerror = () => {
-        listeningRef.current = false;
-        setPhase("paused");
-      };
-      rec.onend = () => {
-        listeningRef.current = false;
-        if (phase === "listening") setPhase("paused");
-      };
+      rec.onerror = () => setPhase("paused");
+      rec.onend = () => setPhase("paused");
       recognitionRef.current = rec;
       rec.start();
     } catch {
-      /* mic unavailable — text still works */
+      /* text fallback */
     }
-  }
-
-  function stopListening() {
-    recognitionRef.current?.stop();
-    listeningRef.current = false;
-    setPhase("paused");
   }
 
   async function submitQuestion() {
@@ -681,9 +832,7 @@ export function AiTeacherClassroom({
     setPhase("answering");
     pauseTeaching();
     try {
-      const spokenSoFar = speech
-        .slice(0, speechIdxRef.current + 1)
-        .map((s) => s.text);
+      const spokenSoFar = speech.slice(0, speechIdxRef.current + 1).map((s) => s.text);
       let reply =
         locale === "ar"
           ? "سؤال ممتاز. دعنا نوضح هذه النقطة ثم نكمل من حيث توقفنا."
@@ -698,9 +847,7 @@ export function AiTeacherClassroom({
       }
       setTeacherReply(reply);
       setAskText("");
-      if (mode === "voice") {
-        await speak(reply);
-      }
+      if (mode === "voice" && soundEnabled) await speak(reply);
     } finally {
       setAsking(false);
       setPhase("paused");
@@ -715,19 +862,23 @@ export function AiTeacherClassroom({
       ? "rtl"
       : "ltr";
 
+  const isWriting = board.some((b) => progressOf(b, clock) < 1) && phase === "teaching";
+
   return (
     <div
-      className="mt-3 overflow-hidden rounded-2xl border border-emerald-500/30 bg-[#0b1220] text-slate-100 shadow-xl"
+      className="overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-b from-[#0b1220] to-[#071018] text-slate-100 shadow-2xl"
       dir={dir}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2.5">
+        <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-300/90">
             U Learn · {labels.classroom}
           </p>
-          <h4 className="text-base font-semibold leading-tight">{lesson.lesson_title}</h4>
+          <h4 className="truncate text-base font-semibold leading-tight">
+            {lesson.lesson_title}
+          </h4>
           {lesson.objective ? (
-            <p className="mt-0.5 text-xs text-slate-400">
+            <p className="mt-0.5 line-clamp-1 text-xs text-slate-400">
               <span className="font-medium text-slate-300">{labels.objective}: </span>
               {lesson.objective}
             </p>
@@ -738,18 +889,22 @@ export function AiTeacherClassroom({
             <button
               type="button"
               className={cn(
-                "rounded-full px-2.5 py-1 font-semibold",
-                mode === "voice" ? "bg-emerald-500/25 text-emerald-100" : "text-slate-400"
+                "rounded-full px-2.5 py-1 font-semibold transition",
+                mode === "voice"
+                  ? "bg-emerald-500/30 text-emerald-50"
+                  : "text-slate-400"
               )}
-              onClick={() => setMode("voice")}
+              onClick={() => void unlockVoice().then(() => setMode("voice"))}
             >
               {labels.voice}
             </button>
             <button
               type="button"
               className={cn(
-                "rounded-full px-2.5 py-1 font-semibold",
-                mode === "text" ? "bg-emerald-500/25 text-emerald-100" : "text-slate-400"
+                "rounded-full px-2.5 py-1 font-semibold transition",
+                mode === "text"
+                  ? "bg-emerald-500/30 text-emerald-50"
+                  : "text-slate-400"
               )}
               onClick={() => {
                 stopVoice();
@@ -759,11 +914,30 @@ export function AiTeacherClassroom({
               {labels.text}
             </button>
           </div>
-          {phase === "idle" || phase === "completed" ? (
+          <button
+            type="button"
+            className={cn(
+              "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+              soundEnabled
+                ? "border-emerald-400/40 bg-emerald-500/20 text-emerald-100"
+                : "border-amber-400/40 bg-amber-400/15 text-amber-100"
+            )}
+            onClick={() => {
+              if (soundEnabled) {
+                stopVoice();
+                setSoundEnabled(false);
+              } else {
+                void unlockVoice();
+              }
+            }}
+          >
+            {soundEnabled ? labels.soundOn : labels.enableSound}
+          </button>
+          {phase === "ready" || phase === "completed" ? (
             <button
               type="button"
-              className="rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-bold text-emerald-950"
-              onClick={() => void runLesson(0)}
+              className="rounded-full bg-emerald-400 px-3.5 py-1.5 text-xs font-bold text-emerald-950 shadow-lg shadow-emerald-500/20"
+              onClick={() => void startWithVoice()}
             >
               {labels.start}
             </button>
@@ -780,10 +954,10 @@ export function AiTeacherClassroom({
           {phase === "paused" || phase === "answering" ? (
             <button
               type="button"
-              className="rounded-full bg-emerald-500/90 px-3 py-1.5 text-xs font-bold text-emerald-950"
+              className="rounded-full bg-emerald-400 px-3 py-1.5 text-xs font-bold text-emerald-950"
               onClick={resumeTeaching}
             >
-              {phase === "answering" || teacherReply ? labels.continue : labels.resume}
+              {teacherReply ? labels.continue : labels.resume}
             </button>
           ) : null}
           <button
@@ -802,18 +976,26 @@ export function AiTeacherClassroom({
         </div>
       </div>
 
-      <p className="px-3 pt-2 text-[11px] text-slate-500">{labels.interruptHint}</p>
+      {!soundEnabled && phase === "ready" ? (
+        <div className="mx-3 mt-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-50">
+          {labels.enableSound} — {labels.interruptHint}
+        </div>
+      ) : null}
 
-      {/* Live whiteboard */}
-      <div className="relative mx-3 mt-2 aspect-[16/10] overflow-hidden rounded-xl border border-white/10 bg-[#f4f7fb]">
+      <div className="relative mx-3 mt-3 overflow-hidden rounded-2xl border border-white/10 bg-[#f7fafc] shadow-inner">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-gradient-to-b from-black/10 to-transparent" />
         <svg
           viewBox={`0 0 ${BOARD_W} ${BOARD_H}`}
-          className="h-full w-full"
+          className="aspect-[16/10] h-auto w-full"
           role="img"
           aria-label={lesson.lesson_title}
         >
-          <rect x={0} y={0} width={BOARD_W} height={BOARD_H} fill="#f4f7fb" />
-          {/* subtle grid */}
+          <defs>
+            <filter id="softInk" x="-10%" y="-10%" width="120%" height="120%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="0.35" />
+            </filter>
+          </defs>
+          <rect x={0} y={0} width={BOARD_W} height={BOARD_H} fill="#f7fafc" />
           {Array.from({ length: 19 }).map((_, i) => (
             <line
               key={`v-${i}`}
@@ -821,7 +1003,7 @@ export function AiTeacherClassroom({
               y1={0}
               x2={(i + 1) * 100}
               y2={BOARD_H}
-              stroke="#e2e8f0"
+              stroke="#e8eef5"
               strokeWidth={1}
             />
           ))}
@@ -832,25 +1014,32 @@ export function AiTeacherClassroom({
               y1={(i + 1) * 100}
               x2={BOARD_W}
               y2={(i + 1) * 100}
-              stroke="#e2e8f0"
+              stroke="#e8eef5"
               strokeWidth={1}
             />
           ))}
+
           {board.map((item) => {
+            const p = easeOut(progressOf(item, clock));
+            if (p <= 0) return null;
+
             if (item.kind === "highlight") {
               return (
                 <rect
                   key={item.id}
                   x={item.x}
                   y={item.y}
-                  width={item.w}
+                  width={item.w * p}
                   height={item.h}
                   fill={item.color}
-                  opacity={0.45}
+                  opacity={0.35 * p}
                 />
               );
             }
+
             if (item.kind === "text") {
+              const chars = Math.max(1, Math.floor(item.text.length * p));
+              const shown = item.text.slice(0, chars);
               return (
                 <text
                   key={item.id}
@@ -858,13 +1047,22 @@ export function AiTeacherClassroom({
                   y={item.y}
                   fill={item.color}
                   fontSize={item.size}
-                  fontFamily="ui-sans-serif, system-ui, Tahoma, Arial"
+                  fontFamily="'Segoe UI', Tahoma, 'Noto Naskh Arabic', Arial, sans-serif"
+                  fontWeight={600}
+                  opacity={0.35 + 0.65 * p}
                 >
-                  {item.text}
+                  {shown}
+                  {p < 1 ? (
+                    <tspan fill="#10b981" fontWeight={700}>
+                      |
+                    </tspan>
+                  ) : null}
                 </text>
               );
             }
+
             if (item.kind === "circle") {
+              const circ = 2 * Math.PI * item.r;
               return (
                 <circle
                   key={item.id}
@@ -874,10 +1072,16 @@ export function AiTeacherClassroom({
                   fill="none"
                   stroke={item.color}
                   strokeWidth={item.width}
+                  strokeDasharray={circ}
+                  strokeDashoffset={circ * (1 - p)}
+                  strokeLinecap="round"
+                  filter="url(#softInk)"
                 />
               );
             }
+
             if (item.kind === "rect") {
+              const peri = 2 * (item.w + item.h);
               return (
                 <rect
                   key={item.id}
@@ -888,69 +1092,84 @@ export function AiTeacherClassroom({
                   fill="none"
                   stroke={item.color}
                   strokeWidth={item.width}
+                  strokeDasharray={peri}
+                  strokeDashoffset={peri * (1 - p)}
+                  strokeLinejoin="miter"
+                  filter="url(#softInk)"
                 />
               );
             }
+
+            const x2 = item.x1 + (item.x2 - item.x1) * p;
+            const y2 = item.y1 + (item.y2 - item.y1) * p;
             return (
               <g key={item.id}>
                 <line
                   x1={item.x1}
                   y1={item.y1}
-                  x2={item.x2}
-                  y2={item.y2}
+                  x2={x2}
+                  y2={y2}
                   stroke={item.color}
                   strokeWidth={item.width}
                   strokeLinecap="round"
+                  filter="url(#softInk)"
                 />
-                {item.kind === "arrow" ? (
-                  <ArrowHead
-                    x1={item.x1}
-                    y1={item.y1}
-                    x2={item.x2}
-                    y2={item.y2}
-                    color={item.color}
-                    width={item.width}
+                {item.kind === "arrow" && p > 0.85 ? (
+                  <polygon
+                    points={(() => {
+                      const angle = Math.atan2(item.y2 - item.y1, item.x2 - item.x1);
+                      const size = 14 + item.width;
+                      const a1 = angle - Math.PI / 7;
+                      const a2 = angle + Math.PI / 7;
+                      return `${item.x2},${item.y2} ${item.x2 - size * Math.cos(a1)},${item.y2 - size * Math.sin(a1)} ${item.x2 - size * Math.cos(a2)},${item.y2 - size * Math.sin(a2)}`;
+                    })()}
+                    fill={item.color}
+                    opacity={(p - 0.85) / 0.15}
                   />
                 ) : null}
               </g>
             );
           })}
         </svg>
+
+        {isWriting ? (
+          <div className="absolute bottom-3 start-3 rounded-full bg-slate-900/70 px-3 py-1 text-[11px] font-semibold text-emerald-200 backdrop-blur">
+            {labels.writing}
+          </div>
+        ) : null}
+
         {(phase === "listening" || phase === "answering") && (
-          <div className="absolute inset-0 flex items-center justify-center bg-slate-900/35 backdrop-blur-[1px]">
-            <div className="rounded-2xl bg-slate-950/85 px-4 py-3 text-sm font-semibold text-emerald-100">
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
+            <div className="rounded-2xl bg-slate-950/90 px-4 py-3 text-sm font-semibold text-emerald-100">
               {phase === "listening" ? labels.listening : labels.teacherReply}
             </div>
           </div>
         )}
       </div>
 
-      {/* Teacher caption / current spoken line */}
-      <div className="mx-3 mt-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-300/80">
-          {phase === "completed"
-            ? labels.summary
-            : mode === "voice"
-              ? labels.voice
-              : labels.text}
-          {speech.length ? ` · ${Math.min(speechIndex + 1, speech.length)}/${speech.length}` : ""}
-        </p>
-        <p className="mt-1 text-sm leading-relaxed text-slate-100">{caption || "…"}</p>
+      <div className="mx-3 mt-3 mb-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-300/80">
+            {phase === "completed"
+              ? labels.summary
+              : mode === "voice"
+                ? labels.voice
+                : labels.text}
+            {speech.length
+              ? ` · ${Math.min(speechIndex + 1, speech.length)}/${speech.length}`
+              : ""}
+          </p>
+          {voiceReady && soundEnabled ? (
+            <span className="text-[10px] font-semibold text-emerald-300/70">
+              TTS
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-1 text-[15px] leading-relaxed text-slate-50">{caption || "…"}</p>
       </div>
 
       {askOpen && (
-        <div className="mx-3 mt-2 space-y-2 rounded-xl border border-amber-400/30 bg-amber-400/5 p-3">
-          <div className="flex flex-wrap gap-2">
-            {mode === "voice" && phase === "listening" ? (
-              <button
-                type="button"
-                className="rounded-full border border-white/20 px-3 py-1.5 text-xs font-semibold"
-                onClick={stopListening}
-              >
-                {labels.stopListen}
-              </button>
-            ) : null}
-          </div>
+        <div className="mx-3 mb-3 space-y-2 rounded-2xl border border-amber-400/30 bg-amber-400/5 p-3">
           <textarea
             value={askText}
             onChange={(e) => setAskText(e.target.value)}
@@ -963,14 +1182,16 @@ export function AiTeacherClassroom({
               type="button"
               disabled={!askText.trim() || asking}
               onClick={() => void submitQuestion()}
-              className="rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-bold text-emerald-950 disabled:opacity-50"
+              className="rounded-full bg-emerald-400 px-3 py-1.5 text-xs font-bold text-emerald-950 disabled:opacity-50"
             >
               {asking ? "…" : labels.send}
             </button>
           </div>
           {teacherReply ? (
             <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-sm">
-              <p className="text-[11px] font-semibold text-emerald-300">{labels.teacherReply}</p>
+              <p className="text-[11px] font-semibold text-emerald-300">
+                {labels.teacherReply}
+              </p>
               <p className="mt-1 text-slate-100">{teacherReply}</p>
               <button
                 type="button"
@@ -985,21 +1206,24 @@ export function AiTeacherClassroom({
       )}
 
       {phase === "completed" && lesson.summary?.length > 0 && (
-        <div className="mx-3 mt-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+        <div className="mx-3 mb-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
           <p className="text-xs font-semibold text-slate-300">{labels.summary}</p>
           <ul className="mt-1 list-disc space-y-1 ps-4 text-sm text-slate-200">
             {lesson.summary.map((s, i) => (
-              <li key={i}>{s}</li>
+              <li key={i}>{cleanBoardText(s) || s}</li>
             ))}
           </ul>
         </div>
       )}
 
       {phase === "completed" && lesson.quiz?.length > 0 && (
-        <div className="mx-3 my-3 space-y-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+        <div className="mx-3 mb-3 space-y-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
           <p className="text-xs font-semibold text-slate-300">{labels.quiz}</p>
           {lesson.quiz.map((q, qi) => (
-            <div key={qi} className="rounded-lg border border-white/10 bg-slate-950/40 p-2.5">
+            <div
+              key={qi}
+              className="rounded-xl border border-white/10 bg-slate-950/40 p-2.5"
+            >
               <p className="text-sm font-medium">
                 {qi + 1}. {q.question}
               </p>
@@ -1028,7 +1252,6 @@ export function AiTeacherClassroom({
           ))}
         </div>
       )}
-      {phase !== "completed" ? <div className="h-3" /> : null}
     </div>
   );
 }

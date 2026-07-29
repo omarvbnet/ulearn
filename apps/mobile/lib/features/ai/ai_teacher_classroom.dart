@@ -565,6 +565,42 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
 
 enum _Phase { idle, teaching, paused, answering, completed }
 
+String? _cleanBoardText(dynamic raw) {
+  if (raw == null) return '';
+  if (raw is Map) {
+    for (final key in ['text', 'content', 'label', 'title', 'latex', 'value']) {
+      final v = raw[key];
+      if (v is String && v.trim().isNotEmpty) return _cleanBoardText(v);
+    }
+    return '';
+  }
+  var s = raw.toString().trim();
+  if (s.isEmpty ||
+      s == '[object Object]' ||
+      s == 'null' ||
+      s == 'undefined') {
+    return '';
+  }
+  if ((s.startsWith('{') && s.endsWith('}')) ||
+      (s.startsWith('[') && s.endsWith(']'))) {
+    try {
+      final textMatch = RegExp(r'"text"\s*:\s*"([^"]+)"').firstMatch(s);
+      if (textMatch != null) return _cleanBoardText(textMatch.group(1));
+    } catch (_) {}
+    return '';
+  }
+  if (RegExp(
+    r'''^["']?(text|x|y|color|size|action|parameters)''',
+    caseSensitive: false,
+  ).hasMatch(s)) {
+    return '';
+  }
+  if (s.contains('"x":') && s.contains('"y":')) return '';
+  if (s.contains('"parameters"') || s.contains('"action"')) return '';
+  if (s.length > 180) s = s.substring(0, 180);
+  return s;
+}
+
 num _num(dynamic v, [num fallback = 0]) {
   if (v is num) return v;
   return num.tryParse(v?.toString() ?? '') ?? fallback;
@@ -622,8 +658,8 @@ void _applyCue(List<_BoardItem> items, Map<String, dynamic> cue, int idx) {
   if (action == 'write_text' ||
       action == 'draw_formula' ||
       action == 'draw_equation') {
-    final text = (p['text'] ?? p['latex'] ?? '').toString().trim();
-    if (text.isEmpty) return;
+    final text = _cleanBoardText(p['text'] ?? p['latex'] ?? p['content'] ?? p['title']);
+    if (text == null || text.isEmpty) return;
     items.add(
       _BoardItem.text(
         id: id,
