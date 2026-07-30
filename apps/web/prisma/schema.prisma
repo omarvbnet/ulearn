@@ -2039,6 +2039,10 @@ model StudentAiMemory {
   examResults        Json?
   preferredStyle     String?
   learningSpeed      String?
+  /// Per-material classroom progress, keyed by sorted documentIds joined
+  /// with ",". Lets the AI Teacher resume each material's lesson instead of
+  /// restarting from lesson 1 on every new session.
+  materialProgress   Json?
   updatedAt          DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

@@ -9,6 +9,8 @@ import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:speech_to_text/speech_recognition_result.dart'
+    show SpeechRecognitionResult;
 import 'package:ulearn/core/api/api_client.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 
@@ -64,6 +66,10 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
   var _boardCursorY = 160.0;
   var _turnStarted = false;
   String? _pendingAsk;
+  // Stays true across the whole ask→wait→answer cycle (unlike _pendingAsk,
+  // which the loop clears early to enter the wait state). Ensures the
+  // student's reply is always bridged with "let me check" first.
+  bool _awaitingCheck = false;
   String? _countryCode;
   String? _accent;
   var _bridgeVariant = 0;
@@ -462,10 +468,12 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       _askWaitMs =
           ((beat['waitForStudentMs'] as num?)?.toInt() ?? 5500).clamp(5000, 8000);
       _pendingAsk = ask;
+      _awaitingCheck = true;
       if (mounted) setState(() => _caption = _cleanText(ask) ?? ask);
     } else {
       _askWaitMs = 0;
       _pendingAsk = null;
+      _awaitingCheck = false;
     }
     if (beat['sessionComplete'] == true && mounted) {
       setState(() => _ended = true);
@@ -511,7 +519,8 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     try {
       final api = _api;
       if (api == null) return;
-      final wasCheck = _pendingAsk != null;
+      final wasCheck = _awaitingCheck;
+      _awaitingCheck = false;
       final kind = wasCheck ? 'check' : 'explain';
       final apiFuture = api.post(
         '/api/ai/classroom/session/$_sessionId/turn',
@@ -651,6 +660,24 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     _listenStarting = false;
   }
 
+  /// Some engines (mainly Android) return several candidate transcripts per
+  /// result with a confidence score each. Picking the most confident one
+  /// (instead of always the engine's default #0) noticeably improves
+  /// accuracy on noisy audio or accented speech.
+  String _bestAlternateWords(SpeechRecognitionResult result) {
+    if (result.alternates.isEmpty) return result.recognizedWords;
+    var best = result.alternates.first;
+    for (final alt in result.alternates.skip(1)) {
+      if (alt.recognizedWords.trim().isNotEmpty &&
+          alt.confidence > best.confidence) {
+        best = alt;
+      }
+    }
+    return best.recognizedWords.trim().isNotEmpty
+        ? best.recognizedWords
+        : result.recognizedWords;
+  }
+
   Future<void> _startListen() async {
     if (_voiceBusy || _handlingTurn || _ended || _cancelled) return;
     if (_listenStarting) return;
@@ -728,7 +755,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         },
         onResult: (result) async {
           if (_voiceBusy || _handlingTurn || gen != _listenGen) return;
-          final words = result.recognizedWords.trim();
+          final words = _bestAlternateWords(result).trim();
           final count =
               words.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
           if (count >= 1 && mounted) {
@@ -913,18 +940,23 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        Center(
-                          child: AspectRatio(
-                            aspectRatio: _boardW / _boardH,
-                            child: CustomPaint(
-                              painter: _BoardPainter(
-                                items: List.of(_items),
-                                clockMs: _clockMs,
-                                rtl: _rtl,
-                                boardW: _boardW,
-                                boardH: _boardH,
+                        InteractiveViewer(
+                          minScale: 1.0,
+                          maxScale: 3.5,
+                          boundaryMargin: const EdgeInsets.all(120),
+                          child: Center(
+                            child: AspectRatio(
+                              aspectRatio: _boardW / _boardH,
+                              child: CustomPaint(
+                                painter: _BoardPainter(
+                                  items: List.of(_items),
+                                  clockMs: _clockMs,
+                                  rtl: _rtl,
+                                  boardW: _boardW,
+                                  boardH: _boardH,
+                                ),
+                                child: const SizedBox.expand(),
                               ),
-                              child: const SizedBox.expand(),
                             ),
                           ),
                         ),

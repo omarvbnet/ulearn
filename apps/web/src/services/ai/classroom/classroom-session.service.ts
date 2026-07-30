@@ -36,6 +36,32 @@ function clamp01(n: number, fallback = 0.5): number {
   return Math.max(0, Math.min(1, n));
 }
 
+/** Student explicitly asked to go back to lesson 1 / restart the material. */
+const RESTART_PATTERNS: RegExp[] = [
+  /\bfrom (the )?(start|beginning)\b/i,
+  /\brestart\b/i,
+  /\bstart over\b/i,
+  /\bfrom (lesson|chapter) (one|1)\b/i,
+  /\b(the )?first lesson\b/i,
+  /\bback to (the )?(start|beginning|first lesson)\b/i,
+  /من البداية/,
+  /من الأول/,
+  /الدرس الأول/,
+  /رجّعني للبداية/,
+  /رجعني للبداية/,
+  /ابدأ من جديد/,
+  /باشتان/i,
+  /baştan/i,
+  /ilk ders/i,
+  /başa dön/i,
+];
+
+function wantsRestartFromFirstLesson(text?: string | null): boolean {
+  const t = (text || "").trim();
+  if (!t) return false;
+  return RESTART_PATTERNS.some((re) => re.test(t));
+}
+
 function parseBeat(raw: string): ClassroomBeat | null {
   const jsonText = extractJsonObject(raw);
   if (!jsonText) return null;
@@ -467,7 +493,10 @@ export class ClassroomSessionService {
       },
     });
 
-    const language = (profile?.locale || input.language || "en").toString();
+    // The language the student explicitly selected to start this classroom
+    // (e.g. the site's current UI locale) always wins over their stored
+    // profile default — country still drives the regional accent below.
+    const language = (input.language || profile?.locale || "en").toString();
     const countryCode = profile?.country?.code || null;
     const provinceName =
       profile?.province?.nameEn ||
@@ -546,6 +575,24 @@ export class ClassroomSessionService {
     const state = emptyClassroomState(materialExcerpt);
     if (curriculumOutline[0]) state.currentLessonName = curriculumOutline[0];
 
+    const materialsKey = StudentMemoryService.materialsKey(documentIds);
+    const restart = wantsRestartFromFirstLesson(input.question);
+    let resumeLessonName: string | null = null;
+    if (!restart && materialsKey) {
+      const progress = await StudentMemoryService.getMaterialProgress(
+        input.userId,
+        materialsKey
+      );
+      if (
+        progress?.lessonName &&
+        curriculumOutline.includes(progress.lessonName) &&
+        progress.lessonName !== curriculumOutline[0]
+      ) {
+        state.currentLessonName = progress.lessonName;
+        resumeLessonName = progress.lessonName;
+      }
+    }
+
     const row = await prisma.aiClassroomSession.create({
       data: {
         userId: input.userId,
@@ -574,6 +621,7 @@ export class ClassroomSessionService {
       state,
       mode: "open",
       question: input.question || undefined,
+      resumeLessonName,
     });
 
     const nextState = mergeState(state, beat);
@@ -584,6 +632,13 @@ export class ClassroomSessionService {
         beatIndex: 1,
       },
     });
+
+    if (materialsKey) {
+      void StudentMemoryService.saveMaterialProgress(input.userId, materialsKey, {
+        lessonName: nextState.currentLessonName,
+        lessonIndex: curriculumOutline.indexOf(nextState.currentLessonName || ""),
+      });
+    }
 
     return {
       needsMaterialSelection: false as const,
@@ -628,6 +683,14 @@ export class ClassroomSessionService {
         endedAt: ended ? new Date() : null,
       },
     });
+
+    const materialsKey = StudentMemoryService.materialsKey(row.documentIds);
+    if (materialsKey && nextState.currentLessonName) {
+      void StudentMemoryService.saveMaterialProgress(input.userId, materialsKey, {
+        lessonName: nextState.currentLessonName,
+        lessonIndex: curriculumOutline.indexOf(nextState.currentLessonName),
+      });
+    }
 
     const voice = resolveTeacherVoice({
       language: row.locale,
@@ -726,6 +789,14 @@ export class ClassroomSessionService {
       void StudentMemoryService.recordQuestion(input.userId, transcript);
     }
 
+    const materialsKey = StudentMemoryService.materialsKey(row.documentIds);
+    if (materialsKey && nextState.currentLessonName) {
+      void StudentMemoryService.saveMaterialProgress(input.userId, materialsKey, {
+        lessonName: nextState.currentLessonName,
+        lessonIndex: curriculumOutline.indexOf(nextState.currentLessonName),
+      });
+    }
+
     const voice = resolveTeacherVoice({
       language: row.locale,
       countryCode: row.countryCode,
@@ -803,6 +874,7 @@ export class ClassroomSessionService {
     mode: "open" | "next" | "react" | "silence";
     studentTranscript?: string;
     question?: string;
+    resumeLessonName?: string | null;
   }): Promise<ClassroomBeat> {
     const system = buildClassroomBeatPrompt({
       language: input.language,
@@ -815,11 +887,17 @@ export class ClassroomSessionService {
       state: input.state,
       mode: input.mode,
       studentTranscript: input.studentTranscript,
+      resumeLessonName: input.resumeLessonName,
     });
 
     const userContent =
       input.mode === "open"
-        ? `Open the live classroom. Student request: ${input.question || "Teach my selected material from the first lesson to the last."}`
+        ? `Open the live classroom. Student request: ${
+            input.question ||
+            (input.resumeLessonName
+              ? `Continue teaching from "${input.resumeLessonName}" where the student left off — do not restart from lesson 1.`
+              : "Teach my selected material from the first lesson to the last.")
+          }`
         : input.mode === "react"
           ? `Student spoke — answer immediately: ${input.studentTranscript}`
           : input.mode === "silence"

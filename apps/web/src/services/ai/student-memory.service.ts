@@ -10,6 +10,12 @@ type ExamResultEntry = {
   at: string;
 };
 
+type MaterialProgressEntry = {
+  lessonName: string;
+  lessonIndex: number | null;
+  updatedAt: string;
+};
+
 export class StudentMemoryService {
   static async getOrCreate(userId: string) {
     const existing = await prisma.studentAiMemory.findUnique({ where: { userId } });
@@ -124,5 +130,58 @@ export class StudentMemoryService {
         weakSubjects: weak,
       },
     });
+  }
+
+  /** Stable key for a set of KB documents, order-independent. */
+  static materialsKey(documentIds: string[] | null | undefined): string {
+    return [...(documentIds || [])]
+      .filter(Boolean)
+      .sort()
+      .join(",");
+  }
+
+  static async getMaterialProgress(
+    userId: string,
+    materialsKey: string
+  ): Promise<MaterialProgressEntry | null> {
+    if (!materialsKey) return null;
+    try {
+      const mem = await this.getOrCreate(userId);
+      const map =
+        mem.materialProgress && typeof mem.materialProgress === "object"
+          ? (mem.materialProgress as Record<string, MaterialProgressEntry>)
+          : {};
+      return map[materialsKey] || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Fire-and-forget: remembers the student's furthest lesson per material set. */
+  static async saveMaterialProgress(
+    userId: string,
+    materialsKey: string,
+    progress: { lessonName?: string | null; lessonIndex?: number | null }
+  ) {
+    if (!materialsKey || !progress.lessonName) return;
+    try {
+      const mem = await this.getOrCreate(userId);
+      const map = (
+        mem.materialProgress && typeof mem.materialProgress === "object"
+          ? { ...(mem.materialProgress as Record<string, unknown>) }
+          : {}
+      ) as Record<string, MaterialProgressEntry>;
+      map[materialsKey] = {
+        lessonName: progress.lessonName,
+        lessonIndex: progress.lessonIndex ?? null,
+        updatedAt: new Date().toISOString(),
+      };
+      await prisma.studentAiMemory.update({
+        where: { userId },
+        data: { materialProgress: map as unknown as Prisma.InputJsonValue },
+      });
+    } catch {
+      /* ignore progress writeback failures */
+    }
   }
 }

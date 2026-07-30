@@ -340,21 +340,47 @@ function stopCloudAudio() {
   activeCloudAudio = null;
 }
 
+type SpeechRecognitionAlternativeLike = {
+  transcript?: string;
+  confidence?: number;
+};
+type SpeechRecognitionResultLike = SpeechRecognitionAlternativeLike & {
+  isFinal?: boolean;
+  length?: number;
+  [index: number]: SpeechRecognitionAlternativeLike | undefined;
+};
 type SpeechRecognitionLike = {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
+  maxAlternatives?: number;
   start: () => void;
   stop: () => void;
   onresult: ((ev: {
-    results: ArrayLike<{
-      isFinal?: boolean;
-      0?: { transcript?: string };
-    }>;
+    results: ArrayLike<SpeechRecognitionResultLike>;
   }) => void) | null;
   onend: (() => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((ev?: { error?: string }) => void) | null;
 };
+
+/** Pick the highest-confidence alternative the engine offered for a result. */
+function bestTranscript(row: SpeechRecognitionResultLike | undefined): string {
+  if (!row) return "";
+  const count = typeof row.length === "number" ? row.length : 1;
+  let best = row[0]?.transcript || "";
+  let bestConf = row[0]?.confidence ?? -1;
+  for (let j = 1; j < count; j++) {
+    const alt = row[j];
+    if (alt?.transcript && (alt.confidence ?? -1) > bestConf) {
+      bestConf = alt.confidence ?? -1;
+      best = alt.transcript;
+    }
+  }
+  return best;
+}
+
+/** Fatal permission/setup errors — retrying will only spam the mic prompt. */
+const FATAL_SPEECH_ERRORS = new Set(["not-allowed", "service-not-allowed"]);
 
 function getSpeechRecognition(): (new () => SpeechRecognitionLike) | null {
   if (typeof window === "undefined") return null;
@@ -572,6 +598,9 @@ export function LiveClassroom({
   const [error, setError] = useState<string | null>(null);
   const [hz, setHz] = useState(() => Array.from({ length: 40 }, () => 0.08));
   const [ended, setEnded] = useState(false);
+  const [boardZoom, setBoardZoom] = useState(1);
+  const pinchDistRef = useRef<number | null>(null);
+  const pinchZoomRef = useRef(1);
 
   const cancelledRef = useRef(false);
   const voiceBusyRef = useRef(false);
@@ -579,12 +608,17 @@ export function LiveClassroom({
   const sessionIdRef = useRef<string | null>(null);
   const countryCodeRef = useRef<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const fatalSpeechErrorRef = useRef(false);
   const loopActiveRef = useRef(false);
   const speechActivityRef = useRef(0);
   const lastAskWaitRef = useRef(0);
   const boardCursorRef = useRef(160);
   const turnStartedRef = useRef(false);
   const pendingAskRef = useRef<string | null>(null);
+  // Stays true across the whole ask→wait→answer cycle (unlike pendingAskRef,
+  // which the loop clears early to move into the wait state). Used so the
+  // student's reply is always bridged with "let me check" first.
+  const awaitingCheckRef = useRef(false);
   const bridgeVariantRef = useRef(0);
   const finalBufferRef = useRef("");
   const finalTimerRef = useRef<number | null>(null);
@@ -628,6 +662,48 @@ export function LiveClassroom({
       setTick((t) => t + 1);
     }, 33);
     return () => window.clearInterval(id);
+  }, []);
+
+  const clampBoardZoom = useCallback((z: number) => Math.max(1, Math.min(3, z)), []);
+
+  const handleBoardWheel = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      // Trackpad pinch fires wheel with ctrlKey/metaKey true in every major browser.
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setBoardZoom((z) => clampBoardZoom(z - e.deltaY * 0.01));
+    },
+    [clampBoardZoom]
+  );
+
+  const handleBoardTouchStart = useCallback(
+    (e: React.TouchEvent<HTMLDivElement>) => {
+      if (e.touches.length === 2) {
+        const [a, b] = [e.touches[0], e.touches[1]];
+        pinchDistRef.current = Math.hypot(
+          a.clientX - b.clientX,
+          a.clientY - b.clientY
+        );
+        pinchZoomRef.current = boardZoom;
+      }
+    },
+    [boardZoom]
+  );
+
+  const handleBoardTouchMove = useCallback(
+    (e: React.TouchEvent<HTMLDivElement>) => {
+      if (e.touches.length === 2 && pinchDistRef.current) {
+        const [a, b] = [e.touches[0], e.touches[1]];
+        const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+        const ratio = dist / pinchDistRef.current;
+        setBoardZoom(clampBoardZoom(pinchZoomRef.current * ratio));
+      }
+    },
+    [clampBoardZoom]
+  );
+
+  const handleBoardTouchEnd = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length < 2) pinchDistRef.current = null;
   }, []);
 
   const stopListen = useCallback(() => {
@@ -696,10 +772,12 @@ export function LiveClassroom({
           Math.min(8000, beat.waitForStudentMs || 5500)
         );
         pendingAskRef.current = ask;
+        awaitingCheckRef.current = true;
         setCaption(ask);
       } else {
         lastAskWaitRef.current = 0;
         pendingAskRef.current = null;
+        awaitingCheckRef.current = false;
       }
       if (beat.sessionComplete) setEnded(true);
     },
@@ -731,9 +809,12 @@ export function LiveClassroom({
 
       const kind: ClassroomBridgeKind = opts?.noAnswer
         ? "think"
-        : pendingAskRef.current
+        : awaitingCheckRef.current
           ? "check"
           : "explain";
+      // Consumed for this turn — the next beat will re-arm it if another
+      // check question is asked (e.g. re-asking after a wrong answer).
+      awaitingCheckRef.current = false;
       const apiP = fetch(
         `/api/ai/classroom/session/${sessionIdRef.current}/turn`,
         {
@@ -779,6 +860,7 @@ export function LiveClassroom({
 
   const startListen = useCallback(() => {
     if (voiceBusyRef.current || handlingTurnRef.current || ended) return;
+    if (fatalSpeechErrorRef.current) return;
     const Ctor = getSpeechRecognition();
     if (!Ctor) return;
     if (recognitionRef.current) return;
@@ -787,6 +869,9 @@ export function LiveClassroom({
       rec.lang = session?.speechLocale || (rtl ? "ar-IQ" : "en-US");
       rec.continuous = true;
       rec.interimResults = true;
+      // Ask the engine for multiple candidate transcripts so we can pick the
+      // highest-confidence one instead of always trusting alternative #0.
+      rec.maxAlternatives = 3;
       // ev.results is CUMULATIVE for this recognition session — rebuild from
       // the session base instead of appending (appending duplicated words).
       const sessionBase = finalBufferRef.current;
@@ -796,7 +881,7 @@ export function LiveClassroom({
         let interim = "";
         for (let i = 0; i < ev.results.length; i++) {
           const row = ev.results[i];
-          const alt = row?.[0]?.transcript || "";
+          const alt = bestTranscript(row);
           if (row?.isFinal) finalChunk += `${alt} `;
           else interim += alt;
         }
@@ -816,7 +901,11 @@ export function LiveClassroom({
           );
         }
         const q = finalBufferRef.current.trim();
-        const need = pendingAskRef.current ? minWords : Math.max(minWords, rtl ? 2 : 2);
+        // A short precise answer ("four", "yes", "Paris") is common when a
+        // check question is pending — don't force a 2nd word that may never
+        // come, which used to make the recognizer merge it with the start of
+        // the NEXT utterance and mis-transcribe both.
+        const need = pendingAskRef.current ? 1 : Math.max(minWords, 2);
         if (q.split(/\s+/).filter(Boolean).length >= need) {
           if (finalTimerRef.current) window.clearTimeout(finalTimerRef.current);
           // Debounce so multi-phrase answers finish before we cut off.
@@ -840,10 +929,28 @@ export function LiveClassroom({
           !cancelledRef.current &&
           !voiceBusyRef.current &&
           !handlingTurnRef.current &&
-          !ended
+          !ended &&
+          !fatalSpeechErrorRef.current
         ) {
           window.setTimeout(() => startListen(), 220);
         }
+      };
+      rec.onerror = (ev) => {
+        const code = ev?.error || "";
+        if (FATAL_SPEECH_ERRORS.has(code)) {
+          // Permission denied / mic blocked — stop hammering the browser
+          // prompt; surface it once so the student knows why nothing works.
+          fatalSpeechErrorRef.current = true;
+          setError(
+            lang === "ar"
+              ? "الرجاء السماح بالوصول إلى الميكروفون"
+              : lang === "tr"
+                ? "Lütfen mikrofon erişimine izin verin"
+                : "Please allow microphone access"
+          );
+        }
+        // Transient errors (no-speech, network, aborted) are recovered by
+        // the normal onend → restart cycle below.
       };
       recognitionRef.current = rec;
       setPresence((p) => (p === "speaking" || p === "thinking" ? p : "listening"));
@@ -1070,45 +1177,92 @@ export function LiveClassroom({
       </header>
 
       <div className="relative mx-3 min-h-0 flex-1 overflow-hidden rounded-[22px] border border-white/10 bg-[#f7f4ee] shadow-[0_30px_80px_-40px_rgba(0,0,0,0.8)] sm:mx-5">
-        <svg
-          viewBox={`0 0 ${BOARD_W} ${BOARD_H}`}
-          className="h-full w-full"
-          preserveAspectRatio="xMidYMid meet"
+        <div
+          className="h-full w-full overflow-auto"
+          style={{ touchAction: boardZoom > 1 ? "pan-x pan-y" : "none" }}
+          onWheel={handleBoardWheel}
+          onTouchStart={handleBoardTouchStart}
+          onTouchMove={handleBoardTouchMove}
+          onTouchEnd={handleBoardTouchEnd}
         >
-          <defs>
-            <filter id="chalkSoft" x="-20%" y="-20%" width="140%" height="140%">
-              <feGaussianBlur stdDeviation="0.6" />
-            </filter>
-          </defs>
-          <rect x={0} y={0} width={BOARD_W} height={BOARD_H} fill="#f7f4ee" />
-          {Array.from({ length: 19 }).map((_, i) => (
-            <line
-              key={`v${i}`}
-              x1={(i + 1) * 100}
-              y1={0}
-              x2={(i + 1) * 100}
-              y2={BOARD_H}
-              stroke="#e7e0d4"
-              strokeWidth={1}
-            />
-          ))}
-          {Array.from({ length: 10 }).map((_, i) => (
-            <line
-              key={`h${i}`}
-              x1={0}
-              y1={(i + 1) * 100}
-              x2={BOARD_W}
-              y2={(i + 1) * 100}
-              stroke="#e7e0d4"
-              strokeWidth={1}
-            />
-          ))}
-          <g filter="url(#chalkSoft)">
-            {board.map((item) => (
-              <BoardStroke key={item.id} item={item} clock={clock} />
+          <svg
+            viewBox={`0 0 ${BOARD_W} ${BOARD_H}`}
+            style={{
+              display: "block",
+              width: `${boardZoom * 100}%`,
+              height: `${boardZoom * 100}%`,
+              minWidth: "100%",
+              minHeight: "100%",
+            }}
+            preserveAspectRatio="xMidYMid meet"
+          >
+            <defs>
+              <filter id="chalkSoft" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="0.6" />
+              </filter>
+            </defs>
+            <rect x={0} y={0} width={BOARD_W} height={BOARD_H} fill="#f7f4ee" />
+            {Array.from({ length: 19 }).map((_, i) => (
+              <line
+                key={`v${i}`}
+                x1={(i + 1) * 100}
+                y1={0}
+                x2={(i + 1) * 100}
+                y2={BOARD_H}
+                stroke="#e7e0d4"
+                strokeWidth={1}
+              />
             ))}
-          </g>
-        </svg>
+            {Array.from({ length: 10 }).map((_, i) => (
+              <line
+                key={`h${i}`}
+                x1={0}
+                y1={(i + 1) * 100}
+                x2={BOARD_W}
+                y2={(i + 1) * 100}
+                stroke="#e7e0d4"
+                strokeWidth={1}
+              />
+            ))}
+            <g filter="url(#chalkSoft)">
+              {board.map((item) => (
+                <BoardStroke key={item.id} item={item} clock={clock} />
+              ))}
+            </g>
+          </svg>
+        </div>
+
+        <div
+          className="absolute top-3 flex flex-col gap-1 rounded-xl border border-white/15 bg-slate-950/70 p-1 backdrop-blur-md"
+          style={rtl ? { left: 12 } : { right: 12 }}
+        >
+          <button
+            type="button"
+            aria-label="Zoom in"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-sm font-semibold text-white/85 hover:bg-white/10"
+            onClick={() => setBoardZoom((z) => clampBoardZoom(z + 0.25))}
+          >
+            +
+          </button>
+          <button
+            type="button"
+            aria-label="Zoom out"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-sm font-semibold text-white/85 hover:bg-white/10"
+            onClick={() => setBoardZoom((z) => clampBoardZoom(z - 0.25))}
+          >
+            −
+          </button>
+          {boardZoom !== 1 ? (
+            <button
+              type="button"
+              aria-label="Reset zoom"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-[10px] font-semibold text-white/70 hover:bg-white/10"
+              onClick={() => setBoardZoom(1)}
+            >
+              1:1
+            </button>
+          ) : null}
+        </div>
 
         <div className="absolute inset-x-3 bottom-3 rounded-2xl border border-white/20 bg-slate-950/82 px-4 py-3 backdrop-blur-md">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-300/90">

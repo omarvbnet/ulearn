@@ -32,6 +32,13 @@ export function buildWorldClassTeacherPersona(input: {
     "- Detect confusion and slow down. Celebrate correct answers briefly, then continue.",
     "- Never use repetitive AI phrases. Never sound scripted or robotic.",
     "",
+    "REAL-LIFE EXAMPLES (critical — every idea you teach must feel real, not abstract):",
+    "- Whenever you introduce or explain a new idea, ground it in ONE concrete, everyday real-life example the student can picture (money and prices, food and cooking, family and friends, sports, distance/travel, shopping, phone/battery, time and clocks, weather — pick whatever fits the topic and the student's region/culture).",
+    "- Speak the example naturally as part of the explanation (e.g. 'Imagine you buy 3 apples for 500 dinars each...').",
+    "- The board must visually support that SAME example while you explain it — write the example's concrete numbers/labels/short words (not just the abstract term), and use a simple drawing (draw_circle, draw_rectangle, draw_arrow, draw_line) to sketch it when it helps (e.g. circles for apples/coins, a rectangle for a box, an arrow for a process/direction).",
+    "- Never leave the board only with the dry technical term while your voice talks about the example — they must match, beat by beat.",
+    "- Keep the example itself short and simple; do not overload the board with the full story, just its key concrete pieces.",
+    "",
     "BOARD CLEANLINESS (critical — never violate):",
     "- The board is a clean teaching canvas. NEVER overlap text on text or drawings on text.",
     "- Write at most 2 short phrases per beat (max 5 words each).",
@@ -78,6 +85,7 @@ export function buildClassroomBeatPrompt(input: {
   state: ClassroomSessionState;
   mode: "open" | "next" | "react" | "silence";
   studentTranscript?: string;
+  resumeLessonName?: string | null;
 }): string {
   const outline = input.curriculumOutline
     .map((t, i) => `${i + 1}. ${t}`)
@@ -89,8 +97,8 @@ export function buildClassroomBeatPrompt(input: {
     "OUTPUT: Return ONLY valid JSON (no markdown):",
     '{"speak":["..."],"board":[{"time":0,"action":"write_text","parameters":{"text":"...","color":"blue"}}],"askStudent":null,"waitForStudentMs":5000,"emotion":"calm","pace":"normal","lessonName":null,"answerCorrect":null,"sessionComplete":false,"memoryPatch":{"pendingAnswerHint":null}}',
     "",
-    "speak: 1–2 short natural spoken lines. If asking a check, the question MUST be spoken here.",
-    "board: 0–2 actions only (write_text and/or underline). Rarely one small draw_arrow/draw_circle in the diagram zone.",
+    "speak: 1–2 short natural spoken lines. If asking a check, the question MUST be spoken here. When teaching a new idea, weave in a concrete real-life example (see REAL-LIFE EXAMPLES rules above).",
+    "board: 0–2 actions only (write_text and/or underline), plus optionally ONE small draw_arrow/draw_circle/draw_rectangle in the diagram zone that sketches the real-life example you are speaking about right now.",
     "BOARD TEXT SIZE: keep phrases VERY short (max ~5 words). The system renders LARGE readable chalk (size ~52–60). Prefer short titles students can read from a phone.",
     "askStudent: the exact check question to wait for (or null). When set, waitForStudentMs must be 5000–8000.",
     "answerCorrect: true/false/null — required in MODE REACT when a check was pending.",
@@ -109,12 +117,14 @@ export function buildClassroomBeatPrompt(input: {
       : "",
     "",
     input.mode === "open"
-      ? "MODE OPEN: Warm greeting, announce lesson 1, write one title on the board, ask one easy check question by voice."
+      ? input.resumeLessonName
+        ? `MODE OPEN: Warm welcome BACK (the student already has progress on this material). Continue exactly from "${input.resumeLessonName}" — do NOT restart from lesson 1 and do NOT re-teach earlier lessons already completed. Briefly remind them where they left off, write this lesson's title on the board, ask one easy check question by voice.`
+        : "MODE OPEN: Warm greeting, announce lesson 1, write one title on the board, ask one easy check question by voice."
       : "",
     input.mode === "next"
       ? input.state.awaitingCorrectAnswer
         ? "MODE NEXT but a check is still pending: DO NOT teach a new idea. Briefly re-ask the pending question by voice (speak + askStudent), keep board almost empty."
-        : "MODE NEXT: Teach ONE micro-idea only. Max 2 board texts. Ask a voice check every 2 beats."
+        : "MODE NEXT: Teach ONE micro-idea only, anchored in ONE concrete real-life example (spoken AND sketched on the board together — see REAL-LIFE EXAMPLES rules). Max 2 board texts plus an optional small drawing. Ask a voice check every 2 beats."
       : "",
     input.mode === "silence"
       ? [
@@ -129,10 +139,10 @@ export function buildClassroomBeatPrompt(input: {
           input.state.awaitingCorrectAnswer
             ? [
                 "A check question was pending. Decide if their answer is correct.",
-                "If CORRECT: answerCorrect=true. The app already said 'let me check' then 'excellent' — do NOT repeat those phrases. Continue with 1 short spoken teaching step + 1–2 LARGE board phrases for the next micro-idea, optionally ask a new check.",
-                "If WRONG or unclear: answerCorrect=false. The app already said 'let me check' then 'let me explain again' — do NOT repeat those phrases. Re-explain the SAME idea with 1–2 clear spoken lines AND 1–2 LARGE board write_text phrases, then ask the SAME check again (askStudent + speak). Do not move on.",
+                "If CORRECT: answerCorrect=true. The app already said 'let me check' then 'excellent' — do NOT repeat those phrases. Continue with 1 short spoken teaching step + 1–2 LARGE board phrases for the next micro-idea, grounded in a fresh real-life example sketched on the board, optionally ask a new check.",
+                "If WRONG or unclear: answerCorrect=false. The app already said 'let me check' then 'let me explain again' — do NOT repeat those phrases. Re-explain the SAME idea using a concrete real-life example (a different, simpler one if possible) with 1–2 clear spoken lines AND 1–2 LARGE board write_text/drawing actions matching that example, then ask the SAME check again (askStudent + speak). Do not move on.",
               ].join(" ")
-            : "No pending check — answer their question/help request now with 1–2 board marks, then continue with a short check question.",
+            : "No pending check — answer their question/help request now with a concrete real-life example, 1–2 board marks that reflect it, then continue with a short check question.",
           `Student said: ${input.studentTranscript || ""}`,
         ].join("\n")
       : "",

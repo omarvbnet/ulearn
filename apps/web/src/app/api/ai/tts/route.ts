@@ -38,11 +38,15 @@ export async function POST(request: Request) {
   });
 
   const provinceName = profile?.province?.nameEn || null;
+  // Country always drives the regional accent, regardless of language.
   const countryCode =
     parsed.data.country || profile?.country?.code || null;
-  // Prefer the student's saved app language for classroom voice; request language is fallback.
+  // The language the student actively selected for this session/classroom
+  // (e.g. current UI locale) always wins over the stored profile default —
+  // a student browsing in Turkish must be taught in Turkish even if their
+  // account locale is Arabic.
   const language =
-    profile?.locale || parsed.data.language || "en";
+    parsed.data.language || profile?.locale || "en";
   const resolved = resolveTeacherVoice({
     language,
     countryCode,

@@ -276,6 +276,8 @@ export function accentInstruction(
   const tag = region ? ` (${region})` : "";
   const shared =
     "Sound like a senior professional teacher: warm, clear, confident, never robotic. Prefer natural classroom rhythm with gentle pauses.";
+  const arabicDiacritics =
+    "CRITICAL for pronunciation: write full Arabic diacritics (تشكيل كامل — الفتحة والضمة والكسرة والسكون والشدة) on EVERY word of every spoken sentence (the speak[] lines), so the text-to-speech engine pronounces each word with the correct vowels and stress. Do not skip diacritics on any word, including short/common ones. Keep board text short and diacritic-free for clean visuals.";
   switch (v.selectedLanguage) {
     case "ar":
       if (v.accent.startsWith("iraqi") || v.accent === "iraqi_levantine") {
@@ -283,6 +285,7 @@ export function accentInstruction(
           `Speak and write entirely in clear Arabic (فصحى مبسّطة) with a natural Iraqi classroom tone${tag}.`,
           "Use familiar Iraqi educational expressions when helpful (e.g. خلّينا، زين، شوفوا، تمام) without becoming slangy or unclear.",
           "Pronounce carefully for students; keep sentences short and musical.",
+          arabicDiacritics,
           shared,
           "Never switch language unless asked.",
         ].join(" ");
@@ -291,6 +294,7 @@ export function accentInstruction(
         return [
           `Speak and write entirely in clear Arabic with a Levantine-friendly teaching tone${tag}.`,
           "Keep MSA clarity with warm Levantine classroom flavor.",
+          arabicDiacritics,
           shared,
           "Never switch language unless asked.",
         ].join(" ");
@@ -299,6 +303,7 @@ export function accentInstruction(
         return [
           `Speak and write entirely in clear Arabic with a polished Gulf educational tone${tag}.`,
           "Stay respectful, clear, and classroom-professional.",
+          arabicDiacritics,
           shared,
           "Never switch language unless asked.",
         ].join(" ");
@@ -307,11 +312,12 @@ export function accentInstruction(
         return [
           `Speak and write entirely in clear Arabic with an Egyptian-friendly teaching tone${tag}.`,
           "Warm and engaging, but still academically precise.",
+          arabicDiacritics,
           shared,
           "Never switch language unless asked.",
         ].join(" ");
       }
-      return `Speak and write entirely in Arabic (العربية)${tag}. ${shared} Do not switch to English unless the user asks.`;
+      return `Speak and write entirely in Arabic (العربية)${tag}. ${arabicDiacritics} ${shared} Do not switch to English unless the user asks.`;
     case "ku":
       return `You MUST reply entirely in Kurdish (کوردی)${tag}. Keep explanations natural and professional for students in this region. ${shared} Do not switch language unless asked.`;
     case "tr":
