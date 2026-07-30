@@ -706,6 +706,117 @@ function elevenLabsModelId(model?: string | null): string {
   return "eleven_multilingual_v2";
 }
 
+function normalizeFishAudioBase(baseUrl?: string | null): string {
+  const raw = (baseUrl || "https://api.fish.audio").replace(/\/$/, "");
+  return raw.replace(/\/v1$/i, "");
+}
+
+function fishAudioModelId(model?: string | null): string {
+  const m = (model || "").trim().toLowerCase();
+  if (
+    m === "s2.1-pro-free" ||
+    m === "s2.1-pro" ||
+    m === "s2-pro" ||
+    m === "s1"
+  ) {
+    return m;
+  }
+  // Prefer the free developer tier (Fish Audio S2.1 Pro free API).
+  return "s2.1-pro-free";
+}
+
+export class FishAudioAdapter implements AiProviderAdapter {
+  readonly type = "FISH_AUDIO";
+
+  async chat(_config: ProviderConfig, _messages: ChatMessage[]): Promise<ChatResult> {
+    throw new Error(
+      "Fish Audio is voice-only. Assign FISH_AUDIO to VOICE_TTS for AI Teacher classroom speech."
+    );
+  }
+
+  async embed(_config: ProviderConfig, _text: string): Promise<EmbeddingResult> {
+    throw new Error("Fish Audio does not provide embeddings — use Gemini, OpenAI, or Jina.");
+  }
+
+  async synthesizeSpeech(
+    config: ProviderConfig,
+    input: SpeechSynthesisInput
+  ): Promise<SpeechSynthesisResult> {
+    const text = input.text.trim().slice(0, 4000);
+    if (!text) throw new Error("Empty speech text");
+    const resolved = resolveTeacherVoice({
+      language: input.language,
+      countryCode: input.countryCode,
+      provinceName: input.provinceName,
+      voiceOverride: input.voice || config.apiVersion,
+    });
+    const modelId = fishAudioModelId(config.model);
+    const base = normalizeFishAudioBase(config.baseUrl);
+    const url = `${base}/v1/tts`;
+    const pace = input.pace || "normal";
+    const speed =
+      pace === "slow" ? 0.88 : pace === "brisk" ? 1.08 : 1.0;
+
+    const body: Record<string, unknown> = {
+      text,
+      reference_id: resolved.fishAudioVoiceId,
+      format: "mp3",
+      mp3_bitrate: 128,
+      // Live classroom needs low first-audio latency (~90ms TTFA on S2.1 Pro).
+      latency: "balanced",
+      normalize: true,
+      prosody: {
+        speed,
+        volume: 0,
+        normalize_loudness: true,
+      },
+    };
+
+    const res = await fetchJson(
+      url,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          "Content-Type": "application/json",
+          model: modelId,
+        },
+        body: JSON.stringify(body),
+      },
+      Math.max(config.timeoutMs || 30000, 60000)
+    );
+    if (!res.ok) {
+      const raw = await res.text().catch(() => "");
+      throw new Error(
+        `Fish Audio TTS failed (${res.status}) at ${url}${raw ? `: ${raw.slice(0, 220)}` : ""}`
+      );
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    const words = text.split(/\s+/).filter(Boolean).length;
+    return {
+      mimeType: "audio/mpeg",
+      dataBase64: buf.toString("base64"),
+      durationMs: Math.max(1500, Math.min(45000, words * 380)),
+    };
+  }
+
+  async testConnection(config: ProviderConfig) {
+    try {
+      await this.synthesizeSpeech(config, {
+        text: "OK",
+        language: "en",
+        countryCode: "US",
+      });
+      return { ok: true, message: "Fish Audio TTS connection OK" };
+    } catch (e) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "Fish Audio test failed",
+      };
+    }
+  }
+}
+
 export class ElevenLabsAdapter implements AiProviderAdapter {
   readonly type = "ELEVENLABS";
 
@@ -836,6 +947,8 @@ export function getAdapter(type: string): AiProviderAdapter {
       return new FluxAdapter();
     case "ELEVENLABS":
       return new ElevenLabsAdapter();
+    case "FISH_AUDIO":
+      return new FishAudioAdapter();
     case "ANTHROPIC":
       return new AnthropicAdapter();
     default:
@@ -863,6 +976,8 @@ export function defaultBaseUrlForType(type: string): string | null {
       return "https://api.bfl.ai";
     case "ELEVENLABS":
       return "https://api.elevenlabs.io";
+    case "FISH_AUDIO":
+      return "https://api.fish.audio";
     default:
       return null;
   }
@@ -887,13 +1002,13 @@ export function jinaDefaultBaseUrl(model: string): string {
 /** True when this provider can run the EMBEDDING module. */
 export function providerSupportsEmbeddings(type: string, model?: string): boolean {
   if (type === "JINA") return isJinaEmbeddingModel(model || "jina-embeddings-v4");
-  if (type === "FLUX" || type === "ELEVENLABS") return false;
+  if (type === "FLUX" || type === "ELEVENLABS" || type === "FISH_AUDIO") return false;
   return type === "GEMINI" || type === "OPENAI" || type === "OPENAI_COMPATIBLE";
 }
 
 /** True when this provider can run chat / completion modules. */
 export function providerSupportsChat(type: string, model?: string): boolean {
-  if (type === "FLUX" || type === "ELEVENLABS") return false;
+  if (type === "FLUX" || type === "ELEVENLABS" || type === "FISH_AUDIO") return false;
   if (type === "JINA") return isJinaDeepSearchModel(model || "");
   return true;
 }
@@ -903,9 +1018,14 @@ export function providerSupportsImageGeneration(type: string): boolean {
   return type === "FLUX";
 }
 
-/** True when this provider can run VOICE_TTS (OpenAI speech or ElevenLabs). */
+/** True when this provider can run VOICE_TTS (Fish Audio, ElevenLabs, or OpenAI speech). */
 export function providerSupportsSpeech(type: string): boolean {
-  return type === "OPENAI" || type === "OPENAI_COMPATIBLE" || type === "ELEVENLABS";
+  return (
+    type === "OPENAI" ||
+    type === "OPENAI_COMPATIBLE" ||
+    type === "ELEVENLABS" ||
+    type === "FISH_AUDIO"
+  );
 }
 
 function defaultChatModel(type: string): string {

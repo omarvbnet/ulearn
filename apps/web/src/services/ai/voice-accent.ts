@@ -20,9 +20,19 @@ export type ResolvedTeacherVoice = {
   elevenLabsVoiceId: string;
   /** ElevenLabs language_code when supported */
   elevenLanguageCode: string;
+  /** Fish Audio voice model id (reference_id) */
+  fishAudioVoiceId: string;
   /** Human-readable accent key for prompts / debugging */
   accent: string;
 };
+
+/** Public Fish Audio Voice Library ids used as classroom defaults. */
+const FISH = {
+  /** Clear multilingual female teacher (docs example) */
+  teacher: "802e3bc2b27e49c2995d23ef70e6ac89",
+  /** Warm narration / male (docs example) */
+  narrator: "933563129e564b19a115bedd57b7406a",
+} as const;
 
 const ELEVEN = {
   /** Sarah — clear multilingual female */
@@ -55,6 +65,7 @@ function arabicAccent(country: string | null): {
   accent: string;
   openaiVoice: string;
   elevenLabsVoiceId: string;
+  fishAudioVoiceId: string;
 } {
   // Levant / Iraq
   if (country && ["IQ", "SY", "JO", "LB", "PS", "YE"].includes(country)) {
@@ -63,6 +74,7 @@ function arabicAccent(country: string | null): {
       accent: country === "IQ" ? "iraqi_levantine" : "levantine",
       openaiVoice: "nova",
       elevenLabsVoiceId: ELEVEN.sarah,
+      fishAudioVoiceId: FISH.teacher,
     };
   }
   // Gulf
@@ -72,6 +84,7 @@ function arabicAccent(country: string | null): {
       accent: "gulf",
       openaiVoice: "nova",
       elevenLabsVoiceId: ELEVEN.sarah,
+      fishAudioVoiceId: FISH.teacher,
     };
   }
   // Egypt / North Africa
@@ -81,6 +94,7 @@ function arabicAccent(country: string | null): {
       accent: "egyptian",
       openaiVoice: "nova",
       elevenLabsVoiceId: ELEVEN.sarah,
+      fishAudioVoiceId: FISH.teacher,
     };
   }
   if (country && ["MA", "DZ", "TN", "LY"].includes(country)) {
@@ -89,6 +103,7 @@ function arabicAccent(country: string | null): {
       accent: "maghrebi",
       openaiVoice: "nova",
       elevenLabsVoiceId: ELEVEN.sarah,
+      fishAudioVoiceId: FISH.teacher,
     };
   }
   return {
@@ -96,6 +111,7 @@ function arabicAccent(country: string | null): {
     accent: "msa",
     openaiVoice: "nova",
     elevenLabsVoiceId: ELEVEN.sarah,
+    fishAudioVoiceId: FISH.teacher,
   };
 }
 
@@ -104,6 +120,7 @@ function englishAccent(country: string | null): {
   accent: string;
   openaiVoice: string;
   elevenLabsVoiceId: string;
+  fishAudioVoiceId: string;
 } {
   if (country && ["GB", "IE"].includes(country)) {
     return {
@@ -111,6 +128,7 @@ function englishAccent(country: string | null): {
       accent: "british",
       openaiVoice: "fable",
       elevenLabsVoiceId: ELEVEN.daniel,
+      fishAudioVoiceId: FISH.narrator,
     };
   }
   if (country && ["AU", "NZ"].includes(country)) {
@@ -119,6 +137,7 @@ function englishAccent(country: string | null): {
       accent: "australian",
       openaiVoice: "shimmer",
       elevenLabsVoiceId: ELEVEN.lily,
+      fishAudioVoiceId: FISH.teacher,
     };
   }
   if (country && ["CA"].includes(country)) {
@@ -127,6 +146,7 @@ function englishAccent(country: string | null): {
       accent: "canadian",
       openaiVoice: "alloy",
       elevenLabsVoiceId: ELEVEN.adam,
+      fishAudioVoiceId: FISH.narrator,
     };
   }
   return {
@@ -134,6 +154,7 @@ function englishAccent(country: string | null): {
     accent: "american",
     openaiVoice: "alloy",
     elevenLabsVoiceId: ELEVEN.adam,
+    fishAudioVoiceId: FISH.narrator,
   };
 }
 
@@ -162,6 +183,8 @@ export function resolveTeacherVoice(input: {
       openaiVoice: override || "onyx",
       elevenLabsVoiceId: override && override.length >= 16 ? override : ELEVEN.george,
       elevenLanguageCode: "tr",
+      fishAudioVoiceId:
+        override && /^[a-f0-9]{24,}$/i.test(override) ? override : FISH.narrator,
       accent: "turkish",
     };
   }
@@ -183,6 +206,12 @@ export function resolveTeacherVoice(input: {
             ? ELEVEN.george
             : ar.elevenLabsVoiceId,
       elevenLanguageCode: inTurkey ? "tr" : "ar",
+      fishAudioVoiceId:
+        override && /^[a-f0-9]{24,}$/i.test(override)
+          ? override
+          : inTurkey
+            ? FISH.narrator
+            : ar.fishAudioVoiceId,
       accent: inTurkey ? "kurdish_tr_context" : "kurdish_iq_context",
     };
   }
@@ -204,6 +233,10 @@ export function resolveTeacherVoice(input: {
       elevenLabsVoiceId:
         override && override.length >= 16 ? override : ar.elevenLabsVoiceId,
       elevenLanguageCode: "ar",
+      fishAudioVoiceId:
+        override && /^[a-f0-9]{24,}$/i.test(override)
+          ? override
+          : ar.fishAudioVoiceId,
       accent,
     };
   }
@@ -219,6 +252,10 @@ export function resolveTeacherVoice(input: {
     elevenLabsVoiceId:
       override && override.length >= 16 ? override : en.elevenLabsVoiceId,
     elevenLanguageCode: "en",
+    fishAudioVoiceId:
+      override && /^[a-f0-9]{24,}$/i.test(override)
+        ? override
+        : en.fishAudioVoiceId,
     accent: en.accent,
   };
 }

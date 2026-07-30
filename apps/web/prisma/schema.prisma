@@ -1782,6 +1782,8 @@ enum AiProviderType {
   FLUX
   /// ElevenLabs text-to-speech (AI Teacher classroom voice)
   ELEVENLABS
+  /// Fish Audio S2.1 Pro TTS (preferred AI Teacher classroom voice)
+  FISH_AUDIO
 }
 
 enum AiProviderStatus {

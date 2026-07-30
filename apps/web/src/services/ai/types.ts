@@ -47,7 +47,7 @@ export type SpeechSynthesisInput = {
   countryCode?: string | null;
   /** Optional province/region name for finer dialect */
   provinceName?: string | null;
-  /** Optional provider voice override (OpenAI name or ElevenLabs id) */
+  /** Optional provider voice override (OpenAI name, Fish Audio model id, or ElevenLabs id) */
   voice?: string | null;
   /** Speaking pace hint for more natural classroom delivery */
   pace?: "slow" | "normal" | "brisk" | null;

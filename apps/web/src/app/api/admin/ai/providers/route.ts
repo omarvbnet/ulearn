@@ -5,9 +5,9 @@ import { z } from "zod";
 
 function providerCreateError(e: unknown) {
   const msg = e instanceof Error ? e.message : "Create failed";
-  if (/JINA|FLUX|ELEVENLABS|AiProviderType|AiModuleKey|enum/i.test(msg)) {
+  if (/JINA|FLUX|ELEVENLABS|FISH_AUDIO|AiProviderType|AiModuleKey|enum/i.test(msg)) {
     return error(
-      'Database enum missing. Run SQL: ALTER TYPE "AiProviderType" ADD VALUE IF NOT EXISTS \'ELEVENLABS\'; ALTER TYPE "AiProviderType" ADD VALUE IF NOT EXISTS \'FLUX\'; ALTER TYPE "AiModuleKey" ADD VALUE IF NOT EXISTS \'AI_CREATIVE_IMAGE\'; ALTER TYPE "AiModuleKey" ADD VALUE IF NOT EXISTS \'VOICE_TTS\';',
+      'Database enum missing. Run SQL: ALTER TYPE "AiProviderType" ADD VALUE IF NOT EXISTS \'FISH_AUDIO\'; ALTER TYPE "AiProviderType" ADD VALUE IF NOT EXISTS \'ELEVENLABS\'; ALTER TYPE "AiProviderType" ADD VALUE IF NOT EXISTS \'FLUX\'; ALTER TYPE "AiModuleKey" ADD VALUE IF NOT EXISTS \'AI_CREATIVE_IMAGE\'; ALTER TYPE "AiModuleKey" ADD VALUE IF NOT EXISTS \'VOICE_TTS\';',
       500,
       "DB_MIGRATION"
     );

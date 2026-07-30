@@ -130,7 +130,7 @@ export class AiProviderService {
     } else if (moduleKey === "VOICE_TTS") {
       if (!providerSupportsSpeech(provider.type)) {
         throw new Error(
-          `${provider.type} (${provider.name}) cannot run TTS. Assign VOICE_TTS to ElevenLabs or OpenAI (tts-1-hd / gpt-4o-mini-tts).`
+          `${provider.type} (${provider.name}) cannot run TTS. Assign VOICE_TTS to Fish Audio (s2.1-pro-free), ElevenLabs, or OpenAI (tts-1-hd / gpt-4o-mini-tts).`
         );
       }
     } else if (moduleKey !== "EMBEDDING" && !providerSupportsChat(provider.type, provider.model)) {
@@ -230,7 +230,7 @@ export class AiProviderService {
         preferTypes: opts?.preferTypes?.length
           ? opts.preferTypes
           : ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE", "JINA"],
-        skipTypes: [...(opts?.skipTypes || []), "DEEPSEEK", "KIMI", "ANTHROPIC", "FLUX", "ELEVENLABS"],
+        skipTypes: [...(opts?.skipTypes || []), "DEEPSEEK", "KIMI", "ANTHROPIC", "FLUX", "ELEVENLABS", "FISH_AUDIO"],
       };
       opts = embedOpts;
     } else if (moduleKey === "AI_CREATIVE_IMAGE") {
@@ -246,13 +246,14 @@ export class AiProviderService {
           "OPENAI",
           "OPENAI_COMPATIBLE",
           "ELEVENLABS",
+          "FISH_AUDIO",
         ],
       };
     } else if (moduleKey === "VOICE_TTS") {
       opts = {
         preferTypes: opts?.preferTypes?.length
           ? opts.preferTypes
-          : ["ELEVENLABS", "OPENAI", "OPENAI_COMPATIBLE"],
+          : ["FISH_AUDIO", "ELEVENLABS", "OPENAI", "OPENAI_COMPATIBLE"],
         skipTypes: [
           ...(opts?.skipTypes || []),
           "FLUX",
@@ -274,13 +275,14 @@ export class AiProviderService {
           "FLUX",
           "JINA",
           "ELEVENLABS",
+          "FISH_AUDIO",
         ],
       };
     } else if (moduleKey) {
-      // Chat modules: never use FLUX (image-only) or ElevenLabs (voice-only).
+      // Chat modules: never use FLUX (image-only) or voice-only TTS providers.
       opts = {
         ...opts,
-        skipTypes: [...(opts?.skipTypes || []), "FLUX", "ELEVENLABS"],
+        skipTypes: [...(opts?.skipTypes || []), "FLUX", "ELEVENLABS", "FISH_AUDIO"],
       };
     }
     if (opts?.preferTypes?.length) {
@@ -309,7 +311,7 @@ export class AiProviderService {
       }
       if (moduleKey === "VOICE_TTS" && !providerSupportsSpeech(provider.type)) {
         lastError = new Error(
-          `${provider.type} (${provider.name}) cannot run TTS. Assign VOICE_TTS to ElevenLabs or OpenAI.`
+          `${provider.type} (${provider.name}) cannot run TTS. Assign VOICE_TTS to Fish Audio, ElevenLabs, or OpenAI.`
         );
         continue;
       }
@@ -504,6 +506,7 @@ function estimateCost(type: string, tokensIn: number, tokensOut: number): number
     JINA: { in: 0.00000002, out: 0 },
     FLUX: { in: 0.00008, out: 0 },
     ELEVENLABS: { in: 0.00003, out: 0 },
+    FISH_AUDIO: { in: 0, out: 0 },
   };
   const r = rates[type] || rates.GEMINI;
   return tokensIn * r.in + tokensOut * r.out;

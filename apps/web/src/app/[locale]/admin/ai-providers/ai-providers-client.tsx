@@ -84,7 +84,8 @@ const PROVIDER_TYPES = [
   { value: "DEEPSEEK", label: "DeepSeek" },
   { value: "JINA", label: "Jina AI (Embeddings / DeepSearch)" },
   { value: "FLUX", label: "FLUX.1 Kontext Max (BFL Images)" },
-  { value: "ELEVENLABS", label: "ElevenLabs (AI Teacher Voice)" },
+  { value: "FISH_AUDIO", label: "Fish Audio S2.1 Pro (AI Teacher Voice · free)" },
+  { value: "ELEVENLABS", label: "ElevenLabs (AI Teacher Voice · fallback)" },
   { value: "OPENAI_COMPATIBLE", label: "OpenAI Compatible (custom)" },
 ] as const;
 
@@ -139,6 +140,15 @@ const MODELS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
     { value: "flux-2-pro", label: "FLUX.2 Pro" },
     { value: "flux-2-max", label: "FLUX.2 Max" },
   ],
+  FISH_AUDIO: [
+    {
+      value: "s2.1-pro-free",
+      label: "s2.1-pro-free (recommended · free developer tier · ar / tr / en)",
+    },
+    { value: "s2.1-pro", label: "s2.1-pro (paid · SLA)" },
+    { value: "s2-pro", label: "s2-pro (previous generation)" },
+    { value: "s1", label: "s1 (legacy)" },
+  ],
   ELEVENLABS: [
     {
       value: "eleven_multilingual_v2",
@@ -163,6 +173,7 @@ const DEFAULT_BASE_URL: Record<string, string> = {
   DEEPSEEK: "https://api.deepseek.com/v1",
   JINA: "https://api.jina.ai/v1",
   FLUX: "https://api.bfl.ai",
+  FISH_AUDIO: "https://api.fish.audio",
   ELEVENLABS: "https://api.elevenlabs.io",
   OPENAI_COMPATIBLE: "",
 };
@@ -175,6 +186,7 @@ const DEFAULT_MODEL: Record<string, string> = {
   DEEPSEEK: "deepseek-chat",
   JINA: "jina-embeddings-v4",
   FLUX: "flux-kontext-max",
+  FISH_AUDIO: "s2.1-pro-free",
   ELEVENLABS: "eleven_multilingual_v2",
   OPENAI_COMPATIBLE: "gpt-4o-mini",
 };
@@ -195,7 +207,7 @@ export function AiProvidersClient() {
     customModel: "",
     apiKey: "",
     baseUrl: DEFAULT_BASE_URL.GEMINI,
-    /** Optional ElevenLabs voice id (stored as apiVersion). */
+    /** Optional Fish Audio / ElevenLabs voice id (stored as apiVersion). */
     voiceId: "",
     isDefault: true,
   });
@@ -242,7 +254,7 @@ export function AiProvidersClient() {
       type,
       model: nextModel,
       customModel: "",
-      voiceId: type === "ELEVENLABS" ? f.voiceId : "",
+      voiceId: type === "FISH_AUDIO" || type === "ELEVENLABS" ? f.voiceId : "",
       baseUrl: DEFAULT_BASE_URL[type] ?? f.baseUrl,
       name:
         f.name === "Gemini Default" ||
@@ -291,7 +303,8 @@ export function AiProvidersClient() {
           baseUrl: form.baseUrl || undefined,
           apiKey: form.apiKey || undefined,
           apiVersion:
-            form.type === "ELEVENLABS" && form.voiceId.trim()
+            (form.type === "FISH_AUDIO" || form.type === "ELEVENLABS") &&
+            form.voiceId.trim()
               ? form.voiceId.trim()
               : undefined,
           isDefault: form.isDefault,
@@ -573,10 +586,14 @@ export function AiProvidersClient() {
           value={form.baseUrl}
           onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
         />
-        {form.type === "ELEVENLABS" ? (
+        {form.type === "FISH_AUDIO" || form.type === "ELEVENLABS" ? (
           <input
             className="input"
-            placeholder="Voice ID (optional · from elevenlabs.io/app/voice-library)"
+            placeholder={
+              form.type === "FISH_AUDIO"
+                ? "Voice model ID (optional · from fish.audio voice library)"
+                : "Voice ID (optional · from elevenlabs.io/app/voice-library)"
+            }
             value={form.voiceId}
             onChange={(e) => setForm({ ...form, voiceId: e.target.value })}
           />
@@ -613,7 +630,17 @@ export function AiProvidersClient() {
           </a>{" "}
           (default <code>api.bfl.ai</code>) — assign to{" "}
           <code>AI_CREATIVE_IMAGE</code> for educational drawings, infographics, and image
-          edits. ElevenLabs uses keys from{" "}
+          edits. Fish Audio uses free keys from{" "}
+          <a
+            className="underline"
+            href="https://fish.audio/app/api-keys"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            fish.audio/app/api-keys
+          </a>{" "}
+          (model <code>s2.1-pro-free</code>, default <code>api.fish.audio</code>) — preferred for{" "}
+          <code>VOICE_TTS</code>. ElevenLabs (fallback) uses keys from{" "}
           <a
             className="underline"
             href="https://elevenlabs.io/app/settings/api-keys"
@@ -622,8 +649,7 @@ export function AiProvidersClient() {
           >
             elevenlabs.io
           </a>{" "}
-          (default <code>api.elevenlabs.io</code>) — assign to <code>VOICE_TTS</code> for AI
-          Teacher classroom speech (ar / tr / en). Embedding models → EMBEDDING;{" "}
+          (default <code>api.elevenlabs.io</code>). Embedding models → EMBEDDING;{" "}
           <code>jina-deepsearch-v1</code> → AI Creative / chat (PPT/text).
         </p>
         <button
@@ -695,7 +721,7 @@ export function AiProvidersClient() {
 
       <PageHeader
         title="Module assignments"
-        description="Route each AI module to a provider. EMBEDDING: Gemini/OpenAI/Jina. AI_CREATIVE_IMAGE: FLUX. VOICE_TTS: ElevenLabs (preferred) or OpenAI TTS for AI Teacher classroom speech (ar / tr / en)."
+        description="Route each AI module to a provider. EMBEDDING: Gemini/OpenAI/Jina. AI_CREATIVE_IMAGE: FLUX. VOICE_TTS: Fish Audio s2.1-pro-free (preferred), ElevenLabs, or OpenAI TTS for AI Teacher classroom speech (ar / tr / en)."
       />
       <div className="card space-y-3 p-4">
         {MODULES.map((moduleKey) => {
@@ -738,12 +764,14 @@ export function AiProvidersClient() {
               ) : null}
               {moduleKey === "VOICE_TTS" && options.length === 0 ? (
                 <span className="text-xs text-amber-700">
-                  Add ElevenLabs or OpenAI TTS for classroom voice in Arabic, Turkish, and English.
+                  Add Fish Audio (s2.1-pro-free), ElevenLabs, or OpenAI TTS for classroom voice in
+                  Arabic, Turkish, and English.
                 </span>
               ) : null}
               {moduleKey === "VOICE_TTS" && options.length > 0 ? (
                 <span className="text-xs text-muted">
-                  Prefer ElevenLabs multilingual for natural ar / tr / en classroom speech
+                  Prefer Fish Audio s2.1-pro-free for natural low-latency ar / tr / en classroom
+                  speech
                 </span>
               ) : null}
               {moduleKey === "AI_CREATIVE_IMAGE" && options.length === 0 ? (
