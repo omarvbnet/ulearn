@@ -38,9 +38,14 @@ export async function POST(request: Request) {
   });
 
   const provinceName = profile?.province?.nameEn || null;
+  const countryCode =
+    parsed.data.country || profile?.country?.code || null;
+  // Prefer the student's saved app language for classroom voice; request language is fallback.
+  const language =
+    profile?.locale || parsed.data.language || "en";
   const resolved = resolveTeacherVoice({
-    language: parsed.data.language || profile?.locale || "en",
-    countryCode: parsed.data.country || profile?.country?.code || null,
+    language,
+    countryCode,
     provinceName,
     voiceOverride: parsed.data.voice,
   });
@@ -52,7 +57,9 @@ export async function POST(request: Request) {
         language: resolved.selectedLanguage,
         countryCode: resolved.countryCode,
         provinceName,
-        voice: resolved.openaiVoice,
+        // Only pass an explicit client voice override. Each adapter resolves
+        // its own country accent voice (Fish reference_id / ElevenLabs / OpenAI).
+        voice: parsed.data.voice,
         pace: parsed.data.pace || "normal",
       },
       auth.session.userId

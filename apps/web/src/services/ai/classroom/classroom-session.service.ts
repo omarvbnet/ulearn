@@ -129,17 +129,89 @@ function finalizeBeat(
   const rtl =
     language.toLowerCase().startsWith("ar") ||
     language.toLowerCase().startsWith("ku");
-  const layout = normalizeBoardActions(beat.board || [], {
+  const ar = rtl;
+  const tr = language.toLowerCase().startsWith("tr");
+
+  let speak = [...(beat.speak || [])].filter(Boolean);
+  let board = [...(beat.board || [])];
+
+  // Wrong answer must always continue with voice + board re-explanation.
+  if (beat.answerCorrect === false) {
+    if (!speak.length) {
+      speak = [
+        ar
+          ? "نفس الفكرة مرة ثانية بهدوء."
+          : tr
+            ? "Aynı fikri sakin sakin tekrar edelim."
+            : "Same idea again, slowly and clearly.",
+      ];
+    }
+    const hasText = board.some((b) =>
+      /write_text|draw_formula|draw_equation/i.test(String(b.action || ""))
+    );
+    if (!hasText) {
+      const hint =
+        sanitizeClassroomPlainText(state.pendingAnswerHint, 24) ||
+        sanitizeClassroomPlainText(state.currentTopic, 24) ||
+        (ar ? "الفكرة الأساسية" : tr ? "Ana fikir" : "Key idea");
+      board = [
+        {
+          time: 0,
+          action: "write_text",
+          parameters: {
+            text: hint,
+            color: "blue",
+            size: 56,
+          },
+        },
+        ...board,
+      ];
+    }
+    // Keep asking the same check after re-explain.
+    if (!beat.askStudent && state.pendingQuestion) {
+      beat = { ...beat, askStudent: state.pendingQuestion };
+    }
+  }
+
+  // Correct answer: continue teaching on board if empty.
+  if (beat.answerCorrect === true) {
+    const hasText = board.some((b) =>
+      /write_text|draw_formula|draw_equation/i.test(String(b.action || ""))
+    );
+    if (!hasText) {
+      board = [
+        {
+          time: 0,
+          action: "write_text",
+          parameters: {
+            text: ar ? "الخطوة التالية" : tr ? "Sonraki adım" : "Next step",
+            color: "green",
+            size: 56,
+          },
+        },
+      ];
+    }
+    if (!speak.length) {
+      speak = [
+        ar
+          ? "لنكمل الخطوة التالية."
+          : tr
+            ? "Şimdi sonraki adıma geçelim."
+            : "Let’s continue with the next step.",
+      ];
+    }
+  }
+
+  const layout = normalizeBoardActions(board, {
     rtl,
-    cursorY: state.boardCursorY || 140,
+    cursorY: state.boardCursorY || 160,
   });
   const ask =
     beat.askStudent ||
-    (beat.speak.length && /[?؟]$/.test(beat.speak[beat.speak.length - 1] || "")
-      ? beat.speak[beat.speak.length - 1]
+    (speak.length && /[?؟]$/.test(speak[speak.length - 1] || "")
+      ? speak[speak.length - 1]
       : null);
   // Ensure check questions are spoken aloud.
-  const speak = [...beat.speak];
   if (ask && !speak.some((s) => s.includes(ask.slice(0, 12)))) {
     speak.push(ask);
   }
@@ -183,7 +255,7 @@ function fallbackBeat(
             text: ar ? "فكرة مهمة" : tr ? "Önemli fikir" : "Key idea",
             x: ar ? 1780 : 120,
             y: 820,
-            size: 26,
+            size: 56,
             color: "blue",
             align: ar ? "right" : "left",
           },
@@ -227,7 +299,7 @@ function fallbackBeat(
           text: lessonName || (ar ? "درس اليوم" : tr ? "Bugünün dersi" : "Today"),
           x: ar ? 1780 : 120,
           y: 120,
-          size: 34,
+          size: 58,
           color: "blue",
           align: ar ? "right" : "left",
         },
@@ -395,7 +467,7 @@ export class ClassroomSessionService {
       },
     });
 
-    const language = (input.language || profile?.locale || "en").toString();
+    const language = (profile?.locale || input.language || "en").toString();
     const countryCode = profile?.country?.code || null;
     const provinceName =
       profile?.province?.nameEn ||

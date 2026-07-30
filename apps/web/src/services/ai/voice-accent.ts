@@ -327,7 +327,13 @@ export function accentInstruction(
   }
 }
 
-export type ClassroomBridgeKind = "think" | "explain" | "listen";
+export type ClassroomBridgeKind =
+  | "think"
+  | "explain"
+  | "listen"
+  | "check"
+  | "reexplain"
+  | "excellent";
 
 /**
  * Natural spoken bridge while the teacher prepares the next beat / answer.
@@ -350,10 +356,31 @@ export function classroomBridgePhrase(
     const egy = v.accent === "egyptian";
     if (kind === "listen") {
       if (iraqi) return ["إي، سامعك", "تفضّل، أنا أسمعك", "زين، كمّل"][i]!;
-      if (gulf) return ["تفضّل، أسمعك", "إي، كمّل", " حاضر، سامعك"][i]!;
+      if (gulf) return ["تفضّل، أسمعك", "إي، كمّل", "حاضر، سامعك"][i]!;
       if (lev) return ["تفضّل، عم اسمعك", "إي كمّل", "حاضر"][i]!;
       if (egy) return ["اتفضل، سامعك", "كمّل يا بطل", "إي أنا سامعك"][i]!;
       return ["تفضل، أنا أستمع إليك", "حسنًا، أكمل", "أنا معك، تفضّل"][i]!;
+    }
+    if (kind === "check") {
+      if (iraqi) return ["خلّيني أتأكد", "لحظة خلّيني أشيك الجواب", "زين، خلّيني أراجع جوابك"][i]!;
+      if (gulf) return ["خلني أتأكد", "لحظة أشيك الجواب", "خلني أراجع جوابك"][i]!;
+      if (lev) return ["خليني تأكد", "لحظة خليني شيّك الجواب", "خليني راجع جوابك"][i]!;
+      if (egy) return ["سيبني أتأكد", "لحظة أشيك الإجابة", "سيبني أراجع جوابك"][i]!;
+      return ["دعني أتأكد", "لحظة لأراجع الجواب", "دعني أتحقق من إجابتك"][i]!;
+    }
+    if (kind === "excellent") {
+      if (iraqi) return ["ممتاز!", "زين جداً، أحسنت!", "جوابك صحيح، ممتاز!"][i]!;
+      if (gulf) return ["ممتاز!", "أحسنت، زين!", "صحيح، ممتاز!"][i]!;
+      if (lev) return ["ممتاز!", "يسلموا، أحسنت!", "صح، ممتاز!"][i]!;
+      if (egy) return ["ممتاز!", "برافو عليك!", "صح، ممتاز يا بطل!"][i]!;
+      return ["ممتاز!", "أحسنت!", "إجابة صحيحة، ممتاز!"][i]!;
+    }
+    if (kind === "reexplain") {
+      if (iraqi) return ["خلّيني أشرح مرة ثانية", "زين، خلّيني أوضحها من جديد", "خلّيني نعيد الشرح بهدوء"][i]!;
+      if (gulf) return ["خلني أشرح مرة ثانية", "خلني أوضحها من جديد", "خلنا نعيد الشرح بهدوء"][i]!;
+      if (lev) return ["خليني اشرح مرة تانية", "خليني وضّحها من جديد", "خليني نعيد الشرح بهدوء"][i]!;
+      if (egy) return ["سيبني أشرح تاني", "سيبني أوضحها من الأول", "تعالى نعيد الشرح بهدوء"][i]!;
+      return ["دعني أشرح مرة أخرى", "دعني أوضحها من جديد", "لنُعِد الشرح بهدوء"][i]!;
     }
     if (kind === "explain") {
       if (iraqi) return ["خلّيني أوضح لك", "زين، خلّيني أشرحها بهدوء", "خلّيني أشرحلك الفكرة"][i]!;
@@ -372,18 +399,33 @@ export function classroomBridgePhrase(
 
   if (v.selectedLanguage === "ku") {
     if (kind === "listen") return ["باشە، گوێت لێدەگرم", "بەردەوام بە", "من گوێم لێتە"][i]!;
+    if (kind === "check") return ["با دڵنیا ببمەوە", "چرکەیەک با وەڵامەکە بپشکنم", "با وەڵامەکەت بپشکنم"][i]!;
+    if (kind === "excellent") return ["نایاب!", "زۆر باش، ئافەرین!", "وەڵامەکەت دروستە، نایاب!"][i]!;
+    if (kind === "reexplain") return ["با جارێکی تر ڕوونی بکەمەوە", "با لەسەرەتاوە ڕوونی بکەمەوە", "با دووبارە ڕوونی بکەینەوە"][i]!;
     if (kind === "explain") return ["با ڕوونت بکەمەوە", "با بە ئارامی ڕوونی بکەمەوە", "با پێکەوە ڕوونی بکەینەوە"][i]!;
     return ["با کەمێک بیر بکەمەوە", "چرکەیەک با بیر بکەمەوە", "با بیر لە وەڵام بکەمەوە"][i]!;
   }
 
   if (v.selectedLanguage === "tr") {
     if (kind === "listen") return ["Dinliyorum, buyur", "Seni dinliyorum", "Devam et lütfen"][i]!;
+    if (kind === "check") return ["Kontrol edeyim", "Cevabını bir bakayım", "Bir kontrol edeyim"][i]!;
+    if (kind === "excellent") return ["Mükemmel!", "Harika, aferin!", "Doğru cevap, mükemmel!"][i]!;
+    if (kind === "reexplain") return ["Tekrar açıklayayım", "Baştan anlatayım", "Bir daha açıklayayım"][i]!;
     if (kind === "explain") return ["Açıklayayım", "Sakin sakin anlatayım", "Birlikte netleştirelim"][i]!;
     return ["Bir düşüneyim", "Bir saniye düşüneyim", "Cevabı bir toparlayayım"][i]!;
   }
 
   if (kind === "listen") {
     return ["I'm listening — go ahead", "Yes, I'm with you", "Go on, I'm listening"][i]!;
+  }
+  if (kind === "check") {
+    return ["Let me check", "Let me check your answer", "One moment — let me check"][i]!;
+  }
+  if (kind === "excellent") {
+    return ["Excellent!", "Excellent — well done!", "That's correct — excellent!"][i]!;
+  }
+  if (kind === "reexplain") {
+    return ["Let me explain again", "Let me explain that again", "Okay — let me explain again"][i]!;
   }
   if (kind === "explain") {
     return ["Let me explain", "Let me walk you through it", "Let me make this clear"][i]!;
@@ -417,4 +459,76 @@ export function ttsDeliveryInstruction(
     paceHint,
     "Sound human: soft emphasis, natural breath, no chatbot cadence.",
   ].join(" ");
+}
+
+/**
+ * Fish Audio S2 inline delivery cue for the student's country accent.
+ * S2 reads natural-language tags in [square brackets] before the spoken text.
+ * @see https://fish.audio/blog/fish-audio-s2-fine-grained-ai-voice-control-at-the-word-level/
+ */
+export function fishAccentSpeechTag(
+  language?: string | null,
+  countryCode?: string | null,
+  provinceName?: string | null,
+  pace?: "slow" | "normal" | "brisk" | null
+): string {
+  const v = resolveTeacherVoice({ language, countryCode, provinceName });
+  const paceBit =
+    pace === "slow"
+      ? "slow patient pace"
+      : pace === "brisk"
+        ? "energetic clear pace"
+        : "natural teacher pace";
+
+  if (v.selectedLanguage === "ar") {
+    if (v.accent.startsWith("iraqi") || v.accent === "iraqi_levantine") {
+      return `[warm professional Iraqi Arabic classroom accent, ${paceBit}, clear diction]`;
+    }
+    if (v.accent === "levantine") {
+      return `[warm Levantine Arabic classroom accent, ${paceBit}, clear diction]`;
+    }
+    if (v.accent === "gulf") {
+      return `[polished Gulf Arabic educational accent, ${paceBit}, respectful and clear]`;
+    }
+    if (v.accent === "egyptian") {
+      return `[warm Egyptian Arabic teaching accent, ${paceBit}, engaging and clear]`;
+    }
+    if (v.accent === "maghrebi") {
+      return `[clear Maghrebi Arabic classroom accent leaning MSA, ${paceBit}]`;
+    }
+    return `[clear Modern Standard Arabic classroom accent, ${paceBit}]`;
+  }
+  if (v.selectedLanguage === "tr") {
+    return `[clear professional Turkish classroom teacher accent, ${paceBit}]`;
+  }
+  if (v.selectedLanguage === "ku") {
+    return v.countryCode === "TR"
+      ? `[clear Turkish classroom teacher accent, ${paceBit}]`
+      : `[warm professional Iraqi Arabic classroom accent, ${paceBit}]`;
+  }
+  if (v.accent === "british") {
+    return `[polished British English classroom accent, ${paceBit}]`;
+  }
+  if (v.accent === "australian") {
+    return `[clear Australian English classroom accent, ${paceBit}]`;
+  }
+  if (v.accent === "canadian") {
+    return `[clear Canadian English classroom accent, ${paceBit}]`;
+  }
+  return `[clear American English classroom accent, ${paceBit}]`;
+}
+
+/** Prefixed spoken text so Fish Audio S2 delivers the student's regional accent. */
+export function withFishAccentSpeech(
+  text: string,
+  language?: string | null,
+  countryCode?: string | null,
+  provinceName?: string | null,
+  pace?: "slow" | "normal" | "brisk" | null
+): string {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  const tag = fishAccentSpeechTag(language, countryCode, provinceName, pace);
+  if (trimmed.startsWith("[")) return trimmed;
+  return `${tag} ${trimmed}`;
 }

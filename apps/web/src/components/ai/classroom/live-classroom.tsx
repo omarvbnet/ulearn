@@ -22,6 +22,7 @@ type ClassroomBeat = {
   emotion?: string;
   pace?: "slow" | "normal" | "brisk";
   lessonName?: string | null;
+  answerCorrect?: boolean | null;
   sessionComplete?: boolean;
 };
 
@@ -30,6 +31,7 @@ type ClassroomSession = {
   status: string;
   locale: string;
   countryCode: string | null;
+  provinceName?: string | null;
   speechLocale: string;
   accent: string;
   materialNames: string[];
@@ -125,10 +127,10 @@ function applyActions(
   cursorY: number
 ): { items: BoardItem[]; cursorY: number } {
   let acc = [...items];
-  let yCursor = cursorY || 140;
+  let yCursor = cursorY || 160;
   let penAt = nowMs();
-  const textX = rtl ? 1760 : 150;
-  const diagramX = rtl ? 420 : 1380;
+  const textX = rtl ? 1720 : 120;
+  const diagramX = rtl ? 380 : 1320;
 
   actions.forEach((cue, idx) => {
     const action = String(cue.action || "").toLowerCase().replace(/\s+/g, "_");
@@ -137,7 +139,7 @@ function applyActions(
     const seed = idx * 97 + Math.floor(num(cue.time, idx) * 3);
     if (action === "clear_board" || action === "open_new_board") {
       acc = [];
-      yCursor = 140;
+      yCursor = 160;
       penAt = nowMs();
       return;
     }
@@ -146,13 +148,16 @@ function applyActions(
       action === "draw_formula" ||
       action === "draw_equation"
     ) {
-      const text = cleanText(p.text ?? p.content ?? p.latex).slice(0, 40);
+      const text = cleanText(p.text ?? p.content ?? p.latex).slice(0, 26);
       if (!text) return;
-      if (yCursor > 920) {
+      if (yCursor > 900) {
         acc = [];
-        yCursor = 140;
+        yCursor = 160;
       }
-      const size = Math.max(26, Math.min(36, num(p.size, text.length < 16 ? 34 : 28)));
+      const size = Math.max(
+        48,
+        Math.min(64, num(p.size, text.length < 12 ? 60 : 52))
+      );
       const writeMs = Math.max(900, Math.min(4200, text.length * 70));
       acc.push({
         kind: "text",
@@ -167,7 +172,7 @@ function applyActions(
         align: rtl ? "right" : "left",
         seed,
       });
-      yCursor += Math.max(88, size + 52);
+      yCursor += Math.max(120, size + 68);
       penAt += writeMs + 160;
       return;
     }
@@ -176,16 +181,16 @@ function applyActions(
       action === "underline" ||
       action === "draw_line"
     ) {
-      const uy = Math.max(130, yCursor - 56);
+      const uy = Math.max(150, yCursor - 72);
       acc.push({
         kind: "line",
         id,
         x1: textX,
         y1: uy,
-        x2: textX + (rtl ? -360 : 360),
+        x2: textX + (rtl ? -520 : 520),
         y2: uy,
         color: resolveColor(p.color, "#ea580c"),
-        width: 3,
+        width: 4.2,
         bornAt: penAt,
         writeMs: 700,
         seed,
@@ -263,19 +268,21 @@ let activeCloudAudio: HTMLAudioElement | null = null;
 async function speakCloud(
   text: string,
   language: string,
-  pace: string
+  pace: string,
+  country?: string | null
 ): Promise<boolean> {
-  const ok = await speakCloudOnce(text, language, pace);
+  const ok = await speakCloudOnce(text, language, pace, country);
   if (ok) return true;
   // One retry — a single failed TTS request must not silence the teacher.
   await new Promise((r) => setTimeout(r, 450));
-  return speakCloudOnce(text, language, pace);
+  return speakCloudOnce(text, language, pace, country);
 }
 
 async function speakCloudOnce(
   text: string,
   language: string,
-  pace: string
+  pace: string,
+  country?: string | null
 ): Promise<boolean> {
   try {
     if (activeCloudAudio) {
@@ -289,7 +296,12 @@ async function speakCloudOnce(
     const res = await fetch("/api/ai/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, language, pace }),
+      body: JSON.stringify({
+        text,
+        language,
+        pace,
+        ...(country ? { country } : {}),
+      }),
     });
     if (!res.ok) return false;
     const data = await res.json();
@@ -565,11 +577,12 @@ export function LiveClassroom({
   const voiceBusyRef = useRef(false);
   const handlingTurnRef = useRef(false);
   const sessionIdRef = useRef<string | null>(null);
+  const countryCodeRef = useRef<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const loopActiveRef = useRef(false);
   const speechActivityRef = useRef(0);
   const lastAskWaitRef = useRef(0);
-  const boardCursorRef = useRef(140);
+  const boardCursorRef = useRef(160);
   const turnStartedRef = useRef(false);
   const pendingAskRef = useRef<string | null>(null);
   const bridgeVariantRef = useRef(0);
@@ -582,8 +595,8 @@ export function LiveClassroom({
     async (kind: ClassroomBridgeKind) => {
       const phrase = classroomBridgePhrase(
         locale,
-        session?.countryCode,
-        null,
+        session?.countryCode ?? countryCodeRef.current,
+        session?.provinceName,
         kind,
         bridgeVariantRef.current++
       );
@@ -597,11 +610,16 @@ export function LiveClassroom({
           prev.map((_, i) => 0.14 + (Math.sin(t + i * 0.4) * 0.5 + 0.5) * 0.7)
         );
       }, 50);
-      await speakCloud(phrase, locale, "normal");
+      await speakCloud(
+        phrase,
+        locale,
+        "normal",
+        session?.countryCode ?? countryCodeRef.current
+      );
       window.clearInterval(wave);
       voiceBusyRef.current = false;
     },
-    [locale, session?.countryCode]
+    [locale, session?.countryCode, session?.provinceName]
   );
 
   useEffect(() => {
@@ -651,7 +669,12 @@ export function LiveClassroom({
             prev.map((_, i) => 0.12 + (Math.sin(t + i * 0.45) * 0.5 + 0.5) * 0.75)
           );
         }, 50);
-        await speakCloud(line, locale, beat.pace || "normal");
+        await speakCloud(
+          line,
+          locale,
+          beat.pace || "normal",
+          countryCodeRef.current
+        );
         window.clearInterval(wave);
         await new Promise((r) => setTimeout(r, 280));
       }
@@ -709,7 +732,7 @@ export function LiveClassroom({
       const kind: ClassroomBridgeKind = opts?.noAnswer
         ? "think"
         : pendingAskRef.current
-          ? "think"
+          ? "check"
           : "explain";
       const apiP = fetch(
         `/api/ai/classroom/session/${sessionIdRef.current}/turn`,
@@ -729,8 +752,22 @@ export function LiveClassroom({
       try {
         await speakBridge(kind);
         const data = await apiP;
-        if (data.session) setSession(data.session);
-        await playBeat(data.beat as ClassroomBeat);
+        if (data.session) {
+          if (data.session.countryCode) {
+            countryCodeRef.current = data.session.countryCode;
+          }
+          setSession(data.session);
+        }
+        const beat = data.beat as ClassroomBeat;
+        // After "let me check": praise if correct, re-explain bridge if wrong.
+        if (kind === "check") {
+          if (beat?.answerCorrect === true) {
+            await speakBridge("excellent");
+          } else if (beat?.answerCorrect === false) {
+            await speakBridge("reexplain");
+          }
+        }
+        await playBeat(beat);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Turn failed");
       } finally {
@@ -865,7 +902,7 @@ export function LiveClassroom({
         setPresence("speaking");
         setCaption(question);
         voiceBusyRef.current = true;
-        await speakCloud(question, locale, "slow");
+        await speakCloud(question, locale, "slow", countryCodeRef.current);
         voiceBusyRef.current = false;
         await new Promise((r) => setTimeout(r, 350));
       }
@@ -914,7 +951,12 @@ export function LiveClassroom({
         });
         await speakBridge("think");
         const data = await apiP;
-        if (data.session) setSession(data.session);
+        if (data.session) {
+          if (data.session.countryCode) {
+            countryCodeRef.current = data.session.countryCode;
+          }
+          setSession(data.session);
+        }
         const beat = data.beat as ClassroomBeat;
         await playBeat(beat);
         if (beat.sessionComplete || data.session?.status === "ENDED") {
@@ -950,6 +992,7 @@ export function LiveClassroom({
           return;
         }
         sessionIdRef.current = data.session.id;
+        countryCodeRef.current = data.session.countryCode || null;
         setSession(data.session);
         await playBeat(data.beat as ClassroomBeat);
         void runLoop();

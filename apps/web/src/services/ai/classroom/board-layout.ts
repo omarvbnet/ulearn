@@ -5,7 +5,7 @@ function num(v: unknown, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function shortText(raw: unknown, max = 42): string {
+function shortText(raw: unknown, max = 28): string {
   const s = String(raw ?? "")
     .replace(/\s+/g, " ")
     .trim();
@@ -16,6 +16,7 @@ function shortText(raw: unknown, max = 42): string {
 /**
  * Force a clean classroom board composition:
  * - neat vertical text column (never overlapping)
+ * - large, readable handwriting-sized text
  * - diagrams in a separate zone
  * - soft underlines instead of opaque highlight blobs
  * - auto clear when the column is full
@@ -27,19 +28,19 @@ export function normalizeBoardActions(
     cursorY?: number;
   }
 ): { actions: ClassroomBoardAction[]; nextCursorY: number; cleared: boolean } {
-  let y = Math.max(120, Math.min(900, input.cursorY ?? 140));
-  let diagramY = 180;
+  let y = Math.max(140, Math.min(880, input.cursorY ?? 160));
+  let diagramY = 200;
   let cleared = false;
   const out: ClassroomBoardAction[] = [];
-  const textX = input.rtl ? 1760 : 150;
-  const diagramX = input.rtl ? 420 : 1380;
+  const textX = input.rtl ? 1720 : 120;
+  const diagramX = input.rtl ? 380 : 1320;
   const align = input.rtl ? "right" : "left";
 
-  const ensureRoom = (need = 100) => {
+  const ensureRoom = (need = 130) => {
     if (y + need <= 980) return;
     out.push({ time: out.length * 200, action: "clear_board", parameters: {} });
-    y = 140;
-    diagramY = 180;
+    y = 160;
+    diagramY = 200;
     cleared = true;
   };
 
@@ -51,8 +52,8 @@ export function normalizeBoardActions(
 
     if (action === "clear_board" || action === "open_new_board") {
       out.push({ time: out.length * 200, action: "clear_board", parameters: {} });
-      y = 140;
-      diagramY = 180;
+      y = 160;
+      diagramY = 200;
       cleared = true;
       continue;
     }
@@ -62,10 +63,11 @@ export function normalizeBoardActions(
       action === "draw_formula" ||
       action === "draw_equation"
     ) {
-      const text = shortText(p.text ?? p.content ?? p.latex, 40);
+      const text = shortText(p.text ?? p.content ?? p.latex, 26);
       if (!text) continue;
-      ensureRoom(95);
-      const size = Math.max(26, Math.min(36, num(p.size, text.length < 16 ? 34 : 28)));
+      ensureRoom(140);
+      // Large classroom chalk size — readable on phone and desktop.
+      const size = Math.max(48, Math.min(64, num(p.size, text.length < 12 ? 60 : 52)));
       out.push({
         time: out.length * 280,
         action: "write_text",
@@ -78,23 +80,23 @@ export function normalizeBoardActions(
           align,
         },
       });
-      y += Math.max(88, size + 52);
+      y += Math.max(120, size + 68);
       continue;
     }
 
     if (action === "underline" || action === "highlight") {
       // Convert heavy highlights into a thin underline under the last text line.
-      const underlineY = Math.max(130, y - 58);
+      const underlineY = Math.max(150, y - 72);
       out.push({
         time: out.length * 280,
         action: "underline",
         parameters: {
           x1: input.rtl ? textX : textX,
           y1: underlineY,
-          x2: input.rtl ? textX - 360 : textX + 360,
+          x2: input.rtl ? textX - 520 : textX + 520,
           y2: underlineY,
           color: action === "highlight" ? "orange" : String(p.color || "orange"),
-          width: 3.2,
+          width: 4.2,
         },
       });
       continue;

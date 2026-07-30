@@ -91,6 +91,7 @@ export function buildClassroomBeatPrompt(input: {
     "",
     "speak: 1–2 short natural spoken lines. If asking a check, the question MUST be spoken here.",
     "board: 0–2 actions only (write_text and/or underline). Rarely one small draw_arrow/draw_circle in the diagram zone.",
+    "BOARD TEXT SIZE: keep phrases VERY short (max ~5 words). The system renders LARGE readable chalk (size ~52–60). Prefer short titles students can read from a phone.",
     "askStudent: the exact check question to wait for (or null). When set, waitForStudentMs must be 5000–8000.",
     "answerCorrect: true/false/null — required in MODE REACT when a check was pending.",
     "memoryPatch.pendingAnswerHint: short expected answer idea when you ask a check.",
@@ -128,8 +129,8 @@ export function buildClassroomBeatPrompt(input: {
           input.state.awaitingCorrectAnswer
             ? [
                 "A check question was pending. Decide if their answer is correct.",
-                "If CORRECT: answerCorrect=true, brief praise, clear the pending check in memoryPatch (awaitingCorrectAnswer false via empty pendingQuestion), teach the next tiny step, optionally ask a new check.",
-                "If WRONG or unclear: answerCorrect=false, patiently re-explain the SAME idea with 1–2 clean board phrases, then ask the SAME check again (askStudent + speak). Do not move on.",
+                "If CORRECT: answerCorrect=true. The app already said 'let me check' then 'excellent' — do NOT repeat those phrases. Continue with 1 short spoken teaching step + 1–2 LARGE board phrases for the next micro-idea, optionally ask a new check.",
+                "If WRONG or unclear: answerCorrect=false. The app already said 'let me check' then 'let me explain again' — do NOT repeat those phrases. Re-explain the SAME idea with 1–2 clear spoken lines AND 1–2 LARGE board write_text phrases, then ask the SAME check again (askStudent + speak). Do not move on.",
               ].join(" ")
             : "No pending check — answer their question/help request now with 1–2 board marks, then continue with a short check question.",
           `Student said: ${input.studentTranscript || ""}`,

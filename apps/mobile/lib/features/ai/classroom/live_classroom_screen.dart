@@ -61,7 +61,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
   DateTime? _lastListenStart;
   DateTime? _speechActivityAt;
   var _askWaitMs = 0;
-  var _boardCursorY = 140.0;
+  var _boardCursorY = 160.0;
   var _turnStarted = false;
   String? _pendingAsk;
   String? _countryCode;
@@ -409,7 +409,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
             (cue['action']?.toString() ?? '').toLowerCase().replaceAll(' ', '_');
         if (action == 'clear_board' || action == 'open_new_board') {
           _items.clear();
-          _boardCursorY = 140;
+          _boardCursorY = 160;
           penAt = DateTime.now().millisecondsSinceEpoch.toDouble();
           continue;
         }
@@ -511,7 +511,8 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     try {
       final api = _api;
       if (api == null) return;
-      final kind = _pendingAsk != null ? 'think' : 'explain';
+      final wasCheck = _pendingAsk != null;
+      final kind = wasCheck ? 'check' : 'explain';
       final apiFuture = api.post(
         '/api/ai/classroom/session/$_sessionId/turn',
         {'transcript': q},
@@ -521,7 +522,15 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       if (!mounted || _cancelled) return;
       final beat = data['beat'];
       if (beat is Map) {
-        await _playBeat(Map<String, dynamic>.from(beat));
+        final map = Map<String, dynamic>.from(beat);
+        if (wasCheck) {
+          if (map['answerCorrect'] == true) {
+            await _speakBridge('excellent');
+          } else if (map['answerCorrect'] == false) {
+            await _speakBridge('reexplain');
+          }
+        }
+        await _playBeat(map);
       }
     } catch (e) {
       if (!mounted) return;
@@ -572,11 +581,15 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       } catch (_) {}
       final api = _api;
       if (api == null) return false;
-      final data = await api.post('/api/ai/tts', {
+      final payload = <String, dynamic>{
         'text': text,
         'language': _selectedLanguage ?? _lang,
         'pace': pace,
-      });
+      };
+      if (_countryCode != null && _countryCode!.isNotEmpty) {
+        payload['country'] = _countryCode;
+      }
+      final data = await api.post('/api/ai/tts', payload);
       if (!mounted) return false;
       final nested = data['data'];
       final nestedMap =
@@ -1086,6 +1099,37 @@ String _classroomBridgePhrase({
       if (egy) return ['اتفضل، سامعك', 'كمّل يا بطل', 'إي أنا سامعك'][i];
       return ['تفضل، أنا أستمع إليك', 'حسنًا، أكمل', 'أنا معك، تفضّل'][i];
     }
+    if (kind == 'check') {
+      if (iraqi) {
+        return ['خلّيني أتأكد', 'لحظة خلّيني أشيك الجواب', 'زين، خلّيني أراجع جوابك'][i];
+      }
+      if (gulf) return ['خلني أتأكد', 'لحظة أشيك الجواب', 'خلني أراجع جوابك'][i];
+      if (lev) return ['خليني تأكد', 'لحظة خليني شيّك الجواب', 'خليني راجع جوابك'][i];
+      if (egy) return ['سيبني أتأكد', 'لحظة أشيك الإجابة', 'سيبني أراجع جوابك'][i];
+      return ['دعني أتأكد', 'لحظة لأراجع الجواب', 'دعني أتحقق من إجابتك'][i];
+    }
+    if (kind == 'excellent') {
+      if (iraqi) return ['ممتاز!', 'زين جداً، أحسنت!', 'جوابك صحيح، ممتاز!'][i];
+      if (gulf) return ['ممتاز!', 'أحسنت، زين!', 'صحيح، ممتاز!'][i];
+      if (lev) return ['ممتاز!', 'يسلموا، أحسنت!', 'صح، ممتاز!'][i];
+      if (egy) return ['ممتاز!', 'برافو عليك!', 'صح، ممتاز يا بطل!'][i];
+      return ['ممتاز!', 'أحسنت!', 'إجابة صحيحة، ممتاز!'][i];
+    }
+    if (kind == 'reexplain') {
+      if (iraqi) {
+        return ['خلّيني أشرح مرة ثانية', 'زين، خلّيني أوضحها من جديد', 'خلّيني نعيد الشرح بهدوء'][i];
+      }
+      if (gulf) {
+        return ['خلني أشرح مرة ثانية', 'خلني أوضحها من جديد', 'خلنا نعيد الشرح بهدوء'][i];
+      }
+      if (lev) {
+        return ['خليني اشرح مرة تانية', 'خليني وضّحها من جديد', 'خليني نعيد الشرح بهدوء'][i];
+      }
+      if (egy) {
+        return ['سيبني أشرح تاني', 'سيبني أوضحها من الأول', 'تعالى نعيد الشرح بهدوء'][i];
+      }
+      return ['دعني أشرح مرة أخرى', 'دعني أوضحها من جديد', 'لنُعِد الشرح بهدوء'][i];
+    }
     if (kind == 'explain') {
       if (iraqi) {
         return ['خلّيني أوضح لك', 'زين، خلّيني أشرحها بهدوء', 'خلّيني أشرحلك الفكرة'][i];
@@ -1119,6 +1163,15 @@ String _classroomBridgePhrase({
     if (kind == 'listen') {
       return ['Dinliyorum, buyur', 'Seni dinliyorum', 'Devam et lütfen'][i];
     }
+    if (kind == 'check') {
+      return ['Kontrol edeyim', 'Cevabını bir bakayım', 'Bir kontrol edeyim'][i];
+    }
+    if (kind == 'excellent') {
+      return ['Mükemmel!', 'Harika, aferin!', 'Doğru cevap, mükemmel!'][i];
+    }
+    if (kind == 'reexplain') {
+      return ['Tekrar açıklayayım', 'Baştan anlatayım', 'Bir daha açıklayayım'][i];
+    }
     if (kind == 'explain') {
       return ['Açıklayayım', 'Sakin sakin anlatayım', 'Birlikte netleştirelim'][i];
     }
@@ -1126,6 +1179,15 @@ String _classroomBridgePhrase({
   }
   if (kind == 'listen') {
     return ["I'm listening — go ahead", "Yes, I'm with you", "Go on, I'm listening"][i];
+  }
+  if (kind == 'check') {
+    return ['Let me check', 'Let me check your answer', 'One moment — let me check'][i];
+  }
+  if (kind == 'excellent') {
+    return ['Excellent!', 'Excellent — well done!', "That's correct — excellent!"][i];
+  }
+  if (kind == 'reexplain') {
+    return ['Let me explain again', 'Let me explain that again', 'Okay — let me explain again'][i];
   }
   if (kind == 'explain') {
     return ['Let me explain', 'Let me walk you through it', 'Let me make this clear'][i];
@@ -1206,8 +1268,8 @@ void _applyCue(
       (cue['action']?.toString() ?? '').toLowerCase().replaceAll(' ', '_');
   final id = '${DateTime.now().microsecondsSinceEpoch}-$action-$idx';
   final seed = idx * 97 + _num(cue['time']).toInt();
-  final textX = rtl ? 1760.0 : 150.0;
-  final diagramX = rtl ? 420.0 : 1380.0;
+  final textX = rtl ? 1720.0 : 120.0;
+  final diagramX = rtl ? 380.0 : 1320.0;
 
   if (action == 'write_text' ||
       action == 'draw_formula' ||
@@ -1215,17 +1277,17 @@ void _applyCue(
     final text = _cleanText(p['text'] ?? p['latex'] ?? p['content']);
     if (text == null || text.isEmpty) return;
     var y = getCursorY();
-    if (y > 920) {
+    if (y > 900) {
       items.clear();
-      y = 140;
-      setCursorY(140);
+      y = 160;
+      setCursorY(160);
     }
     final size =
-        _num(p['size'], text.length < 16 ? 34 : 28).toDouble().clamp(26.0, 36.0);
+        _num(p['size'], text.length < 12 ? 60 : 52).toDouble().clamp(48.0, 64.0);
     items.add(
       _BoardItem.text(
         id: id,
-        text: text.length > 40 ? '${text.substring(0, 39)}…' : text,
+        text: text.length > 26 ? '${text.substring(0, 25)}…' : text,
         x: textX + _handJitter(seed, 1, 1.5),
         y: y + _handJitter(seed, 2, 1.2),
         color: _color(p['color'], const Color(0xFF1E3A8A)),
@@ -1236,21 +1298,21 @@ void _applyCue(
         seed: seed,
       ),
     );
-    setCursorY(y + math.max(88.0, size + 52));
+    setCursorY(y + math.max(120.0, size + 68));
     return;
   }
   if (action == 'highlight' || action == 'underline' || action == 'draw_line') {
     // Soft underline only — never opaque blobs over text.
-    final uy = math.max(130.0, getCursorY() - 56);
+    final uy = math.max(150.0, getCursorY() - 72);
     items.add(
       _BoardItem.line(
         id: id,
         x1: textX + _handJitter(seed, 1, 1.5),
         y1: uy,
-        x2: textX + (rtl ? -360 : 360) + _handJitter(seed, 3, 1.5),
+        x2: textX + (rtl ? -520 : 520) + _handJitter(seed, 3, 1.5),
         y2: uy,
         color: _color(p['color'], const Color(0xFFEA580C)),
-        width: 3.0,
+        width: 4.2,
         bornAt: bornAt,
         writeMs: 700,
         seed: seed,

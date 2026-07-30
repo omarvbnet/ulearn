@@ -10,7 +10,7 @@ import type {
   SpeechSynthesisResult,
 } from "./types";
 import { EMBEDDING_DIMS } from "./types";
-import { resolveTeacherVoice, ttsDeliveryInstruction } from "./voice-accent";
+import { resolveTeacherVoice, ttsDeliveryInstruction, withFishAccentSpeech } from "./voice-accent";
 
 function truncateOrPad(vec: number[], dim = EMBEDDING_DIMS): number[] {
   if (vec.length === dim) return vec;
@@ -285,7 +285,9 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
       language: input.language,
       countryCode: input.countryCode,
       provinceName: input.provinceName,
-      voiceOverride: input.voice,
+      // OpenAI voice names are short (alloy/nova/…). Ignore Fish/Eleven hex ids here.
+      voiceOverride:
+        input.voice && input.voice.length < 16 ? input.voice : null,
     });
     const voice = resolved.openaiVoice;
     const speed =
@@ -748,7 +750,13 @@ export class FishAudioAdapter implements AiProviderAdapter {
       language: input.language,
       countryCode: input.countryCode,
       provinceName: input.provinceName,
-      voiceOverride: input.voice || config.apiVersion,
+      // Only honor explicit Fish/hex voice overrides — never OpenAI names like "nova".
+      voiceOverride:
+        input.voice && /^[a-f0-9]{24,}$/i.test(input.voice)
+          ? input.voice
+          : config.apiVersion && /^[a-f0-9]{24,}$/i.test(config.apiVersion)
+            ? config.apiVersion
+            : null,
     });
     const modelId = fishAudioModelId(config.model);
     const base = normalizeFishAudioBase(config.baseUrl);
@@ -756,9 +764,17 @@ export class FishAudioAdapter implements AiProviderAdapter {
     const pace = input.pace || "normal";
     const speed =
       pace === "slow" ? 0.88 : pace === "brisk" ? 1.08 : 1.0;
+    // Country accent must reach the voice engine — Fish S2 follows [bracket] cues.
+    const spoken = withFishAccentSpeech(
+      text,
+      input.language,
+      input.countryCode,
+      input.provinceName,
+      pace
+    );
 
     const body: Record<string, unknown> = {
-      text,
+      text: spoken,
       reference_id: resolved.fishAudioVoiceId,
       format: "mp3",
       mp3_bitrate: 128,
@@ -840,7 +856,13 @@ export class ElevenLabsAdapter implements AiProviderAdapter {
       language: input.language,
       countryCode: input.countryCode,
       provinceName: input.provinceName,
-      voiceOverride: input.voice || config.apiVersion,
+      // Only treat long provider voice ids as overrides (not OpenAI names like "nova").
+      voiceOverride:
+        input.voice && input.voice.length >= 16
+          ? input.voice
+          : config.apiVersion && config.apiVersion.length >= 16
+            ? config.apiVersion
+            : null,
     });
     // Admin model field can still force a custom ElevenLabs voice id.
     const modelField = (config.model || "").trim();
@@ -878,11 +900,9 @@ export class ElevenLabsAdapter implements AiProviderAdapter {
       text,
       model_id: modelId,
       voice_settings,
+      // Always pin language so regional Arabic/Turkish/English accents stay on-target.
+      language_code: resolved.elevenLanguageCode,
     };
-    // language_code is supported on turbo/flash/v3 (ignored on multilingual_v2).
-    if (!/multilingual_v2/i.test(modelId)) {
-      body.language_code = resolved.elevenLanguageCode;
-    }
 
     const res = await fetchJson(
       url,
