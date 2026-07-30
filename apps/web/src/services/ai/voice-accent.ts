@@ -290,6 +290,70 @@ export function accentInstruction(
   }
 }
 
+export type ClassroomBridgeKind = "think" | "explain" | "listen";
+
+/**
+ * Natural spoken bridge while the teacher prepares the next beat / answer.
+ * Matches selected language + regional classroom accent.
+ */
+export function classroomBridgePhrase(
+  language?: string | null,
+  countryCode?: string | null,
+  provinceName?: string | null,
+  kind: ClassroomBridgeKind = "think",
+  variant = 0
+): string {
+  const v = resolveTeacherVoice({ language, countryCode, provinceName });
+  const i = Math.abs(variant) % 3;
+
+  if (v.selectedLanguage === "ar") {
+    const iraqi = v.accent.startsWith("iraqi") || v.accent === "iraqi_levantine";
+    const gulf = v.accent === "gulf";
+    const lev = v.accent === "levantine";
+    const egy = v.accent === "egyptian";
+    if (kind === "listen") {
+      if (iraqi) return ["إي، سامعك", "تفضّل، أنا أسمعك", "زين، كمّل"][i]!;
+      if (gulf) return ["تفضّل، أسمعك", "إي، كمّل", " حاضر، سامعك"][i]!;
+      if (lev) return ["تفضّل، عم اسمعك", "إي كمّل", "حاضر"][i]!;
+      if (egy) return ["اتفضل، سامعك", "كمّل يا بطل", "إي أنا سامعك"][i]!;
+      return ["تفضل، أنا أستمع إليك", "حسنًا، أكمل", "أنا معك، تفضّل"][i]!;
+    }
+    if (kind === "explain") {
+      if (iraqi) return ["خلّيني أوضح لك", "زين، خلّيني أشرحها بهدوء", "خلّيني أشرحلك الفكرة"][i]!;
+      if (gulf) return ["خلني أوضح لك", "خلني أشرحها بهدوء", "خلنا نوضحها مع بعض"][i]!;
+      if (lev) return ["خليني وضّحلك", "خليني اشرحلك بهدوء", "خليني بيّنلك الفكرة"][i]!;
+      if (egy) return ["سيبني أوضحلك", "سيبني أشرحلك بهدوء", "تعالى نشرحها سوا"][i]!;
+      return ["دعني أوضح لك", "دعني أشرح بهدوء", "لنوضّح الفكرة معًا"][i]!;
+    }
+    // think
+    if (iraqi) return ["خلّيني أفكر شوية", "لحظة خلّيني أرتّب الفكرة", "خلّيني أشوفها وياك"][i]!;
+    if (gulf) return ["خلني أفكر شوي", "لحظة أرتب الفكرة", "خلني أشوفها معك"][i]!;
+    if (lev) return ["خليني فكر شوي", "لحظة خليني رتّب الفكرة", "خليني شوفها معك"][i]!;
+    if (egy) return ["سيبني أفكر شوية", "لحظة أرتب الفكرة", "سيبني أشوفها معاك"][i]!;
+    return ["دعني أفكر قليلاً", "لحظة حتى أرتّب الفكرة", "دعني أتأمل السؤال"][i]!;
+  }
+
+  if (v.selectedLanguage === "ku") {
+    if (kind === "listen") return ["باشە، گوێت لێدەگرم", "بەردەوام بە", "من گوێم لێتە"][i]!;
+    if (kind === "explain") return ["با ڕوونت بکەمەوە", "با بە ئارامی ڕوونی بکەمەوە", "با پێکەوە ڕوونی بکەینەوە"][i]!;
+    return ["با کەمێک بیر بکەمەوە", "چرکەیەک با بیر بکەمەوە", "با بیر لە وەڵام بکەمەوە"][i]!;
+  }
+
+  if (v.selectedLanguage === "tr") {
+    if (kind === "listen") return ["Dinliyorum, buyur", "Seni dinliyorum", "Devam et lütfen"][i]!;
+    if (kind === "explain") return ["Açıklayayım", "Sakin sakin anlatayım", "Birlikte netleştirelim"][i]!;
+    return ["Bir düşüneyim", "Bir saniye düşüneyim", "Cevabı bir toparlayayım"][i]!;
+  }
+
+  if (kind === "listen") {
+    return ["I'm listening — go ahead", "Yes, I'm with you", "Go on, I'm listening"][i]!;
+  }
+  if (kind === "explain") {
+    return ["Let me explain", "Let me walk you through it", "Let me make this clear"][i]!;
+  }
+  return ["Let me think for a moment", "One moment while I gather that", "Give me a second to think"][i]!;
+}
+
 /** Short delivery instruction for TTS engines that support style prompts. */
 export function ttsDeliveryInstruction(
   language?: string | null,

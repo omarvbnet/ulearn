@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import {
+  classroomBridgePhrase,
+  type ClassroomBridgeKind,
+} from "@/services/ai/voice-accent";
 
 type BoardAction = {
   time?: number;
@@ -534,7 +538,8 @@ export function LiveClassroom({
       lang === "ar" || lang === "ku" ? "ar" : lang === "tr" ? "tr" : "en"
     ]!;
   const rtl = lang === "ar" || lang === "ku";
-  const minWords = rtl ? 2 : 3;
+  // Accept shorter answers, especially for check questions / Arabic.
+  const minWords = rtl ? 1 : 2;
 
   const [session, setSession] = useState<ClassroomSession | null>(null);
   const [board, setBoard] = useState<BoardItem[]>([]);
@@ -555,8 +560,37 @@ export function LiveClassroom({
   const boardCursorRef = useRef(140);
   const turnStartedRef = useRef(false);
   const pendingAskRef = useRef<string | null>(null);
+  const bridgeVariantRef = useRef(0);
+  const finalBufferRef = useRef("");
+  const finalTimerRef = useRef<number | null>(null);
   const clockRef = useRef(0);
   const [, setTick] = useState(0);
+
+  const speakBridge = useCallback(
+    async (kind: ClassroomBridgeKind) => {
+      const phrase = classroomBridgePhrase(
+        locale,
+        session?.countryCode,
+        null,
+        kind,
+        bridgeVariantRef.current++
+      );
+      if (!phrase) return;
+      setPresence("speaking");
+      setCaption(phrase);
+      voiceBusyRef.current = true;
+      const wave = window.setInterval(() => {
+        const t = Date.now() / 90;
+        setHz((prev) =>
+          prev.map((_, i) => 0.14 + (Math.sin(t + i * 0.4) * 0.5 + 0.5) * 0.7)
+        );
+      }, 50);
+      await speakCloud(phrase, locale, "normal");
+      window.clearInterval(wave);
+      voiceBusyRef.current = false;
+    },
+    [locale, session?.countryCode]
+  );
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -646,28 +680,43 @@ export function LiveClassroom({
       if (!opts?.noAnswer && !q) return;
       handlingTurnRef.current = true;
       turnStartedRef.current = true;
+      finalBufferRef.current = "";
+      if (finalTimerRef.current) {
+        window.clearTimeout(finalTimerRef.current);
+        finalTimerRef.current = null;
+      }
       stopListen();
       stopCloudAudio();
       voiceBusyRef.current = false;
       if (!opts?.noAnswer) {
         setPresence("listening");
         setCaption(q);
-        await new Promise((r) => setTimeout(r, 160));
+        await new Promise((r) => setTimeout(r, 120));
       }
-      setPresence("speaking");
-      try {
-        const res = await fetch(
-          `/api/ai/classroom/session/${sessionIdRef.current}/turn`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(
-              opts?.noAnswer ? { noAnswer: true } : { transcript: q }
-            ),
-          }
-        );
+
+      const kind: ClassroomBridgeKind = opts?.noAnswer
+        ? "think"
+        : pendingAskRef.current
+          ? "think"
+          : "explain";
+      const apiP = fetch(
+        `/api/ai/classroom/session/${sessionIdRef.current}/turn`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            opts?.noAnswer ? { noAnswer: true } : { transcript: q }
+          ),
+        }
+      ).then(async (res) => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Turn failed");
+        return data;
+      });
+
+      try {
+        await speakBridge(kind);
+        const data = await apiP;
         if (data.session) setSession(data.session);
         await playBeat(data.beat as ClassroomBeat);
       } catch (e) {
@@ -676,7 +725,7 @@ export function LiveClassroom({
         handlingTurnRef.current = false;
       }
     },
-    [playBeat, stopListen]
+    [playBeat, speakBridge, stopListen]
   );
 
   const startListen = useCallback(() => {
@@ -691,15 +740,20 @@ export function LiveClassroom({
       rec.interimResults = true;
       rec.onresult = (ev) => {
         if (voiceBusyRef.current || handlingTurnRef.current) return;
-        let finalText = "";
+        let finalChunk = "";
         let interim = "";
         for (let i = 0; i < ev.results.length; i++) {
           const row = ev.results[i];
           const alt = row?.[0]?.transcript || "";
-          if (row?.isFinal) finalText += `${alt} `;
+          if (row?.isFinal) finalChunk += `${alt} `;
           else interim += alt;
         }
-        const heard = (finalText || interim).trim();
+        if (finalChunk.trim()) {
+          finalBufferRef.current = `${finalBufferRef.current} ${finalChunk}`
+            .replace(/\s+/g, " ")
+            .trim();
+        }
+        const heard = (finalBufferRef.current || interim).trim();
         const words = heard.split(/\s+/).filter(Boolean);
         if (words.length >= 1) {
           speechActivityRef.current = Date.now();
@@ -709,10 +763,23 @@ export function LiveClassroom({
             prev.map((_, i) => 0.2 + ((i * 17 + Date.now()) % 70) / 100)
           );
         }
-        const q = finalText.trim();
-        if (q.split(/\s+/).filter(Boolean).length >= minWords) {
-          turnStartedRef.current = true;
-          void submitTurn(q);
+        const q = finalBufferRef.current.trim();
+        const need = pendingAskRef.current ? minWords : Math.max(minWords, rtl ? 2 : 2);
+        if (q.split(/\s+/).filter(Boolean).length >= need) {
+          if (finalTimerRef.current) window.clearTimeout(finalTimerRef.current);
+          // Debounce so multi-phrase answers finish before we cut off.
+          finalTimerRef.current = window.setTimeout(() => {
+            const ready = finalBufferRef.current.trim();
+            if (
+              ready &&
+              !voiceBusyRef.current &&
+              !handlingTurnRef.current &&
+              ready.split(/\s+/).filter(Boolean).length >= need
+            ) {
+              turnStartedRef.current = true;
+              void submitTurn(ready);
+            }
+          }, rtl ? 900 : 700);
         }
       };
       rec.onend = () => {
@@ -723,7 +790,7 @@ export function LiveClassroom({
           !handlingTurnRef.current &&
           !ended
         ) {
-          window.setTimeout(() => startListen(), 350);
+          window.setTimeout(() => startListen(), 220);
         }
       };
       recognitionRef.current = rec;
@@ -809,12 +876,16 @@ export function LiveClassroom({
         }
 
         setPresence("thinking");
-        const res = await fetch(
+        const apiP = fetch(
           `/api/ai/classroom/session/${sessionIdRef.current}/beat`,
           { method: "POST" }
-        );
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Beat failed");
+        ).then(async (res) => {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Beat failed");
+          return data;
+        });
+        await speakBridge("think");
+        const data = await apiP;
         if (data.session) setSession(data.session);
         const beat = data.beat as ClassroomBeat;
         await playBeat(beat);
@@ -828,7 +899,7 @@ export function LiveClassroom({
     } finally {
       loopActiveRef.current = false;
     }
-  }, [ended, playBeat, runStudentCheck, waitForStudentWindow]);
+  }, [ended, playBeat, runStudentCheck, speakBridge, waitForStudentWindow]);
 
   useEffect(() => {
     cancelledRef.current = false;

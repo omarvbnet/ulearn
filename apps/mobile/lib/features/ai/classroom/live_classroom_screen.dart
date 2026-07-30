@@ -62,6 +62,11 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
   var _boardCursorY = 140.0;
   var _turnStarted = false;
   String? _pendingAsk;
+  String? _countryCode;
+  String? _accent;
+  var _bridgeVariant = 0;
+  String _finalBuffer = '';
+  Timer? _finalDebounce;
   Timer? _paintTimer;
   Timer? _hzTimer;
   ApiClient? _api;
@@ -133,6 +138,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     _listenGen++;
     _paintTimer?.cancel();
     _hzTimer?.cancel();
+    _finalDebounce?.cancel();
     unawaited(_speechStt.stop());
     unawaited(_audio.dispose());
     final id = _sessionId;
@@ -178,6 +184,8 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       }
       _sessionId = id;
       _speechLocale = sessionMap?['speechLocale']?.toString();
+      _countryCode = sessionMap?['countryCode']?.toString();
+      _accent = sessionMap?['accent']?.toString();
       final names = sessionMap?['materialNames'];
       final state = sessionMap?['state'];
       final lessonName = state is Map
@@ -237,10 +245,12 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     try {
       final api = _api;
       if (api == null) return;
-      final data = await api.post(
+      final apiFuture = api.post(
         '/api/ai/classroom/session/$_sessionId/turn',
         {'noAnswer': true},
       );
+      await _speakBridge('think');
+      final data = await apiFuture;
       if (!mounted || _cancelled) return;
       final beat = data['beat'];
       if (beat is Map) {
@@ -316,8 +326,10 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         if (mounted) setState(() => _presence = _Presence.thinking);
         final api = _api;
         if (api == null) break;
-        final data =
-            await api.post('/api/ai/classroom/session/$_sessionId/beat', {});
+        final apiFuture =
+            api.post('/api/ai/classroom/session/$_sessionId/beat', {});
+        await _speakBridge('think');
+        final data = await apiFuture;
         if (!mounted || _cancelled) break;
         final session = data['session'];
         if (session is Map) {
@@ -425,31 +437,52 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     }
   }
 
+  Future<void> _speakBridge(String kind) async {
+    final phrase = _classroomBridgePhrase(
+      lang: _lang,
+      countryCode: _countryCode,
+      accent: _accent,
+      kind: kind,
+      variant: _bridgeVariant++,
+    );
+    if (phrase.isEmpty || !mounted) return;
+    if (mounted) {
+      setState(() {
+        _presence = _Presence.speaking;
+        _caption = phrase;
+      });
+    }
+    await _speakCloud(phrase, pace: 'normal');
+  }
+
   Future<void> _submitTurn(String transcript) async {
     final q = (_cleanText(transcript) ?? transcript).trim();
     if (q.isEmpty || _sessionId == null || _handlingTurn) return;
     _handlingTurn = true;
     _turnStarted = true;
+    _finalBuffer = '';
+    _finalDebounce?.cancel();
     await _stopListeningQuietly();
     try {
       await _audio.stop();
     } catch (_) {}
-    // Feel immediate — jump to speaking presence quickly after a brief cue.
     if (mounted) {
       setState(() {
         _presence = _Presence.listening;
         _caption = q;
       });
     }
-    await Future<void>.delayed(const Duration(milliseconds: 180));
-    if (mounted) setState(() => _presence = _Presence.speaking);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
     try {
       final api = _api;
       if (api == null) return;
-      final data = await api.post(
+      final kind = _pendingAsk != null ? 'think' : 'explain';
+      final apiFuture = api.post(
         '/api/ai/classroom/session/$_sessionId/turn',
         {'transcript': q},
       );
+      await _speakBridge(kind);
+      final data = await apiFuture;
       if (!mounted || _cancelled) return;
       final beat = data['beat'];
       if (beat is Map) {
@@ -596,15 +629,18 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         setState(() => _updateHzFromLevel(_soundLevel));
       });
 
-      final minWords = _rtl ? 2 : 3;
+      final minWords = _pendingAsk != null
+          ? (_rtl ? 1 : 1)
+          : (_rtl ? 1 : 2);
       await _speechStt.listen(
         listenOptions: stt.SpeechListenOptions(
           localeId: _sttLocaleId,
-          listenFor: const Duration(seconds: 45),
-          pauseFor: const Duration(milliseconds: 1800),
+          listenFor: const Duration(seconds: 60),
+          pauseFor: const Duration(milliseconds: 2400),
           partialResults: true,
           cancelOnError: false,
           listenMode: stt.ListenMode.dictation,
+          autoPunctuation: true,
         ),
         onSoundLevelChange: (level) {
           if (!mounted || _voiceBusy || gen != _listenGen) return;
@@ -623,12 +659,27 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
               _caption = words;
             });
           }
-          if (!result.finalResult || count < minWords) return;
-          _turnStarted = true;
-          try {
-            await _audio.stop();
-          } catch (_) {}
-          await _submitTurn(words);
+          if (!result.finalResult) return;
+          _finalBuffer = '$_finalBuffer $words'.replaceAll(RegExp(r'\s+'), ' ').trim();
+          final readyCount = _finalBuffer
+              .split(RegExp(r'\s+'))
+              .where((w) => w.isNotEmpty)
+              .length;
+          if (readyCount < minWords) return;
+          _finalDebounce?.cancel();
+          _finalDebounce = Timer(
+            Duration(milliseconds: _rtl ? 900 : 700),
+            () async {
+              if (_voiceBusy || _handlingTurn || gen != _listenGen) return;
+              final ready = _finalBuffer.trim();
+              if (ready.isEmpty) return;
+              _turnStarted = true;
+              try {
+                await _audio.stop();
+              } catch (_) {}
+              await _submitTurn(ready);
+            },
+          );
         },
       );
     } finally {
@@ -927,6 +978,82 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       ),
     );
   }
+}
+
+String _classroomBridgePhrase({
+  required String lang,
+  String? countryCode,
+  String? accent,
+  required String kind,
+  int variant = 0,
+}) {
+  final i = variant.abs() % 3;
+  final acc = (accent ?? '').toLowerCase();
+  final country = (countryCode ?? '').toUpperCase();
+  final iraqi = acc.contains('iraqi') || country == 'IQ';
+  final gulf = acc == 'gulf' ||
+      ['SA', 'AE', 'KW', 'QA', 'BH', 'OM'].contains(country);
+  final lev = acc == 'levantine' ||
+      ['SY', 'JO', 'LB', 'PS'].contains(country);
+  final egy = acc == 'egyptian' || country == 'EG';
+
+  if (lang == 'ar') {
+    if (kind == 'listen') {
+      if (iraqi) return ['إي، سامعك', 'تفضّل، أنا أسمعك', 'زين، كمّل'][i];
+      if (gulf) return ['تفضّل، أسمعك', 'إي، كمّل', 'حاضر، سامعك'][i];
+      if (lev) return ['تفضّل، عم اسمعك', 'إي كمّل', 'حاضر'][i];
+      if (egy) return ['اتفضل، سامعك', 'كمّل يا بطل', 'إي أنا سامعك'][i];
+      return ['تفضل، أنا أستمع إليك', 'حسنًا، أكمل', 'أنا معك، تفضّل'][i];
+    }
+    if (kind == 'explain') {
+      if (iraqi) {
+        return ['خلّيني أوضح لك', 'زين، خلّيني أشرحها بهدوء', 'خلّيني أشرحلك الفكرة'][i];
+      }
+      if (gulf) {
+        return ['خلني أوضح لك', 'خلني أشرحها بهدوء', 'خلنا نوضحها مع بعض'][i];
+      }
+      if (lev) {
+        return ['خليني وضّحلك', 'خليني اشرحلك بهدوء', 'خليني بيّنلك الفكرة'][i];
+      }
+      if (egy) {
+        return ['سيبني أوضحلك', 'سيبني أشرحلك بهدوء', 'تعالى نشرحها سوا'][i];
+      }
+      return ['دعني أوضح لك', 'دعني أشرح بهدوء', 'لنوضّح الفكرة معًا'][i];
+    }
+    if (iraqi) {
+      return ['خلّيني أفكر شوية', 'لحظة خلّيني أرتّب الفكرة', 'خلّيني أشوفها وياك'][i];
+    }
+    if (gulf) {
+      return ['خلني أفكر شوي', 'لحظة أرتب الفكرة', 'خلني أشوفها معك'][i];
+    }
+    if (lev) {
+      return ['خليني فكر شوي', 'لحظة خليني رتّب الفكرة', 'خليني شوفها معك'][i];
+    }
+    if (egy) {
+      return ['سيبني أفكر شوية', 'لحظة أرتب الفكرة', 'سيبني أشوفها معاك'][i];
+    }
+    return ['دعني أفكر قليلاً', 'لحظة حتى أرتّب الفكرة', 'دعني أتأمل السؤال'][i];
+  }
+  if (lang == 'tr') {
+    if (kind == 'listen') {
+      return ['Dinliyorum, buyur', 'Seni dinliyorum', 'Devam et lütfen'][i];
+    }
+    if (kind == 'explain') {
+      return ['Açıklayayım', 'Sakin sakin anlatayım', 'Birlikte netleştirelim'][i];
+    }
+    return ['Bir düşüneyim', 'Bir saniye düşüneyim', 'Cevabı bir toparlayayım'][i];
+  }
+  if (kind == 'listen') {
+    return ["I'm listening — go ahead", "Yes, I'm with you", "Go on, I'm listening"][i];
+  }
+  if (kind == 'explain') {
+    return ['Let me explain', 'Let me walk you through it', 'Let me make this clear'][i];
+  }
+  return [
+    'Let me think for a moment',
+    'One moment while I gather that',
+    'Give me a second to think',
+  ][i];
 }
 
 String? _cleanText(dynamic raw) {
