@@ -3,7 +3,8 @@ import { ClassroomSessionService } from "@/services/ai/classroom/classroom-sessi
 import { z } from "zod";
 
 const schema = z.object({
-  transcript: z.string().min(1).max(1000),
+  transcript: z.string().max(1000).optional().default(""),
+  noAnswer: z.boolean().optional(),
   signals: z
     .object({
       frustration: z.number().min(0).max(1).optional(),
@@ -13,7 +14,7 @@ const schema = z.object({
     .optional(),
 });
 
-/** Student spoke / typed during the live classroom. */
+/** Student spoke / typed during the live classroom (or timed out silently). */
 export async function POST(
   request: Request,
   ctx: { params: Promise<{ id: string }> }
@@ -31,6 +32,7 @@ export async function POST(
       userId: auth.session.userId,
       sessionId: id,
       transcript: parsed.data.transcript,
+      noAnswer: parsed.data.noAnswer,
       signals: parsed.data.signals,
     });
     return json(result);

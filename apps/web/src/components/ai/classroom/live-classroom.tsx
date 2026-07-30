@@ -114,26 +114,18 @@ function jitter(seed: number, i: number, amp = 4.5) {
   return (x - Math.floor(x)) * 2 * amp - amp;
 }
 
-function nextTextY(items: BoardItem[], rtl: boolean, requested?: number) {
-  if (typeof requested === "number" && Number.isFinite(requested) && requested > 40) {
-    return requested;
-  }
-  const texts = items.filter((i) => i.kind === "text") as Extract<
-    BoardItem,
-    { kind: "text" }
-  >[];
-  if (!texts.length) return 150;
-  const last = texts[texts.length - 1]!;
-  return Math.min(980, last.y + Math.max(78, last.size + 48));
-}
-
 function applyActions(
   items: BoardItem[],
   actions: BoardAction[],
-  rtl: boolean
-): BoardItem[] {
+  rtl: boolean,
+  cursorY: number
+): { items: BoardItem[]; cursorY: number } {
   let acc = [...items];
+  let yCursor = cursorY || 140;
   let penAt = nowMs();
+  const textX = rtl ? 1760 : 150;
+  const diagramX = rtl ? 420 : 1380;
+
   actions.forEach((cue, idx) => {
     const action = String(cue.action || "").toLowerCase().replace(/\s+/g, "_");
     const p = cue.parameters || {};
@@ -141,6 +133,7 @@ function applyActions(
     const seed = idx * 97 + Math.floor(num(cue.time, idx) * 3);
     if (action === "clear_board" || action === "open_new_board") {
       acc = [];
+      yCursor = 140;
       penAt = nowMs();
       return;
     }
@@ -149,127 +142,105 @@ function applyActions(
       action === "draw_formula" ||
       action === "draw_equation"
     ) {
-      const text = cleanText(p.text ?? p.content ?? p.latex);
+      const text = cleanText(p.text ?? p.content ?? p.latex).slice(0, 40);
       if (!text) return;
-      const align =
-        p.align === "right" || p.align === "left"
-          ? (p.align as "left" | "right")
-          : rtl
-            ? "right"
-            : "left";
-      const writeMs = Math.max(1100, Math.min(6500, text.length * 78));
-      const y = nextTextY(acc, rtl, num(p.y, NaN));
+      if (yCursor > 920) {
+        acc = [];
+        yCursor = 140;
+      }
+      const size = Math.max(26, Math.min(36, num(p.size, text.length < 16 ? 34 : 28)));
+      const writeMs = Math.max(900, Math.min(4200, text.length * 70));
       acc.push({
         kind: "text",
         id,
         text,
-        x: num(p.x, align === "right" ? 1780 : 140) + jitter(seed, 1, 2.2),
-        y: y + jitter(seed, 2, 2),
+        x: textX + jitter(seed, 1, 1.5),
+        y: yCursor + jitter(seed, 2, 1.2),
         color: resolveColor(p.color),
-        size: Math.max(22, Math.min(44, num(p.size, text.length < 18 ? 34 : 28))),
+        size,
         bornAt: penAt,
         writeMs,
-        align,
+        align: rtl ? "right" : "left",
         seed,
       });
-      penAt += writeMs + 220;
+      yCursor += Math.max(88, size + 52);
+      penAt += writeMs + 160;
       return;
     }
-    const color = resolveColor(p.color, "#334155");
-    const width = Math.max(2.4, Math.min(8, num(p.width, 3.4)));
-    if (action === "highlight") {
-      const x1 = num(p.x1, num(p.x, rtl ? 1200 : 120));
-      const y1 = num(p.y1, num(p.y, 140));
-      const x2 = num(p.x2, x1 + num(p.w, 280));
-      const y2 = num(p.y2, y1 + num(p.h, 48));
-      acc.push({
-        kind: "highlight",
-        id,
-        x1,
-        y1,
-        x2,
-        y2,
-        color: resolveColor(p.color, "#fde047"),
-        width: 0,
-        bornAt: penAt,
-        writeMs: 480,
-        seed,
-      });
-      penAt += 520;
-      return;
-    }
-    if (action === "draw_line" || action === "underline") {
-      const baseY = num(p.y1, num(p.y, nextTextY(acc, rtl) - 20));
+    if (
+      action === "highlight" ||
+      action === "underline" ||
+      action === "draw_line"
+    ) {
+      const uy = Math.max(130, yCursor - 56);
       acc.push({
         kind: "line",
         id,
-        x1: num(p.x1, num(p.x, rtl ? 1780 : 140)) + jitter(seed, 1, 2),
-        y1: baseY + jitter(seed, 2, 1.5),
-        x2: num(p.x2, num(p.x, rtl ? 1780 : 140) + (rtl ? -320 : 320)) +
-          jitter(seed, 3, 2),
-        y2: num(p.y2, baseY) + jitter(seed, 4, 1.5),
+        x1: textX,
+        y1: uy,
+        x2: textX + (rtl ? -360 : 360),
+        y2: uy,
         color: resolveColor(p.color, "#ea580c"),
-        width,
+        width: 3,
         bornAt: penAt,
-        writeMs: 980,
+        writeMs: 700,
         seed,
       });
-      penAt += 1050;
-    } else if (action === "draw_arrow") {
+      penAt += 740;
+      return;
+    }
+    if (action === "draw_arrow") {
+      const ay = Math.min(860, 220 + idx * 90);
       acc.push({
         kind: "arrow",
         id,
-        x1: num(p.x1, rtl ? 700 : 1300) + jitter(seed, 1, 3),
-        y1: num(p.y1, 480) + jitter(seed, 2, 3),
-        x2: num(p.x2, rtl ? 380 : 1620) + jitter(seed, 3, 3),
-        y2: num(p.y2, 320) + jitter(seed, 4, 3),
+        x1: diagramX - 40,
+        y1: ay + 70,
+        x2: diagramX + 140,
+        y2: ay,
         color: resolveColor(p.color, "#059669"),
-        width,
+        width: 3.2,
         bornAt: penAt,
-        writeMs: 1200,
+        writeMs: 1000,
         seed,
       });
-      penAt += 1260;
+      penAt += 1050;
     } else if (action === "draw_circle" || action === "circle") {
-      const cx = num(p.cx, rtl ? 520 : 1480);
-      const cy = num(p.cy, 420);
-      const r = Math.max(28, num(p.r, 70));
+      const cy = Math.min(820, 240 + idx * 120);
+      const r = Math.max(36, Math.min(60, num(p.r, 50)));
       acc.push({
         kind: "circle",
         id,
-        x1: cx - r,
+        x1: diagramX + 40 - r,
         y1: cy - r,
-        x2: cx + r,
+        x2: diagramX + 40 + r,
         y2: cy + r,
         color: resolveColor(p.color, "#dc2626"),
-        width,
+        width: 3,
         bornAt: penAt,
-        writeMs: 1400,
+        writeMs: 1100,
         seed,
       });
-      penAt += 1460;
+      penAt += 1150;
     } else if (action === "draw_rectangle" || action === "draw_rect") {
-      const x = num(p.x, num(p.x1, rtl ? 280 : 1280));
-      const y = num(p.y, num(p.y1, 300));
-      const w = num(p.w, num(p.x2, x + 220) - x);
-      const h = num(p.h, num(p.y2, y + 120) - y);
+      const ry = Math.min(820, 240 + idx * 110);
       acc.push({
         kind: "rect",
         id,
-        x1: x,
-        y1: y,
-        x2: x + Math.abs(w),
-        y2: y + Math.abs(h),
+        x1: diagramX - 40,
+        y1: ry,
+        x2: diagramX + 140,
+        y2: ry + 80,
         color: resolveColor(p.color, "#92400e"),
-        width,
+        width: 3,
         bornAt: penAt,
-        writeMs: 1250,
+        writeMs: 1000,
         seed,
       });
-      penAt += 1300;
+      penAt += 1050;
     }
   });
-  return acc;
+  return { items: acc, cursorY: yCursor };
 }
 
 function progressOf(item: BoardItem, clock: number) {
@@ -581,6 +552,9 @@ export function LiveClassroom({
   const loopActiveRef = useRef(false);
   const speechActivityRef = useRef(0);
   const lastAskWaitRef = useRef(0);
+  const boardCursorRef = useRef(140);
+  const turnStartedRef = useRef(false);
+  const pendingAskRef = useRef<string | null>(null);
   const clockRef = useRef(0);
   const [, setTick] = useState(0);
 
@@ -605,12 +579,25 @@ export function LiveClassroom({
     async (beat: ClassroomBeat) => {
       if (cancelledRef.current) return;
       stopListen();
-      setBoard((prev) => applyActions(prev, beat.board || [], rtl));
+      setBoard((prev) => {
+        const next = applyActions(
+          prev,
+          beat.board || [],
+          rtl,
+          boardCursorRef.current
+        );
+        boardCursorRef.current = next.cursorY;
+        return next.items;
+      });
       voiceBusyRef.current = true;
       setPresence("speaking");
       const lines = (beat.speak || []).map(cleanText).filter(Boolean);
+      const ask = cleanText(beat.askStudent) || beat.askStudent || "";
+      if (ask && !lines.some((l) => l.includes(ask.slice(0, 10)))) {
+        lines.push(ask);
+      }
       for (const line of lines) {
-        if (cancelledRef.current || handlingTurnRef.current) break;
+        if (cancelledRef.current) break;
         setCaption(line);
         const wave = window.setInterval(() => {
           const t = Date.now() / 100;
@@ -623,7 +610,6 @@ export function LiveClassroom({
         await new Promise((r) => setTimeout(r, 280));
       }
       voiceBusyRef.current = false;
-      // Critical settle before mic — prevents crash / garbled listen
       await new Promise((r) => setTimeout(r, 400));
       if (beat.lessonName) {
         setSession((s) =>
@@ -635,14 +621,16 @@ export function LiveClassroom({
             : s
         );
       }
-      if (beat.askStudent) {
+      if (ask) {
         lastAskWaitRef.current = Math.max(
-          4200,
-          Math.min(8000, beat.waitForStudentMs || 5000)
+          5000,
+          Math.min(8000, beat.waitForStudentMs || 5500)
         );
-        setCaption(cleanText(beat.askStudent) || beat.askStudent);
+        pendingAskRef.current = ask;
+        setCaption(ask);
       } else {
         lastAskWaitRef.current = 0;
+        pendingAskRef.current = null;
       }
       if (beat.sessionComplete) setEnded(true);
     },
@@ -650,22 +638,32 @@ export function LiveClassroom({
   );
 
   const submitTurn = useCallback(
-    async (transcript: string) => {
-      const q = cleanText(transcript) || transcript.trim();
-      if (!q || !sessionIdRef.current || handlingTurnRef.current) return;
+    async (transcript: string, opts?: { noAnswer?: boolean }) => {
+      if (!sessionIdRef.current || handlingTurnRef.current) return;
+      const q = opts?.noAnswer
+        ? ""
+        : cleanText(transcript) || transcript.trim();
+      if (!opts?.noAnswer && !q) return;
       handlingTurnRef.current = true;
+      turnStartedRef.current = true;
       stopListen();
       stopCloudAudio();
       voiceBusyRef.current = false;
-      setPresence("thinking");
-      setCaption(q);
+      if (!opts?.noAnswer) {
+        setPresence("listening");
+        setCaption(q);
+        await new Promise((r) => setTimeout(r, 160));
+      }
+      setPresence("speaking");
       try {
         const res = await fetch(
           `/api/ai/classroom/session/${sessionIdRef.current}/turn`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ transcript: q }),
+            body: JSON.stringify(
+              opts?.noAnswer ? { noAnswer: true } : { transcript: q }
+            ),
           }
         );
         const data = await res.json();
@@ -713,6 +711,7 @@ export function LiveClassroom({
         }
         const q = finalText.trim();
         if (q.split(/\s+/).filter(Boolean).length >= minWords) {
+          turnStartedRef.current = true;
           void submitTurn(q);
         }
       };
@@ -738,6 +737,7 @@ export function LiveClassroom({
   const waitForStudentWindow = useCallback(
     async (baseMs: number) => {
       speechActivityRef.current = 0;
+      turnStartedRef.current = false;
       setPresence("waiting");
       startListen();
       const started = Date.now();
@@ -746,14 +746,39 @@ export function LiveClassroom({
           speechActivityRef.current > 0 &&
           Date.now() - speechActivityRef.current < 2200;
         const elapsed = Date.now() - started;
-        const deadline = active ? Math.max(baseMs, elapsed + 1800) : baseMs;
+        const deadline = active ? Math.max(baseMs, elapsed + 2000) : baseMs;
         if (elapsed >= deadline && !active) break;
         await new Promise((r) => setTimeout(r, 120));
       }
-      // Keep listening if a turn just started; otherwise pause before thinking
       if (!handlingTurnRef.current) stopListen();
+      return turnStartedRef.current || handlingTurnRef.current;
     },
     [ended, startListen, stopListen]
+  );
+
+  const runStudentCheck = useCallback(
+    async (question: string, waitMs: number, pace: string) => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (cancelledRef.current || ended) return;
+        const answered = await waitForStudentWindow(waitMs);
+        if (answered || handlingTurnRef.current) {
+          while (handlingTurnRef.current && !cancelledRef.current) {
+            await new Promise((r) => setTimeout(r, 120));
+          }
+          return;
+        }
+        setPresence("speaking");
+        setCaption(question);
+        voiceBusyRef.current = true;
+        await speakCloud(question, locale, "slow");
+        voiceBusyRef.current = false;
+        await new Promise((r) => setTimeout(r, 350));
+      }
+      if (cancelledRef.current || ended || handlingTurnRef.current) return;
+      await submitTurn("", { noAnswer: true });
+      void pace;
+    },
+    [ended, locale, submitTurn, waitForStudentWindow]
   );
 
   const runLoop = useCallback(async () => {
@@ -766,10 +791,17 @@ export function LiveClassroom({
           continue;
         }
 
-        const listenMs = lastAskWaitRef.current || 4200;
-        await waitForStudentWindow(listenMs);
+        if (pendingAskRef.current) {
+          const q = pendingAskRef.current;
+          const waitMs = lastAskWaitRef.current || 5500;
+          pendingAskRef.current = null;
+          await runStudentCheck(q, waitMs, "normal");
+          continue;
+        }
+
+        const answered = await waitForStudentWindow(2800);
         if (cancelledRef.current || ended) break;
-        if (handlingTurnRef.current) {
+        if (answered || handlingTurnRef.current) {
           while (handlingTurnRef.current && !cancelledRef.current) {
             await new Promise((r) => setTimeout(r, 150));
           }
@@ -796,7 +828,7 @@ export function LiveClassroom({
     } finally {
       loopActiveRef.current = false;
     }
-  }, [ended, playBeat, waitForStudentWindow]);
+  }, [ended, playBeat, runStudentCheck, waitForStudentWindow]);
 
   useEffect(() => {
     cancelledRef.current = false;

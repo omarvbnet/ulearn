@@ -59,6 +59,9 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
   DateTime? _lastListenStart;
   DateTime? _speechActivityAt;
   var _askWaitMs = 0;
+  var _boardCursorY = 140.0;
+  var _turnStarted = false;
+  String? _pendingAsk;
   Timer? _paintTimer;
   Timer? _hzTimer;
   ApiClient? _api;
@@ -208,8 +211,9 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     }
   }
 
-  Future<void> _waitForStudentWindow(int baseMs) async {
+  Future<bool> _waitForStudentWindow(int baseMs) async {
     _speechActivityAt = null;
+    _turnStarted = false;
     if (mounted) setState(() => _presence = _Presence.waiting);
     await _startListen();
     final started = DateTime.now();
@@ -217,11 +221,68 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       final active = _speechActivityAt != null &&
           DateTime.now().difference(_speechActivityAt!).inMilliseconds < 2200;
       final elapsed = DateTime.now().difference(started).inMilliseconds;
-      final deadline = active ? math.max(baseMs, elapsed + 1800) : baseMs;
+      final deadline = active ? math.max(baseMs, elapsed + 2000) : baseMs;
       if (elapsed >= deadline && !active) break;
       await Future<void>.delayed(const Duration(milliseconds: 120));
     }
     if (!_handlingTurn) await _stopListeningQuietly();
+    return _turnStarted || _handlingTurn;
+  }
+
+  Future<void> _submitSilence() async {
+    if (_sessionId == null || _handlingTurn || _cancelled) return;
+    _handlingTurn = true;
+    _turnStarted = true;
+    if (mounted) setState(() => _presence = _Presence.speaking);
+    try {
+      final api = _api;
+      if (api == null) return;
+      final data = await api.post(
+        '/api/ai/classroom/session/$_sessionId/turn',
+        {'noAnswer': true},
+      );
+      if (!mounted || _cancelled) return;
+      final beat = data['beat'];
+      if (beat is Map) {
+        await _playBeat(Map<String, dynamic>.from(beat));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e is ApiException ? e.message : 'Turn failed';
+      });
+    } finally {
+      _handlingTurn = false;
+    }
+  }
+
+  /// Wait for answer; if delayed, repeat the question by voice; if still silent, notify server.
+  Future<void> _runStudentCheck(
+    String question,
+    int waitMs,
+    String pace,
+  ) async {
+    for (var attempt = 0; attempt < 2; attempt++) {
+      if (_cancelled || _ended) return;
+      final answered = await _waitForStudentWindow(waitMs);
+      if (answered || _handlingTurn) {
+        while (_handlingTurn && !_cancelled) {
+          await Future<void>.delayed(const Duration(milliseconds: 120));
+        }
+        return;
+      }
+      // Student delayed — repeat the question by voice.
+      if (mounted) {
+        setState(() {
+          _presence = _Presence.speaking;
+          _caption = question;
+        });
+      }
+      await _speakCloud(question, pace: 'slow');
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+    }
+    if (_cancelled || _ended || _handlingTurn) return;
+    await _submitSilence();
   }
 
   Future<void> _runLoop() async {
@@ -234,10 +295,18 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
           continue;
         }
 
-        final listenMs = _askWaitMs > 0 ? _askWaitMs : 4200;
-        await _waitForStudentWindow(listenMs);
+        if (_pendingAsk != null) {
+          final q = _pendingAsk!;
+          final waitMs = _askWaitMs > 0 ? _askWaitMs : 5500;
+          _pendingAsk = null;
+          await _runStudentCheck(q, waitMs, 'normal');
+          continue;
+        }
+
+        // Short interrupt window between teaching beats
+        final answered = await _waitForStudentWindow(2800);
         if (_cancelled || _ended) break;
-        if (_handlingTurn) {
+        if (answered || _handlingTurn) {
           while (_handlingTurn && !_cancelled) {
             await Future<void>.delayed(const Duration(milliseconds: 150));
           }
@@ -289,10 +358,20 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         final row = board[i];
         if (row is! Map) continue;
         final cue = Map<String, dynamic>.from(row);
+        final action =
+            (cue['action']?.toString() ?? '').toLowerCase().replaceAll(' ', '_');
+        if (action == 'clear_board' || action == 'open_new_board') {
+          _items.clear();
+          _boardCursorY = 140;
+          penAt = DateTime.now().millisecondsSinceEpoch.toDouble();
+          continue;
+        }
         final before = _items.length;
-        _applyCue(_items, cue, i, penAt, _rtl);
+        _applyCue(_items, cue, i, penAt, _rtl, () => _boardCursorY, (y) {
+          _boardCursorY = y;
+        });
         if (_items.length > before) {
-          penAt += _items.last.writeMs + 180;
+          penAt += _items.last.writeMs + 160;
         }
       }
       if (mounted) setState(() {});
@@ -313,8 +392,15 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     }
 
     final pace = beat['pace']?.toString() ?? 'normal';
+    final ask = beat['askStudent']?.toString().trim();
+    // Ensure check questions are spoken even if model forgot.
+    if (ask != null &&
+        ask.isNotEmpty &&
+        !lines.any((l) => l.contains(ask.substring(0, math.min(10, ask.length))))) {
+      lines.add(ask);
+    }
     for (final line in lines) {
-      if (_cancelled || _handlingTurn) break;
+      if (_cancelled) break;
       if (mounted) setState(() => _caption = line);
       await _speakCloud(line, pace: pace);
       await Future<void>.delayed(const Duration(milliseconds: 220));
@@ -325,15 +411,14 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     if (lessonName != null && lessonName.isNotEmpty && mounted) {
       setState(() => _title = lessonName);
     }
-    final ask = beat['askStudent']?.toString();
-    if (ask != null && ask.trim().isNotEmpty) {
+    if (ask != null && ask.isNotEmpty) {
       _askWaitMs =
-          ((beat['waitForStudentMs'] as num?)?.toInt() ?? 5000).clamp(4200, 8000);
-      if (mounted) {
-        setState(() => _caption = _cleanText(ask) ?? ask);
-      }
+          ((beat['waitForStudentMs'] as num?)?.toInt() ?? 5500).clamp(5000, 8000);
+      _pendingAsk = ask;
+      if (mounted) setState(() => _caption = _cleanText(ask) ?? ask);
     } else {
       _askWaitMs = 0;
+      _pendingAsk = null;
     }
     if (beat['sessionComplete'] == true && mounted) {
       setState(() => _ended = true);
@@ -344,16 +429,20 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     final q = (_cleanText(transcript) ?? transcript).trim();
     if (q.isEmpty || _sessionId == null || _handlingTurn) return;
     _handlingTurn = true;
+    _turnStarted = true;
     await _stopListeningQuietly();
     try {
       await _audio.stop();
     } catch (_) {}
+    // Feel immediate — jump to speaking presence quickly after a brief cue.
     if (mounted) {
       setState(() {
-        _presence = _Presence.thinking;
+        _presence = _Presence.listening;
         _caption = q;
       });
     }
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+    if (mounted) setState(() => _presence = _Presence.speaking);
     try {
       final api = _api;
       if (api == null) return;
@@ -535,6 +624,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
             });
           }
           if (!result.finalResult || count < minWords) return;
+          _turnStarted = true;
           try {
             await _audio.stop();
           } catch (_) {}
@@ -695,15 +785,20 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        CustomPaint(
-                          painter: _BoardPainter(
-                            items: List.of(_items),
-                            clockMs: _clockMs,
-                            rtl: _rtl,
-                            boardW: _boardW,
-                            boardH: _boardH,
+                        Center(
+                          child: AspectRatio(
+                            aspectRatio: _boardW / _boardH,
+                            child: CustomPaint(
+                              painter: _BoardPainter(
+                                items: List.of(_items),
+                                clockMs: _clockMs,
+                                rtl: _rtl,
+                                boardW: _boardW,
+                                boardH: _boardH,
+                              ),
+                              child: const SizedBox.expand(),
+                            ),
                           ),
-                          child: const SizedBox.expand(),
                         ),
                         Positioned(
                           left: 12,
@@ -887,22 +982,14 @@ double _handJitter(int seed, int i, [double amp = 4.5]) {
   return (x - x.floor()) * 2 * amp - amp;
 }
 
-double _nextTextY(List<_BoardItem> items, double? requested) {
-  if (requested != null && requested > 40) return requested;
-  _BoardItem? last;
-  for (final i in items) {
-    if (i.kind == _Kind.text) last = i;
-  }
-  if (last == null) return 150;
-  return math.min(980.0, last.y + math.max(78.0, last.size + 48));
-}
-
 void _applyCue(
   List<_BoardItem> items,
   Map<String, dynamic> cue,
   int idx,
   double bornAt,
   bool rtl,
+  double Function() getCursorY,
+  void Function(double y) setCursorY,
 ) {
   final p = cue['parameters'] is Map
       ? Map<String, dynamic>.from(cue['parameters'] as Map)
@@ -911,87 +998,71 @@ void _applyCue(
       (cue['action']?.toString() ?? '').toLowerCase().replaceAll(' ', '_');
   final id = '${DateTime.now().microsecondsSinceEpoch}-$action-$idx';
   final seed = idx * 97 + _num(cue['time']).toInt();
+  final textX = rtl ? 1760.0 : 150.0;
+  final diagramX = rtl ? 420.0 : 1380.0;
 
-  if (action == 'clear_board' || action == 'open_new_board') {
-    items.clear();
-    return;
-  }
   if (action == 'write_text' ||
       action == 'draw_formula' ||
       action == 'draw_equation') {
     final text = _cleanText(p['text'] ?? p['latex'] ?? p['content']);
     if (text == null || text.isEmpty) return;
-    final alignRight = rtl || p['align']?.toString() == 'right';
-    final yReq = p['y'] == null ? null : _num(p['y']).toDouble();
+    var y = getCursorY();
+    if (y > 920) {
+      items.clear();
+      y = 140;
+      setCursorY(140);
+    }
+    final size =
+        _num(p['size'], text.length < 16 ? 34 : 28).toDouble().clamp(26.0, 36.0);
     items.add(
       _BoardItem.text(
         id: id,
-        text: text,
-        x: _num(p['x'], rtl ? 1780 : 140).toDouble() + _handJitter(seed, 1, 2.2),
-        y: _nextTextY(items, yReq) + _handJitter(seed, 2, 2),
+        text: text.length > 40 ? '${text.substring(0, 39)}…' : text,
+        x: textX + _handJitter(seed, 1, 1.5),
+        y: y + _handJitter(seed, 2, 1.2),
         color: _color(p['color'], const Color(0xFF1E3A8A)),
-        size: _num(p['size'], text.length < 18 ? 34 : 28)
-            .toDouble()
-            .clamp(22, 44),
+        size: size.toDouble(),
         bornAt: bornAt,
-        writeMs: math.max(1100, math.min(6500, text.length * 78)).toDouble(),
-        alignRight: alignRight,
+        writeMs: math.max(900, math.min(4200, text.length * 70)).toDouble(),
+        alignRight: rtl,
         seed: seed,
       ),
     );
+    setCursorY(y + math.max(88.0, size + 52));
     return;
   }
-  if (action == 'highlight') {
-    final x1 = _num(p['x1'], _num(p['x'], rtl ? 1200 : 120)).toDouble();
-    final y1 = _num(p['y1'], _num(p['y'], 140)).toDouble();
-    items.add(
-      _BoardItem.highlight(
-        id: id,
-        x: x1,
-        y: y1,
-        w: _num(p['w'], _num(p['x2'], x1 + 280) - x1).toDouble().abs(),
-        h: _num(p['h'], _num(p['y2'], y1 + 48) - y1).toDouble().abs(),
-        color: _color(p['color'], const Color(0xFFFDE047)),
-        bornAt: bornAt,
-        writeMs: 480,
-        seed: seed,
-      ),
-    );
-    return;
-  }
-  if (action == 'draw_line' || action == 'underline') {
-    final baseY = _num(p['y1'], _num(p['y'], _nextTextY(items, null) - 20));
+  if (action == 'highlight' || action == 'underline' || action == 'draw_line') {
+    // Soft underline only — never opaque blobs over text.
+    final uy = math.max(130.0, getCursorY() - 56);
     items.add(
       _BoardItem.line(
         id: id,
-        x1: _num(p['x1'], _num(p['x'], rtl ? 1780 : 140)).toDouble() +
-            _handJitter(seed, 1, 2),
-        y1: baseY.toDouble() + _handJitter(seed, 2, 1.5),
-        x2: _num(p['x2'], _num(p['x'], rtl ? 1780 : 140) + (rtl ? -320 : 320))
-                .toDouble() +
-            _handJitter(seed, 3, 2),
-        y2: _num(p['y2'], baseY).toDouble() + _handJitter(seed, 4, 1.5),
+        x1: textX + _handJitter(seed, 1, 1.5),
+        y1: uy,
+        x2: textX + (rtl ? -360 : 360) + _handJitter(seed, 3, 1.5),
+        y2: uy,
         color: _color(p['color'], const Color(0xFFEA580C)),
-        width: _num(p['width'], 3.4).toDouble(),
+        width: 3.0,
         bornAt: bornAt,
-        writeMs: 980,
+        writeMs: 700,
         seed: seed,
       ),
     );
     return;
   }
   if (action == 'draw_arrow') {
+    final ay = math.min(860.0, 220.0 + items.where((e) => e.kind != _Kind.text).length * 120);
     items.add(
       _BoardItem.line(
         id: id,
-        x1: _num(p['x1'], rtl ? 700 : 1300).toDouble() + _handJitter(seed, 1, 3),
-        y1: _num(p['y1'], 480).toDouble() + _handJitter(seed, 2, 3),
-        x2: _num(p['x2'], rtl ? 380 : 1620).toDouble() + _handJitter(seed, 3, 3),
-        y2: _num(p['y2'], 320).toDouble() + _handJitter(seed, 4, 3),
+        x1: diagramX - 40,
+        y1: ay + 70,
+        x2: diagramX + 140,
+        y2: ay,
         color: _color(p['color'], const Color(0xFF059669)),
-        width: _num(p['width'], 3.4).toDouble(),
+        width: 3.2,
         bornAt: bornAt,
-        writeMs: 1200,
+        writeMs: 1000,
         arrow: true,
         seed: seed,
       ),
@@ -999,35 +1070,35 @@ void _applyCue(
     return;
   }
   if (action == 'draw_circle' || action == 'circle') {
+    final cy = math.min(820.0, 240.0 + items.where((e) => e.kind == _Kind.circle).length * 150);
     items.add(
       _BoardItem.circle(
         id: id,
-        cx: _num(p['cx'], rtl ? 520 : 1480).toDouble(),
-        cy: _num(p['cy'], 420).toDouble(),
-        r: math.max(28, _num(p['r'], 70)).toDouble(),
+        cx: diagramX + 40,
+        cy: cy,
+        r: math.min(60.0, math.max(36.0, _num(p['r'], 50).toDouble())),
         color: _color(p['color'], const Color(0xFFDC2626)),
-        width: _num(p['width'], 3.4).toDouble(),
+        width: 3.0,
         bornAt: bornAt,
-        writeMs: 1400,
+        writeMs: 1100,
         seed: seed,
       ),
     );
     return;
   }
   if (action == 'draw_rectangle' || action == 'draw_rect') {
-    final x = _num(p['x'], _num(p['x1'], rtl ? 280 : 1280)).toDouble();
-    final y = _num(p['y'], _num(p['y1'], 300)).toDouble();
+    final ry = math.min(820.0, 240.0 + items.where((e) => e.kind == _Kind.rect).length * 130);
     items.add(
       _BoardItem.rect(
         id: id,
-        x: x,
-        y: y,
-        w: _num(p['w'], 220).toDouble(),
-        h: _num(p['h'], 120).toDouble(),
+        x: diagramX - 40,
+        y: ry,
+        w: 180,
+        h: 80,
         color: _color(p['color'], const Color(0xFF92400E)),
-        width: _num(p['width'], 3.4).toDouble(),
+        width: 3.0,
         bornAt: bornAt,
-        writeMs: 1250,
+        writeMs: 1000,
         seed: seed,
       ),
     );
@@ -1180,9 +1251,12 @@ class _BoardPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final sx = size.width / boardW;
-    final sy = size.height / boardH;
-    canvas.scale(sx, sy);
+    // Uniform scale — never crush width/height independently.
+    final scale = math.min(size.width / boardW, size.height / boardH);
+    final dx = (size.width - boardW * scale) / 2;
+    final dy = (size.height - boardH * scale) / 2;
+    canvas.translate(dx, dy);
+    canvas.scale(scale);
 
     canvas.drawRect(
       Rect.fromLTWH(0, 0, boardW, boardH),
@@ -1204,12 +1278,13 @@ class _BoardPainter extends CustomPainter {
       if (p <= 0) continue;
       switch (item.kind) {
         case _Kind.highlight:
+          // Keep highlights very soft so they never hide text.
           canvas.drawRRect(
             RRect.fromRectAndRadius(
               Rect.fromLTWH(item.x, item.y, item.w * p, item.h),
               const Radius.circular(8),
             ),
-            Paint()..color = item.color.withValues(alpha: 0.28 * p),
+            Paint()..color = item.color.withValues(alpha: 0.14 * p),
           );
         case _Kind.text:
           final chars = p >= 0.995

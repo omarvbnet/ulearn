@@ -29,6 +29,13 @@ export type ClassroomSessionState = {
   teachingStyle: string;
   lastAskStudent: string | null;
   materialExcerpt: string;
+  /** Vertical cursor for neat board stacking across beats */
+  boardCursorY: number;
+  /** Teacher asked a check question and waits for a correct spoken answer */
+  awaitingCorrectAnswer: boolean;
+  pendingQuestion: string | null;
+  pendingAnswerHint: string | null;
+  pendingAttempts: number;
 };
 
 export type ClassroomBeat = {
@@ -40,6 +47,8 @@ export type ClassroomBeat = {
   pace: ClassroomPace;
   lessonName?: string | null;
   sessionComplete?: boolean;
+  /** Whether the student's last answer was correct (react mode) */
+  answerCorrect?: boolean | null;
   memoryPatch?: Partial<ClassroomSessionState>;
 };
 
@@ -63,6 +72,8 @@ export type ClassroomSessionPublic = {
     | "understanding"
     | "confidence"
     | "lastAskStudent"
+    | "awaitingCorrectAnswer"
+    | "pendingQuestion"
   >;
 };
 
@@ -85,5 +96,10 @@ export function emptyClassroomState(
     teachingStyle: "warm_expert",
     lastAskStudent: null,
     materialExcerpt,
+    boardCursorY: 140,
+    awaitingCorrectAnswer: false,
+    pendingQuestion: null,
+    pendingAnswerHint: null,
+    pendingAttempts: 0,
   };
 }

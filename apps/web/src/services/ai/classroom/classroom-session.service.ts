@@ -5,6 +5,7 @@ import { StudentMemoryService } from "../student-memory.service";
 import { resolveTeacherVoice } from "../voice-accent";
 import { sanitizeClassroomPlainText } from "../ai-teacher-prompt";
 import type { ChatMessage } from "../types";
+import { normalizeBoardActions } from "./board-layout";
 import { buildClassroomBeatPrompt } from "./classroom-prompts";
 import {
   emptyClassroomState,
@@ -65,7 +66,7 @@ function parseBeat(raw: string): ClassroomBeat | null {
             ? { ...(r.parameters as Record<string, unknown>) }
             : {};
         if ("text" in parameters) {
-          parameters.text = sanitizeClassroomPlainText(parameters.text, 48);
+          parameters.text = sanitizeClassroomPlainText(parameters.text, 40);
         }
         return {
           time: Math.max(0, Number(r.time) || i * 350),
@@ -80,14 +81,20 @@ function parseBeat(raw: string): ClassroomBeat | null {
     const askStudent = o.askStudent
       ? sanitizeClassroomPlainText(o.askStudent, 160)
       : null;
+    const answerCorrect =
+      o.answerCorrect === true
+        ? true
+        : o.answerCorrect === false
+          ? false
+          : null;
 
     return {
-      speak,
-      board: board.slice(0, 5),
+      speak: speak.slice(0, 2),
+      board: board.slice(0, 3),
       askStudent,
       waitForStudentMs: Math.max(
         0,
-        Math.min(5000, Number(o.waitForStudentMs) || (askStudent ? 2500 : 0))
+        Math.min(8000, Number(o.waitForStudentMs) || (askStudent ? 5500 : 0))
       ),
       emotion: [
         "calm",
@@ -103,6 +110,7 @@ function parseBeat(raw: string): ClassroomBeat | null {
         ? sanitizeClassroomPlainText(o.lessonName, 80)
         : null,
       sessionComplete: Boolean(o.sessionComplete),
+      answerCorrect,
       memoryPatch:
         o.memoryPatch && typeof o.memoryPatch === "object"
           ? (o.memoryPatch as Partial<ClassroomSessionState>)
@@ -111,6 +119,44 @@ function parseBeat(raw: string): ClassroomBeat | null {
   } catch {
     return null;
   }
+}
+
+function finalizeBeat(
+  beat: ClassroomBeat,
+  state: ClassroomSessionState,
+  language: string
+): ClassroomBeat {
+  const rtl =
+    language.toLowerCase().startsWith("ar") ||
+    language.toLowerCase().startsWith("ku");
+  const layout = normalizeBoardActions(beat.board || [], {
+    rtl,
+    cursorY: state.boardCursorY || 140,
+  });
+  const ask =
+    beat.askStudent ||
+    (beat.speak.length && /[?؟]$/.test(beat.speak[beat.speak.length - 1] || "")
+      ? beat.speak[beat.speak.length - 1]
+      : null);
+  // Ensure check questions are spoken aloud.
+  const speak = [...beat.speak];
+  if (ask && !speak.some((s) => s.includes(ask.slice(0, 12)))) {
+    speak.push(ask);
+  }
+  return {
+    ...beat,
+    speak: speak.slice(0, 3),
+    board: layout.actions,
+    askStudent: ask,
+    waitForStudentMs: ask
+      ? Math.max(5000, beat.waitForStudentMs || 5500)
+      : beat.waitForStudentMs || 0,
+    memoryPatch: {
+      ...(beat.memoryPatch || {}),
+      boardCursorY: layout.nextCursorY,
+      ...(layout.cleared ? { boardSummary: [] } : {}),
+    },
+  };
 }
 
 function fallbackBeat(
@@ -204,7 +250,10 @@ function mergeState(
   beat: ClassroomBeat,
   studentTranscript?: string
 ): ClassroomSessionState {
-  const next: ClassroomSessionState = { ...state };
+  const next: ClassroomSessionState = {
+    ...emptyClassroomState(state.materialExcerpt),
+    ...state,
+  };
   const patch = beat.memoryPatch || {};
   if (patch.currentLessonName) next.currentLessonName = String(patch.currentLessonName);
   if (patch.currentTopic) next.currentTopic = String(patch.currentTopic);
@@ -219,6 +268,9 @@ function mergeState(
     next.confidence = clamp01(patch.confidence, next.confidence);
   if (patch.learningSpeed === "slow" || patch.learningSpeed === "normal" || patch.learningSpeed === "fast") {
     next.learningSpeed = patch.learningSpeed;
+  }
+  if (typeof patch.boardCursorY === "number" && Number.isFinite(patch.boardCursorY)) {
+    next.boardCursorY = Math.max(120, Math.min(980, patch.boardCursorY));
   }
   if (Array.isArray(patch.mistakes)) {
     next.mistakes = [...next.mistakes, ...asStringArray(patch.mistakes)].slice(-12);
@@ -235,7 +287,33 @@ function mergeState(
     if (notes.length) next.boardSummary = [...next.boardSummary, ...notes].slice(-16);
   }
   next.spokenHistory = [...next.spokenHistory, ...beat.speak].slice(-24);
-  next.lastAskStudent = beat.askStudent || null;
+  next.lastAskStudent = beat.askStudent || next.lastAskStudent;
+
+  if (beat.answerCorrect === true) {
+    next.awaitingCorrectAnswer = false;
+    next.pendingQuestion = null;
+    next.pendingAnswerHint = null;
+    next.pendingAttempts = 0;
+    next.understanding = clamp01(next.understanding + 0.08, next.understanding);
+    next.confidence = clamp01(next.confidence + 0.08, next.confidence);
+  } else if (beat.askStudent) {
+    next.awaitingCorrectAnswer = true;
+    next.pendingQuestion = beat.askStudent;
+    next.pendingAnswerHint =
+      sanitizeClassroomPlainText(patch.pendingAnswerHint, 80) ||
+      next.pendingAnswerHint;
+    if (beat.answerCorrect === false) {
+      next.pendingAttempts = (next.pendingAttempts || 0) + 1;
+      next.mistakes = [
+        ...next.mistakes,
+        studentTranscript?.trim() || "incorrect attempt",
+      ].slice(-12);
+      next.understanding = Math.max(0.15, next.understanding - 0.08);
+      next.emotionalState = "patient";
+      next.learningSpeed = "slow";
+    }
+  }
+
   if (studentTranscript?.trim()) {
     next.studentQuestions = [...next.studentQuestions, studentTranscript.trim()].slice(
       -16
@@ -280,6 +358,8 @@ function toPublic(
       understanding: state.understanding ?? 0.5,
       confidence: state.confidence ?? 0.5,
       lastAskStudent: state.lastAskStudent ?? null,
+      awaitingCorrectAnswer: Boolean(state.awaitingCorrectAnswer),
+      pendingQuestion: state.pendingQuestion ?? null,
     },
   };
 }
@@ -501,19 +581,25 @@ export class ClassroomSessionService {
   static async studentTurn(input: {
     userId: string;
     sessionId: string;
-    transcript: string;
+    transcript?: string;
+    noAnswer?: boolean;
     signals?: {
       frustration?: number;
       confidence?: number;
       confusion?: number;
     };
   }) {
+    const silence = Boolean(input.noAnswer);
     const transcript =
-      sanitizeClassroomPlainText(input.transcript, 280) || input.transcript.trim();
-    if (!transcript) throw new Error("Empty transcript");
+      sanitizeClassroomPlainText(input.transcript || "", 280) ||
+      (input.transcript || "").trim();
+    if (!silence && !transcript) throw new Error("Empty transcript");
 
     const row = await this.requireLiveSession(input.userId, input.sessionId);
-    const state = { ...(row.state as unknown as ClassroomSessionState) };
+    const state = {
+      ...emptyClassroomState(""),
+      ...(row.state as unknown as ClassroomSessionState),
+    };
     if (typeof input.signals?.confusion === "number" && input.signals.confusion > 0.55) {
       state.understanding = Math.max(0.15, state.understanding - 0.12);
       state.emotionalState = "patient";
@@ -541,11 +627,19 @@ export class ClassroomSessionService {
       studentBlurb: "",
       memoryBlurb,
       state,
-      mode: "react",
-      studentTranscript: transcript,
+      mode: silence ? "silence" : "react",
+      studentTranscript: silence ? undefined : transcript,
     });
 
-    const nextState = mergeState(state, beat, transcript);
+    const nextState = mergeState(state, beat, silence ? undefined : transcript);
+    if (silence) {
+      nextState.pendingAttempts = (nextState.pendingAttempts || 0) + 1;
+      nextState.awaitingCorrectAnswer = true;
+      if (!nextState.pendingQuestion) {
+        nextState.pendingQuestion =
+          beat.askStudent || state.pendingQuestion || state.lastAskStudent;
+      }
+    }
     const beatIndex = row.beatIndex + 1;
     await prisma.aiClassroomSession.update({
       where: { id: row.id },
@@ -556,7 +650,9 @@ export class ClassroomSessionService {
       },
     });
 
-    void StudentMemoryService.recordQuestion(input.userId, transcript);
+    if (!silence && transcript) {
+      void StudentMemoryService.recordQuestion(input.userId, transcript);
+    }
 
     const voice = resolveTeacherVoice({
       language: row.locale,
@@ -632,7 +728,7 @@ export class ClassroomSessionService {
     studentBlurb: string;
     memoryBlurb: string;
     state: ClassroomSessionState;
-    mode: "open" | "next" | "react";
+    mode: "open" | "next" | "react" | "silence";
     studentTranscript?: string;
     question?: string;
   }): Promise<ClassroomBeat> {
@@ -653,33 +749,45 @@ export class ClassroomSessionService {
       input.mode === "open"
         ? `Open the live classroom. Student request: ${input.question || "Teach my selected material from the first lesson to the last."}`
         : input.mode === "react"
-          ? `Student interrupted: ${input.studentTranscript}`
-          : "Continue the live classroom with the next natural teaching beat.";
+          ? `Student spoke — answer immediately: ${input.studentTranscript}`
+          : input.mode === "silence"
+            ? "Student did not answer. Repeat the pending check question by voice now."
+            : "Continue the live classroom with the next natural teaching beat.";
 
     const messages: ChatMessage[] = [
       { role: "system", content: system },
       { role: "user", content: userContent },
     ];
 
+    const fallbackMode =
+      input.mode === "silence" ? "react" : input.mode === "react" ? "react" : input.mode === "open" ? "open" : "next";
+
     try {
       const result = await AiProviderService.chat(
         "TEACHING_ASSISTANT",
         messages,
-        input.userId
+        input.userId,
+        {
+          temperature: input.mode === "react" || input.mode === "silence" ? 0.35 : 0.45,
+        }
       );
-      return (
+      const parsed =
         parseBeat(result.text) ||
         fallbackBeat(
           input.language,
-          input.mode,
+          fallbackMode,
           input.state.currentLessonName || input.curriculumOutline[0] || null
-        )
-      );
+        );
+      return finalizeBeat(parsed, input.state, input.language);
     } catch {
-      return fallbackBeat(
-        input.language,
-        input.mode,
-        input.state.currentLessonName || input.curriculumOutline[0] || null
+      return finalizeBeat(
+        fallbackBeat(
+          input.language,
+          fallbackMode,
+          input.state.currentLessonName || input.curriculumOutline[0] || null
+        ),
+        input.state,
+        input.language
       );
     }
   }

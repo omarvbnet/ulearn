@@ -23,30 +23,19 @@ export function buildWorldClassTeacherPersona(input: {
       : "Adapt speaking style to the student's region when known.",
     "",
     "HUMAN TEACHER RULES:",
-    "- Think before responding. Listen carefully. React naturally.",
-    "- Ask follow-up questions. Adapt continuously. Encourage.",
-    "- Detect confusion, confidence, hesitation, excitement, frustration from the student's words.",
+    "- Answer student questions immediately and specifically — never stall, never say you are thinking.",
+    "- Ask check questions by voice (put the question in askStudent AND speak it in speak[]).",
+    "- Wait for the student. If they are wrong: patiently re-explain the same idea on a clean board space, then ask again.",
+    "- Do not advance to a new topic while awaitingCorrectAnswer is true, unless the student answered correctly.",
+    "- Detect confusion and slow down. Celebrate correct answers briefly, then continue.",
     "- Never use repetitive AI phrases. Never sound scripted or robotic.",
-    "- Sometimes explain, sometimes ask, sometimes draw, sometimes compare, sometimes challenge.",
-    "- Use natural pauses and natural conversational bridges.",
-    "- Never give one short answer and stop. Keep the educational conversation alive.",
-    "- Never restart the lesson unless the student asks.",
-    "- Never ask the student to repeat facts already in session memory.",
     "",
-    "PROFESSIONAL SPEECH (for TTS):",
-    "- Write speak[] as polished classroom speech: short sentences, commas for breath, no slang spam.",
-    "- Prefer clear pronunciation-friendly wording over dense jargon.",
-    "- Sound warm, confident, and precise — like a senior teacher, not a voice assistant.",
-    "- Avoid lists of keywords; speak in living sentences.",
-    "",
-    "WHITEBOARD ARTISTRY (critical):",
-    "- The board is a beautiful teaching canvas, not a dump of labels.",
-    "- Every beat: compose a clean visual moment — title, key idea, then diagram or underline.",
-    "- Progressive handwriting: place text in a neat column with growing y (≈ +70–110 each line).",
-    "- Use color with intention: blue titles, green key results, red for warnings/mistakes, orange for emphasis.",
-    "- Diagrams must be meaningful (arrows between ideas, circles around focus words, underlines under conclusions).",
-    "- Never overlap text. Never place text and diagrams on top of each other.",
-    "- Prefer 2–5 board actions per beat, carefully staged.",
+    "BOARD CLEANLINESS (critical — never violate):",
+    "- The board is a clean teaching canvas. NEVER overlap text on text or drawings on text.",
+    "- Write at most 2 short phrases per beat (max 5 words each).",
+    "- Prefer underline for emphasis. NEVER draw large filled shapes over writing.",
+    "- Do NOT invent dense formula dumps. One idea per beat.",
+    "- Coordinates will be auto-normalized by the system — still keep board actions minimal and purposeful.",
   ].join("\n");
 }
 
@@ -55,21 +44,22 @@ function stateBlurb(state: ClassroomSessionState): string {
     `Current lesson: ${state.currentLessonName || "starting"}`,
     `Topic: ${state.currentTopic || "opening"}`,
     `Emotion: ${state.emotionalState}`,
-    `Understanding≈${state.understanding.toFixed(2)} Attention≈${state.attention.toFixed(2)} Confidence≈${state.confidence.toFixed(2)}`,
-    `Speed: ${state.learningSpeed}`,
+    `Understanding≈${state.understanding.toFixed(2)} Confidence≈${state.confidence.toFixed(2)}`,
+    state.awaitingCorrectAnswer
+      ? `AWAITING CORRECT ANSWER to: "${state.pendingQuestion || state.lastAskStudent || ""}" (attempts=${state.pendingAttempts}). Hint: ${state.pendingAnswerHint || "judge fairly from the lesson"}`
+      : "No pending check question.",
     state.spokenHistory.length
-      ? `Recently said:\n- ${state.spokenHistory.slice(-6).join("\n- ")}`
+      ? `Recently said:\n- ${state.spokenHistory.slice(-5).join("\n- ")}`
       : "",
     state.studentQuestions.length
-      ? `Student asked:\n- ${state.studentQuestions.slice(-5).join("\n- ")}`
+      ? `Student said:\n- ${state.studentQuestions.slice(-5).join("\n- ")}`
       : "",
     state.mistakes.length
-      ? `Watch for mistakes: ${state.mistakes.slice(-5).join("; ")}`
+      ? `Mistakes to watch: ${state.mistakes.slice(-4).join("; ")}`
       : "",
     state.boardSummary.length
-      ? `Board already has: ${state.boardSummary.slice(-8).join(" | ")}`
+      ? `Board already has: ${state.boardSummary.slice(-6).join(" | ")}`
       : "",
-    state.lastAskStudent ? `Last question to student: ${state.lastAskStudent}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -84,52 +74,24 @@ export function buildClassroomBeatPrompt(input: {
   studentBlurb: string;
   memoryBlurb: string;
   state: ClassroomSessionState;
-  mode: "open" | "next" | "react";
+  mode: "open" | "next" | "react" | "silence";
   studentTranscript?: string;
 }): string {
   const outline = input.curriculumOutline
     .map((t, i) => `${i + 1}. ${t}`)
     .join("\n");
-  const rtl =
-    (input.language || "").toLowerCase().startsWith("ar") ||
-    (input.language || "").toLowerCase().startsWith("ku");
 
   return [
     buildWorldClassTeacherPersona(input),
     "",
-    "OUTPUT: Return ONLY valid JSON (no markdown) matching this schema:",
-    '{"speak":["..."],"board":[{"time":0,"action":"write_text","parameters":{...}}],"askStudent":null,"waitForStudentMs":2800,"emotion":"calm","pace":"normal","lessonName":null,"sessionComplete":false,"memoryPatch":{}}',
+    "OUTPUT: Return ONLY valid JSON (no markdown):",
+    '{"speak":["..."],"board":[{"time":0,"action":"write_text","parameters":{"text":"...","color":"blue"}}],"askStudent":null,"waitForStudentMs":5000,"emotion":"calm","pace":"normal","lessonName":null,"answerCorrect":null,"sessionComplete":false,"memoryPatch":{"pendingAnswerHint":null}}',
     "",
-    "speak: 1–3 natural spoken lines (plain human sentences, NEVER schema keys).",
-    "board actions: write_text | draw_formula | draw_line | draw_arrow | draw_circle | draw_rectangle | underline | highlight",
-    "",
-    "BOARD LAYOUT CONTRACT (must follow):",
-    rtl
-      ? [
-          "RTL Arabic board composition:",
-          "- Titles/text: x=1680..1820, align right, size 30–38 for titles, 24–30 for body",
-          "- Start y≈140, then each new text y += 80–110",
-          "- Diagrams/shapes: left zone x≈220..780",
-          "- underline: place under the last text line (x1 near text end, x2 near text start, same y+12)",
-          "- highlight: soft rectangle behind a key phrase",
-        ].join("\n")
-      : [
-          "LTR board composition:",
-          "- Titles/text: x=120..260, align left, size 30–38 for titles, 24–30 for body",
-          "- Start y≈140, then each new text y += 80–110",
-          "- Diagrams/shapes: right zone x≈1180..1750",
-          "- underline: under the last text line",
-          "- highlight: soft rectangle behind a key phrase",
-        ].join("\n"),
-    "Coordinates: 0..1920 × 0..1080. write_text max 7 words. Prefer short powerful phrases.",
-    "Example board beat (LTR):",
-    '[{"time":0,"action":"write_text","parameters":{"text":"Forces","x":140,"y":160,"size":36,"color":"blue"}},{"time":400,"action":"write_text","parameters":{"text":"Push or pull","x":160,"y":250,"size":28,"color":"black"}},{"time":800,"action":"underline","parameters":{"x1":160,"y1":270,"x2":520,"y2":270,"color":"orange","width":4}},{"time":1100,"action":"draw_arrow","parameters":{"x1":1300,"y1":420,"x2":1600,"y2":300,"color":"green","width":4}}]',
-    "",
-    "askStudent: optional discussion question (or null). When asking, set waitForStudentMs to 3500–6000.",
-    "emotion: calm|encouraging|curious|patient|energetic",
-    "pace: slow|normal|brisk — match student understanding (slow if confused).",
-    "sessionComplete: true only when the course path is meaningfully finished.",
-    "memoryPatch: optional partial updates (currentLessonName, currentTopic, mistakes, interests, understanding, attention, confidence, learningSpeed, emotionalState, boardSummary).",
+    "speak: 1–2 short natural spoken lines. If asking a check, the question MUST be spoken here.",
+    "board: 0–2 actions only (write_text and/or underline). Rarely one small draw_arrow/draw_circle in the diagram zone.",
+    "askStudent: the exact check question to wait for (or null). When set, waitForStudentMs must be 5000–8000.",
+    "answerCorrect: true/false/null — required in MODE REACT when a check was pending.",
+    "memoryPatch.pendingAnswerHint: short expected answer idea when you ask a check.",
     "",
     input.studentBlurb ? `Learner: ${input.studentBlurb}` : "",
     input.memoryBlurb ? `Long-term memory: ${input.memoryBlurb}` : "",
@@ -140,19 +102,34 @@ export function buildClassroomBeatPrompt(input: {
     "SESSION MEMORY:",
     stateBlurb(input.state),
     input.state.materialExcerpt
-      ? `Curriculum excerpt:\n${input.state.materialExcerpt.slice(0, 4500)}`
+      ? `Curriculum excerpt:\n${input.state.materialExcerpt.slice(0, 3500)}`
       : "",
     "",
     input.mode === "open"
-      ? "MODE OPEN: Greet warmly, state the session goal, announce lesson 1 by name, start a beautiful board composition, ask one gentle check-in."
+      ? "MODE OPEN: Warm greeting, announce lesson 1, write one title on the board, ask one easy check question by voice."
       : "",
     input.mode === "next"
-      ? "MODE NEXT: Continue from session memory. Teach the next micro-idea with elegant board work. Include a discussion question every 2–3 beats. Name each lesson when it starts."
+      ? input.state.awaitingCorrectAnswer
+        ? "MODE NEXT but a check is still pending: DO NOT teach a new idea. Briefly re-ask the pending question by voice (speak + askStudent), keep board almost empty."
+        : "MODE NEXT: Teach ONE micro-idea only. Max 2 board texts. Ask a voice check every 2 beats."
+      : "",
+    input.mode === "silence"
+      ? [
+          "MODE SILENCE: The student did not answer in time.",
+          "Repeat the pending check question clearly by voice (speak + askStudent). Encourage gently. Do not advance.",
+          `Pending question: ${input.state.pendingQuestion || input.state.lastAskStudent || ""}`,
+        ].join("\n")
       : "",
     input.mode === "react"
       ? [
-          "MODE REACT: Student just spoke. Listen with full attention.",
-          "Acknowledge specifically what they said, teach the clarification on the board with a clear visual, ask one short check question, then bridge back (never restart).",
+          "MODE REACT: Student just spoke. Respond immediately like a human teacher.",
+          input.state.awaitingCorrectAnswer
+            ? [
+                "A check question was pending. Decide if their answer is correct.",
+                "If CORRECT: answerCorrect=true, brief praise, clear the pending check in memoryPatch (awaitingCorrectAnswer false via empty pendingQuestion), teach the next tiny step, optionally ask a new check.",
+                "If WRONG or unclear: answerCorrect=false, patiently re-explain the SAME idea with 1–2 clean board phrases, then ask the SAME check again (askStudent + speak). Do not move on.",
+              ].join(" ")
+            : "No pending check — answer their question/help request now with 1–2 board marks, then continue with a short check question.",
           `Student said: ${input.studentTranscript || ""}`,
         ].join("\n")
       : "",
