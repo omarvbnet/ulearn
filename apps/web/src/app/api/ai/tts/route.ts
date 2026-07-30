@@ -11,6 +11,7 @@ const schema = z.object({
   /** Optional ISO country override; otherwise loaded from the user profile */
   country: z.string().max(8).optional(),
   voice: z.string().max(40).optional(),
+  pace: z.enum(["slow", "normal", "brisk"]).optional(),
 });
 
 /**
@@ -32,12 +33,14 @@ export async function POST(request: Request) {
     select: {
       locale: true,
       country: { select: { code: true } },
+      province: { select: { nameEn: true } },
     },
   });
 
   const resolved = resolveTeacherVoice({
     language: parsed.data.language || profile?.locale || "en",
     countryCode: parsed.data.country || profile?.country?.code || null,
+    provinceName: profile?.province?.nameEn || null,
     voiceOverride: parsed.data.voice,
   });
 
@@ -48,6 +51,7 @@ export async function POST(request: Request) {
         language: resolved.selectedLanguage,
         countryCode: resolved.countryCode,
         voice: resolved.openaiVoice,
+        pace: parsed.data.pace || "normal",
       },
       auth.session.userId
     );

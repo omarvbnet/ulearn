@@ -11,6 +11,7 @@ export type ResolvedTeacherVoice = {
   /** Original selected language (may be ku) */
   selectedLanguage: TeacherSpeechLanguage;
   countryCode: string | null;
+  provinceName: string | null;
   /** BCP-47 tag for speech recognition */
   speechLocale: string;
   /** OpenAI /audio/speech voice name */
@@ -143,10 +144,12 @@ function englishAccent(country: string | null): {
 export function resolveTeacherVoice(input: {
   language?: string | null;
   countryCode?: string | null;
+  provinceName?: string | null;
   voiceOverride?: string | null;
 }): ResolvedTeacherVoice {
   const selectedLanguage = normLang(input.language);
   const countryCode = normCountry(input.countryCode);
+  const provinceName = (input.provinceName || "").trim() || null;
   const override = (input.voiceOverride || "").trim();
 
   if (selectedLanguage === "tr") {
@@ -154,6 +157,7 @@ export function resolveTeacherVoice(input: {
       language: "tr",
       selectedLanguage,
       countryCode,
+      provinceName,
       speechLocale: "tr-TR",
       openaiVoice: override || "onyx",
       elevenLabsVoiceId: override && override.length >= 16 ? override : ELEVEN.george,
@@ -163,14 +167,13 @@ export function resolveTeacherVoice(input: {
   }
 
   if (selectedLanguage === "ku") {
-    // Teach in Kurdish text; voice uses multilingual Arabic/Turkish-capable speaker
-    // with locale matching the student's country when possible.
     const ar = arabicAccent(countryCode);
     const inTurkey = countryCode === "TR";
     return {
       language: inTurkey ? "tr" : "ar",
       selectedLanguage,
       countryCode,
+      provinceName,
       speechLocale: inTurkey ? "tr-TR" : countryCode === "IQ" ? "ar-IQ" : ar.speechLocale,
       openaiVoice: override || (inTurkey ? "onyx" : ar.openaiVoice),
       elevenLabsVoiceId:
@@ -186,16 +189,22 @@ export function resolveTeacherVoice(input: {
 
   if (selectedLanguage === "ar") {
     const ar = arabicAccent(countryCode);
+    // Province can refine Iraqi Arabic teaching tone without changing voice id.
+    const accent =
+      countryCode === "IQ" && provinceName
+        ? `iraqi_${provinceName.toLowerCase().replace(/\s+/g, "_").slice(0, 24)}`
+        : ar.accent;
     return {
       language: "ar",
       selectedLanguage,
       countryCode,
+      provinceName,
       speechLocale: ar.speechLocale,
       openaiVoice: override || ar.openaiVoice,
       elevenLabsVoiceId:
         override && override.length >= 16 ? override : ar.elevenLabsVoiceId,
       elevenLanguageCode: "ar",
-      accent: ar.accent,
+      accent,
     };
   }
 
@@ -204,6 +213,7 @@ export function resolveTeacherVoice(input: {
     language: "en",
     selectedLanguage: "en",
     countryCode,
+    provinceName,
     speechLocale: en.speechLocale,
     openaiVoice: override || en.openaiVoice,
     elevenLabsVoiceId:
@@ -216,33 +226,43 @@ export function resolveTeacherVoice(input: {
 /** Prompt hint so the teacher writes/speaks in the right language + regional tone. */
 export function accentInstruction(
   language?: string | null,
-  countryCode?: string | null
+  countryCode?: string | null,
+  provinceName?: string | null
 ): string {
-  const v = resolveTeacherVoice({ language, countryCode });
-  const country = v.countryCode ? ` (country ${v.countryCode})` : "";
+  const v = resolveTeacherVoice({ language, countryCode, provinceName });
+  const region = [
+    v.countryCode ? `country ${v.countryCode}` : null,
+    v.provinceName ? `province ${v.provinceName}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const tag = region ? ` (${region})` : "";
   switch (v.selectedLanguage) {
     case "ar":
-      if (v.accent === "iraqi_levantine") {
-        return `Speak and write entirely in clear Arabic (MSA) with a natural Iraqi/Levantine teaching tone${country}. Prefer local examples when helpful. Never switch language unless asked.`;
+      if (v.accent.startsWith("iraqi") || v.accent === "iraqi_levantine") {
+        return `Speak and write entirely in clear Arabic (MSA) with a natural Iraqi classroom tone${tag}. Use locally familiar educational expressions when helpful, while remaining clear for all students. Never switch language unless asked.`;
+      }
+      if (v.accent === "levantine") {
+        return `Speak and write entirely in clear Arabic (MSA) with a Levantine-friendly teaching tone${tag}. Never switch language unless asked.`;
       }
       if (v.accent === "gulf") {
-        return `Speak and write entirely in clear Arabic (MSA) with a Gulf-friendly educational tone${country}. Never switch language unless asked.`;
+        return `Speak and write entirely in clear Arabic (MSA) with a Gulf-friendly educational tone${tag}. Never switch language unless asked.`;
       }
       if (v.accent === "egyptian") {
-        return `Speak and write entirely in clear Arabic (MSA) with an Egyptian-friendly teaching tone${country}. Never switch language unless asked.`;
+        return `Speak and write entirely in clear Arabic (MSA) with an Egyptian-friendly teaching tone${tag}. Never switch language unless asked.`;
       }
-      return `Speak and write entirely in Arabic (العربية)${country}. Do not switch to English unless the user asks.`;
+      return `Speak and write entirely in Arabic (العربية)${tag}. Do not switch to English unless the user asks.`;
     case "ku":
-      return `You MUST reply entirely in Kurdish (کوردی)${country}. Keep explanations natural for students in this region. Do not switch language unless asked.`;
+      return `You MUST reply entirely in Kurdish (کوردی)${tag}. Keep explanations natural for students in this region. Do not switch language unless asked.`;
     case "tr":
-      return `Speak and write entirely in natural Turkish${country}. Use clear classroom Turkish. Do not switch language unless asked.`;
+      return `Speak and write entirely in natural classroom Turkish${tag}. Do not switch language unless asked.`;
     default:
       if (v.accent === "british") {
-        return `Speak and write entirely in English with British spelling/examples${country}.`;
+        return `Speak and write entirely in English with British spelling/examples${tag}.`;
       }
       if (v.accent === "australian") {
-        return `Speak and write entirely in English with Australian-friendly examples${country}.`;
+        return `Speak and write entirely in English with Australian-friendly examples${tag}.`;
       }
-      return `Speak and write entirely in English${country}.`;
+      return `Speak and write entirely in English${tag}.`;
   }
 }

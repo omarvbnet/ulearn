@@ -253,6 +253,7 @@ model User {
   videoAssets          VideoAsset[]
   whiteboardAssets     WhiteboardAsset[]
   aiConversations      AiConversation[]
+  aiClassroomSessions  AiClassroomSession[]
   aiUsageLogs          AiUsageLog[]
   studentAiMemory      StudentAiMemory?
   aiMessages           AiMessage[]
@@ -2039,6 +2040,37 @@ model StudentAiMemory {
   updatedAt          DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum AiClassroomSessionStatus {
+  LIVE
+  PAUSED
+  ENDED
+}
+
+/// Live AI Teacher classroom session (beat-by-beat, not one-shot scripts).
+model AiClassroomSession {
+  id                 String                   @id @default(cuid())
+  userId             String
+  conversationId     String?
+  documentIds        String[]                 @default([])
+  status             AiClassroomSessionStatus @default(LIVE)
+  locale             String
+  countryCode        String?
+  provinceName       String?
+  materialNames      String[]                 @default([])
+  curriculumOutline  Json
+  /// Live teaching memory: topic, board summary, questions, emotion, etc.
+  state              Json
+  beatIndex          Int                      @default(0)
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  endedAt            DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, updatedAt])
+  @@index([userId, createdAt])
 }
 
 model AiResponseCache {

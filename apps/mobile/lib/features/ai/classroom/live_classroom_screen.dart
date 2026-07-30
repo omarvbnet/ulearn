@@ -1,0 +1,1168 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:ulearn/core/api/api_client.dart';
+import 'package:ulearn/core/l10n/l10n_extension.dart';
+
+/// Full-screen live AI Teacher classroom (beat session loop).
+class LiveClassroomScreen extends StatefulWidget {
+  const LiveClassroomScreen({
+    super.key,
+    required this.documentIds,
+    this.question = '',
+  });
+
+  final List<String> documentIds;
+  final String question;
+
+  @override
+  State<LiveClassroomScreen> createState() => _LiveClassroomScreenState();
+}
+
+enum _Presence { thinking, speaking, listening, waiting, idle }
+
+class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
+  static const _boardW = 1920.0;
+  static const _boardH = 1080.0;
+
+  final _audio = AudioPlayer();
+  final _speechStt = stt.SpeechToText();
+  final _items = <_BoardItem>[];
+  final _hzBars = List<double>.filled(28, 0.08);
+
+  var _presence = _Presence.thinking;
+  var _caption = '';
+  var _title = 'Classroom';
+  String? _error;
+  var _ended = false;
+  var _clockMs = 0.0;
+  var _soundLevel = 0.0;
+  String? _sessionId;
+  String? _speechLocale;
+  String? _selectedLanguage;
+
+  var _cancelled = false;
+  var _voiceBusy = false;
+  var _handlingTurn = false;
+  var _loopActive = false;
+  var _sttReady = false;
+  var _listenStarting = false;
+  var _listenGen = 0;
+  DateTime? _lastListenStart;
+  Timer? _paintTimer;
+  Timer? _hzTimer;
+  ApiClient? _api;
+
+  String get _lang {
+    final raw = (_selectedLanguage ?? context.localeCode).toLowerCase();
+    if (raw.startsWith('ar') || raw.startsWith('ku')) return 'ar';
+    if (raw.startsWith('tr')) return 'tr';
+    return 'en';
+  }
+
+  bool get _rtl => _lang == 'ar';
+
+  String get _sttLocaleId {
+    final tag = (_speechLocale ?? '').replaceAll('-', '_');
+    if (tag.length >= 2) return tag;
+    if (_lang == 'ar') return 'ar_SA';
+    if (_lang == 'tr') return 'tr_TR';
+    return 'en_US';
+  }
+
+  String _presenceLabel(_Presence p) {
+    switch (_lang) {
+      case 'ar':
+        return switch (p) {
+          _Presence.thinking => 'يفكّر…',
+          _Presence.speaking => 'يشرح…',
+          _Presence.listening => 'يستمع إليك',
+          _Presence.waiting => 'دورك',
+          _Presence.idle => 'جاهز',
+        };
+      case 'tr':
+        return switch (p) {
+          _Presence.thinking => 'Düşünüyor…',
+          _Presence.speaking => 'Anlatıyor…',
+          _Presence.listening => 'Seni dinliyor',
+          _Presence.waiting => 'Sıra sende',
+          _Presence.idle => 'Hazır',
+        };
+      default:
+        return switch (p) {
+          _Presence.thinking => 'Thinking…',
+          _Presence.speaking => 'Teaching…',
+          _Presence.listening => 'Listening to you',
+          _Presence.waiting => 'Your turn',
+          _Presence.idle => 'Ready',
+        };
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _paintTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
+      if (!mounted) return;
+      setState(() {
+        _clockMs = DateTime.now().millisecondsSinceEpoch.toDouble();
+      });
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _selectedLanguage = context.localeCode.toLowerCase();
+      unawaited(_startSession());
+    });
+  }
+
+  @override
+  void dispose() {
+    _cancelled = true;
+    _listenGen++;
+    _paintTimer?.cancel();
+    _hzTimer?.cancel();
+    unawaited(_speechStt.stop());
+    unawaited(_audio.dispose());
+    final id = _sessionId;
+    final api = _api;
+    _sessionId = null;
+    if (id != null && api != null) {
+      unawaited(api.post('/api/ai/classroom/session/$id/end', {}));
+    }
+    super.dispose();
+  }
+
+  Future<void> _startSession() async {
+    if (!mounted) return;
+    setState(() {
+      _presence = _Presence.thinking;
+      _error = null;
+    });
+    try {
+      final api = context.read<ApiClient>();
+      _api = api;
+      final locale = context.localeCode.toLowerCase();
+      _selectedLanguage = locale;
+      final data = await api.post('/api/ai/classroom/session', {
+        'language': locale,
+        'question': widget.question,
+        'documentIds': widget.documentIds,
+      });
+      if (!mounted || _cancelled) return;
+      if (data['needsMaterialSelection'] == true) {
+        setState(() {
+          _error = _lang == 'ar'
+              ? 'اختر المادة أولاً'
+              : 'Select materials first';
+        });
+        return;
+      }
+      final session = data['session'];
+      final sessionMap =
+          session is Map ? Map<String, dynamic>.from(session) : null;
+      final id = sessionMap?['id']?.toString();
+      if (id == null || id.isEmpty) {
+        throw Exception('Missing session');
+      }
+      _sessionId = id;
+      _speechLocale = sessionMap?['speechLocale']?.toString();
+      final names = sessionMap?['materialNames'];
+      final state = sessionMap?['state'];
+      final lessonName = state is Map
+          ? state['currentLessonName']?.toString()
+          : null;
+      setState(() {
+        _title = (lessonName != null && lessonName.isNotEmpty)
+            ? lessonName
+            : (names is List && names.isNotEmpty
+                ? names.first.toString()
+                : (_lang == 'ar'
+                    ? 'الفصل المباشر'
+                    : _lang == 'tr'
+                        ? 'Canlı sınıf'
+                        : 'Live classroom'));
+      });
+      final beat = data['beat'];
+      if (beat is Map) {
+        await _playBeat(Map<String, dynamic>.from(beat));
+      }
+      unawaited(_runLoop());
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e is ApiException
+            ? e.message
+            : (_lang == 'ar'
+                ? 'تعذر بدء الفصل'
+                : 'Could not start classroom');
+      });
+    }
+  }
+
+  Future<void> _runLoop() async {
+    if (_loopActive || _sessionId == null) return;
+    _loopActive = true;
+    try {
+      while (!_cancelled && !_ended && _sessionId != null && mounted) {
+        if (_handlingTurn) {
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          continue;
+        }
+        if (mounted) setState(() => _presence = _Presence.waiting);
+        await _startListen();
+        await Future<void>.delayed(const Duration(milliseconds: 1800));
+        await _stopListeningQuietly();
+        if (_cancelled || _handlingTurn || _ended) continue;
+
+        if (mounted) setState(() => _presence = _Presence.thinking);
+        final api = _api;
+        if (api == null) break;
+        final data =
+            await api.post('/api/ai/classroom/session/$_sessionId/beat', {});
+        if (!mounted || _cancelled) break;
+        final session = data['session'];
+        if (session is Map) {
+          final state = session['state'];
+          final lessonName = state is Map
+              ? state['currentLessonName']?.toString()
+              : null;
+          if (lessonName != null && lessonName.isNotEmpty) {
+            setState(() => _title = lessonName);
+          }
+        }
+        final beatRaw = data['beat'];
+        if (beatRaw is! Map) continue;
+        final beat = Map<String, dynamic>.from(beatRaw);
+        await _playBeat(beat);
+        final ask = beat['askStudent']?.toString();
+        if (ask != null && ask.trim().isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _presence = _Presence.waiting;
+              _caption = _cleanText(ask) ?? ask;
+            });
+          }
+          await _startListen();
+          final waitMs =
+              ((beat['waitForStudentMs'] as num?)?.toInt() ?? 2400)
+                  .clamp(1600, 8000);
+          await Future<void>.delayed(Duration(milliseconds: waitMs));
+          await _stopListeningQuietly();
+        }
+        final status = session is Map ? session['status']?.toString() : null;
+        if (beat['sessionComplete'] == true || status == 'ENDED') {
+          if (mounted) setState(() => _ended = true);
+          break;
+        }
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e is ApiException ? e.message : 'Classroom failed';
+      });
+    } finally {
+      _loopActive = false;
+    }
+  }
+
+  Future<void> _playBeat(Map<String, dynamic> beat) async {
+    if (_cancelled || !mounted) return;
+    final board = beat['board'];
+    if (board is List) {
+      var penAt = DateTime.now().millisecondsSinceEpoch.toDouble();
+      for (var i = 0; i < board.length; i++) {
+        final row = board[i];
+        if (row is! Map) continue;
+        final cue = Map<String, dynamic>.from(row);
+        final before = _items.length;
+        _applyCue(_items, cue, i, penAt, _rtl);
+        if (_items.length > before) {
+          penAt += _items.last.writeMs + 180;
+        }
+      }
+      if (mounted) setState(() {});
+    }
+
+    _voiceBusy = true;
+    if (mounted) setState(() => _presence = _Presence.speaking);
+    final speakRaw = beat['speak'];
+    final lines = <String>[];
+    if (speakRaw is List) {
+      for (final s in speakRaw) {
+        final t = _cleanText(s);
+        if (t != null && t.isNotEmpty) lines.add(t);
+      }
+    } else if (speakRaw is String) {
+      final t = _cleanText(speakRaw);
+      if (t != null && t.isNotEmpty) lines.add(t);
+    }
+
+    final pace = beat['pace']?.toString() ?? 'normal';
+    for (final line in lines) {
+      if (_cancelled || _handlingTurn) break;
+      if (mounted) setState(() => _caption = line);
+      await _speakCloud(line, pace: pace);
+      await Future<void>.delayed(const Duration(milliseconds: 220));
+    }
+    _voiceBusy = false;
+    final lessonName = beat['lessonName']?.toString();
+    if (lessonName != null && lessonName.isNotEmpty && mounted) {
+      setState(() => _title = lessonName);
+    }
+    if (beat['sessionComplete'] == true && mounted) {
+      setState(() => _ended = true);
+    }
+  }
+
+  Future<void> _submitTurn(String transcript) async {
+    final q = (_cleanText(transcript) ?? transcript).trim();
+    if (q.isEmpty || _sessionId == null || _handlingTurn) return;
+    _handlingTurn = true;
+    await _stopListeningQuietly();
+    try {
+      await _audio.stop();
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        _presence = _Presence.thinking;
+        _caption = q;
+      });
+    }
+    try {
+      final api = _api;
+      if (api == null) return;
+      final data = await api.post(
+        '/api/ai/classroom/session/$_sessionId/turn',
+        {'transcript': q},
+      );
+      if (!mounted || _cancelled) return;
+      final beat = data['beat'];
+      if (beat is Map) {
+        await _playBeat(Map<String, dynamic>.from(beat));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e is ApiException ? e.message : 'Turn failed';
+      });
+    } finally {
+      _handlingTurn = false;
+    }
+  }
+
+  Future<void> _speakCloud(String text, {String pace = 'normal'}) async {
+    if (!mounted) return;
+    await _stopListeningQuietly();
+    _voiceBusy = true;
+    _hzTimer?.cancel();
+    _hzTimer = Timer.periodic(const Duration(milliseconds: 55), (_) {
+      if (!mounted || !_voiceBusy) return;
+      setState(() => _driveTeacherWave(active: true));
+    });
+    File? tmp;
+    try {
+      try {
+        await _audio.stop();
+      } catch (_) {}
+      final api = _api;
+      if (api == null) return;
+      final data = await api.post('/api/ai/tts', {
+        'text': text,
+        'language': _selectedLanguage ?? _lang,
+        'pace': pace,
+      });
+      if (!mounted) return;
+      final nested = data['data'];
+      final nestedMap =
+          nested is Map ? Map<String, dynamic>.from(nested) : null;
+      final speechLocale =
+          (data['speechLocale'] ?? nestedMap?['speechLocale'])?.toString();
+      if (speechLocale != null && speechLocale.isNotEmpty) {
+        _speechLocale = speechLocale;
+      }
+      final b64 =
+          (data['dataBase64'] ?? nestedMap?['dataBase64'])?.toString();
+      final mime = (data['mimeType'] ?? nestedMap?['mimeType'])?.toString() ??
+          'audio/mpeg';
+      if (b64 == null || b64.isEmpty) return;
+      final bytes = Uint8List.fromList(base64Decode(b64));
+      final dir = await getTemporaryDirectory();
+      final ext = mime.contains('wav') ? 'wav' : 'mp3';
+      tmp = File(
+        '${dir.path}/ulearn_live_tts_${DateTime.now().microsecondsSinceEpoch}.$ext',
+      );
+      await tmp.writeAsBytes(bytes, flush: true);
+      if (!mounted) return;
+      await _audio.setVolume(1.0);
+      await _audio.setFilePath(tmp.path);
+      await _audio.play();
+      await _audio.playerStateStream
+          .firstWhere(
+            (s) =>
+                s.processingState == ProcessingState.completed ||
+                (s.processingState == ProcessingState.idle && !s.playing),
+          )
+          .timeout(Duration(milliseconds: _estimateMs(text) + 12000));
+      try {
+        await _audio.stop();
+      } catch (_) {}
+    } catch (_) {
+      try {
+        await _audio.stop();
+      } catch (_) {}
+    } finally {
+      _voiceBusy = false;
+      _hzTimer?.cancel();
+      _hzTimer = null;
+      if (mounted) setState(() => _driveTeacherWave(active: false));
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      final doomed = tmp;
+      if (doomed != null) {
+        Future<void>.delayed(const Duration(milliseconds: 400), () async {
+          try {
+            await doomed.delete();
+          } catch (_) {}
+        });
+      }
+    }
+  }
+
+  Future<void> _stopListeningQuietly() async {
+    _listenGen++;
+    try {
+      await _speechStt.stop();
+    } catch (_) {}
+    _listenStarting = false;
+  }
+
+  Future<void> _startListen() async {
+    if (_voiceBusy || _handlingTurn || _ended || _cancelled) return;
+    if (_listenStarting) return;
+    if (_audio.playing) return;
+    final now = DateTime.now();
+    if (_lastListenStart != null &&
+        now.difference(_lastListenStart!).inMilliseconds < 700) {
+      return;
+    }
+
+    _listenStarting = true;
+    final gen = ++_listenGen;
+    try {
+      if (!_sttReady) {
+        _sttReady = await _speechStt.initialize(
+          onError: (_) {
+            if (!mounted) return;
+            _hzTimer?.cancel();
+          },
+          onStatus: (status) {
+            if (!mounted) return;
+            if ((status == 'done' || status == 'notListening') &&
+                !_voiceBusy &&
+                !_handlingTurn &&
+                !_ended &&
+                !_listenStarting) {
+              Future<void>.delayed(
+                const Duration(milliseconds: 800),
+                _startListen,
+              );
+            }
+          },
+        );
+      }
+      if (!_sttReady || !mounted || gen != _listenGen) return;
+      if (_voiceBusy || _handlingTurn || _ended) return;
+      if (_speechStt.isListening) return;
+
+      _lastListenStart = DateTime.now();
+      if (mounted) setState(() => _presence = _Presence.listening);
+      _hzTimer?.cancel();
+      _hzTimer = Timer.periodic(const Duration(milliseconds: 70), (_) {
+        if (!mounted || _voiceBusy) return;
+        setState(() => _updateHzFromLevel(_soundLevel));
+      });
+
+      await _speechStt.listen(
+        localeId: _sttLocaleId,
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 2),
+        partialResults: true,
+        onSoundLevelChange: (level) {
+          if (!mounted || _voiceBusy || gen != _listenGen) return;
+          final n = (level.clamp(-50, 10) + 50) / 60.0;
+          _soundLevel = n.clamp(0.0, 1.0);
+        },
+        onResult: (result) async {
+          if (_voiceBusy || _handlingTurn || gen != _listenGen) return;
+          final words = result.recognizedWords.trim();
+          final count =
+              words.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+          if (count >= 2 && mounted) {
+            setState(() => _presence = _Presence.listening);
+          }
+          if (!result.finalResult || count < 3) return;
+          await _submitTurn(words);
+        },
+      );
+    } finally {
+      _listenStarting = false;
+    }
+  }
+
+  void _driveTeacherWave({required bool active}) {
+    final t = DateTime.now().millisecondsSinceEpoch / 100.0;
+    for (var i = 0; i < _hzBars.length; i++) {
+      _hzBars[i] = active
+          ? 0.12 + (math.sin(t + i * 0.45) * 0.5 + 0.5) * 0.75
+          : 0.08;
+    }
+  }
+
+  void _updateHzFromLevel(double level) {
+    final base = 0.1 + level * 0.85;
+    for (var i = 0; i < _hzBars.length; i++) {
+      final wobble = 0.08 * math.sin(DateTime.now().millisecondsSinceEpoch / 90 + i);
+      _hzBars[i] = (base + wobble).clamp(0.06, 1.0);
+    }
+  }
+
+  Color get _voiceLineColor {
+    if (_presence == _Presence.listening) return const Color(0xFFFBBF24);
+    if (_presence == _Presence.speaking) return const Color(0xFF34D399);
+    return const Color(0xFF38BDF8);
+  }
+
+  Future<void> _close() async {
+    _cancelled = true;
+    await _stopListeningQuietly();
+    try {
+      await _audio.stop();
+    } catch (_) {}
+    final id = _sessionId;
+    _sessionId = null;
+    final api = _api;
+    if (id != null && api != null) {
+      try {
+        await api.post('/api/ai/classroom/session/$id/end', {});
+      } catch (_) {}
+    }
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final caption = _caption.isEmpty ? '…' : (_cleanText(_caption) ?? _caption);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF07111F),
+      body: SafeArea(
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF07111F), Color(0xFF0F172A), Color(0xFF0A1628)],
+            ),
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'U Learn · Classroom',
+                            style: TextStyle(
+                              color: Color(0xFF7DD3FC),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 11,
+                              letterSpacing: 1.1,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 17,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      margin: const EdgeInsets.only(right: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.14),
+                        ),
+                      ),
+                      child: Text(
+                        _presenceLabel(_presence),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _close,
+                      child: Text(
+                        _lang == 'ar'
+                            ? 'إغلاق'
+                            : _lang == 'tr'
+                                ? 'Kapat'
+                                : 'Close',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.12),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          blurRadius: 36,
+                          offset: const Offset(0, 16),
+                        ),
+                      ],
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        CustomPaint(
+                          painter: _BoardPainter(
+                            items: List.of(_items),
+                            clockMs: _clockMs,
+                            rtl: _rtl,
+                            boardW: _boardW,
+                            boardH: _boardH,
+                          ),
+                          child: const SizedBox.expand(),
+                        ),
+                        Positioned(
+                          left: 12,
+                          right: 12,
+                          bottom: 12,
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0B1220)
+                                  .withValues(alpha: 0.85),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.14),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _presenceLabel(_presence),
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF6EE7B7),
+                                    letterSpacing: 0.4,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  caption,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    height: 1.3,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                child: Container(
+                  height: 36,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.1),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: CustomPaint(
+                          painter: _VoiceWavePainter(
+                            levels: List.of(_hzBars),
+                            color: _voiceLineColor,
+                            active: _presence == _Presence.speaking ||
+                                _presence == _Presence.listening,
+                          ),
+                          child: const SizedBox.expand(),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 120),
+                        child: Text(
+                          _presenceLabel(_presence),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.55),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    _error!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFFFCA5A5),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              if (_ended)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Text(
+                    _lang == 'ar'
+                        ? 'انتهى هذا الجزء من الفصل.'
+                        : _lang == 'tr'
+                            ? 'Bu sınıf bölümü tamamlandı.'
+                            : 'This classroom segment is complete.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFFA7F3D0),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String? _cleanText(dynamic raw) {
+  if (raw == null) return '';
+  var s = raw.toString().trim();
+  if (s.isEmpty) return '';
+  if (RegExp(
+    r'language|lesson_title|objective|parameters|action\s*:',
+    caseSensitive: false,
+  ).hasMatch(s)) {
+    return '';
+  }
+  s = s.replaceAll(RegExp(r'\s+'), ' ');
+  if (s.length > 90) s = s.substring(0, 90);
+  return s;
+}
+
+num _num(dynamic v, [num fallback = 0]) {
+  if (v is num) return v;
+  return num.tryParse(v?.toString() ?? '') ?? fallback;
+}
+
+int _estimateMs(String text) {
+  final words =
+      text.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+  return math.max(2200, math.min(14000, words * 420));
+}
+
+Color _color(dynamic raw, [Color fallback = const Color(0xFF1E293B)]) {
+  final c = (raw?.toString() ?? '').trim().toLowerCase();
+  const map = {
+    'blue': Color(0xFF2563EB),
+    'red': Color(0xFFDC2626),
+    'green': Color(0xFF16A34A),
+    'orange': Color(0xFFEA580C),
+    'black': Color(0xFF0F172A),
+    'yellow': Color(0xFFCA8A04),
+  };
+  if (map.containsKey(c)) return map[c]!;
+  if (c.startsWith('#') && (c.length == 7 || c.length == 4)) {
+    try {
+      final hex = c.length == 4
+          ? '#${c[1]}${c[1]}${c[2]}${c[2]}${c[3]}${c[3]}'
+          : c;
+      return Color(int.parse(hex.replaceFirst('#', 'FF'), radix: 16));
+    } catch (_) {}
+  }
+  return fallback;
+}
+
+void _applyCue(
+  List<_BoardItem> items,
+  Map<String, dynamic> cue,
+  int idx,
+  double bornAt,
+  bool rtl,
+) {
+  final p = cue['parameters'] is Map
+      ? Map<String, dynamic>.from(cue['parameters'] as Map)
+      : <String, dynamic>{};
+  final action =
+      (cue['action']?.toString() ?? '').toLowerCase().replaceAll(' ', '_');
+  final id = '${DateTime.now().microsecondsSinceEpoch}-$action-$idx';
+
+  if (action == 'clear_board' || action == 'open_new_board') {
+    items.clear();
+    return;
+  }
+  if (action == 'write_text' ||
+      action == 'draw_formula' ||
+      action == 'draw_equation') {
+    final text = _cleanText(p['text'] ?? p['latex'] ?? p['content']);
+    if (text == null || text.isEmpty) return;
+    final alignRight = rtl || p['align']?.toString() == 'right';
+    items.add(
+      _BoardItem.text(
+        id: id,
+        text: text,
+        x: _num(p['x'], rtl ? 1780 : 120).toDouble(),
+        y: _num(p['y'], 140 + items.length * 12).toDouble(),
+        color: _color(p['color'], const Color(0xFF1E3A8A)),
+        size: _num(p['size'], 28).toDouble().clamp(18, 48),
+        bornAt: bornAt,
+        writeMs: math.max(900, math.min(5000, text.length * 70)).toDouble(),
+        alignRight: alignRight,
+      ),
+    );
+    return;
+  }
+  if (action == 'draw_line' || action == 'underline') {
+    items.add(
+      _BoardItem.line(
+        id: id,
+        x1: _num(p['x1'], _num(p['x'], 200)).toDouble(),
+        y1: _num(p['y1'], _num(p['y'], 200)).toDouble(),
+        x2: _num(p['x2'], _num(p['x'], 200) + 160).toDouble(),
+        y2: _num(p['y2'], _num(p['y'], 200)).toDouble(),
+        color: _color(p['color']),
+        width: _num(p['width'], 3).toDouble(),
+        bornAt: bornAt,
+        writeMs: 900,
+      ),
+    );
+    return;
+  }
+  if (action == 'draw_arrow') {
+    items.add(
+      _BoardItem.line(
+        id: id,
+        x1: _num(p['x1'], 400).toDouble(),
+        y1: _num(p['y1'], 400).toDouble(),
+        x2: _num(p['x2'], 700).toDouble(),
+        y2: _num(p['y2'], 300).toDouble(),
+        color: _color(p['color'], const Color(0xFFCA8A04)),
+        width: _num(p['width'], 3).toDouble(),
+        bornAt: bornAt,
+        writeMs: 1100,
+        arrow: true,
+      ),
+    );
+    return;
+  }
+  if (action == 'draw_circle' || action == 'circle') {
+    final cx = _num(p['cx'], 500).toDouble();
+    final cy = _num(p['cy'], 500).toDouble();
+    final r = _num(p['r'], 60).toDouble();
+    items.add(
+      _BoardItem.circle(
+        id: id,
+        cx: cx,
+        cy: cy,
+        r: r,
+        color: _color(p['color'], const Color(0xFFDC2626)),
+        width: _num(p['width'], 3).toDouble(),
+        bornAt: bornAt,
+        writeMs: 1200,
+      ),
+    );
+    return;
+  }
+  if (action == 'draw_rectangle' || action == 'draw_rect') {
+    final x = _num(p['x'], 300).toDouble();
+    final y = _num(p['y'], 300).toDouble();
+    items.add(
+      _BoardItem.rect(
+        id: id,
+        x: x,
+        y: y,
+        w: _num(p['w'], 180).toDouble(),
+        h: _num(p['h'], 100).toDouble(),
+        color: _color(p['color'], const Color(0xFF92400E)),
+        width: _num(p['width'], 3).toDouble(),
+        bornAt: bornAt,
+        writeMs: 1100,
+      ),
+    );
+  }
+}
+
+class _BoardItem {
+  _BoardItem.text({
+    required this.id,
+    required this.text,
+    required this.x,
+    required this.y,
+    required this.color,
+    required this.size,
+    required this.bornAt,
+    required this.writeMs,
+    required this.alignRight,
+  }) : kind = _Kind.text;
+
+  _BoardItem.line({
+    required this.id,
+    required this.x1,
+    required this.y1,
+    required this.x2,
+    required this.y2,
+    required this.color,
+    required this.width,
+    required this.bornAt,
+    required this.writeMs,
+    this.arrow = false,
+  }) : kind = _Kind.line;
+
+  _BoardItem.circle({
+    required this.id,
+    required this.cx,
+    required this.cy,
+    required this.r,
+    required this.color,
+    required this.width,
+    required this.bornAt,
+    required this.writeMs,
+  }) : kind = _Kind.circle;
+
+  _BoardItem.rect({
+    required this.id,
+    required this.x,
+    required this.y,
+    required this.w,
+    required this.h,
+    required this.color,
+    required this.width,
+    required this.bornAt,
+    required this.writeMs,
+  }) : kind = _Kind.rect;
+
+  final String id;
+  final _Kind kind;
+  String text = '';
+  double x = 0, y = 0, w = 0, h = 0;
+  double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+  double cx = 0, cy = 0, r = 0;
+  double size = 28;
+  double width = 3;
+  bool arrow = false;
+  bool alignRight = false;
+  double bornAt = 0;
+  double writeMs = 600;
+  Color color = const Color(0xFF1E293B);
+
+  double progress(double clockMs) {
+    final p = (clockMs - bornAt) / math.max(1, writeMs);
+    return p.clamp(0.0, 1.0);
+  }
+}
+
+enum _Kind { text, line, circle, rect }
+
+class _VoiceWavePainter extends CustomPainter {
+  _VoiceWavePainter({
+    required this.levels,
+    required this.color,
+    required this.active,
+  });
+
+  final List<double> levels;
+  final Color color;
+  final bool active;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (levels.isEmpty || size.width <= 0 || size.height <= 0) return;
+    final n = levels.length;
+    final barW = math.max(1.4, size.width / (n * 2.8));
+    final paint = Paint()
+      ..color = color.withValues(alpha: active ? 0.92 : 0.35)
+      ..style = PaintingStyle.fill;
+    final midY = size.height * 0.5;
+    final maxH = size.height * 0.72;
+    for (var i = 0; i < n; i++) {
+      final h = (2.0 + levels[i] * maxH).clamp(2.0, maxH);
+      final x = (i + 0.5) * (size.width / n) - barW / 2;
+      final y = midY - h / 2;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, y, barW, h),
+          const Radius.circular(1.5),
+        ),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _VoiceWavePainter oldDelegate) => true;
+}
+
+class _BoardPainter extends CustomPainter {
+  _BoardPainter({
+    required this.items,
+    required this.clockMs,
+    required this.rtl,
+    required this.boardW,
+    required this.boardH,
+  });
+
+  final List<_BoardItem> items;
+  final double clockMs;
+  final bool rtl;
+  final double boardW;
+  final double boardH;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final sx = size.width / boardW;
+    final sy = size.height / boardH;
+    canvas.scale(sx, sy);
+
+    final grid = Paint()
+      ..color = const Color(0xFFE8EEF5)
+      ..strokeWidth = 1;
+    for (var i = 1; i < 19; i++) {
+      canvas.drawLine(Offset(i * 100.0, 0), Offset(i * 100.0, boardH), grid);
+    }
+    for (var i = 1; i < 10; i++) {
+      canvas.drawLine(Offset(0, i * 100.0), Offset(boardW, i * 100.0), grid);
+    }
+
+    for (final item in items) {
+      final p = item.progress(clockMs);
+      if (p <= 0) continue;
+      switch (item.kind) {
+        case _Kind.text:
+          final chars = math.max(1, (item.text.length * p).ceil());
+          final shown = item.text.substring(0, chars.clamp(0, item.text.length));
+          final dir =
+              item.alignRight || rtl ? TextDirection.rtl : TextDirection.ltr;
+          final tp = TextPainter(
+            text: TextSpan(
+              text: shown,
+              style: TextStyle(
+                color: item.color,
+                fontSize: item.size,
+                fontWeight: FontWeight.w600,
+                fontFamily: 'Georgia',
+              ),
+            ),
+            textDirection: dir,
+            textAlign:
+                dir == TextDirection.rtl ? TextAlign.right : TextAlign.left,
+          )..layout(maxWidth: 1600);
+          final paintX =
+              dir == TextDirection.rtl ? item.x - tp.width : item.x;
+          tp.paint(canvas, Offset(paintX, item.y - item.size));
+        case _Kind.circle:
+          canvas.drawArc(
+            Rect.fromCircle(center: Offset(item.cx, item.cy), radius: item.r),
+            -math.pi / 2,
+            2 * math.pi * p,
+            false,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = item.width
+              ..color = item.color,
+          );
+        case _Kind.rect:
+          canvas.drawRect(
+            Rect.fromLTWH(item.x, item.y, item.w * p, item.h * p),
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = item.width
+              ..color = item.color,
+          );
+        case _Kind.line:
+          final x2 = item.x1 + (item.x2 - item.x1) * p;
+          final y2 = item.y1 + (item.y2 - item.y1) * p;
+          canvas.drawLine(
+            Offset(item.x1, item.y1),
+            Offset(x2, y2),
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = item.width
+              ..strokeCap = StrokeCap.round
+              ..color = item.color,
+          );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BoardPainter oldDelegate) =>
+      oldDelegate.clockMs != clockMs || oldDelegate.items != items;
+}

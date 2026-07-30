@@ -287,6 +287,8 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
       voiceOverride: input.voice,
     });
     const voice = resolved.openaiVoice;
+    const speed =
+      input.pace === "slow" ? 0.9 : input.pace === "brisk" ? 1.05 : 0.97;
     const model = /tts|speech|gpt-4o-mini-tts/i.test(config.model)
       ? config.model
       : "tts-1-hd";
@@ -304,7 +306,7 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
           input: text,
           voice,
           response_format: "mp3",
-          speed: 0.98,
+          speed,
         }),
       },
       Math.max(config.timeoutMs || 30000, 60000)

@@ -15,7 +15,7 @@ import 'package:ulearn/core/widgets/glass.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/ai/ai_exam_panel.dart';
 import 'package:ulearn/features/ai/ai_message_content.dart';
-import 'package:ulearn/features/ai/ai_teacher_classroom.dart';
+import 'package:ulearn/features/ai/classroom/live_classroom_screen.dart';
 import 'package:ulearn/features/ai/ai_upgrade.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
 
@@ -425,148 +425,19 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     }
   }
 
-  Future<Map<String, dynamic>> _askClassroomTeacher({
-    required String question,
-    required int pausedIndex,
-    required Map<String, dynamic> lesson,
+  Future<void> _openLiveClassroom({
+    required List<String> documentIds,
+    String question = '',
   }) async {
-    final api = context.read<ApiClient>();
-    final locale = context.read<LocaleProvider>().code.toLowerCase();
-    final title = lesson['lesson_title']?.toString() ?? 'Lesson';
-    final speech = (lesson['speech'] as List?) ?? const [];
-    final spoken = <String>[];
-    for (var i = 0; i <= pausedIndex && i < speech.length; i++) {
-      final s = speech[i];
-      if (s is Map && s['text'] != null) spoken.add(s['text'].toString());
-    }
-    try {
-      final data = await api.post('/api/ai/teacher/interrupt', {
-        'question': question,
-        'language': locale,
-        'lessonTitle': title,
-        'pausedSpeechIndex': pausedIndex,
-        'spokenSoFar': spoken.length <= 5
-            ? spoken
-            : spoken.sublist(spoken.length - 5),
-        if (lesson['documentIds'] is List)
-          'documentIds': (lesson['documentIds'] as List)
-              .map((e) => e.toString())
-              .where((e) => e.isNotEmpty)
-              .toList(),
-        if (lesson['curriculumOutline'] is List)
-          'curriculumOutline': (lesson['curriculumOutline'] as List)
-              .map((e) => e.toString())
-              .where((e) => e.isNotEmpty)
-              .toList(),
-        if (lesson['materialNames'] is List)
-          'materialNames': (lesson['materialNames'] as List)
-              .map((e) => e.toString())
-              .where((e) => e.isNotEmpty)
-              .toList(),
-      });
-      final answer = data['answer']?.toString().trim() ?? '';
-      final board = data['board'];
-      return {
-        'answer': answer.isNotEmpty
-            ? answer
-            : (locale == 'ar'
-                ? 'سؤال ممتاز. دعنا نكمل من حيث توقفنا.'
-                : 'Excellent question. Let’s continue from where we paused.'),
-        'board': board is List ? board : const [],
-      };
-    } catch (_) {
-      return {
-        'answer': locale == 'ar'
-            ? 'سؤال ممتاز. دعنا نكمل من حيث توقفنا.'
-            : 'Excellent question. Let’s continue from where we paused.',
-        'board': const [],
-      };
-    }
-  }
-
-  Future<void> _openLiveClassroom(Map<String, dynamic> lesson) async {
-    if (!mounted) return;
-    final l10n = context.l10n;
-    await showGeneralDialog(
-      context: context,
-      barrierDismissible: false,
-      barrierLabel: 'classroom',
-      barrierColor: Colors.black87,
-      pageBuilder: (ctx, a1, a2) {
-        return SafeArea(
-          child: Material(
-            color: const Color(0xFF070B14),
-            child: Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.28),
-                    border: Border(
-                      bottom: BorderSide(
-                        color: Colors.white.withValues(alpha: 0.1),
-                      ),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'U Learn · ${l10n.t('mobile.ai.aiTeacherClassroom')}',
-                              style: const TextStyle(
-                                color: Color(0xFF7DD3FC),
-                                fontWeight: FontWeight.w800,
-                                fontSize: 11,
-                                letterSpacing: 1.1,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              lesson['lesson_title']?.toString() ??
-                                  l10n.t('mobile.ai.aiTeacherClassroom'),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.of(ctx).pop(),
-                        child: Text(
-                          l10n.t('mobile.ai.aiTeacherCloseBoard'),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: AiTeacherClassroom(
-                    lesson: lesson,
-                    onAskTeacher: (question, pausedIndex) =>
-                        _askClassroomTeacher(
-                      question: question,
-                      pausedIndex: pausedIndex,
-                      lesson: lesson,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+    if (!mounted || documentIds.isEmpty) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => LiveClassroomScreen(
+          documentIds: documentIds,
+          question: question,
+        ),
+      ),
     );
   }
 
@@ -584,13 +455,11 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     _scrollToEnd();
     try {
       final api = context.read<ApiClient>();
-      final auth = context.read<AuthProvider>();
       final locale = context.read<LocaleProvider>().code.toLowerCase();
-      final data = await api.post('/api/ai/teacher', {
+      final data = await api.post('/api/ai/classroom/session', {
         'question': q,
         'language': locale,
         if (_conversationId != null) 'conversationId': _conversationId,
-        ..._stagePayload(auth),
       });
       if (!mounted) return;
       if (data['needsUpgrade'] == true) {
@@ -600,8 +469,6 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       }
       if (data['needsMaterialSelection'] == true) {
         final pendingQ = data['pendingQuestion']?.toString() ?? q;
-        final pendingMode = data['pendingMode']?.toString() ?? 'ai_teacher';
-        final pendingCount = (data['pendingCount'] as num?)?.toInt();
         final materialsRaw = data['materials'];
         final materials = <Map<String, dynamic>>[];
         final seenNames = <String>{};
@@ -629,48 +496,21 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                   context.l10n.t('mobile.ai.pickMaterialToAnswerHint'),
               selectableMaterials: materials,
               pendingMaterialQuestion: pendingQ,
-              pendingMode: pendingMode,
-              pendingCount: pendingCount,
+              pendingMode: 'ai_teacher',
             ),
           );
         });
         return;
       }
-      if (data['needsChapterSelection'] == true) {
-        _showChapterSelectionBubble(data, q);
-        return;
-      }
-      final lessonRaw = data['aiTeacherLesson'];
-      final lesson = lessonRaw is Map
-          ? Map<String, dynamic>.from(lessonRaw)
-          : null;
-      if (lesson == null) {
-        setState(() {
-          _conversationId =
-              data['conversationId']?.toString() ?? _conversationId;
-          _messages.add(
-            _ChatBubble(
-              role: 'assistant',
-              text: data['answer']?.toString() ??
-                  context.l10n.t('mobile.ai.errorGeneric'),
-            ),
-          );
-        });
-        return;
-      }
+      // Without documentIds the session API only returns material selection.
       setState(() {
-        _conversationId = data['conversationId']?.toString() ?? _conversationId;
         _messages.add(
           _ChatBubble(
             role: 'assistant',
-            text: '',
-            aiTeacherLesson: lesson,
+            text: context.l10n.t('mobile.ai.pickMaterialToAnswerHint'),
           ),
         );
       });
-      _scrollToEnd();
-      await _openLiveClassroom(lesson);
-      await _loadConversations();
     } catch (e) {
       if (!mounted) return;
       _toast(
@@ -967,38 +807,29 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         if (_conversationId != null) 'conversationId': _conversationId,
         ..._stagePayload(auth),
       };
-      final data = isAiTeacher
-          ? await api.post('/api/ai/teacher', payload)
-          : await api.post('/api/ai/chat', payload);
+      if (isAiTeacher) {
+        setState(() {
+          _messages.add(
+            _ChatBubble(
+              role: 'assistant',
+              text: locale == 'ar'
+                  ? 'جاري فتح الفصل المباشر…'
+                  : 'Opening the live classroom…',
+            ),
+          );
+        });
+        await _openLiveClassroom(
+          documentIds: documentIds,
+          question: question,
+        );
+        return;
+      }
+
+      final data = await api.post('/api/ai/chat', payload);
       if (!mounted) return;
 
       if (data['needsChapterSelection'] == true) {
         _showChapterSelectionBubble(data, question);
-        return;
-      }
-
-      if (isAiTeacher) {
-        final lessonRaw = data['aiTeacherLesson'];
-        final lesson = lessonRaw is Map
-            ? Map<String, dynamic>.from(lessonRaw)
-            : null;
-        setState(() {
-          _conversationId =
-              data['conversationId']?.toString() ?? _conversationId;
-          _messages.add(
-            _ChatBubble(
-              role: 'assistant',
-              text: lesson != null
-                  ? ''
-                  : (data['answer']?.toString() ?? unavailable),
-              aiTeacherLesson: lesson,
-            ),
-          );
-        });
-        if (lesson != null) {
-          await _openLiveClassroom(lesson);
-        }
-        _loadConversations();
         return;
       }
 
@@ -1584,10 +1415,36 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                                 if (m.text.isNotEmpty)
                                                   const SizedBox(height: 8),
                                                 FilledButton.icon(
-                                                  onPressed: () =>
-                                                      _openLiveClassroom(
-                                                    m.aiTeacherLesson!,
-                                                  ),
+                                                  onPressed: () {
+                                                    final lesson =
+                                                        m.aiTeacherLesson!;
+                                                    final docs = <String>[];
+                                                    final raw =
+                                                        lesson['documentIds'];
+                                                    if (raw is List) {
+                                                      for (final d in raw) {
+                                                        final id = d.toString();
+                                                        if (id.isNotEmpty) {
+                                                          docs.add(id);
+                                                        }
+                                                      }
+                                                    }
+                                                    if (docs.isEmpty) {
+                                                      _toast(
+                                                        context.l10n.t(
+                                                          'mobile.ai.pickMaterialToAnswerHint',
+                                                        ),
+                                                      );
+                                                      return;
+                                                    }
+                                                    _openLiveClassroom(
+                                                      documentIds: docs,
+                                                      question: lesson[
+                                                                  'lesson_title']
+                                                              ?.toString() ??
+                                                          '',
+                                                    );
+                                                  },
                                                   icon: const Icon(
                                                     Icons.slideshow_rounded,
                                                   ),

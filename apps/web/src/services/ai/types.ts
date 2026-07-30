@@ -47,6 +47,8 @@ export type SpeechSynthesisInput = {
   countryCode?: string | null;
   /** Optional provider voice override (OpenAI name or ElevenLabs id) */
   voice?: string | null;
+  /** Speaking pace hint for more natural classroom delivery */
+  pace?: "slow" | "normal" | "brisk" | null;
 };
 
 export type SpeechSynthesisResult = {
