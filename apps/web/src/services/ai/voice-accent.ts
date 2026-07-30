@@ -237,32 +237,83 @@ export function accentInstruction(
     .filter(Boolean)
     .join(", ");
   const tag = region ? ` (${region})` : "";
+  const shared =
+    "Sound like a senior professional teacher: warm, clear, confident, never robotic. Prefer natural classroom rhythm with gentle pauses.";
   switch (v.selectedLanguage) {
     case "ar":
       if (v.accent.startsWith("iraqi") || v.accent === "iraqi_levantine") {
-        return `Speak and write entirely in clear Arabic (MSA) with a natural Iraqi classroom tone${tag}. Use locally familiar educational expressions when helpful, while remaining clear for all students. Never switch language unless asked.`;
+        return [
+          `Speak and write entirely in clear Arabic (فصحى مبسّطة) with a natural Iraqi classroom tone${tag}.`,
+          "Use familiar Iraqi educational expressions when helpful (e.g. خلّينا، زين، شوفوا، تمام) without becoming slangy or unclear.",
+          "Pronounce carefully for students; keep sentences short and musical.",
+          shared,
+          "Never switch language unless asked.",
+        ].join(" ");
       }
       if (v.accent === "levantine") {
-        return `Speak and write entirely in clear Arabic (MSA) with a Levantine-friendly teaching tone${tag}. Never switch language unless asked.`;
+        return [
+          `Speak and write entirely in clear Arabic with a Levantine-friendly teaching tone${tag}.`,
+          "Keep MSA clarity with warm Levantine classroom flavor.",
+          shared,
+          "Never switch language unless asked.",
+        ].join(" ");
       }
       if (v.accent === "gulf") {
-        return `Speak and write entirely in clear Arabic (MSA) with a Gulf-friendly educational tone${tag}. Never switch language unless asked.`;
+        return [
+          `Speak and write entirely in clear Arabic with a polished Gulf educational tone${tag}.`,
+          "Stay respectful, clear, and classroom-professional.",
+          shared,
+          "Never switch language unless asked.",
+        ].join(" ");
       }
       if (v.accent === "egyptian") {
-        return `Speak and write entirely in clear Arabic (MSA) with an Egyptian-friendly teaching tone${tag}. Never switch language unless asked.`;
+        return [
+          `Speak and write entirely in clear Arabic with an Egyptian-friendly teaching tone${tag}.`,
+          "Warm and engaging, but still academically precise.",
+          shared,
+          "Never switch language unless asked.",
+        ].join(" ");
       }
-      return `Speak and write entirely in Arabic (العربية)${tag}. Do not switch to English unless the user asks.`;
+      return `Speak and write entirely in Arabic (العربية)${tag}. ${shared} Do not switch to English unless the user asks.`;
     case "ku":
-      return `You MUST reply entirely in Kurdish (کوردی)${tag}. Keep explanations natural for students in this region. Do not switch language unless asked.`;
+      return `You MUST reply entirely in Kurdish (کوردی)${tag}. Keep explanations natural and professional for students in this region. ${shared} Do not switch language unless asked.`;
     case "tr":
-      return `Speak and write entirely in natural classroom Turkish${tag}. Do not switch language unless asked.`;
+      return `Speak and write entirely in natural classroom Turkish${tag}. Clear diction, warm teacher energy, professional vocabulary. ${shared} Do not switch language unless asked.`;
     default:
       if (v.accent === "british") {
-        return `Speak and write entirely in English with British spelling/examples${tag}.`;
+        return `Speak and write entirely in English with British spelling/examples${tag}. Polished classroom English. ${shared}`;
       }
       if (v.accent === "australian") {
-        return `Speak and write entirely in English with Australian-friendly examples${tag}.`;
+        return `Speak and write entirely in English with Australian-friendly examples${tag}. Clear professional classroom English. ${shared}`;
       }
-      return `Speak and write entirely in English${tag}.`;
+      return `Speak and write entirely in clear professional classroom English${tag}. ${shared}`;
   }
+}
+
+/** Short delivery instruction for TTS engines that support style prompts. */
+export function ttsDeliveryInstruction(
+  language?: string | null,
+  countryCode?: string | null,
+  provinceName?: string | null,
+  pace?: "slow" | "normal" | "brisk" | null
+): string {
+  const v = resolveTeacherVoice({ language, countryCode, provinceName });
+  const paceHint =
+    pace === "slow"
+      ? "Speak slowly and patiently, with clear pauses between ideas."
+      : pace === "brisk"
+        ? "Speak with energetic, confident classroom pace — still clear."
+        : "Speak at a natural teacher pace with gentle emphasis.";
+  const accentHint =
+    v.selectedLanguage === "ar"
+      ? `Use a professional ${v.accent.replace(/_/g, " ")} Arabic classroom accent. Warm, clear, never robotic.`
+      : v.selectedLanguage === "tr"
+        ? "Use a clear professional Turkish classroom voice."
+        : `Use a professional ${v.accent} English classroom voice.`;
+  return [
+    "You are a world-class human teacher speaking live in class.",
+    accentHint,
+    paceHint,
+    "Sound human: soft emphasis, natural breath, no chatbot cadence.",
+  ].join(" ");
 }

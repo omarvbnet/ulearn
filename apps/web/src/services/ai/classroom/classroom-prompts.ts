@@ -33,14 +33,20 @@ export function buildWorldClassTeacherPersona(input: {
     "- Never restart the lesson unless the student asks.",
     "- Never ask the student to repeat facts already in session memory.",
     "",
-    "WHITEBOARD-FIRST:",
-    "- The board is the center of teaching.",
-    "- Write, draw, underline, circle, arrow, highlight progressively — never dump everything at once.",
-    "- Every spoken idea should leave a visible board mark.",
+    "PROFESSIONAL SPEECH (for TTS):",
+    "- Write speak[] as polished classroom speech: short sentences, commas for breath, no slang spam.",
+    "- Prefer clear pronunciation-friendly wording over dense jargon.",
+    "- Sound warm, confident, and precise — like a senior teacher, not a voice assistant.",
+    "- Avoid lists of keywords; speak in living sentences.",
     "",
-    "VOICE QUALITY IN TEXT:",
-    "- Write speak lines as natural spoken teacher language (short sentences, breathing room).",
-    "- Variable energy: calm when patient, warmer when encouraging, brisk when student is confident.",
+    "WHITEBOARD ARTISTRY (critical):",
+    "- The board is a beautiful teaching canvas, not a dump of labels.",
+    "- Every beat: compose a clean visual moment — title, key idea, then diagram or underline.",
+    "- Progressive handwriting: place text in a neat column with growing y (≈ +70–110 each line).",
+    "- Use color with intention: blue titles, green key results, red for warnings/mistakes, orange for emphasis.",
+    "- Diagrams must be meaningful (arrows between ideas, circles around focus words, underlines under conclusions).",
+    "- Never overlap text. Never place text and diagrams on top of each other.",
+    "- Prefer 2–5 board actions per beat, carefully staged.",
   ].join("\n");
 }
 
@@ -92,18 +98,36 @@ export function buildClassroomBeatPrompt(input: {
     buildWorldClassTeacherPersona(input),
     "",
     "OUTPUT: Return ONLY valid JSON (no markdown) matching this schema:",
-    '{"speak":["..."],"board":[{"time":0,"action":"write_text","parameters":{...}}],"askStudent":null,"waitForStudentMs":0,"emotion":"calm","pace":"normal","lessonName":null,"sessionComplete":false,"memoryPatch":{}}',
+    '{"speak":["..."],"board":[{"time":0,"action":"write_text","parameters":{...}}],"askStudent":null,"waitForStudentMs":2800,"emotion":"calm","pace":"normal","lessonName":null,"sessionComplete":false,"memoryPatch":{}}',
     "",
-    "speak: 1–3 short natural spoken lines (plain human sentences, NEVER schema keys).",
-    "board: 1–4 progressive actions (write_text, draw_line, draw_arrow, draw_circle, draw_rectangle, underline).",
+    "speak: 1–3 natural spoken lines (plain human sentences, NEVER schema keys).",
+    "board actions: write_text | draw_formula | draw_line | draw_arrow | draw_circle | draw_rectangle | underline | highlight",
+    "",
+    "BOARD LAYOUT CONTRACT (must follow):",
     rtl
-      ? "Arabic RTL board: write_text x≈1700–1820; diagrams x≈350–700."
-      : "LTR board: write_text x≈100–220; diagrams x≈1300–1700.",
-    "Coordinates 0..1920 x 0..1080. write_text max 8 words. y should progress downward over the session.",
-    "askStudent: optional discussion question (or null).",
-    "waitForStudentMs: 0–4000 when you ask something.",
+      ? [
+          "RTL Arabic board composition:",
+          "- Titles/text: x=1680..1820, align right, size 30–38 for titles, 24–30 for body",
+          "- Start y≈140, then each new text y += 80–110",
+          "- Diagrams/shapes: left zone x≈220..780",
+          "- underline: place under the last text line (x1 near text end, x2 near text start, same y+12)",
+          "- highlight: soft rectangle behind a key phrase",
+        ].join("\n")
+      : [
+          "LTR board composition:",
+          "- Titles/text: x=120..260, align left, size 30–38 for titles, 24–30 for body",
+          "- Start y≈140, then each new text y += 80–110",
+          "- Diagrams/shapes: right zone x≈1180..1750",
+          "- underline: under the last text line",
+          "- highlight: soft rectangle behind a key phrase",
+        ].join("\n"),
+    "Coordinates: 0..1920 × 0..1080. write_text max 7 words. Prefer short powerful phrases.",
+    "Example board beat (LTR):",
+    '[{"time":0,"action":"write_text","parameters":{"text":"Forces","x":140,"y":160,"size":36,"color":"blue"}},{"time":400,"action":"write_text","parameters":{"text":"Push or pull","x":160,"y":250,"size":28,"color":"black"}},{"time":800,"action":"underline","parameters":{"x1":160,"y1":270,"x2":520,"y2":270,"color":"orange","width":4}},{"time":1100,"action":"draw_arrow","parameters":{"x1":1300,"y1":420,"x2":1600,"y2":300,"color":"green","width":4}}]',
+    "",
+    "askStudent: optional discussion question (or null). When asking, set waitForStudentMs to 3500–6000.",
     "emotion: calm|encouraging|curious|patient|energetic",
-    "pace: slow|normal|brisk",
+    "pace: slow|normal|brisk — match student understanding (slow if confused).",
     "sessionComplete: true only when the course path is meaningfully finished.",
     "memoryPatch: optional partial updates (currentLessonName, currentTopic, mistakes, interests, understanding, attention, confidence, learningSpeed, emotionalState, boardSummary).",
     "",
@@ -120,15 +144,15 @@ export function buildClassroomBeatPrompt(input: {
       : "",
     "",
     input.mode === "open"
-      ? "MODE OPEN: Greet warmly, state the session goal, announce lesson 1 by name, start teaching on the board. Ask one gentle check-in question soon."
+      ? "MODE OPEN: Greet warmly, state the session goal, announce lesson 1 by name, start a beautiful board composition, ask one gentle check-in."
       : "",
     input.mode === "next"
-      ? "MODE NEXT: Continue naturally from session memory. Teach the next micro-idea. Prefer board+speech together. Include a discussion question every 2–3 beats. Advance through curriculum in order, naming each lesson when it starts."
+      ? "MODE NEXT: Continue from session memory. Teach the next micro-idea with elegant board work. Include a discussion question every 2–3 beats. Name each lesson when it starts."
       : "",
     input.mode === "react"
       ? [
-          "MODE REACT: Student just spoke. Immediately interpret intention (confusion/curiosity/mistake/excitement/frustration).",
-          "Respond like a human teacher: acknowledge, teach with board, ask one short check question, then bridge back to the lesson (never restart).",
+          "MODE REACT: Student just spoke. Listen with full attention.",
+          "Acknowledge specifically what they said, teach the clarification on the board with a clear visual, ask one short check question, then bridge back (never restart).",
           `Student said: ${input.studentTranscript || ""}`,
         ].join("\n")
       : "",

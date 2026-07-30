@@ -10,7 +10,7 @@ import type {
   SpeechSynthesisResult,
 } from "./types";
 import { EMBEDDING_DIMS } from "./types";
-import { resolveTeacherVoice } from "./voice-accent";
+import { resolveTeacherVoice, ttsDeliveryInstruction } from "./voice-accent";
 
 function truncateOrPad(vec: number[], dim = EMBEDDING_DIMS): number[] {
   if (vec.length === dim) return vec;
@@ -284,15 +284,31 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
     const resolved = resolveTeacherVoice({
       language: input.language,
       countryCode: input.countryCode,
+      provinceName: input.provinceName,
       voiceOverride: input.voice,
     });
     const voice = resolved.openaiVoice;
     const speed =
-      input.pace === "slow" ? 0.9 : input.pace === "brisk" ? 1.05 : 0.97;
+      input.pace === "slow" ? 0.88 : input.pace === "brisk" ? 1.04 : 0.95;
     const model = /tts|speech|gpt-4o-mini-tts/i.test(config.model)
       ? config.model
       : "tts-1-hd";
     const url = `${this.base(config)}/audio/speech`;
+    const body: Record<string, unknown> = {
+      model,
+      input: text,
+      voice,
+      response_format: "mp3",
+      speed,
+    };
+    if (/gpt-4o-mini-tts/i.test(model)) {
+      body.instructions = ttsDeliveryInstruction(
+        input.language,
+        input.countryCode,
+        input.provinceName,
+        input.pace
+      );
+    }
     const res = await fetchJson(
       url,
       {
@@ -301,13 +317,7 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
           "Content-Type": "application/json",
           Authorization: `Bearer ${config.apiKey}`,
         },
-        body: JSON.stringify({
-          model,
-          input: text,
-          voice,
-          response_format: "mp3",
-          speed,
-        }),
+        body: JSON.stringify(body),
       },
       Math.max(config.timeoutMs || 30000, 60000)
     );
@@ -718,6 +728,7 @@ export class ElevenLabsAdapter implements AiProviderAdapter {
     const resolved = resolveTeacherVoice({
       language: input.language,
       countryCode: input.countryCode,
+      provinceName: input.provinceName,
       voiceOverride: input.voice || config.apiVersion,
     });
     // Admin model field can still force a custom ElevenLabs voice id.
@@ -729,16 +740,33 @@ export class ElevenLabsAdapter implements AiProviderAdapter {
     const modelId = elevenLabsModelId(config.model);
     const base = normalizeElevenLabsBase(config.baseUrl);
     const url = `${base}/v1/text-to-speech/${encodeURIComponent(voiceId)}`;
+    const pace = input.pace || "normal";
+    const voice_settings =
+      pace === "slow"
+        ? {
+            stability: 0.58,
+            similarity_boost: 0.82,
+            style: 0.08,
+            use_speaker_boost: true,
+          }
+        : pace === "brisk"
+          ? {
+              stability: 0.38,
+              similarity_boost: 0.78,
+              style: 0.32,
+              use_speaker_boost: true,
+            }
+          : {
+              stability: 0.48,
+              similarity_boost: 0.85,
+              style: 0.22,
+              use_speaker_boost: true,
+            };
 
     const body: Record<string, unknown> = {
       text,
       model_id: modelId,
-      voice_settings: {
-        stability: 0.42,
-        similarity_boost: 0.8,
-        style: 0.15,
-        use_speaker_boost: true,
-      },
+      voice_settings,
     };
     // language_code is supported on turbo/flash/v3 (ignored on multilingual_v2).
     if (!/multilingual_v2/i.test(modelId)) {

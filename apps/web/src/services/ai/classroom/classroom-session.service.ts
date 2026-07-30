@@ -148,7 +148,7 @@ function fallbackBeat(
         : tr
           ? "Şimdi ne anladın?"
           : "What do you understand now?",
-      waitForStudentMs: 2800,
+      waitForStudentMs: 4800,
       emotion: "encouraging",
       pace: "slow",
       lessonName: lessonName || null,
@@ -192,7 +192,7 @@ function fallbackBeat(
       : tr
         ? "Hazır mısın?"
         : "Are you ready?",
-    waitForStudentMs: 2200,
+    waitForStudentMs: 4500,
     emotion: "encouraging",
     pace: "normal",
     lessonName: lessonName || null,

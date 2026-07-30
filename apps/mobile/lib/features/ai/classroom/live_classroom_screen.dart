@@ -57,6 +57,8 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
   var _listenStarting = false;
   var _listenGen = 0;
   DateTime? _lastListenStart;
+  DateTime? _speechActivityAt;
+  var _askWaitMs = 0;
   Timer? _paintTimer;
   Timer? _hzTimer;
   ApiClient? _api;
@@ -206,6 +208,22 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     }
   }
 
+  Future<void> _waitForStudentWindow(int baseMs) async {
+    _speechActivityAt = null;
+    if (mounted) setState(() => _presence = _Presence.waiting);
+    await _startListen();
+    final started = DateTime.now();
+    while (!_cancelled && !_ended && !_handlingTurn && mounted) {
+      final active = _speechActivityAt != null &&
+          DateTime.now().difference(_speechActivityAt!).inMilliseconds < 2200;
+      final elapsed = DateTime.now().difference(started).inMilliseconds;
+      final deadline = active ? math.max(baseMs, elapsed + 1800) : baseMs;
+      if (elapsed >= deadline && !active) break;
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+    if (!_handlingTurn) await _stopListeningQuietly();
+  }
+
   Future<void> _runLoop() async {
     if (_loopActive || _sessionId == null) return;
     _loopActive = true;
@@ -215,11 +233,16 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
           await Future<void>.delayed(const Duration(milliseconds: 200));
           continue;
         }
-        if (mounted) setState(() => _presence = _Presence.waiting);
-        await _startListen();
-        await Future<void>.delayed(const Duration(milliseconds: 1800));
-        await _stopListeningQuietly();
-        if (_cancelled || _handlingTurn || _ended) continue;
+
+        final listenMs = _askWaitMs > 0 ? _askWaitMs : 4200;
+        await _waitForStudentWindow(listenMs);
+        if (_cancelled || _ended) break;
+        if (_handlingTurn) {
+          while (_handlingTurn && !_cancelled) {
+            await Future<void>.delayed(const Duration(milliseconds: 150));
+          }
+          continue;
+        }
 
         if (mounted) setState(() => _presence = _Presence.thinking);
         final api = _api;
@@ -241,21 +264,6 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         if (beatRaw is! Map) continue;
         final beat = Map<String, dynamic>.from(beatRaw);
         await _playBeat(beat);
-        final ask = beat['askStudent']?.toString();
-        if (ask != null && ask.trim().isNotEmpty) {
-          if (mounted) {
-            setState(() {
-              _presence = _Presence.waiting;
-              _caption = _cleanText(ask) ?? ask;
-            });
-          }
-          await _startListen();
-          final waitMs =
-              ((beat['waitForStudentMs'] as num?)?.toInt() ?? 2400)
-                  .clamp(1600, 8000);
-          await Future<void>.delayed(Duration(milliseconds: waitMs));
-          await _stopListeningQuietly();
-        }
         final status = session is Map ? session['status']?.toString() : null;
         if (beat['sessionComplete'] == true || status == 'ENDED') {
           if (mounted) setState(() => _ended = true);
@@ -312,9 +320,20 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       await Future<void>.delayed(const Duration(milliseconds: 220));
     }
     _voiceBusy = false;
+    await Future<void>.delayed(const Duration(milliseconds: 400));
     final lessonName = beat['lessonName']?.toString();
     if (lessonName != null && lessonName.isNotEmpty && mounted) {
       setState(() => _title = lessonName);
+    }
+    final ask = beat['askStudent']?.toString();
+    if (ask != null && ask.trim().isNotEmpty) {
+      _askWaitMs =
+          ((beat['waitForStudentMs'] as num?)?.toInt() ?? 5000).clamp(4200, 8000);
+      if (mounted) {
+        setState(() => _caption = _cleanText(ask) ?? ask);
+      }
+    } else {
+      _askWaitMs = 0;
     }
     if (beat['sessionComplete'] == true && mounted) {
       setState(() => _ended = true);
@@ -488,11 +507,16 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         setState(() => _updateHzFromLevel(_soundLevel));
       });
 
+      final minWords = _rtl ? 2 : 3;
       await _speechStt.listen(
-        localeId: _sttLocaleId,
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 2),
-        partialResults: true,
+        listenOptions: stt.SpeechListenOptions(
+          localeId: _sttLocaleId,
+          listenFor: const Duration(seconds: 45),
+          pauseFor: const Duration(milliseconds: 1800),
+          partialResults: true,
+          cancelOnError: false,
+          listenMode: stt.ListenMode.dictation,
+        ),
         onSoundLevelChange: (level) {
           if (!mounted || _voiceBusy || gen != _listenGen) return;
           final n = (level.clamp(-50, 10) + 50) / 60.0;
@@ -503,10 +527,17 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
           final words = result.recognizedWords.trim();
           final count =
               words.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
-          if (count >= 2 && mounted) {
-            setState(() => _presence = _Presence.listening);
+          if (count >= 1 && mounted) {
+            _speechActivityAt = DateTime.now();
+            setState(() {
+              _presence = _Presence.listening;
+              _caption = words;
+            });
           }
-          if (!result.finalResult || count < 3) return;
+          if (!result.finalResult || count < minWords) return;
+          try {
+            await _audio.stop();
+          } catch (_) {}
           await _submitTurn(words);
         },
       );
@@ -647,7 +678,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                   child: Container(
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
+                      color: const Color(0xFFF7F4EE),
                       borderRadius: BorderRadius.circular(22),
                       border: Border.all(
                         color: Colors.white.withValues(alpha: 0.12),
@@ -851,6 +882,21 @@ Color _color(dynamic raw, [Color fallback = const Color(0xFF1E293B)]) {
   return fallback;
 }
 
+double _handJitter(int seed, int i, [double amp = 4.5]) {
+  final x = math.sin(seed * 12.9898 + i * 78.233) * 43758.5453;
+  return (x - x.floor()) * 2 * amp - amp;
+}
+
+double _nextTextY(List<_BoardItem> items, double? requested) {
+  if (requested != null && requested > 40) return requested;
+  _BoardItem? last;
+  for (final i in items) {
+    if (i.kind == _Kind.text) last = i;
+  }
+  if (last == null) return 150;
+  return math.min(980.0, last.y + math.max(78.0, last.size + 48));
+}
+
 void _applyCue(
   List<_BoardItem> items,
   Map<String, dynamic> cue,
@@ -864,6 +910,7 @@ void _applyCue(
   final action =
       (cue['action']?.toString() ?? '').toLowerCase().replaceAll(' ', '_');
   final id = '${DateTime.now().microsecondsSinceEpoch}-$action-$idx';
+  final seed = idx * 97 + _num(cue['time']).toInt();
 
   if (action == 'clear_board' || action == 'open_new_board') {
     items.clear();
@@ -875,33 +922,60 @@ void _applyCue(
     final text = _cleanText(p['text'] ?? p['latex'] ?? p['content']);
     if (text == null || text.isEmpty) return;
     final alignRight = rtl || p['align']?.toString() == 'right';
+    final yReq = p['y'] == null ? null : _num(p['y']).toDouble();
     items.add(
       _BoardItem.text(
         id: id,
         text: text,
-        x: _num(p['x'], rtl ? 1780 : 120).toDouble(),
-        y: _num(p['y'], 140 + items.length * 12).toDouble(),
+        x: _num(p['x'], rtl ? 1780 : 140).toDouble() + _handJitter(seed, 1, 2.2),
+        y: _nextTextY(items, yReq) + _handJitter(seed, 2, 2),
         color: _color(p['color'], const Color(0xFF1E3A8A)),
-        size: _num(p['size'], 28).toDouble().clamp(18, 48),
+        size: _num(p['size'], text.length < 18 ? 34 : 28)
+            .toDouble()
+            .clamp(22, 44),
         bornAt: bornAt,
-        writeMs: math.max(900, math.min(5000, text.length * 70)).toDouble(),
+        writeMs: math.max(1100, math.min(6500, text.length * 78)).toDouble(),
         alignRight: alignRight,
+        seed: seed,
+      ),
+    );
+    return;
+  }
+  if (action == 'highlight') {
+    final x1 = _num(p['x1'], _num(p['x'], rtl ? 1200 : 120)).toDouble();
+    final y1 = _num(p['y1'], _num(p['y'], 140)).toDouble();
+    items.add(
+      _BoardItem.highlight(
+        id: id,
+        x: x1,
+        y: y1,
+        w: _num(p['w'], _num(p['x2'], x1 + 280) - x1).toDouble().abs(),
+        h: _num(p['h'], _num(p['y2'], y1 + 48) - y1).toDouble().abs(),
+        color: _color(p['color'], const Color(0xFFFDE047)),
+        bornAt: bornAt,
+        writeMs: 480,
+        seed: seed,
       ),
     );
     return;
   }
   if (action == 'draw_line' || action == 'underline') {
+    final baseY = _num(p['y1'], _num(p['y'], _nextTextY(items, null) - 20));
     items.add(
       _BoardItem.line(
         id: id,
-        x1: _num(p['x1'], _num(p['x'], 200)).toDouble(),
-        y1: _num(p['y1'], _num(p['y'], 200)).toDouble(),
-        x2: _num(p['x2'], _num(p['x'], 200) + 160).toDouble(),
-        y2: _num(p['y2'], _num(p['y'], 200)).toDouble(),
-        color: _color(p['color']),
-        width: _num(p['width'], 3).toDouble(),
+        x1: _num(p['x1'], _num(p['x'], rtl ? 1780 : 140)).toDouble() +
+            _handJitter(seed, 1, 2),
+        y1: baseY.toDouble() + _handJitter(seed, 2, 1.5),
+        x2: _num(p['x2'], _num(p['x'], rtl ? 1780 : 140) + (rtl ? -320 : 320))
+                .toDouble() +
+            _handJitter(seed, 3, 2),
+        y2: _num(p['y2'], baseY).toDouble() + _handJitter(seed, 4, 1.5),
+        color: _color(p['color'], const Color(0xFFEA580C)),
+        width: _num(p['width'], 3.4).toDouble(),
         bornAt: bornAt,
-        writeMs: 900,
+        writeMs: 980,
+        seed: seed,
       ),
     );
     return;
@@ -910,51 +984,51 @@ void _applyCue(
     items.add(
       _BoardItem.line(
         id: id,
-        x1: _num(p['x1'], 400).toDouble(),
-        y1: _num(p['y1'], 400).toDouble(),
-        x2: _num(p['x2'], 700).toDouble(),
-        y2: _num(p['y2'], 300).toDouble(),
-        color: _color(p['color'], const Color(0xFFCA8A04)),
-        width: _num(p['width'], 3).toDouble(),
+        x1: _num(p['x1'], rtl ? 700 : 1300).toDouble() + _handJitter(seed, 1, 3),
+        y1: _num(p['y1'], 480).toDouble() + _handJitter(seed, 2, 3),
+        x2: _num(p['x2'], rtl ? 380 : 1620).toDouble() + _handJitter(seed, 3, 3),
+        y2: _num(p['y2'], 320).toDouble() + _handJitter(seed, 4, 3),
+        color: _color(p['color'], const Color(0xFF059669)),
+        width: _num(p['width'], 3.4).toDouble(),
         bornAt: bornAt,
-        writeMs: 1100,
+        writeMs: 1200,
         arrow: true,
+        seed: seed,
       ),
     );
     return;
   }
   if (action == 'draw_circle' || action == 'circle') {
-    final cx = _num(p['cx'], 500).toDouble();
-    final cy = _num(p['cy'], 500).toDouble();
-    final r = _num(p['r'], 60).toDouble();
     items.add(
       _BoardItem.circle(
         id: id,
-        cx: cx,
-        cy: cy,
-        r: r,
+        cx: _num(p['cx'], rtl ? 520 : 1480).toDouble(),
+        cy: _num(p['cy'], 420).toDouble(),
+        r: math.max(28, _num(p['r'], 70)).toDouble(),
         color: _color(p['color'], const Color(0xFFDC2626)),
-        width: _num(p['width'], 3).toDouble(),
+        width: _num(p['width'], 3.4).toDouble(),
         bornAt: bornAt,
-        writeMs: 1200,
+        writeMs: 1400,
+        seed: seed,
       ),
     );
     return;
   }
   if (action == 'draw_rectangle' || action == 'draw_rect') {
-    final x = _num(p['x'], 300).toDouble();
-    final y = _num(p['y'], 300).toDouble();
+    final x = _num(p['x'], _num(p['x1'], rtl ? 280 : 1280)).toDouble();
+    final y = _num(p['y'], _num(p['y1'], 300)).toDouble();
     items.add(
       _BoardItem.rect(
         id: id,
         x: x,
         y: y,
-        w: _num(p['w'], 180).toDouble(),
-        h: _num(p['h'], 100).toDouble(),
+        w: _num(p['w'], 220).toDouble(),
+        h: _num(p['h'], 120).toDouble(),
         color: _color(p['color'], const Color(0xFF92400E)),
-        width: _num(p['width'], 3).toDouble(),
+        width: _num(p['width'], 3.4).toDouble(),
         bornAt: bornAt,
-        writeMs: 1100,
+        writeMs: 1250,
+        seed: seed,
       ),
     );
   }
@@ -971,6 +1045,7 @@ class _BoardItem {
     required this.bornAt,
     required this.writeMs,
     required this.alignRight,
+    required this.seed,
   }) : kind = _Kind.text;
 
   _BoardItem.line({
@@ -983,6 +1058,7 @@ class _BoardItem {
     required this.width,
     required this.bornAt,
     required this.writeMs,
+    required this.seed,
     this.arrow = false,
   }) : kind = _Kind.line;
 
@@ -995,6 +1071,7 @@ class _BoardItem {
     required this.width,
     required this.bornAt,
     required this.writeMs,
+    required this.seed,
   }) : kind = _Kind.circle;
 
   _BoardItem.rect({
@@ -1007,7 +1084,21 @@ class _BoardItem {
     required this.width,
     required this.bornAt,
     required this.writeMs,
+    required this.seed,
   }) : kind = _Kind.rect;
+
+  _BoardItem.highlight({
+    required this.id,
+    required this.x,
+    required this.y,
+    required this.w,
+    required this.h,
+    required this.color,
+    required this.bornAt,
+    required this.writeMs,
+    required this.seed,
+  })  : kind = _Kind.highlight,
+        width = 0;
 
   final String id;
   final _Kind kind;
@@ -1021,15 +1112,17 @@ class _BoardItem {
   bool alignRight = false;
   double bornAt = 0;
   double writeMs = 600;
+  int seed = 1;
   Color color = const Color(0xFF1E293B);
 
   double progress(double clockMs) {
-    final p = (clockMs - bornAt) / math.max(1, writeMs);
-    return p.clamp(0.0, 1.0);
+    final raw = (clockMs - bornAt) / math.max(1, writeMs);
+    final t = raw.clamp(0.0, 1.0);
+    return 1 - math.pow(1 - t, 2.4).toDouble();
   }
 }
 
-enum _Kind { text, line, circle, rect }
+enum _Kind { text, line, circle, rect, highlight }
 
 class _VoiceWavePainter extends CustomPainter {
   _VoiceWavePainter({
@@ -1091,8 +1184,13 @@ class _BoardPainter extends CustomPainter {
     final sy = size.height / boardH;
     canvas.scale(sx, sy);
 
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, boardW, boardH),
+      Paint()..color = const Color(0xFFF7F4EE),
+    );
+
     final grid = Paint()
-      ..color = const Color(0xFFE8EEF5)
+      ..color = const Color(0xFFE7E0D4)
       ..strokeWidth = 1;
     for (var i = 1; i < 19; i++) {
       canvas.drawLine(Offset(i * 100.0, 0), Offset(i * 100.0, boardH), grid);
@@ -1105,16 +1203,41 @@ class _BoardPainter extends CustomPainter {
       final p = item.progress(clockMs);
       if (p <= 0) continue;
       switch (item.kind) {
+        case _Kind.highlight:
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromLTWH(item.x, item.y, item.w * p, item.h),
+              const Radius.circular(8),
+            ),
+            Paint()..color = item.color.withValues(alpha: 0.28 * p),
+          );
         case _Kind.text:
-          final chars = math.max(1, (item.text.length * p).ceil());
+          final chars = p >= 0.995
+              ? item.text.length
+              : math.max(1, (item.text.length * p).ceil());
           final shown = item.text.substring(0, chars.clamp(0, item.text.length));
           final dir =
               item.alignRight || rtl ? TextDirection.rtl : TextDirection.ltr;
+          final jx = _handJitter(item.seed, 5, 1.2);
+          final shadow = TextPainter(
+            text: TextSpan(
+              text: shown,
+              style: TextStyle(
+                color: item.color.withValues(alpha: 0.18),
+                fontSize: item.size,
+                fontWeight: FontWeight.w600,
+                fontFamily: 'Georgia',
+              ),
+            ),
+            textDirection: dir,
+            textAlign:
+                dir == TextDirection.rtl ? TextAlign.right : TextAlign.left,
+          )..layout(maxWidth: 1600);
           final tp = TextPainter(
             text: TextSpan(
               text: shown,
               style: TextStyle(
-                color: item.color,
+                color: item.color.withValues(alpha: 0.42 + 0.58 * p),
                 fontSize: item.size,
                 fontWeight: FontWeight.w600,
                 fontFamily: 'Georgia',
@@ -1126,7 +1249,8 @@ class _BoardPainter extends CustomPainter {
           )..layout(maxWidth: 1600);
           final paintX =
               dir == TextDirection.rtl ? item.x - tp.width : item.x;
-          tp.paint(canvas, Offset(paintX, item.y - item.size));
+          shadow.paint(canvas, Offset(paintX + jx + 1.4, item.y - item.size + 1.6));
+          tp.paint(canvas, Offset(paintX + jx, item.y - item.size));
         case _Kind.circle:
           canvas.drawArc(
             Rect.fromCircle(center: Offset(item.cx, item.cy), radius: item.r),
@@ -1136,28 +1260,74 @@ class _BoardPainter extends CustomPainter {
             Paint()
               ..style = PaintingStyle.stroke
               ..strokeWidth = item.width
-              ..color = item.color,
+              ..strokeCap = StrokeCap.round
+              ..color = item.color.withValues(alpha: 0.45 + 0.55 * p),
           );
         case _Kind.rect:
-          canvas.drawRect(
-            Rect.fromLTWH(item.x, item.y, item.w * p, item.h * p),
-            Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = item.width
-              ..color = item.color,
-          );
+          final path = Path()
+            ..addRRect(
+              RRect.fromRectAndRadius(
+                Rect.fromLTWH(item.x, item.y, item.w, item.h),
+                const Radius.circular(6),
+              ),
+            );
+          for (final metric in path.computeMetrics()) {
+            canvas.drawPath(
+              metric.extractPath(0, metric.length * p),
+              Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = item.width
+                ..strokeCap = StrokeCap.round
+                ..strokeJoin = StrokeJoin.round
+                ..color = item.color.withValues(alpha: 0.45 + 0.55 * p),
+            );
+          }
         case _Kind.line:
           final x2 = item.x1 + (item.x2 - item.x1) * p;
           final y2 = item.y1 + (item.y2 - item.y1) * p;
-          canvas.drawLine(
-            Offset(item.x1, item.y1),
-            Offset(x2, y2),
+          final mx = (item.x1 + x2) / 2 + _handJitter(item.seed, 1, 12);
+          final my = (item.y1 + y2) / 2 + _handJitter(item.seed, 2, 10);
+          final path = Path()
+            ..moveTo(item.x1, item.y1)
+            ..quadraticBezierTo(mx, my, x2, y2);
+          canvas.drawPath(
+            path,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = item.width + 1.8
+              ..strokeCap = StrokeCap.round
+              ..color = item.color.withValues(alpha: 0.16),
+          );
+          canvas.drawPath(
+            path,
             Paint()
               ..style = PaintingStyle.stroke
               ..strokeWidth = item.width
               ..strokeCap = StrokeCap.round
-              ..color = item.color,
+              ..color = item.color.withValues(alpha: 0.5 + 0.5 * p),
           );
+          if (item.arrow && p > 0.82) {
+            final angle = math.atan2(y2 - item.y1, x2 - item.x1);
+            const size = 16.0;
+            final head = Path()
+              ..moveTo(x2, y2)
+              ..lineTo(
+                x2 - size * math.cos(angle - 0.4),
+                y2 - size * math.sin(angle - 0.4),
+              )
+              ..lineTo(
+                x2 - size * math.cos(angle + 0.4),
+                y2 - size * math.sin(angle + 0.4),
+              )
+              ..close();
+            canvas.drawPath(
+              head,
+              Paint()
+                ..color = item.color.withValues(
+                  alpha: ((p - 0.82) / 0.18).clamp(0.0, 1.0),
+                ),
+            );
+          }
       }
     }
   }

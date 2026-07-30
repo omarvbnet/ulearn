@@ -37,10 +37,11 @@ export async function POST(request: Request) {
     },
   });
 
+  const provinceName = profile?.province?.nameEn || null;
   const resolved = resolveTeacherVoice({
     language: parsed.data.language || profile?.locale || "en",
     countryCode: parsed.data.country || profile?.country?.code || null,
-    provinceName: profile?.province?.nameEn || null,
+    provinceName,
     voiceOverride: parsed.data.voice,
   });
 
@@ -50,6 +51,7 @@ export async function POST(request: Request) {
         text,
         language: resolved.selectedLanguage,
         countryCode: resolved.countryCode,
+        provinceName,
         voice: resolved.openaiVoice,
         pace: parsed.data.pace || "normal",
       },
