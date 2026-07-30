@@ -546,7 +546,7 @@ export class ClassroomSessionService {
 
     const nextState = mergeState(state, beat);
     const beatIndex = row.beatIndex + 1;
-    const ended = Boolean(beat.sessionComplete) || beatIndex > 40;
+    const ended = Boolean(beat.sessionComplete) || beatIndex > 150;
     await prisma.aiClassroomSession.update({
       where: { id: row.id },
       data: {

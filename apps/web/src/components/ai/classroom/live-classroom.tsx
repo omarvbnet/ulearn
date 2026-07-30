@@ -265,6 +265,18 @@ async function speakCloud(
   language: string,
   pace: string
 ): Promise<boolean> {
+  const ok = await speakCloudOnce(text, language, pace);
+  if (ok) return true;
+  // One retry — a single failed TTS request must not silence the teacher.
+  await new Promise((r) => setTimeout(r, 450));
+  return speakCloudOnce(text, language, pace);
+}
+
+async function speakCloudOnce(
+  text: string,
+  language: string,
+  pace: string
+): Promise<boolean> {
   try {
     if (activeCloudAudio) {
       try {
@@ -738,6 +750,9 @@ export function LiveClassroom({
       rec.lang = session?.speechLocale || (rtl ? "ar-IQ" : "en-US");
       rec.continuous = true;
       rec.interimResults = true;
+      // ev.results is CUMULATIVE for this recognition session — rebuild from
+      // the session base instead of appending (appending duplicated words).
+      const sessionBase = finalBufferRef.current;
       rec.onresult = (ev) => {
         if (voiceBusyRef.current || handlingTurnRef.current) return;
         let finalChunk = "";
@@ -749,7 +764,7 @@ export function LiveClassroom({
           else interim += alt;
         }
         if (finalChunk.trim()) {
-          finalBufferRef.current = `${finalBufferRef.current} ${finalChunk}`
+          finalBufferRef.current = `${sessionBase} ${finalChunk}`
             .replace(/\s+/g, " ")
             .trim();
         }
@@ -805,6 +820,7 @@ export function LiveClassroom({
     async (baseMs: number) => {
       speechActivityRef.current = 0;
       turnStartedRef.current = false;
+      finalBufferRef.current = "";
       setPresence("waiting");
       startListen();
       const started = Date.now();
@@ -817,10 +833,22 @@ export function LiveClassroom({
         if (elapsed >= deadline && !active) break;
         await new Promise((r) => setTimeout(r, 120));
       }
-      if (!handlingTurnRef.current) stopListen();
+      if (!handlingTurnRef.current) {
+        if (finalTimerRef.current) {
+          window.clearTimeout(finalTimerRef.current);
+          finalTimerRef.current = null;
+        }
+        stopListen();
+        // Don't lose an answer captured just before the window closed.
+        const leftover = finalBufferRef.current.trim();
+        if (leftover) {
+          turnStartedRef.current = true;
+          await submitTurn(leftover);
+        }
+      }
       return turnStartedRef.current || handlingTurnRef.current;
     },
-    [ended, startListen, stopListen]
+    [ended, startListen, stopListen, submitTurn]
   );
 
   const runStudentCheck = useCallback(

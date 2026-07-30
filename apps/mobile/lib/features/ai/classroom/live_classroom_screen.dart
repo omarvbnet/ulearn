@@ -42,6 +42,8 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
   var _caption = '';
   var _title = 'Classroom';
   String? _error;
+  String? _ttsError;
+  List<String>? _sttLocales;
   var _ended = false;
   var _clockMs = 0.0;
   var _soundLevel = 0.0;
@@ -81,11 +83,34 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
   bool get _rtl => _lang == 'ar';
 
   String get _sttLocaleId {
-    final tag = (_speechLocale ?? '').replaceAll('-', '_');
-    if (tag.length >= 2) return tag;
-    if (_lang == 'ar') return 'ar_SA';
-    if (_lang == 'tr') return 'tr_TR';
-    return 'en_US';
+    final wanted = (_speechLocale ?? '').replaceAll('-', '_');
+    final fallback = _lang == 'ar'
+        ? 'ar_SA'
+        : _lang == 'tr'
+            ? 'tr_TR'
+            : 'en_US';
+    final preferred = wanted.length >= 2 ? wanted : fallback;
+    final available = _sttLocales;
+    if (available == null || available.isEmpty) return preferred;
+    // Exact match first, then any locale in the same language, else default.
+    final exact = available.firstWhere(
+      (id) => id.toLowerCase() == preferred.toLowerCase(),
+      orElse: () => '',
+    );
+    if (exact.isNotEmpty) return exact;
+    final langPrefix = preferred.split('_').first.toLowerCase();
+    final sameLang = available.firstWhere(
+      (id) => id.toLowerCase().startsWith('${langPrefix}_') ||
+          id.toLowerCase() == langPrefix,
+      orElse: () => '',
+    );
+    if (sameLang.isNotEmpty) return sameLang;
+    final fbLang = fallback.split('_').first.toLowerCase();
+    final fbMatch = available.firstWhere(
+      (id) => id.toLowerCase().startsWith('${fbLang}_'),
+      orElse: () => '',
+    );
+    return fbMatch.isNotEmpty ? fbMatch : preferred;
   }
 
   String _presenceLabel(_Presence p) {
@@ -222,6 +247,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
   Future<bool> _waitForStudentWindow(int baseMs) async {
     _speechActivityAt = null;
     _turnStarted = false;
+    _finalBuffer = '';
     if (mounted) setState(() => _presence = _Presence.waiting);
     await _startListen();
     final started = DateTime.now();
@@ -233,7 +259,16 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       if (elapsed >= deadline && !active) break;
       await Future<void>.delayed(const Duration(milliseconds: 120));
     }
-    if (!_handlingTurn) await _stopListeningQuietly();
+    if (!_handlingTurn) {
+      _finalDebounce?.cancel();
+      await _stopListeningQuietly();
+      // Don't lose an answer captured just before the window closed.
+      final leftover = _finalBuffer.trim();
+      if (leftover.isNotEmpty) {
+        _turnStarted = true;
+        await _submitTurn(leftover);
+      }
+    }
     return _turnStarted || _handlingTurn;
   }
 
@@ -501,25 +536,48 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
   Future<void> _speakCloud(String text, {String pace = 'normal'}) async {
     if (!mounted) return;
     await _stopListeningQuietly();
+    // Settle the audio session after mic release — iOS needs this or
+    // playback can fail silently and the teacher "stops speaking".
+    await Future<void>.delayed(const Duration(milliseconds: 220));
     _voiceBusy = true;
     _hzTimer?.cancel();
     _hzTimer = Timer.periodic(const Duration(milliseconds: 55), (_) {
       if (!mounted || !_voiceBusy) return;
       setState(() => _driveTeacherWave(active: true));
     });
+    try {
+      var ok = await _speakCloudOnce(text, pace: pace);
+      if (!ok && mounted && !_cancelled) {
+        // One retry — a single failed TTS request must not silence the class.
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        ok = await _speakCloudOnce(text, pace: pace);
+      }
+      if (mounted) {
+        setState(() => _ttsError = ok ? null : 'voice');
+      }
+    } finally {
+      _voiceBusy = false;
+      _hzTimer?.cancel();
+      _hzTimer = null;
+      if (mounted) setState(() => _driveTeacherWave(active: false));
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+    }
+  }
+
+  Future<bool> _speakCloudOnce(String text, {String pace = 'normal'}) async {
     File? tmp;
     try {
       try {
         await _audio.stop();
       } catch (_) {}
       final api = _api;
-      if (api == null) return;
+      if (api == null) return false;
       final data = await api.post('/api/ai/tts', {
         'text': text,
         'language': _selectedLanguage ?? _lang,
         'pace': pace,
       });
-      if (!mounted) return;
+      if (!mounted) return false;
       final nested = data['data'];
       final nestedMap =
           nested is Map ? Map<String, dynamic>.from(nested) : null;
@@ -532,7 +590,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
           (data['dataBase64'] ?? nestedMap?['dataBase64'])?.toString();
       final mime = (data['mimeType'] ?? nestedMap?['mimeType'])?.toString() ??
           'audio/mpeg';
-      if (b64 == null || b64.isEmpty) return;
+      if (b64 == null || b64.isEmpty) return false;
       final bytes = Uint8List.fromList(base64Decode(b64));
       final dir = await getTemporaryDirectory();
       final ext = mime.contains('wav') ? 'wav' : 'mp3';
@@ -540,7 +598,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         '${dir.path}/ulearn_live_tts_${DateTime.now().microsecondsSinceEpoch}.$ext',
       );
       await tmp.writeAsBytes(bytes, flush: true);
-      if (!mounted) return;
+      if (!mounted) return false;
       await _audio.setVolume(1.0);
       await _audio.setFilePath(tmp.path);
       await _audio.play();
@@ -554,16 +612,13 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       try {
         await _audio.stop();
       } catch (_) {}
+      return true;
     } catch (_) {
       try {
         await _audio.stop();
       } catch (_) {}
+      return false;
     } finally {
-      _voiceBusy = false;
-      _hzTimer?.cancel();
-      _hzTimer = null;
-      if (mounted) setState(() => _driveTeacherWave(active: false));
-      await Future<void>.delayed(const Duration(milliseconds: 350));
       final doomed = tmp;
       if (doomed != null) {
         Future<void>.delayed(const Duration(milliseconds: 400), () async {
@@ -620,6 +675,17 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       if (!_sttReady || !mounted || gen != _listenGen) return;
       if (_voiceBusy || _handlingTurn || _ended) return;
       if (_speechStt.isListening) return;
+      if (_sttLocales == null) {
+        try {
+          final locales = await _speechStt.locales();
+          _sttLocales = locales.map((l) => l.localeId).toList();
+        } catch (_) {
+          _sttLocales = const [];
+        }
+        if (!mounted || gen != _listenGen || _voiceBusy || _handlingTurn) {
+          return;
+        }
+      }
 
       _lastListenStart = DateTime.now();
       if (mounted) setState(() => _presence = _Presence.listening);
@@ -659,18 +725,16 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
               _caption = words;
             });
           }
+          // recognizedWords is the FULL utterance so far — assign, never append
+          // (appending duplicated the student's words and corrupted answers).
+          if (words.isNotEmpty) _finalBuffer = words;
           if (!result.finalResult) return;
-          _finalBuffer = '$_finalBuffer $words'.replaceAll(RegExp(r'\s+'), ' ').trim();
-          final readyCount = _finalBuffer
-              .split(RegExp(r'\s+'))
-              .where((w) => w.isNotEmpty)
-              .length;
-          if (readyCount < minWords) return;
+          if (count < minWords) return;
           _finalDebounce?.cancel();
           _finalDebounce = Timer(
             Duration(milliseconds: _rtl ? 900 : 700),
             () async {
-              if (_voiceBusy || _handlingTurn || gen != _listenGen) return;
+              if (_voiceBusy || _handlingTurn) return;
               final ready = _finalBuffer.trim();
               if (ready.isEmpty) return;
               _turnStarted = true;
@@ -952,6 +1016,23 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
                       color: Color(0xFFFCA5A5),
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
+                    ),
+                  ),
+                ),
+              if (_ttsError != null && _error == null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    _lang == 'ar'
+                        ? 'تعذّر تشغيل الصوت مؤقتاً، جاري المتابعة…'
+                        : _lang == 'tr'
+                            ? 'Ses geçici olarak çalınamadı, devam ediliyor…'
+                            : 'Voice playback hiccup, continuing…',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFFFDE68A),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 11,
                     ),
                   ),
                 ),
@@ -1285,19 +1366,6 @@ class _BoardItem {
     required this.seed,
   }) : kind = _Kind.rect;
 
-  _BoardItem.highlight({
-    required this.id,
-    required this.x,
-    required this.y,
-    required this.w,
-    required this.h,
-    required this.color,
-    required this.bornAt,
-    required this.writeMs,
-    required this.seed,
-  })  : kind = _Kind.highlight,
-        width = 0;
-
   final String id;
   final _Kind kind;
   String text = '';
@@ -1320,7 +1388,7 @@ class _BoardItem {
   }
 }
 
-enum _Kind { text, line, circle, rect, highlight }
+enum _Kind { text, line, circle, rect }
 
 class _VoiceWavePainter extends CustomPainter {
   _VoiceWavePainter({
@@ -1404,15 +1472,6 @@ class _BoardPainter extends CustomPainter {
       final p = item.progress(clockMs);
       if (p <= 0) continue;
       switch (item.kind) {
-        case _Kind.highlight:
-          // Keep highlights very soft so they never hide text.
-          canvas.drawRRect(
-            RRect.fromRectAndRadius(
-              Rect.fromLTWH(item.x, item.y, item.w * p, item.h),
-              const Radius.circular(8),
-            ),
-            Paint()..color = item.color.withValues(alpha: 0.14 * p),
-          );
         case _Kind.text:
           final chars = p >= 0.995
               ? item.text.length
