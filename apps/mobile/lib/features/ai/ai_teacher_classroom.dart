@@ -622,12 +622,13 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
       });
       await _speak(cleanReply);
       await _waitBoardCatchUp();
-      await Future<void>.delayed(const Duration(milliseconds: 700));
+      // Give the student a beat to absorb / reply, then continue teaching.
+      await Future<void>.delayed(const Duration(milliseconds: 1400));
     } finally {
       _handlingInterrupt = false;
       if (mounted) {
         setState(() => _asking = false);
-        Future<void>.delayed(const Duration(milliseconds: 400), () {
+        Future<void>.delayed(const Duration(milliseconds: 500), () {
           if (!mounted || _cancelled) return;
           _resume();
         });

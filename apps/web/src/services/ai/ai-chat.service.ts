@@ -191,10 +191,10 @@ export class AiChatService {
         JSON.stringify({
           answer:
             language === "ar" || language === "ku"
-              ? "سؤال ممتاز. هذه الفكرة باختصار، وسنكمل من حيث توقفنا."
+              ? "سؤال ممتاز، هذا يدل على تفكير جيد. دعني أوضح الفكرة ببساطة على السبورة، ثم أخبرني: ماذا فهمت؟ بعد ذلك نكمل الدرس من حيث توقفنا."
               : language === "tr"
-                ? "Harika soru. Kısaca bu fikir şöyle; kaldığımız yerden devam edeceğiz."
-                : "Great question. Here is the idea briefly — then we continue where we paused.",
+                ? "Harika soru, bu güzel bir düşünce. Tahtada kısaca açıklayayım; sonra senden bir fikir istiyorum. Ardından kaldığımız yerden devam edeceğiz."
+                : "Excellent question — that shows good thinking. Let me clarify this on the board, then tell me what you understood. After that we continue from where we paused.",
           board: [],
         }),
         language
@@ -1331,12 +1331,13 @@ export class AiChatService {
       {
         role: "user",
         content: [
-          "Teach this selected material as a live whiteboard COURSE session. Return JSON only.",
+          "Teach this selected material as a LIVE interactive classroom COURSE (Version 2.0). Return JSON only.",
           `Topic: ${input.question}`,
           curriculumOutline.length
             ? `Teach lessons in order from "${curriculumOutline[0]}" to "${curriculumOutline[curriculumOutline.length - 1]}". Announce each lesson name.`
             : "Teach progressively and name each lesson step.",
-          "Use 8–14 short speech steps spanning the lesson path. Match each step with board drawings.",
+          "Include goal, explanation, board, example, student discussion questions, practice vibe, summary, quiz, and a bridge to the next lesson.",
+          "Use 10–14 short speech steps. Mix teaching lines with 2+ conversational questions. Match each step with board drawings.",
         ].join("\n"),
         parts: userParts.length ? userParts : undefined,
       },
