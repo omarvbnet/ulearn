@@ -725,6 +725,9 @@ export function AiTeacherClassroom({
     pausedSpeechIndex: number;
     spokenSoFar: string[];
     lessonTitle: string;
+    documentIds?: string[];
+    curriculumOutline?: string[];
+    materialNames?: string[];
   }) => Promise<{ answer: string; board?: Array<{ time?: number; action: string; parameters?: Record<string, unknown> }> } | string>;
 }) {
   const labels = useMemo(() => t(locale), [locale]);
@@ -739,7 +742,7 @@ export function AiTeacherClassroom({
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [micLevel, setMicLevel] = useState(0);
-  const [hzBars, setHzBars] = useState<number[]>(() => Array.from({ length: 18 }, () => 0.12));
+  const [hzBars, setHzBars] = useState<number[]>(() => Array.from({ length: 36 }, () => 0.08));
   const [handsFree, setHandsFree] = useState(true);
   const [speechLocale, setSpeechLocale] = useState<string | null>(null);
   const speechLocaleRef = useRef<string | null>(null);
@@ -762,6 +765,7 @@ export function AiTeacherClassroom({
   const hzRafRef = useRef<number | null>(null);
   const interimBufRef = useRef("");
   const phaseRef = useRef<Phase>("ready");
+  const startAlwaysListenRef = useRef<() => void>(() => {});
 
   const speech = useMemo(
     () =>
@@ -890,9 +894,21 @@ export function AiTeacherClassroom({
       const clean = cleanBoardText(text) || text.trim();
       if (!clean) return;
 
+      stopAlwaysListen();
       stopVoice();
       voiceBusy = true;
       const lang = selectedSpeechLanguage(locale || lesson.language);
+      let teacherWave: number | null = null;
+      teacherWave = window.setInterval(() => {
+        const t = Date.now() / 95;
+        setHzBars((prev) =>
+          prev.map((_, i) => {
+            const wave = Math.sin(t + i * 0.62) * 0.5 + 0.5;
+            const pulse = Math.sin(t * 1.7 + i * 0.2) * 0.5 + 0.5;
+            return Math.min(1, 0.18 + wave * 0.55 + pulse * 0.27);
+          })
+        );
+      }, 45);
       try {
         const cloud = await fetchCloudSpeech(clean, lang);
         if (!cloud) {
@@ -945,10 +961,18 @@ export function AiTeacherClassroom({
           });
         });
       } finally {
+        if (teacherWave != null) window.clearInterval(teacherWave);
         voiceBusy = false;
+        if (
+          handsFreeRef.current &&
+          !handlingInterruptRef.current &&
+          !cancelledRef.current
+        ) {
+          window.setTimeout(() => startAlwaysListenRef.current(), 320);
+        }
       }
     },
-    [lesson.language, locale, stopVoice]
+    [lesson.language, locale, stopVoice, stopAlwaysListen]
   );
 
   const setBoardSmooth = useCallback((items: BoardItem[]) => {
@@ -1129,6 +1153,10 @@ export function AiTeacherClassroom({
           if (!unfinished) break;
           await new Promise((r) => setTimeout(r, 40));
         }
+        // Natural classroom pause so the student can jump in.
+        if (!pausedRef.current && runId === runIdRef.current) {
+          await new Promise((r) => setTimeout(r, 550));
+        }
       }
 
       if (runId !== runIdRef.current || cancelledRef.current) return;
@@ -1239,19 +1267,21 @@ export function AiTeacherClassroom({
       /* unsupported */
     }
   }
+  startAlwaysListenRef.current = startAlwaysListen;
 
   function startWithVoice() {
     unlockVoice();
     handsFreeRef.current = true;
     setHandsFree(true);
     void startHzMonitor();
+    // Mic starts after each TTS finishes (see speak) — avoids audio conflicts.
     void runLesson(0);
-    window.setTimeout(() => startAlwaysListen(), 500);
   }
 
   function pauseTeaching() {
     pausedRef.current = true;
     stopVoice();
+    stopAlwaysListen();
     setPhase("paused");
   }
 
@@ -1259,8 +1289,8 @@ export function AiTeacherClassroom({
     setTeacherReply(null);
     pausedRef.current = false;
     setPhase("teaching");
-    void runLesson(speechIdxRef.current);
-    window.setTimeout(() => startAlwaysListen(), 400);
+    const next = Math.min(speechIdxRef.current + 1, Math.max(0, speech.length - 1));
+    void runLesson(next);
   }
 
   function startListening() {
@@ -1296,6 +1326,9 @@ export function AiTeacherClassroom({
           pausedSpeechIndex: speechIdxRef.current,
           spokenSoFar,
           lessonTitle: lesson.lesson_title,
+          documentIds: lesson.documentIds,
+          curriculumOutline: lesson.curriculumOutline,
+          materialNames: lesson.materialNames,
         });
         if (typeof raw === "string") {
           reply = raw;
@@ -1583,31 +1616,13 @@ export function AiTeacherClassroom({
           </div>
         ) : null}
 
-        {(phase === "listening" || phase === "answering") && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/35 backdrop-blur-[1px]">
-            <div className="flex flex-col items-center gap-3 rounded-3xl border border-white/10 bg-slate-950/90 px-6 py-5 shadow-xl">
-              <span
-                className={cn(
-                  "flex h-16 w-16 items-center justify-center rounded-full text-slate-950 shadow-lg",
-                  phase === "listening"
-                    ? "bg-amber-400 shadow-amber-400/30"
-                    : "bg-sky-400 shadow-sky-400/30"
-                )}
-              >
-                <svg viewBox="0 0 24 24" className="h-8 w-8 fill-current" aria-hidden>
-                  {phase === "listening" ? (
-                    <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
-                  ) : (
-                    <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8L12 2z" />
-                  )}
-                </svg>
-              </span>
-              <div className="text-sm font-semibold text-sky-100">
-                {phase === "listening" ? labels.listening : labels.teacherReply}
-              </div>
+        {(phase === "listening" || phase === "answering") ? (
+          <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
+            <div className="rounded-full border border-white/15 bg-slate-950/80 px-3 py-1 text-[11px] font-semibold text-amber-200 backdrop-blur-md">
+              {phase === "listening" ? labels.listening : labels.teacherReply}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Live caption overlay on the board */}
         {phase !== "ready" ? (
@@ -1633,12 +1648,12 @@ export function AiTeacherClassroom({
         ) : null}
       </div>
 
-      {/* Voice-first control bar */}
-      <div className="relative z-10 mx-3 mt-3 mb-3 flex items-center justify-center gap-4 rounded-[22px] border border-white/12 bg-white/[0.07] p-3 backdrop-blur-xl sm:mx-4">
+      {/* Slim professional voice interaction line */}
+      <div className="relative z-10 mx-3 mt-2 mb-2 flex items-center gap-2 sm:mx-4">
         {phase === "ready" || phase === "completed" ? (
           <button
             type="button"
-            className="rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 px-5 py-2.5 text-sm font-bold text-slate-950 shadow-lg shadow-sky-500/25"
+            className="shrink-0 rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 px-3.5 py-1.5 text-xs font-bold text-slate-950"
             onClick={() => startWithVoice()}
           >
             {labels.start}
@@ -1647,12 +1662,12 @@ export function AiTeacherClassroom({
         {phase === "teaching" ? (
           <button
             type="button"
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-white/5"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5"
             onClick={pauseTeaching}
             aria-label={labels.pause}
             title={labels.pause}
           >
-            <svg viewBox="0 0 24 24" className="h-5 w-5 fill-current" aria-hidden>
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current" aria-hidden>
               <path d="M8 5h3v14H8V5zm5 0h3v14h-3V5z" />
             </svg>
           </button>
@@ -1660,69 +1675,57 @@ export function AiTeacherClassroom({
         {phase === "paused" || phase === "answering" ? (
           <button
             type="button"
-            className="rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 px-4 py-2 text-xs font-bold text-slate-950"
+            className="shrink-0 rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 px-3 py-1.5 text-[11px] font-bold text-slate-950"
             onClick={resumeTeaching}
           >
             {teacherReply ? labels.continue : labels.resume}
           </button>
         ) : null}
-        <div className="flex flex-col items-center gap-1">
-          <div className="flex h-10 items-end gap-[3px]" aria-hidden>
+        <button
+          type="button"
+          className="flex h-9 min-w-0 flex-1 items-center gap-3 rounded-full border border-white/10 bg-white/[0.04] px-3 transition hover:border-white/20"
+          onClick={() => {
+            if (phase === "ready" || phase === "completed") {
+              startWithVoice();
+              return;
+            }
+            if (handsFree) {
+              handsFreeRef.current = false;
+              setHandsFree(false);
+              stopAlwaysListen();
+            } else {
+              startListening();
+            }
+          }}
+          aria-label={handsFree ? labels.listening : labels.ask}
+          title={handsFree ? labels.listening : labels.ask}
+        >
+          <div className="flex h-4 flex-1 items-center gap-[2px]" aria-hidden>
             {hzBars.map((h, i) => (
               <span
                 key={i}
                 className={cn(
-                  "w-[3px] rounded-full transition-[height,background-color] duration-75",
+                  "min-w-[1.5px] flex-1 rounded-full transition-[height,background-color] duration-75",
                   phase === "listening" || micLevel > 0.18
-                    ? "bg-amber-300"
-                    : phase === "teaching"
+                    ? "bg-amber-300/90"
+                    : phase === "teaching" || phase === "answering"
                       ? "bg-emerald-300/90"
-                      : "bg-sky-300/70"
+                      : "bg-sky-300/55"
                 )}
-                style={{ height: `${Math.max(6, Math.round(h * 36))}px` }}
+                style={{ height: `${Math.max(2, Math.round(h * 14))}px` }}
               />
             ))}
           </div>
-          <button
-            type="button"
-            className="relative flex h-16 w-16 items-center justify-center"
-            onClick={() => {
-              // Optional mute/unmute hands-free listening
-              if (handsFree) {
-                handsFreeRef.current = false;
-                setHandsFree(false);
-                stopAlwaysListen();
-              } else {
-                startListening();
-              }
-            }}
-            aria-label={handsFree ? labels.listening : labels.ask}
-            title={handsFree ? labels.listening : labels.ask}
-          >
-            {(phase === "listening" || micLevel > 0.2) && (
-              <span
-                className="absolute inset-0 animate-ping rounded-full border-2 border-amber-300/60"
-                style={{ transform: `scale(${1.05 + micLevel * 0.5})` }}
-              />
-            )}
-            <span
-              className={cn(
-                "relative flex h-14 w-14 items-center justify-center rounded-full text-slate-950 transition",
-                handsFree
-                  ? "bg-amber-400 shadow-lg shadow-amber-500/35"
-                  : "bg-gradient-to-br from-sky-400 to-emerald-400 shadow-lg shadow-sky-500/30"
-              )}
-              style={{ transform: `scale(${1 + micLevel * 0.2})` }}
-            >
-              <svg viewBox="0 0 24 24" className="h-7 w-7 fill-current" aria-hidden>
-                <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
-              </svg>
-            </span>
-          </button>
-          <p className="text-[10px] font-semibold text-slate-300">
-            {handsFree ? labels.listening : labels.ask}
-          </p>
-        </div>
+          <span className="max-w-[38%] truncate text-[10px] font-medium tracking-wide text-white/55">
+            {phase === "listening"
+              ? labels.listening
+              : phase === "answering"
+                ? labels.teacherReply
+                : phase === "teaching"
+                  ? labels.liveVoice
+                  : labels.ask}
+          </span>
+        </button>
       </div>
       {voiceError ? (
         <p className="relative z-10 mx-4 mb-2 text-center text-[11px] font-semibold text-rose-300">

@@ -67,6 +67,12 @@ export type AiTeacherLesson = {
   whiteboard: AiTeacherBoardCue[];
   quiz: AiTeacherQuizItem[];
   summary: string[];
+  /** Selected KB documents grounding this classroom */
+  documentIds?: string[];
+  /** Ordered lesson/chapter titles from first → last */
+  curriculumOutline?: string[];
+  /** Human material file names */
+  materialNames?: string[];
 };
 
 export function buildAiTeacherSystemPrompt(input: {
@@ -402,7 +408,7 @@ export function normalizeAiTeacherLesson(lesson: AiTeacherLesson): AiTeacherLess
       text: sanitizeClassroomPlainText(s.text, 140),
     }))
     .filter((s) => s.text && !isMetaTeachingLine(s.text))
-    .slice(0, 8);
+    .slice(0, 14);
 
   if (!syncedSpeech.length) {
     const q = sanitizeClassroomPlainText(lesson.objective || lesson.lesson_title, 140);
@@ -773,12 +779,29 @@ export function buildCompactAiTeacherPrompt(input: {
   language?: string | null;
   countryCode?: string | null;
   studentBlurb?: string;
+  curriculumOutline?: string[];
+  materialNames?: string[];
 }): string {
+  const outline = (input.curriculumOutline || [])
+    .map((t, i) => `${i + 1}. ${t}`)
+    .join("\n");
+  const materials = (input.materialNames || []).filter(Boolean).join(", ");
   return [
     "You are U Learn AI Teacher in a live classroom. Return ONLY valid JSON (no markdown).",
     accentInstruction(input.language, input.countryCode),
     "language must be exactly ar, tr, or en (use ar for Kurdish board/speech locale mapping when needed). ALL speech and board text match the student's selected language.",
-    "Teach a REAL subject from the student topic — never talk about the UI, writing pace, or 'one line at a time'.",
+    "Teach like a warm expert classroom teacher using the student's selected curriculum materials.",
+    materials ? `Selected material(s): ${materials}` : "",
+    outline
+      ? `CURRICULUM ORDER (teach FIRST → LAST; announce each lesson name out loud):\n${outline}`
+      : "If a curriculum outline is missing, invent a clear progressive path and name each lesson step.",
+    "CRITICAL TEACHING FLOW:",
+    "- Start at lesson 1 of the outline, then continue through later lessons in order.",
+    "- When beginning each lesson, SAY its exact lesson name (e.g. 'Lesson 2: Photosynthesis').",
+    "- Write the lesson name once on the board when that lesson starts.",
+    "- Cover every listed lesson at least briefly (key idea + one board note). Go deeper on early lessons if time is limited.",
+    "- Never skip announcing lesson names. Never teach random topics outside the material.",
+    "Use the classic teach loop per lesson: name → goal → board → explain → short check → next lesson.",
     "CRITICAL: speech[].text and write_text are PLAIN human sentences/phrases only — NEVER schema keys.",
     "Arabic RTL: write_text x ≈ 1700–1820. English/Turkish LTR: write_text x ≈ 100–220.",
     "Put diagrams on the OPPOSITE side of the text (diagrams x ≈ 350–650 for Arabic, x ≈ 1300–1700 for en/tr).",
@@ -787,10 +810,11 @@ export function buildCompactAiTeacherPrompt(input: {
     "Never duplicate the lesson title on every line. Never stack highlight bars over text.",
     input.studentBlurb ? `Learner: ${input.studentBlurb}` : "",
     "Schema: language, lesson_title, objective, speech, whiteboard, quiz, summary.",
-    "speech: 5–7 items {time:ms, text: one short spoken sentence}.",
+    "lesson_title: course-style title for this session (mention the material).",
+    "speech: 8–14 items {time:ms, text: one short spoken sentence}. Progress through lessons in order.",
     "whiteboard actions: open_new_board, write_text, draw_line, draw_arrow, draw_circle, draw_rectangle, underline, wait.",
     "write_text: {text,x,y,color?,size?,align?}. draw_*: numeric coords 0..1920 x 0..1080.",
-    "quiz: 1–2 items. summary: 3 short bullets.",
+    "quiz: 1–2 items from later lessons. summary: 3 short bullets spanning the course path.",
     "No commentary outside JSON.",
   ]
     .filter(Boolean)
@@ -810,22 +834,37 @@ export function buildClassroomInterruptPrompt(input: {
   lessonTitle?: string;
   pausedIndex?: number;
   spokenSoFar?: string[];
+  curriculumOutline?: string[];
+  materialNames?: string[];
+  materialExcerpt?: string;
 }): string {
   const language = normalizeClassroomLanguage(input.language);
   const rtl = language === "ar";
+  const outline = (input.curriculumOutline || [])
+    .map((t, i) => `${i + 1}. ${t}`)
+    .join("\n");
+  const materials = (input.materialNames || []).filter(Boolean).join(", ");
   return [
     "You are U Learn AI Teacher in a LIVE classroom. The student just interrupted by speaking.",
     accentInstruction(input.language, input.countryCode),
     "Reply like ChatGPT voice mode + a human teacher at a whiteboard: warm, clear, concise.",
     "Return ONLY valid JSON (no markdown): {\"answer\":\"...\",\"board\":[...]}",
-    "answer: 2–4 short spoken sentences in the classroom language. Answer the question directly. End by saying you will continue the lesson.",
+    "answer: 2–5 short spoken sentences in the classroom language.",
+    "If the student asks about ANY lesson in the selected material(s) (by name/number/topic), explain THAT lesson smartly using the curriculum context.",
+    "If they ask about another material they selected, answer from that material. If outside selected materials, say briefly that it is outside the current materials and offer the closest lesson.",
+    "Always mention the lesson name you are explaining. End by saying you will continue the current classroom path.",
     "board: 2–4 actions that ILLUSTRATE the answer NOW (write_text + draw_circle/draw_arrow/draw_rectangle/draw_line/underline).",
     rtl
       ? "Arabic RTL: write_text x ≈ 1700–1820, diagrams x ≈ 400–700."
       : "LTR: write_text x ≈ 100–220, diagrams x ≈ 1300–1700.",
     "write_text notes max 8 words. Coordinates 0..1920 x 0..1080. y around 700–980 so new notes appear below prior content.",
     "NEVER dump schema keys. NEVER restart the whole lesson.",
-    input.lessonTitle ? `Lesson: ${input.lessonTitle}` : "",
+    materials ? `Selected materials: ${materials}` : "",
+    outline ? `Curriculum outline:\n${outline}` : "",
+    input.materialExcerpt
+      ? `Material excerpt for answering:\n${input.materialExcerpt.slice(0, 2800)}`
+      : "",
+    input.lessonTitle ? `Current session: ${input.lessonTitle}` : "",
     typeof input.pausedIndex === "number" ? `Paused after step ${input.pausedIndex + 1}.` : "",
     input.spokenSoFar?.length
       ? `Already taught:\n- ${input.spokenSoFar.slice(-4).join("\n- ")}`

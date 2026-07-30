@@ -99,6 +99,9 @@ export class AiChatService {
     lessonTitle?: string;
     pausedSpeechIndex?: number;
     spokenSoFar?: string[];
+    documentIds?: string[];
+    curriculumOutline?: string[];
+    materialNames?: string[];
   }) {
     const question = sanitizeClassroomPlainText(input.question, 220) || input.question.trim();
     if (!question) {
@@ -113,12 +116,62 @@ export class AiChatService {
     });
     const language = input.language || profile?.locale || "en";
     const countryCode = profile?.country?.code ?? null;
+
+    let materialExcerpt = "";
+    let curriculumOutline = [...(input.curriculumOutline || [])];
+    let materialNames = [...(input.materialNames || [])];
+    const documentIds = (input.documentIds || []).filter(Boolean);
+
+    if (documentIds.length) {
+      try {
+        const { AiExamService } = await import("./ai-exam.service");
+        const { ExamGeneratorService } = await import("./exam-generator.service");
+        const allowed = await AiExamService.assertDocumentsAllowed(
+          input.userId,
+          documentIds
+        );
+        if (!materialNames.length) {
+          const docs = await prisma.kbDocument.findMany({
+            where: { id: { in: allowed }, deletedAt: null },
+            select: { fileName: true },
+          });
+          materialNames = docs.map((d) => d.fileName).filter(Boolean);
+        }
+        if (!curriculumOutline.length && allowed[0]) {
+          const chapters = await AiExamService.listDocumentChapters(
+            input.userId,
+            allowed[0]!
+          );
+          curriculumOutline = chapters
+            .map((c) => c.title)
+            .filter((t) => t && t !== "__all__");
+        }
+        // Prefer the chapter whose title is mentioned in the question.
+        const qLower = question.toLowerCase();
+        const matchedLesson = curriculumOutline.find((t) =>
+          qLower.includes(String(t).toLowerCase().slice(0, 24))
+        );
+        const material = await ExamGeneratorService.loadMaterialForDocuments({
+          userId: input.userId,
+          documentIds: allowed,
+          chapterHeading: matchedLesson || "__all__",
+          question,
+        });
+        materialExcerpt = (material?.text?.trim() ?? "").slice(0, 3200);
+      } catch {
+        /* answer without excerpt */
+      }
+    }
+
     const system = buildClassroomInterruptPrompt({
       language,
       countryCode,
       lessonTitle: input.lessonTitle,
       pausedIndex: input.pausedSpeechIndex,
       spokenSoFar: input.spokenSoFar,
+      curriculumOutline,
+      materialNames,
+      materialExcerpt,
     });
     const messages: ChatMessage[] = [
       { role: "system", content: system },
@@ -468,8 +521,7 @@ export class AiChatService {
             chapters[0]?.title === materialName);
 
         if (aiTeacher) {
-          const autoChapter = chapters[0];
-          const resolvedChapterEarly = autoChapter?.id || "__all__";
+          // Teach the whole selected material from first lesson → last.
           return this.runAiTeacherLesson({
             userId: input.userId,
             conversationId: input.conversationId,
@@ -488,9 +540,9 @@ export class AiChatService {
             grade,
             attachments,
             documentIds,
-            chapterHeading: resolvedChapterEarly,
-            chunkFrom: autoChapter?.chunkFrom ?? input.chunkFrom,
-            chunkTo: autoChapter?.chunkTo ?? input.chunkTo,
+            chapterHeading: "__all__",
+            chunkFrom: null,
+            chunkTo: null,
           });
         }
 
@@ -1180,6 +1232,8 @@ export class AiChatService {
       .join("; ");
 
     let materialContext = "";
+    let curriculumOutline: string[] = [];
+    let materialNames: string[] = [];
     const selectedDocumentIds =
       input.documentIds?.filter((id) => id && id.trim().length > 0) ?? [];
     if (selectedDocumentIds.length > 0) {
@@ -1190,16 +1244,54 @@ export class AiChatService {
           input.userId,
           selectedDocumentIds
         );
+        const docs = await prisma.kbDocument.findMany({
+          where: { id: { in: allowed }, deletedAt: null },
+          select: { id: true, fileName: true },
+        });
+        materialNames = docs.map((d) => d.fileName).filter(Boolean);
+
+        // Build ordered lesson list from first → last across selected materials.
+        for (const docId of allowed) {
+          const chapters = await AiExamService.listDocumentChapters(
+            input.userId,
+            docId
+          );
+          for (const c of chapters) {
+            if (!c.title || c.title === "__all__") continue;
+            if (!curriculumOutline.includes(c.title)) {
+              curriculumOutline.push(c.title);
+            }
+          }
+        }
+
+        // If a specific chapter was chosen, start FROM that lesson through the end.
+        const selectedChapter = (input.chapterHeading || "").trim();
+        if (
+          selectedChapter &&
+          selectedChapter !== "__all__" &&
+          curriculumOutline.length
+        ) {
+          const idx = curriculumOutline.findIndex(
+            (t) => t.toLowerCase() === selectedChapter.toLowerCase()
+          );
+          if (idx >= 0) {
+            curriculumOutline = curriculumOutline.slice(idx);
+          }
+        }
+
         const material = await ExamGeneratorService.loadMaterialForDocuments({
           userId: input.userId,
           documentIds: allowed,
           educationalStageId: input.stageId,
-          chapterHeading: input.chapterHeading || "__all__",
+          chapterHeading:
+            selectedChapter && selectedChapter !== "__all__"
+              ? selectedChapter
+              : "__all__",
           chunkFrom: input.chunkFrom ?? undefined,
           chunkTo: input.chunkTo ?? undefined,
         });
-        // Keep material short — large context = slow LLM + longer “thinking”.
-        materialContext = (material?.text?.trim() ?? "").slice(0, 3200);
+        // Curriculum sessions need more context than a single short chapter.
+        materialContext = (material?.text?.trim() ?? "").slice(0, 6500);
       } catch {
         /* use topic-only below */
       }
@@ -1215,9 +1307,16 @@ export class AiChatService {
         language: input.language,
         countryCode,
         studentBlurb: studentBlurb || undefined,
+        curriculumOutline,
+        materialNames,
       }),
+      curriculumOutline.length
+        ? `\nLesson path (first → last):\n${curriculumOutline
+            .map((t, i) => `${i + 1}. ${t}`)
+            .join("\n")}`
+        : "",
       materialContext
-        ? `\nCurriculum (use this; do not invent facts):\n${materialContext}`
+        ? `\nCurriculum text (use this; do not invent facts):\n${materialContext}`
         : "",
       processed.textExcerpt
         ? `\nAttachment text:\n${processed.textExcerpt.slice(0, 1200)}`
@@ -1232,9 +1331,12 @@ export class AiChatService {
       {
         role: "user",
         content: [
-          "Teach this as a live whiteboard lesson. Return JSON only.",
+          "Teach this selected material as a live whiteboard COURSE session. Return JSON only.",
           `Topic: ${input.question}`,
-          "Use 5–7 short speech steps. Match each step with board drawings.",
+          curriculumOutline.length
+            ? `Teach lessons in order from "${curriculumOutline[0]}" to "${curriculumOutline[curriculumOutline.length - 1]}". Announce each lesson name.`
+            : "Teach progressively and name each lesson step.",
+          "Use 8–14 short speech steps spanning the lesson path. Match each step with board drawings.",
         ].join("\n"),
         parts: userParts.length ? userParts : undefined,
       },
@@ -1258,6 +1360,9 @@ export class AiChatService {
 
     lesson = normalizeAiTeacherLesson(lesson);
     if (!lesson.language) lesson.language = input.language;
+    lesson.documentIds = selectedDocumentIds;
+    lesson.curriculumOutline = curriculumOutline;
+    lesson.materialNames = materialNames;
 
     void StudentMemoryService.recordQuestion(
       input.userId,

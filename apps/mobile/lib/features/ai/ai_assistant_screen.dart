@@ -448,6 +448,21 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         'spokenSoFar': spoken.length <= 5
             ? spoken
             : spoken.sublist(spoken.length - 5),
+        if (lesson['documentIds'] is List)
+          'documentIds': (lesson['documentIds'] as List)
+              .map((e) => e.toString())
+              .where((e) => e.isNotEmpty)
+              .toList(),
+        if (lesson['curriculumOutline'] is List)
+          'curriculumOutline': (lesson['curriculumOutline'] as List)
+              .map((e) => e.toString())
+              .where((e) => e.isNotEmpty)
+              .toList(),
+        if (lesson['materialNames'] is List)
+          'materialNames': (lesson['materialNames'] as List)
+              .map((e) => e.toString())
+              .where((e) => e.isNotEmpty)
+              .toList(),
       });
       final answer = data['answer']?.toString().trim() ?? '';
       final board = data['board'];

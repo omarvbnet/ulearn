@@ -29,8 +29,7 @@ class AiTeacherClassroom extends StatefulWidget {
   State<AiTeacherClassroom> createState() => _AiTeacherClassroomState();
 }
 
-class _AiTeacherClassroomState extends State<AiTeacherClassroom>
-    with TickerProviderStateMixin {
+class _AiTeacherClassroomState extends State<AiTeacherClassroom> {
   static const _boardW = 1920.0;
   static const _boardH = 1080.0;
 
@@ -51,16 +50,19 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
   final _speechStt = stt.SpeechToText();
   var _clockMs = 0.0;
   Timer? _paintTimer;
-  late final AnimationController _micPulse;
   var _soundLevel = 0.0;
   String? _ttsError;
   var _voiceBusy = false;
   var _handsFree = true;
   var _handlingInterrupt = false;
-  final _hzBars = List<double>.filled(18, 0.12);
+  final _hzBars = List<double>.filled(28, 0.08);
   Timer? _hzTimer;
   String? _speechLocale;
   String? _selectedLanguage;
+  var _sttReady = false;
+  var _listenGen = 0;
+  var _listenStarting = false;
+  DateTime? _lastListenStart;
 
   List<Map<String, dynamic>> get _speech {
     final raw = widget.lesson['speech'];
@@ -93,14 +95,6 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
     return 'en';
   }
 
-  String get _ttsLanguage {
-    final selected = (_selectedLanguage ?? context.localeCode).toLowerCase();
-    if (selected.startsWith('ku')) return 'ku';
-    if (selected.startsWith('ar')) return 'ar';
-    if (selected.startsWith('tr')) return 'tr';
-    return _lang;
-  }
-
   String get _sttLocaleId {
     final tag = (_speechLocale ?? '').replaceAll('-', '_');
     if (tag.length >= 2) return tag;
@@ -114,10 +108,6 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
   @override
   void initState() {
     super.initState();
-    _micPulse = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 900),
-    );
     _paintTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
       if (!mounted) return;
       if (_phase == _Phase.teaching || _items.any((i) => i.progress(_clockMs) < 1)) {
@@ -155,19 +145,69 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
   void dispose() {
     _cancelled = true;
     _runId++;
+    _listenGen++;
     _paintTimer?.cancel();
     _hzTimer?.cancel();
-    _micPulse.dispose();
     unawaited(_speechStt.stop());
     unawaited(_audio.stop());
     unawaited(_audio.dispose());
     super.dispose();
   }
 
+  Future<void> _stopListeningQuietly() async {
+    final gen = ++_listenGen;
+    _hzTimer?.cancel();
+    _hzTimer = null;
+    try {
+      if (_speechStt.isListening) {
+        await _speechStt.stop();
+      }
+    } catch (_) {}
+    // Give iOS time to release the audio session before next listen/TTS.
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (gen != _listenGen) return;
+    if (!mounted) return;
+    if (_listeningAsk || _soundLevel > 0) {
+      setState(() {
+        _listeningAsk = false;
+        _soundLevel = 0;
+      });
+    }
+  }
+
+  /// Drive the voice line while the teacher is speaking (no mic needed).
+  void _driveTeacherWave({required bool active}) {
+    final t = DateTime.now().millisecondsSinceEpoch / 110.0;
+    for (var i = 0; i < _hzBars.length; i++) {
+      if (!active) {
+        _hzBars[i] = 0.06 + (math.sin(t * 0.3 + i * 0.35) * 0.5 + 0.5) * 0.04;
+        continue;
+      }
+      final wave = (math.sin(t + i * 0.48) * 0.5 + 0.5);
+      final pulse = (math.sin(t * 1.4 + i * 0.18) * 0.5 + 0.5);
+      _hzBars[i] = (0.12 + wave * 0.45 + pulse * 0.2).clamp(0.08, 1.0);
+    }
+  }
+
+  void _updateHzFromLevel(double level) {
+    final t = DateTime.now().millisecondsSinceEpoch / 130.0;
+    for (var i = 0; i < _hzBars.length; i++) {
+      final wave = (math.sin(t + i * 0.42) * 0.5 + 0.5);
+      _hzBars[i] = (0.06 + level * (0.28 + wave * 0.55)).clamp(0.05, 1.0);
+    }
+  }
+
   Future<void> _speak(String text) async {
     final clean = _cleanBoardText(text) ?? text.trim();
     if (clean.isEmpty) return;
+    // Critical: never hold the mic while TTS plays — that crashes iOS audio session.
+    await _stopListeningQuietly();
     _voiceBusy = true;
+    _hzTimer?.cancel();
+    _hzTimer = Timer.periodic(const Duration(milliseconds: 55), (_) {
+      if (!mounted || !_voiceBusy) return;
+      setState(() => _driveTeacherWave(active: true));
+    });
     try {
       try {
         await _audio.stop();
@@ -180,6 +220,20 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
       }
     } finally {
       _voiceBusy = false;
+      _hzTimer?.cancel();
+      _hzTimer = null;
+      if (mounted) setState(() => _driveTeacherWave(active: false));
+      // Brief settle before mic — prevents crash when user speaks immediately.
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      if (_handsFree &&
+          !_handlingInterrupt &&
+          !_asking &&
+          !_voiceBusy &&
+          (_phase == _Phase.teaching ||
+              _phase == _Phase.paused ||
+              _phase == _Phase.answering)) {
+        unawaited(_startAlwaysListen());
+      }
     }
   }
 
@@ -187,11 +241,21 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
     if (!mounted) return false;
     File? tmp;
     try {
+      final lang = _selectedLanguage ??
+          (mounted ? context.localeCode.toLowerCase() : _lang);
+      final ttsLang = lang.startsWith('ku')
+          ? 'ku'
+          : lang.startsWith('ar')
+              ? 'ar'
+              : lang.startsWith('tr')
+                  ? 'tr'
+                  : _lang;
       final api = context.read<ApiClient>();
       final data = await api.post('/api/ai/tts', {
         'text': text,
-        'language': _ttsLanguage,
+        'language': ttsLang,
       });
+      if (!mounted) return false;
       final nested = data['data'];
       final nestedMap = nested is Map ? Map<String, dynamic>.from(nested) : null;
       final speechLocale =
@@ -211,109 +275,153 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
       // iOS/Android: data-URI sources are unreliable for large MP3 — use a temp file.
       final dir = await getTemporaryDirectory();
       final ext = mime.contains('wav') ? 'wav' : 'mp3';
-      tmp = File('${dir.path}/ulearn_tts_${DateTime.now().microsecondsSinceEpoch}.$ext');
+      tmp = File(
+        '${dir.path}/ulearn_tts_${DateTime.now().microsecondsSinceEpoch}.$ext',
+      );
       await tmp.writeAsBytes(bytes, flush: true);
+      if (!mounted) return false;
       await _audio.setVolume(1.0);
       await _audio.setFilePath(tmp.path);
       await _audio.play();
-      // Wait until playback really finishes (not idle-before-play).
-      await _audio.processingStateStream.firstWhere(
-        (s) => s == ProcessingState.completed,
-      );
+      // Wait for real completion; timeout avoids hanging the lesson loop.
+      await _audio.playerStateStream
+          .firstWhere(
+            (s) =>
+                s.processingState == ProcessingState.completed ||
+                (s.processingState == ProcessingState.idle && !s.playing),
+          )
+          .timeout(Duration(milliseconds: _estimateMs(text) + 12000));
+      try {
+        await _audio.stop();
+      } catch (_) {}
       return true;
     } catch (_) {
+      try {
+        await _audio.stop();
+      } catch (_) {}
       return false;
     } finally {
-      try {
-        await tmp?.delete();
-      } catch (_) {}
-    }
-  }
-
-  void _updateHzFromLevel(double level) {
-    final t = DateTime.now().millisecondsSinceEpoch / 120.0;
-    for (var i = 0; i < _hzBars.length; i++) {
-      final wave = (math.sin(t + i * 0.55) * 0.5 + 0.5);
-      _hzBars[i] = (0.1 + level * (0.35 + wave * 0.65)).clamp(0.08, 1.0);
+      // Delete only after player released the file (prevents AVPlayer crashes).
+      final doomed = tmp;
+      tmp = null;
+      if (doomed != null) {
+        Future<void>.delayed(const Duration(milliseconds: 400), () async {
+          try {
+            await doomed.delete();
+          } catch (_) {}
+        });
+      }
     }
   }
 
   Future<void> _startAlwaysListen() async {
     if (!_handsFree || _handlingInterrupt || _asking || _voiceBusy) return;
+    if (_listenStarting) return;
     if (_phase != _Phase.teaching &&
         _phase != _Phase.paused &&
         _phase != _Phase.answering) {
       return;
     }
-    final available = await _speechStt.initialize(
-      onError: (_) {
-        if (!mounted) return;
-        _hzTimer?.cancel();
-        Future<void>.delayed(const Duration(milliseconds: 800), _startAlwaysListen);
-      },
-      onStatus: (status) {
-        if (!mounted) return;
-        if (status == 'done' || status == 'notListening') {
-          if (_handsFree && !_handlingInterrupt && !_asking) {
-            Future<void>.delayed(const Duration(milliseconds: 350), _startAlwaysListen);
-          }
-        }
-      },
-    );
-    if (!available || !mounted) return;
-    setState(() {
-      _listeningAsk = true;
-    });
-    if (!_micPulse.isAnimating) {
-      unawaited(_micPulse.repeat(reverse: true));
+    if (_audio.playing) return;
+    final now = DateTime.now();
+    if (_lastListenStart != null &&
+        now.difference(_lastListenStart!).inMilliseconds < 700) {
+      return;
     }
-    _hzTimer?.cancel();
-    _hzTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
-      if (!mounted) return;
-      setState(() => _updateHzFromLevel(_soundLevel));
-    });
-    await _speechStt.listen(
-      onSoundLevelChange: (level) {
-        if (!mounted) return;
-        final n = (level.clamp(-50, 10) + 50) / 60.0;
-        setState(() {
+
+    _listenStarting = true;
+    final gen = ++_listenGen;
+    try {
+      if (!_sttReady) {
+        _sttReady = await _speechStt.initialize(
+          onError: (_) {
+            if (!mounted) return;
+            _hzTimer?.cancel();
+            if (_handsFree && !_voiceBusy && !_handlingInterrupt) {
+              Future<void>.delayed(
+                const Duration(milliseconds: 1200),
+                _startAlwaysListen,
+              );
+            }
+          },
+          onStatus: (status) {
+            if (!mounted) return;
+            if (status == 'done' || status == 'notListening') {
+              if (_handsFree &&
+                  !_handlingInterrupt &&
+                  !_asking &&
+                  !_voiceBusy &&
+                  !_listenStarting) {
+                Future<void>.delayed(
+                  const Duration(milliseconds: 800),
+                  _startAlwaysListen,
+                );
+              }
+            }
+          },
+        );
+      }
+      if (!_sttReady || !mounted || gen != _listenGen) return;
+      if (_voiceBusy || !_handsFree || _handlingInterrupt) return;
+      if (_speechStt.isListening) return;
+
+      _lastListenStart = DateTime.now();
+      if (mounted) setState(() => _listeningAsk = true);
+      _hzTimer?.cancel();
+      _hzTimer = Timer.periodic(const Duration(milliseconds: 70), (_) {
+        if (!mounted || _voiceBusy) return;
+        setState(() => _updateHzFromLevel(_soundLevel));
+      });
+
+      await _speechStt.listen(
+        onSoundLevelChange: (level) {
+          if (!mounted || _voiceBusy || gen != _listenGen) return;
+          final n = (level.clamp(-50, 10) + 50) / 60.0;
           _soundLevel = n.clamp(0.0, 1.0);
-          _updateHzFromLevel(_soundLevel);
-        });
-        // Barge-in: student talking while teacher explains
-        if (_phase == _Phase.teaching && _soundLevel > 0.35 && !_handlingInterrupt) {
-          _pause();
-          setState(() => _phase = _Phase.answering);
-        }
-      },
-      onResult: (result) async {
-        final words = result.recognizedWords.trim();
-        if (words.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length < 2) {
-          return;
-        }
-        if (!result.finalResult) {
-          if (_phase == _Phase.teaching) {
-            _pause();
-            if (mounted) setState(() => _phase = _Phase.answering);
+          // Do NOT barge-in on raw level — false positives crash iOS audio.
+        },
+        onResult: (result) async {
+          if (_voiceBusy || _handlingInterrupt || gen != _listenGen) return;
+          final words = result.recognizedWords.trim();
+          final count =
+              words.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+          if (count < 3) return;
+          if (!result.finalResult) {
+            // Soft pause only — keep STT alive until final result.
+            if (_phase == _Phase.teaching && !_paused) {
+              _paused = true;
+              try {
+                await _audio.stop();
+              } catch (_) {}
+              if (mounted) setState(() => _phase = _Phase.answering);
+            }
+            return;
           }
-          return;
-        }
-        final q = (_cleanBoardText(words) ?? words).trim();
-        await _speechStt.stop();
-        if (!mounted || q.isEmpty) return;
-        await _submitAsk(q);
-      },
-      listenOptions: stt.SpeechListenOptions(
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 2),
-        partialResults: true,
-        localeId: _sttLocaleId,
-      ),
-    );
+          final q = (_cleanBoardText(words) ?? words).trim();
+          if (q.isEmpty) return;
+          await _stopListeningQuietly();
+          if (!mounted) return;
+          await _submitAsk(q);
+        },
+        listenOptions: stt.SpeechListenOptions(
+          listenFor: const Duration(seconds: 28),
+          pauseFor: const Duration(milliseconds: 1800),
+          partialResults: true,
+          cancelOnError: true,
+          listenMode: stt.ListenMode.dictation,
+          localeId: _sttLocaleId,
+        ),
+      );
+    } catch (_) {
+      // Swallow — never crash the classroom from STT failures.
+    } finally {
+      _listenStarting = false;
+    }
   }
 
   Future<void> _listenAsk() async {
     _handsFree = true;
+    await Future<void>.delayed(const Duration(milliseconds: 300));
     await _startAlwaysListen();
   }
 
@@ -391,7 +499,7 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
       _teacherReply = null;
       _handsFree = true;
     });
-    unawaited(_startAlwaysListen());
+    // Do NOT start mic yet — first release TTS audio session, then listen between beats.
 
     final speech = _speech;
     if (fromIndex == 0) {
@@ -435,7 +543,6 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
         _applyBoardUntil(tMs + math.min(span, elapsed + 600));
         final playing = _voiceBusy || _audio.playing;
         if (!playing && elapsed > 1500) {
-          // Speech finished (or failed) — finish remaining board for this beat.
           break;
         }
         await Future<void>.delayed(const Duration(milliseconds: 40));
@@ -443,6 +550,10 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
       await speakFuture;
       _applyBoardUntil(nextTime);
       await _waitBoardCatchUp();
+      // Natural classroom pause so the student can jump in.
+      if (!_paused && !_cancelled && runId == _runId) {
+        await Future<void>.delayed(const Duration(milliseconds: 550));
+      }
     }
 
     if (runId != _runId || _cancelled) return;
@@ -452,21 +563,22 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
     setState(() {
       _phase = _Phase.completed;
       _caption = done;
+      _listeningAsk = false;
     });
+    await _stopListeningQuietly();
     await _speak(done);
   }
 
   void _pause() {
     _paused = true;
-    unawaited(_speechStt.stop());
+    unawaited(_stopListeningQuietly());
     unawaited(_audio.stop());
-    _micPulse.stop();
-    _micPulse.value = 0;
     if (mounted) {
       setState(() {
         _phase = _Phase.paused;
         _listeningAsk = false;
         _soundLevel = 0;
+        _driveTeacherWave(active: false);
       });
     }
   }
@@ -475,8 +587,9 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
     _teacherReply = null;
     _paused = false;
     if (mounted) setState(() => _phase = _Phase.teaching);
-    _runLesson(_speechIndex);
-    unawaited(_startAlwaysListen());
+    // Continue from the next beat after an answered interrupt / pause.
+    final next = (_speechIndex + 1).clamp(0, _speech.length);
+    unawaited(_runLesson(next >= _speech.length ? _speechIndex : next));
   }
 
   Future<void> _submitAsk(String question) async {
@@ -484,11 +597,12 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
     if (q.isEmpty || _asking || _handlingInterrupt) return;
     _handlingInterrupt = true;
     _pause();
-    setState(() {
-      _asking = true;
-      _phase = _Phase.answering;
-      _listeningAsk = true;
-    });
+    if (mounted) {
+      setState(() {
+        _asking = true;
+        _phase = _Phase.answering;
+      });
+    }
     try {
       var reply = context.l10n.t('mobile.ai.aiTeacherCompleted');
       List<dynamic> board = const [];
@@ -504,16 +618,16 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
       setState(() {
         _teacherReply = cleanReply;
         _caption = cleanReply;
-        _phase = _Phase.paused;
+        _phase = _Phase.answering;
       });
       await _speak(cleanReply);
       await _waitBoardCatchUp();
+      await Future<void>.delayed(const Duration(milliseconds: 700));
     } finally {
       _handlingInterrupt = false;
       if (mounted) {
         setState(() => _asking = false);
-        // Auto-continue like a live teacher
-        Future<void>.delayed(const Duration(milliseconds: 600), () {
+        Future<void>.delayed(const Duration(milliseconds: 400), () {
           if (!mounted || _cancelled) return;
           _resume();
         });
@@ -562,9 +676,15 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
 
 
   String _phaseLabel(dynamic l10n) {
+    if (_voiceBusy) return l10n.t('mobile.ai.aiTeacherLiveVoice');
+    if (_listeningAsk && _soundLevel > 0.25) {
+      return l10n.t('mobile.ai.aiTeacherListening');
+    }
     switch (_phase) {
       case _Phase.teaching:
-        return l10n.t('mobile.ai.aiTeacherPhaseTeaching');
+        return _listeningAsk
+            ? l10n.t('mobile.ai.aiTeacherListening')
+            : l10n.t('mobile.ai.aiTeacherPhaseTeaching');
       case _Phase.paused:
         return l10n.t('mobile.ai.aiTeacherPhasePaused');
       case _Phase.answering:
@@ -574,6 +694,32 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
       case _Phase.idle:
         return l10n.t('mobile.ai.aiTeacherPhaseReady');
     }
+  }
+
+  Color get _voiceLineColor {
+    if (_voiceBusy || (_phase == _Phase.answering && !_listeningAsk)) {
+      return const Color(0xFF34D399);
+    }
+    if (_listeningAsk || _soundLevel > 0.18) {
+      return const Color(0xFFFBBF24);
+    }
+    if (_phase == _Phase.teaching) return const Color(0xFF38BDF8);
+    return const Color(0xFF94A3B8);
+  }
+
+  String _voiceLineHint(dynamic l10n) {
+    if (_voiceBusy) return l10n.t('mobile.ai.aiTeacherLiveVoice');
+    if (_asking) return l10n.t('mobile.ai.aiTeacherReply');
+    if (_listeningAsk) return l10n.t('mobile.ai.aiTeacherListening');
+    if (_phase == _Phase.teaching) {
+      return l10n.t('mobile.ai.aiTeacherInterruptHint');
+    }
+    if (_phase == _Phase.paused) {
+      return _teacherReply != null
+          ? l10n.t('mobile.ai.aiTeacherContinue')
+          : l10n.t('mobile.ai.aiTeacherResume');
+    }
+    return l10n.t('mobile.ai.aiTeacherTapToBegin');
   }
 
   @override
@@ -826,222 +972,107 @@ class _AiTeacherClassroomState extends State<AiTeacherClassroom>
                             ),
                           ),
                         ),
-                      if (_listeningAsk || _phase == _Phase.answering)
-                        Container(
-                          color: Colors.black.withValues(alpha: 0.35),
-                          alignment: Alignment.center,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 88,
-                                height: 88,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: _listeningAsk
-                                      ? const Color(0xFFFBBF24)
-                                      : const Color(0xFF38BDF8),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: (_listeningAsk
-                                              ? const Color(0xFFFBBF24)
-                                              : const Color(0xFF38BDF8))
-                                          .withValues(alpha: 0.45),
-                                      blurRadius: 28,
-                                    ),
-                                  ],
-                                ),
-                                child: Icon(
-                                  _listeningAsk ? Icons.mic_rounded : Icons.auto_awesome,
-                                  size: 40,
-                                  color: const Color(0xFF0B1220),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                _listeningAsk
-                                    ? l10n.t('mobile.ai.aiTeacherListening')
-                                    : l10n.t('mobile.ai.aiTeacherReply'),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 15,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
                     ],
                   ),
                 ),
               ),
             ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+            child: Column(
               children: [
-                if (_phase == _Phase.teaching)
-                  _roundIcon(
-                    icon: Icons.pause_rounded,
-                    label: l10n.t('mobile.ai.aiTeacherPause'),
-                    onTap: _pause,
-                  )
-                else if (_phase == _Phase.paused || _phase == _Phase.answering)
-                  _roundIcon(
-                    icon: Icons.play_arrow_rounded,
-                    label: _teacherReply != null
-                        ? l10n.t('mobile.ai.aiTeacherContinue')
-                        : l10n.t('mobile.ai.aiTeacherResume'),
-                    onTap: _resume,
-                    filled: true,
-                  )
-                else if (_phase == _Phase.idle || _phase == _Phase.completed)
-                  _roundIcon(
-                    icon: Icons.play_arrow_rounded,
-                    label: l10n.t('mobile.ai.aiTeacherStart'),
-                    onTap: () => _runLesson(0),
-                    filled: true,
-                  )
-                else
-                  const SizedBox(width: 56),
-                const Spacer(),
-                GestureDetector(
-                  onTap: () {
-                    if (_handsFree) {
-                      setState(() {
-                        _handsFree = false;
-                        _listeningAsk = false;
-                      });
-                      unawaited(_speechStt.stop());
-                      _micPulse.stop();
-                      _hzTimer?.cancel();
-                    } else {
-                      unawaited(_listenAsk());
-                    }
-                  },
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        height: 36,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            for (var i = 0; i < _hzBars.length; i++)
-                              Container(
-                                width: 3,
-                                height: 6 + _hzBars[i] * 28,
-                                margin: const EdgeInsets.symmetric(horizontal: 1),
-                                decoration: BoxDecoration(
-                                  color: _listeningAsk || _soundLevel > 0.2
-                                      ? const Color(0xFFFBBF24)
-                                      : const Color(0xFF34D399),
-                                  borderRadius: BorderRadius.circular(2),
+                Row(
+                  children: [
+                    if (_phase == _Phase.teaching)
+                      _roundIcon(
+                        icon: Icons.pause_rounded,
+                        label: l10n.t('mobile.ai.aiTeacherPause'),
+                        onTap: _pause,
+                      )
+                    else if (_phase == _Phase.paused || _phase == _Phase.answering)
+                      _roundIcon(
+                        icon: Icons.play_arrow_rounded,
+                        label: _teacherReply != null
+                            ? l10n.t('mobile.ai.aiTeacherContinue')
+                            : l10n.t('mobile.ai.aiTeacherResume'),
+                        onTap: _resume,
+                        filled: true,
+                      )
+                    else if (_phase == _Phase.idle || _phase == _Phase.completed)
+                      _roundIcon(
+                        icon: Icons.play_arrow_rounded,
+                        label: l10n.t('mobile.ai.aiTeacherStart'),
+                        onTap: () => _runLesson(0),
+                        filled: true,
+                      )
+                    else
+                      const SizedBox(width: 56),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          if (_phase == _Phase.idle || _phase == _Phase.completed) {
+                            unawaited(_runLesson(0));
+                            return;
+                          }
+                          if (_handsFree) {
+                            setState(() {
+                              _handsFree = false;
+                              _listeningAsk = false;
+                            });
+                            unawaited(_stopListeningQuietly());
+                          } else {
+                            unawaited(_listenAsk());
+                          }
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          height: 44,
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(999),
+                            color: Colors.white.withValues(alpha: 0.04),
+                            border: Border.all(
+                              color: _voiceLineColor.withValues(alpha: 0.35),
+                              width: 0.8,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: CustomPaint(
+                                  painter: _VoiceWavePainter(
+                                    levels: List<double>.from(_hzBars),
+                                    color: _voiceLineColor,
+                                    active: _voiceBusy ||
+                                        _listeningAsk ||
+                                        _soundLevel > 0.15,
+                                  ),
+                                  child: const SizedBox.expand(),
                                 ),
                               ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      AnimatedBuilder(
-                        animation: _micPulse,
-                        builder: (context, child) {
-                          final pulse = _listeningAsk
-                              ? 1.0 + (_micPulse.value * 0.18) + (_soundLevel * 0.35)
-                              : 1.0;
-                          final ring = _listeningAsk
-                              ? 0.35 + _micPulse.value * 0.45 + _soundLevel * 0.4
-                              : 0.0;
-                          return SizedBox(
-                            width: 92,
-                            height: 92,
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                if (_listeningAsk) ...[
-                                  Transform.scale(
-                                    scale: 1.15 + _micPulse.value * 0.35 + _soundLevel * 0.5,
-                                    child: Container(
-                                      width: 88,
-                                      height: 88,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: const Color(0xFFFBBF24)
-                                              .withValues(alpha: ring.clamp(0.15, 0.85)),
-                                          width: 3,
-                                        ),
-                                      ),
-                                    ),
+                              const SizedBox(width: 10),
+                              Flexible(
+                                child: Text(
+                                  _voiceLineHint(l10n),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.end,
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.62),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.2,
                                   ),
-                                  Transform.scale(
-                                    scale: 1.4 + _micPulse.value * 0.45 + _soundLevel * 0.6,
-                                    child: Container(
-                                      width: 88,
-                                      height: 88,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: const Color(0xFFF59E0B)
-                                              .withValues(alpha: (ring * 0.55).clamp(0.08, 0.5)),
-                                          width: 2,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                                Transform.scale(
-                                  scale: pulse,
-                                  child: child,
                                 ),
-                              ],
-                            ),
-                          );
-                        },
-                        child: Container(
-                          width: 72,
-                          height: 72,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: _listeningAsk
-                                  ? const [Color(0xFFFBBF24), Color(0xFFF59E0B)]
-                                  : const [Color(0xFF38BDF8), Color(0xFF34D399)],
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: (_listeningAsk
-                                        ? const Color(0xFFFBBF24)
-                                        : const Color(0xFF38BDF8))
-                                    .withValues(alpha: 0.45),
-                                blurRadius: _listeningAsk ? 28 : 18,
-                                offset: const Offset(0, 8),
                               ),
                             ],
                           ),
-                          child: Icon(
-                            _listeningAsk ? Icons.mic_rounded : Icons.mic_none_rounded,
-                            size: 34,
-                            color: const Color(0xFF0B1220),
-                          ),
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        _listeningAsk
-                            ? l10n.t('mobile.ai.aiTeacherListening')
-                            : l10n.t('mobile.ai.aiTeacherAsk'),
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                const Spacer(),
-                const SizedBox(width: 56),
               ],
             ),
           ),
@@ -1542,6 +1573,63 @@ class _BoardItem {
 }
 
 enum _Kind { text, line, circle, rect, highlight }
+
+class _VoiceWavePainter extends CustomPainter {
+  _VoiceWavePainter({
+    required this.levels,
+    required this.color,
+    required this.active,
+  });
+
+  final List<double> levels;
+  final Color color;
+  final bool active;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (levels.isEmpty || size.width <= 0 || size.height <= 0) return;
+    final n = levels.length;
+    final barW = math.max(1.4, size.width / (n * 2.8));
+    final paint = Paint()
+      ..color = color.withValues(alpha: active ? 0.92 : 0.35)
+      ..style = PaintingStyle.fill;
+
+    final midY = size.height * 0.5;
+    // Ultra-slim professional baseline
+    final base = Paint()
+      ..color = color.withValues(alpha: 0.16)
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+    canvas.drawLine(Offset(0, midY), Offset(size.width, midY), base);
+
+    final maxH = size.height * 0.72;
+    for (var i = 0; i < n; i++) {
+      final h = (2.0 + levels[i] * maxH).clamp(2.0, maxH);
+      final x = (i + 0.5) * (size.width / n) - barW / 2;
+      final y = midY - h / 2;
+      final r = RRect.fromRectAndRadius(
+        Rect.fromLTWH(x, y, barW, h),
+        const Radius.circular(1.5),
+      );
+      canvas.drawRRect(r, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _VoiceWavePainter oldDelegate) =>
+      oldDelegate.active != active ||
+      oldDelegate.color != color ||
+      oldDelegate.levels.length != levels.length ||
+      !_listEq(oldDelegate.levels, levels);
+
+  bool _listEq(List<double> a, List<double> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if ((a[i] - b[i]).abs() > 0.02) return false;
+    }
+    return true;
+  }
+}
 
 class _ClassroomBoardPainter extends CustomPainter {
   _ClassroomBoardPainter({

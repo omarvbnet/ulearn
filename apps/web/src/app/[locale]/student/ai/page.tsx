@@ -481,6 +481,9 @@ export default function StudentAiPage() {
     pausedSpeechIndex: number;
     spokenSoFar: string[];
     lessonTitle: string;
+    documentIds?: string[];
+    curriculumOutline?: string[];
+    materialNames?: string[];
   }): Promise<{
     answer: string;
     board?: Array<{ time?: number; action: string; parameters?: Record<string, unknown> }>;
@@ -494,6 +497,13 @@ export default function StudentAiPage() {
         lessonTitle: input.lessonTitle,
         pausedSpeechIndex: input.pausedSpeechIndex,
         spokenSoFar: input.spokenSoFar.slice(-5),
+        documentIds: Array.isArray(input.documentIds) ? input.documentIds : undefined,
+        curriculumOutline: Array.isArray(input.curriculumOutline)
+          ? input.curriculumOutline
+          : undefined,
+        materialNames: Array.isArray(input.materialNames)
+          ? input.materialNames
+          : undefined,
       }),
     });
     const data = await res.json();

@@ -11,6 +11,9 @@ export type AiTeacherLessonView = {
   whiteboard: { time: number; action: string; parameters: Record<string, unknown> }[];
   quiz: { question: string; choices: string[]; answer: string }[];
   summary: string[];
+  documentIds?: string[];
+  curriculumOutline?: string[];
+  materialNames?: string[];
 };
 
 function formatMs(ms: number): string {
