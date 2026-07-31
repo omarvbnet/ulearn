@@ -6,7 +6,12 @@ import {
   type ConceptMasteryMap,
   type MaterialEvaluation,
 } from "../student-memory.service";
-import { resolveTeacherVoice } from "../voice-accent";
+import {
+  classroomLanguageLock,
+  classroomSpeechLanguage,
+  normLang,
+  resolveTeacherVoice,
+} from "../voice-accent";
 import { sanitizeClassroomPlainText } from "../ai-teacher-prompt";
 import type { ChatMessage } from "../types";
 import { normalizeBoardActions } from "./board-layout";
@@ -234,8 +239,9 @@ function parseBeat(raw: string): ClassroomBeat | null {
     const homework = o.homework ? sanitizeClassroomPlainText(o.homework, 200) : null;
 
     return {
+      // Match prompt pedagogy: 2 speak lines + up to 5 board strokes.
       speak: speak.slice(0, 2),
-      board: board.slice(0, 3),
+      board: board.slice(0, 5),
       askStudent,
       waitForStudentMs: Math.max(
         0,
@@ -671,14 +677,25 @@ function fallbackBeat(
   mode: "open" | "next" | "react",
   lessonName?: string | null,
   variant = 0,
-  stage?: ClassroomLessonStage | null
+  stage?: ClassroomLessonStage | null,
+  countryCode?: string | null,
+  provinceName?: string | null
 ): ClassroomBeat {
-  const ar = language === "ar" || language === "ku";
-  const tr = language === "tr";
+  // Match TTS delivery language (KU UI → ar/tr), not raw locale equality.
+  const speech = classroomSpeechLanguage({ language, countryCode, provinceName });
+  const ar = speech === "ar";
+  const tr = speech === "tr";
   const key: "ar" | "tr" | "en" = ar ? "ar" : tr ? "tr" : "en";
   const i = Math.abs(variant) % 3;
+  const rawTitle = (lessonName || "").trim();
   const title =
-    (lessonName || "").trim() || (ar ? "درس اليوم" : tr ? "Bugünün dersi" : "Today's lesson");
+    rawTitle && !isWeakLessonTitle(rawTitle, [])
+      ? rawTitle
+      : ar
+        ? "درس اليوم"
+        : tr
+          ? "Bugünün dersi"
+          : "Today's lesson";
   const boardTitle = {
     time: 0,
     action: "write_text",
@@ -1383,7 +1400,8 @@ export class ClassroomSessionService {
     // The language the student explicitly selected to start this classroom
     // (e.g. the site's current UI locale) always wins over their stored
     // profile default — country still drives the regional accent below.
-    const language = (input.language || profile?.locale || "en").toString();
+    // Normalize to ar|ku|tr|en so fallbacks and prompts never see ar-IQ etc.
+    const language = normLang(input.language || profile?.locale || "en");
     const countryCode = profile?.country?.code || null;
     const provinceName =
       profile?.province?.nameEn ||
@@ -1521,27 +1539,35 @@ export class ClassroomSessionService {
     }
 
     // Rebuild outline titles from real excerpt concepts when needed.
+    // Unit fallbacks follow the session speech language (not hard-coded Arabic).
+    const speech = classroomSpeechLanguage({ language, countryCode, provinceName });
+    const unitLabel = (n: number) =>
+      speech === "ar"
+        ? `الوحدة ${n}`
+        : speech === "tr"
+          ? `Ünite ${n}`
+          : `Unit ${n}`;
     if (!curriculumOutline.length && chapterMeta.length) {
       for (let i = 0; i < chapterMeta.length; i++) {
         const c = chapterMeta[i]!;
         let title = topicFromExcerpt(
           materialExcerpt,
-          `الوحدة ${i + 1}`,
+          unitLabel(i + 1),
           materialNames
         );
         if (i > 0) title = `${title} · ${i + 1}`;
-        if (isWeakLessonTitle(title, materialNames)) title = `الوحدة ${i + 1}`;
+        if (isWeakLessonTitle(title, materialNames)) title = unitLabel(i + 1);
         curriculumOutline.push(title);
         c.title = title;
       }
     } else if (!curriculumOutline.length) {
       const title = topicFromExcerpt(
         materialExcerpt,
-        "الوحدة 1",
+        unitLabel(1),
         materialNames
       );
       curriculumOutline.push(
-        isWeakLessonTitle(title, materialNames) ? "الوحدة 1" : title
+        isWeakLessonTitle(title, materialNames) ? unitLabel(1) : title
       );
     }
 
@@ -1549,7 +1575,7 @@ export class ClassroomSessionService {
     if (openingLesson && isWeakLessonTitle(openingLesson, materialNames)) {
       openingLesson = topicFromExcerpt(
         materialExcerpt,
-        "الوحدة 1",
+        unitLabel(1),
         materialNames
       );
       curriculumOutline[0] = openingLesson;
@@ -1636,9 +1662,18 @@ export class ClassroomSessionService {
     // later beat/turn in THIS session skips the StudentAiMemory round trip
     // entirely (materialCompletedLessons/masteredTopics/weakTopics above are
     // already tracked live in `state` and need no re-fetch either).
+    // Never inject a conflicting "Usually taught in: X" when the student
+    // just started a session in a different language — that caused bilingual
+    // / wrong-language opening beats.
+    const sessionLang = language;
+    const storedLang = memory.preferredLanguage
+      ? normLang(memory.preferredLanguage)
+      : null;
+    const preferredForPrompt =
+      storedLang && storedLang === sessionLang ? storedLang : sessionLang;
     state.studentPreferenceBlurb = [
       StudentMemoryService.toPromptBlurb(memory),
-      memory.preferredLanguage ? `Usually taught in: ${memory.preferredLanguage}` : "",
+      `Session language: ${sessionLang}`,
     ]
       .filter(Boolean)
       .join("; ");
@@ -1646,7 +1681,7 @@ export class ClassroomSessionService {
     const memoryBlurb = [
       StudentMemoryService.toPromptBlurb(memory),
       StudentMemoryService.classroomMemoryBlurb({
-        preferredLanguage: memory.preferredLanguage,
+        preferredLanguage: preferredForPrompt,
         preferredStyle: memory.preferredStyle,
         learningSpeed: memory.learningSpeed,
         completedLessons: completedLessonsForMaterial,
@@ -2363,7 +2398,12 @@ export class ClassroomSessionService {
       resumeLessonName: input.resumeLessonName,
     });
 
-    const userContent =
+    const langLock = classroomLanguageLock({
+      language: input.language,
+      countryCode: input.countryCode,
+      provinceName: input.provinceName,
+    });
+    const task =
       input.mode === "open"
         ? `Open the live classroom. Student request: ${
             input.question ||
@@ -2376,6 +2416,7 @@ export class ClassroomSessionService {
           : input.mode === "silence"
             ? "Student did not answer. Repeat the pending check question by voice now."
             : "Continue the live classroom with the next natural teaching beat.";
+    const userContent = `${langLock}\n\n${task}\n\nReturn ONLY the JSON beat. speak[] and board text MUST follow LANGUAGE LOCK.`;
 
     const messages: ChatMessage[] = [
       { role: "system", content: system },
@@ -2392,7 +2433,20 @@ export class ClassroomSessionService {
     // cap truncates the JSON mid-response, parseBeat then fails, and the
     // student hears the same generic fallback question over and over — worse
     // than a slightly slower real response. Keep a real but generous ceiling.
-    const maxTokensExact = input.mode === "open" ? 1000 : 900;
+    // Arabic (+ KU→AR) needs more room for diacritics; keep non-Arabic tighter.
+    const speechLang = classroomSpeechLanguage({
+      language: input.language,
+      countryCode: input.countryCode,
+      provinceName: input.provinceName,
+    });
+    const maxTokensExact =
+      speechLang === "ar"
+        ? input.mode === "open"
+          ? 1400
+          : 1200
+        : input.mode === "open"
+          ? 1000
+          : 900;
 
     // CRITICAL ARCHITECTURE RULE: never block the classroom waiting on a
     // slow/stuck model. Every attempt streams (falling back gracefully to a
@@ -2501,7 +2555,9 @@ export class ClassroomSessionService {
           fallbackMode,
           input.state.currentLessonName || input.curriculumOutline[0] || null,
           Date.now(),
-          input.state.lessonStage
+          input.state.lessonStage,
+          input.countryCode,
+          input.provinceName
         );
       return finalizeBeat(beat, input.state, input.language, input.mode);
     } catch {
@@ -2511,7 +2567,9 @@ export class ClassroomSessionService {
           fallbackMode,
           input.state.currentLessonName || input.curriculumOutline[0] || null,
           Date.now(),
-          input.state.lessonStage
+          input.state.lessonStage,
+          input.countryCode,
+          input.provinceName
         ),
         input.state,
         input.language,

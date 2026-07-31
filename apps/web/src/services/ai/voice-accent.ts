@@ -47,12 +47,54 @@ const ELEVEN = {
   adam: "pNInz6obpgDQGcFmaJgB",
 } as const;
 
-function normLang(raw?: string | null): TeacherSpeechLanguage {
+export function normLang(raw?: string | null): TeacherSpeechLanguage {
   const lang = (raw || "en").toLowerCase().slice(0, 2);
   if (lang === "ar") return "ar";
   if (lang === "ku") return "ku";
   if (lang === "tr") return "tr";
   return "en";
+}
+
+/**
+ * The language the teacher must SPEAK/WRITE for this student.
+ * Kurdish UI maps to Arabic or Turkish because classroom TTS has no KU voice —
+ * the LLM must match the TTS language or the student hears "unknown"/garbled speech.
+ */
+export function classroomSpeechLanguage(input: {
+  language?: string | null;
+  countryCode?: string | null;
+  provinceName?: string | null;
+}): "ar" | "tr" | "en" {
+  const v = resolveTeacherVoice(input);
+  if (v.language === "ar" || v.language === "tr") return v.language;
+  return "en";
+}
+
+/** Hard language lock for the top of every classroom system + user prompt. */
+export function classroomLanguageLock(input: {
+  language?: string | null;
+  countryCode?: string | null;
+  provinceName?: string | null;
+}): string {
+  const v = resolveTeacherVoice(input);
+  const speech = classroomSpeechLanguage(input);
+  const name =
+    speech === "ar" ? "Arabic (العربية)" : speech === "tr" ? "Turkish" : "English";
+  const kuNote =
+    v.selectedLanguage === "ku"
+      ? speech === "tr"
+        ? " Student UI is Kurdish, but you MUST teach in Turkish so the classroom voice can speak clearly."
+        : " Student UI is Kurdish, but you MUST teach in Arabic so the classroom voice can speak clearly."
+      : "";
+  return [
+    `LANGUAGE LOCK (absolute — overrides every other instruction):`,
+    `- Every speak[] line MUST be entirely in ${name}.${kuNote}`,
+    `- Every board write_text label MUST be in ${name}.`,
+    `- askStudent (when allowed) MUST be in ${name}.`,
+    `- SOURCE MATERIAL may be in another language — TRANSLATE and teach the ideas in ${name}. Never mirror the PDF's language if it differs.`,
+    `- Never mix languages in one beat. Never reply in English unless the speech language above is English.`,
+    accentInstruction(input.language, input.countryCode, input.provinceName),
+  ].join("\n");
 }
 
 function normCountry(raw?: string | null): string | null {
@@ -277,7 +319,7 @@ export function accentInstruction(
   const shared =
     "Sound like a senior professional teacher: warm, clear, confident, never robotic. Prefer natural classroom rhythm with gentle pauses.";
   const arabicDiacritics =
-    "CRITICAL for pronunciation: write full Arabic diacritics (تشكيل كامل — الفتحة والضمة والكسرة والسكون والشدة) on EVERY word of every spoken sentence (the speak[] lines), so the text-to-speech engine pronounces each word with the correct vowels and stress. Do not skip diacritics on any word, including short/common ones. Keep board text short and diacritic-free for clean visuals.";
+    "For clear pronunciation: add Arabic diacritics (تشكيل) on speak[] lines wherever helpful — especially technical terms and short words that TTS often misreads. Prefer readable vocalized Arabic over bare text. Keep board text short and diacritic-free for clean visuals.";
   switch (v.selectedLanguage) {
     case "ar":
       if (v.accent.startsWith("iraqi") || v.accent === "iraqi_levantine") {
@@ -318,8 +360,25 @@ export function accentInstruction(
         ].join(" ");
       }
       return `Speak and write entirely in Arabic (العربية)${tag}. ${arabicDiacritics} ${shared} Do not switch to English unless the user asks.`;
-    case "ku":
-      return `You MUST reply entirely in Kurdish (کوردی)${tag}. Keep explanations natural and professional for students in this region. ${shared} Do not switch language unless asked.`;
+    case "ku": {
+      // TTS has no Kurdish voice — content must match delivery language.
+      const speech = v.language === "tr" ? "tr" : "ar";
+      if (speech === "tr") {
+        return [
+          `Student UI is Kurdish, but you MUST speak and write entirely in natural classroom Turkish${tag} so the voice engine can deliver it.`,
+          "Use a warm Kurdish-region teaching tone in Turkish. Keep explanations clear and professional.",
+          shared,
+          "Do not write Kurdish script in speak[] or board text — Turkish only.",
+        ].join(" ");
+      }
+      return [
+        `Student UI is Kurdish, but you MUST speak and write entirely in clear Arabic${tag} so the voice engine can deliver it.`,
+        "Use a warm Kurdish-region classroom tone in Arabic (فصحى مبسّطة with familiar local flavor when helpful).",
+        arabicDiacritics,
+        shared,
+        "Do not write Kurdish script in speak[] or board text — Arabic only.",
+      ].join(" ");
+    }
     case "tr":
       return `Speak and write entirely in natural classroom Turkish${tag}. Clear diction, warm teacher energy, professional vocabulary. ${shared} Do not switch language unless asked.`;
     default:
@@ -504,12 +563,13 @@ export function ttsDeliveryInstruction(
       : pace === "brisk"
         ? "Speak with energetic, confident classroom pace — still clear."
         : "Speak at a natural teacher pace with gentle emphasis.";
+  // Use delivery language (v.language), not UI language — KU UI maps to ar/tr TTS.
   const accentHint =
-    v.selectedLanguage === "ar"
+    v.language === "ar"
       ? `Use a professional ${v.accent.replace(/_/g, " ")} Arabic classroom accent. Warm, clear, never robotic.`
-      : v.selectedLanguage === "tr"
+      : v.language === "tr"
         ? "Use a clear professional Turkish classroom voice."
-        : `Use a professional ${v.accent} English classroom voice.`;
+        : `Use a professional ${String(v.accent).replace(/_/g, " ")} English classroom voice.`;
   return [
     "You are a world-class human teacher speaking live in class.",
     accentHint,
