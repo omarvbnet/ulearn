@@ -66,6 +66,8 @@ export type ClassroomSessionState = {
   teachingStyle: string;
   lastAskStudent: string | null;
   materialExcerpt: string;
+  /** PDF/file names for this session — used to reject cover-page titles. */
+  materialNames: string[];
   /** Vertical cursor for neat board stacking across beats */
   boardCursorY: number;
   /** Teacher asked a check question and waits for a correct spoken answer */
@@ -208,6 +210,7 @@ export function emptyClassroomState(
     teachingStyle: "warm_expert",
     lastAskStudent: null,
     materialExcerpt,
+    materialNames: [],
     boardCursorY: 140,
     awaitingCorrectAnswer: false,
     pendingQuestion: null,

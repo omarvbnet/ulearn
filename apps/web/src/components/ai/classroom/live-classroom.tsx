@@ -1744,15 +1744,16 @@ export function LiveClassroom({
         setPresence("thinking");
         setCaption(
           lang === "ar"
-            ? "المعلم يفكر…"
+            ? "نكمل الشرح…"
             : lang === "tr"
-              ? "Öğretmen düşünüyor…"
-              : "Teacher is thinking…"
+              ? "Anlatıma devam…"
+              : "Continuing the lesson…"
         );
+        // No spoken "think" bridge between teaching beats — it made the
+        // teacher sound stuck repeating filler while the board looped.
         const beat = await consumeAndPlayStream(
           `/api/ai/classroom/session/${sessionIdRef.current}/beat`,
-          {},
-          { bridgeKind: "think" }
+          {}
         );
         if (beat?.sessionComplete) {
           setEnded(true);

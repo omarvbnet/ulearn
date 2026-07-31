@@ -19,6 +19,14 @@ import {
   type ClassroomStreamEvent,
 } from "./progressive-beat";
 import {
+  cleanMaterialExcerpt,
+  isCoverOrMetaLine,
+  isPageLessonLabel,
+  isWeakLessonTitle,
+  nextBoardTopicFromExcerpt,
+  topicFromExcerpt,
+} from "../material-topic";
+import {
   emptyClassroomState,
   type ClassroomBeat,
   type ClassroomBoardAction,
@@ -32,10 +40,6 @@ import {
 function asStringArray(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return v.map((x) => String(x || "").trim()).filter(Boolean);
-}
-
-function isPageLessonLabel(title: string | null | undefined): boolean {
-  return /^pages?\s*\d+/i.test(String(title || "").trim());
 }
 
 /** Strip page-number narration so the teacher never "views pages". */
@@ -53,40 +57,20 @@ function stripPageNarration(speak: string[]): string[] {
     .filter(Boolean);
 }
 
-function cleanMaterialExcerpt(text: string): string {
-  return String(text || "")
-    .replace(/\s*·\s*Pages?\s+\d+\s*[–\-]\s*\d+/gi, "")
-    .replace(/\bPages?\s+\d+\s*[–\-]\s*\d+\b/gi, "")
-    .replace(/\b(page|صفحة|sayfa)\s*\d+\b/gi, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function topicFromExcerpt(excerpt: string, fallback: string): string {
-  const lines = excerpt
-    .split(/\n+/)
-    .map((l) => l.replace(/^\[[^\]]+\]\s*/, "").trim())
-    .filter((l) => l.length >= 6 && !/^---/.test(l));
-  for (const line of lines.slice(0, 8)) {
-    const words = line.split(/\s+/);
-    if (words.length >= 2 && words.length <= 12 && line.length <= 60) {
-      return line.slice(0, 48);
-    }
-  }
-  const words = excerpt
-    .replace(/\[[^\]]+\]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w.length > 2)
-    .slice(0, 6);
-  return words.length >= 2 ? words.join(" ").slice(0, 48) : fallback;
+/** Drop spoken lines that only re-announce the material/teacher cover name. */
+function stripMetaSpeak(speak: string[], materialNames: string[]): string[] {
+  const filtered = speak.filter(
+    (line) => !isCoverOrMetaLine(line, materialNames) && line.trim().length > 2
+  );
+  return filtered.length ? filtered : speak;
 }
 
 async function loadLessonMaterialExcerpt(input: {
   userId: string;
   documentIds: string[];
   lessonName?: string | null;
+  materialNames?: string[];
+  curriculumOutline?: string[];
 }): Promise<string> {
   const { AiExamService } = await import("../ai-exam.service");
   const { ExamGeneratorService } = await import("../exam-generator.service");
@@ -98,23 +82,37 @@ async function loadLessonMaterialExcerpt(input: {
     pageEnd: number | null;
   } | null = null;
   const lesson = (input.lessonName || "").trim();
-  if (lesson) {
+  const materialNames = input.materialNames || [];
+  const outline = input.curriculumOutline || [];
+  const lessonIndex = lesson ? outline.indexOf(lesson) : -1;
+  if (lesson || lessonIndex >= 0) {
     for (const docId of input.documentIds) {
       const chapters = await AiExamService.listDocumentChapters(
         input.userId,
         docId
       );
-      const hit = chapters.find((c) => c.title === lesson);
+      // Prefer exact title, then same index in the outline (titles may have
+      // been humanized away from cover-page text after session open).
+      const hit =
+        chapters.find((c) => c.title === lesson) ||
+        (lessonIndex >= 0 ? chapters[lessonIndex] : undefined);
       if (hit) {
         chapter = hit;
         break;
       }
     }
   }
+  // Scope by page/chunk bounds only — never heading-match a cover/teacher name
+  // (that used to load only the PDF cover and loop the same board title).
+  const useHeading =
+    chapter?.title &&
+    !isWeakLessonTitle(chapter.title, materialNames)
+      ? chapter.title
+      : null;
   const material = await ExamGeneratorService.loadMaterialForDocuments({
     userId: input.userId,
     documentIds: input.documentIds,
-    chapterHeading: chapter?.title || lesson || "__all__",
+    chapterHeading: useHeading,
     chunkFrom: chapter?.chunkFrom ?? null,
     chunkTo: chapter?.chunkTo ?? null,
     pageFrom: chapter?.pageStart ?? null,
@@ -122,7 +120,10 @@ async function loadLessonMaterialExcerpt(input: {
     ordered: true,
     question: lesson || "teach this lesson from the material",
   });
-  return cleanMaterialExcerpt((material?.text?.trim() || "").slice(0, 8000));
+  return cleanMaterialExcerpt(
+    (material?.text?.trim() || "").slice(0, 9000),
+    materialNames
+  );
 }
 
 function extractJsonObject(raw: string): string | null {
@@ -382,23 +383,40 @@ function finalizeBeat(
     state,
     mode
   );
+  const materialNames = state.materialNames || [];
   speak = stripPrematureUnderstandingCheck(speak, stage);
   speak = stripPageNarration(speak);
-  let board = [...(beat.board || [])].map((b) => {
-    const text = b.parameters?.text;
-    if (typeof text === "string" && isPageLessonLabel(text)) {
-      return {
-        ...b,
-        parameters: {
-          ...b.parameters,
-          text:
-            sanitizeClassroomPlainText(state.currentTopic, 28) ||
-            topicFromExcerpt(state.materialExcerpt || "", "Key idea"),
-        },
-      };
-    }
-    return b;
-  });
+  speak = stripMetaSpeak(speak, materialNames);
+  let board = [...(beat.board || [])]
+    .map((b) => {
+      const text = b.parameters?.text;
+      if (typeof text === "string" && isWeakLessonTitle(text, materialNames)) {
+        return {
+          ...b,
+          parameters: {
+            ...b.parameters,
+            text: nextBoardTopicFromExcerpt(
+              state.materialExcerpt || "",
+              state.boardSummary || [],
+              materialNames,
+              ar ? "فكرة الدرس" : tr ? "Ders fikri" : "Key idea"
+            ),
+          },
+        };
+      }
+      return b;
+    })
+    .filter((b) => {
+      // Drop duplicate write_text that just repeats what's already on the board.
+      const text = String(b.parameters?.text || "").trim();
+      if (!text || !/write_text|draw_formula|draw_equation/i.test(String(b.action))) {
+        return true;
+      }
+      const key = text.toLowerCase().slice(0, 22);
+      return !(state.boardSummary || []).some(
+        (s) => s.toLowerCase().slice(0, 22) === key
+      );
+    });
 
   const pickVariant = <T,>(arr: T[]): T =>
     arr[Math.floor(Date.now() / 137) % arr.length]!;
@@ -510,20 +528,23 @@ function finalizeBeat(
       stage === "guided_practice" ||
       stage === "objective")
   ) {
-    const topic =
-      sanitizeClassroomPlainText(state.currentTopic || state.currentLessonName, 40) ||
-      (ar ? "الفكرة" : tr ? "fikir" : "this idea");
+    const topic = nextBoardTopicFromExcerpt(
+      state.materialExcerpt || "",
+      state.boardSummary || [],
+      materialNames,
+      sanitizeClassroomPlainText(state.currentTopic, 40) ||
+        (ar ? "الفكرة" : tr ? "fikir" : "this idea")
+    );
     speak = [
       ar
-        ? `دعنا نشرح ${topic} على السبورة بوضوح.`
+        ? `خلّينا نشرح ${topic} على السبورة بخطوة واضحة.`
         : tr
           ? `${topic} konusunu tahtada net şekilde anlatalım.`
-          : `Let’s explain ${topic} clearly on the board.`,
+          : `Let’s explain ${topic} clearly on the board, step by step.`,
     ];
   }
   // During teaching stages, always put something readable on the board if
-  // the model forgot — an empty board + spoken question is exactly the
-  // broken experience students reported.
+  // the model forgot — never the PDF/teacher cover name, and never a repeat.
   const hasBoardInk = board.some((b) =>
     /write_text|draw_|underline|circle_highlight|point_at/i.test(String(b.action || ""))
   );
@@ -534,25 +555,40 @@ function finalizeBeat(
       stage === "guided_practice" ||
       stage === "objective")
   ) {
-    const rawTitle =
-      sanitizeClassroomPlainText(state.currentTopic, 28) ||
-      sanitizeClassroomPlainText(beat.lessonName || state.currentLessonName, 28) ||
-      "";
-    const title =
-      (rawTitle && !isPageLessonLabel(rawTitle)
-        ? rawTitle
-        : topicFromExcerpt(
-            state.materialExcerpt || "",
-            ar ? "درس اليوم" : tr ? "Bugünün dersi" : "Today's lesson"
-          )) ||
-      (ar ? "درس اليوم" : tr ? "Bugünün dersi" : "Today's lesson");
+    const title = nextBoardTopicFromExcerpt(
+      state.materialExcerpt || "",
+      state.boardSummary || [],
+      materialNames,
+      ar ? "فكرة الدرس" : tr ? "Ders fikri" : "Key idea"
+    );
     board = [
       {
         time: 0,
         action: "write_text",
         parameters: { text: title, color: "blue", size: 58 },
       },
+      {
+        time: 1,
+        action: "draw_circle",
+        parameters: { color: "red", r: 48 },
+      },
       ...board,
+    ];
+  }
+  if (
+    hasBoardInk &&
+    (stage === "explain" || stage === "guided_practice") &&
+    !board.some((b) => /^draw_/i.test(String(b.action || "")))
+  ) {
+    // Teaching beat with text only — add one simple diagram stroke so the
+    // board animates like a short video of the subject.
+    board = [
+      ...board,
+      {
+        time: board.length,
+        action: "draw_arrow",
+        parameters: { color: "green" },
+      },
     ];
   }
   const layout = normalizeBoardActions(board, {
@@ -568,11 +604,13 @@ function finalizeBeat(
   // session) — this is what stops the AI from randomly jumping topics.
   let lessonName =
     mode === "open" || stage === "recommend_next" ? beat.lessonName || null : null;
-  if (lessonName && isPageLessonLabel(lessonName)) {
-    lessonName =
-      sanitizeClassroomPlainText(state.currentTopic, 48) ||
-      topicFromExcerpt(state.materialExcerpt || "", lessonName);
-    if (isPageLessonLabel(lessonName)) lessonName = null;
+  if (lessonName && isWeakLessonTitle(lessonName, materialNames)) {
+    lessonName = topicFromExcerpt(
+      state.materialExcerpt || "",
+      sanitizeClassroomPlainText(state.currentTopic, 48) || "",
+      materialNames
+    );
+    if (isWeakLessonTitle(lessonName, materialNames)) lessonName = null;
   }
   return {
     ...beat,
@@ -1424,56 +1462,114 @@ export class ClassroomSessionService {
     }> = [];
     for (const chapters of chaptersByDoc) {
       for (const c of chapters) {
-        if (!c.title || c.title === "__all__" || isPageLessonLabel(c.title))
-          continue;
+        if (!c.title || c.title === "__all__") continue;
+        // Reject cover/teacher/filename titles so the outline is real subjects.
+        if (isWeakLessonTitle(c.title, materialNames)) continue;
         if (!curriculumOutline.includes(c.title)) {
           curriculumOutline.push(c.title);
           chapterMeta.push(c);
         }
       }
     }
-    // Legacy PDFs that somehow still produced page titles — humanize them.
+    // If every heading was cover-meta, keep chapter bounds but rename titles
+    // from the body text of each window.
     if (!curriculumOutline.length) {
       for (const chapters of chaptersByDoc) {
         for (const c of chapters) {
           if (!c.title || c.title === "__all__") continue;
-          if (!curriculumOutline.includes(c.title)) {
-            curriculumOutline.push(c.title);
+          if (!chapterMeta.some((m) => m.chunkFrom === c.chunkFrom)) {
             chapterMeta.push(c);
           }
         }
       }
     }
 
-    let openingLesson = curriculumOutline[0] || null;
-    const openingChapter =
-      chapterMeta.find((c) => c.title === openingLesson) || chapterMeta[0] || null;
+    let openingChapter = chapterMeta[0] || null;
+    // Always scope by page/chunk bounds — never heading-match a cover name.
     const material = await ExamGeneratorService.loadMaterialForDocuments({
       userId: input.userId,
       documentIds: allowed,
-      chapterHeading: openingChapter?.title || openingLesson || "__all__",
+      chapterHeading:
+        openingChapter && !isWeakLessonTitle(openingChapter.title, materialNames)
+          ? openingChapter.title
+          : null,
       chunkFrom: openingChapter?.chunkFrom ?? null,
       chunkTo: openingChapter?.chunkTo ?? null,
       pageFrom: openingChapter?.pageStart ?? null,
       pageTo: openingChapter?.pageEnd ?? null,
       ordered: true,
-      question: input.question || openingLesson || "teach the subject",
+      question: input.question || "teach the subject from the material",
     });
     perf.mark("loadMaterial");
     materialExcerpt = cleanMaterialExcerpt(
-      (material?.text?.trim() || "").slice(0, 8000)
+      (material?.text?.trim() || "").slice(0, 9000),
+      materialNames
     );
-    if (openingLesson && isPageLessonLabel(openingLesson)) {
-      openingLesson = topicFromExcerpt(materialExcerpt, openingLesson);
-      if (curriculumOutline[0] && isPageLessonLabel(curriculumOutline[0])) {
-        curriculumOutline[0] = openingLesson;
+    // If bounds yielded almost nothing (bad page numbers), reload ordered body.
+    if (materialExcerpt.length < 120) {
+      const full = await ExamGeneratorService.loadMaterialForDocuments({
+        userId: input.userId,
+        documentIds: allowed,
+        chapterHeading: null,
+        ordered: true,
+        question: "teach the subject from the material",
+      });
+      materialExcerpt = cleanMaterialExcerpt(
+        (full?.text?.trim() || "").slice(0, 9000),
+        materialNames
+      );
+    }
+
+    // Rebuild outline titles from real excerpt concepts when needed.
+    if (!curriculumOutline.length && chapterMeta.length) {
+      for (let i = 0; i < chapterMeta.length; i++) {
+        const c = chapterMeta[i]!;
+        let title = topicFromExcerpt(
+          materialExcerpt,
+          `الوحدة ${i + 1}`,
+          materialNames
+        );
+        if (i > 0) title = `${title} · ${i + 1}`;
+        if (isWeakLessonTitle(title, materialNames)) title = `الوحدة ${i + 1}`;
+        curriculumOutline.push(title);
+        c.title = title;
       }
+    } else if (!curriculumOutline.length) {
+      const title = topicFromExcerpt(
+        materialExcerpt,
+        "الوحدة 1",
+        materialNames
+      );
+      curriculumOutline.push(
+        isWeakLessonTitle(title, materialNames) ? "الوحدة 1" : title
+      );
+    }
+
+    let openingLesson = curriculumOutline[0] || null;
+    if (openingLesson && isWeakLessonTitle(openingLesson, materialNames)) {
+      openingLesson = topicFromExcerpt(
+        materialExcerpt,
+        "الوحدة 1",
+        materialNames
+      );
+      curriculumOutline[0] = openingLesson;
     }
 
     const state = emptyClassroomState(materialExcerpt);
+    state.materialNames = materialNames;
     if (openingLesson) state.currentLessonName = openingLesson;
-    if (!state.currentTopic && openingLesson && !isPageLessonLabel(openingLesson)) {
+    if (
+      !state.currentTopic &&
+      openingLesson &&
+      !isWeakLessonTitle(openingLesson, materialNames)
+    ) {
       state.currentTopic = openingLesson.slice(0, 40);
+    } else if (!state.currentTopic) {
+      state.currentTopic = topicFromExcerpt(
+        materialExcerpt,
+        "فكرة الدرس",
+        materialNames
+      ).slice(0, 40);
     }
 
     const materialsKey = StudentMemoryService.materialsKey(documentIds);
@@ -1521,8 +1617,10 @@ export class ClassroomSessionService {
           userId: input.userId,
           documentIds: allowed,
           lessonName: resumeLessonName,
+          materialNames,
+          curriculumOutline,
         });
-        if (!isPageLessonLabel(resumeLessonName)) {
+        if (!isWeakLessonTitle(resumeLessonName, materialNames)) {
           state.currentTopic = resumeLessonName.slice(0, 40);
         }
       } catch {
@@ -1740,8 +1838,11 @@ export class ClassroomSessionService {
           userId: input.userId,
           documentIds: row.documentIds,
           lessonName: nextState.currentLessonName,
+          materialNames: nextState.materialNames || row.materialNames || [],
+          curriculumOutline: asStringArray(row.curriculumOutline),
         });
-        if (!isPageLessonLabel(nextState.currentLessonName)) {
+        const names = nextState.materialNames || row.materialNames || [];
+        if (!isWeakLessonTitle(nextState.currentLessonName, names)) {
           nextState.currentTopic = nextState.currentLessonName.slice(0, 40);
         }
       } catch {
@@ -1902,8 +2003,11 @@ export class ClassroomSessionService {
           userId: input.userId,
           documentIds: row.documentIds,
           lessonName: nextState.currentLessonName,
+          materialNames: nextState.materialNames || row.materialNames || [],
+          curriculumOutline: asStringArray(row.curriculumOutline),
         });
-        if (!isPageLessonLabel(nextState.currentLessonName)) {
+        const names = nextState.materialNames || row.materialNames || [];
+        if (!isWeakLessonTitle(nextState.currentLessonName, names)) {
           nextState.currentTopic = nextState.currentLessonName.slice(0, 40);
         }
       } catch {

@@ -368,17 +368,18 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
           setState(() {
             _presence = _Presence.thinking;
             _caption = _lang == 'ar'
-                ? 'المعلم يفكر…'
+                ? 'نكمل الشرح…'
                 : _lang == 'tr'
-                    ? 'Öğretmen düşünüyor…'
-                    : 'Teacher is thinking…';
+                    ? 'Anlatıma devam…'
+                    : 'Continuing the lesson…';
           });
         }
         if (_api == null) break;
+        // No "think" voice bridge between teaching beats — it sounded like the
+        // teacher was stuck repeating "let me organize the idea" forever.
         final beat = await _consumeAndPlayStream(
           '/api/ai/classroom/session/$_sessionId/beat',
           {},
-          bridgeKind: 'think',
         );
         if (!mounted || _cancelled) break;
         if (beat != null && beat['sessionComplete'] == true) {
