@@ -330,7 +330,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
           _caption = question;
         });
       }
-      await _speakCloud(question, pace: 'slow');
+      await _speakCloud(question, pace: 'slow', emotion: 'patient');
       await Future<void>.delayed(const Duration(milliseconds: 350));
     }
     if (_cancelled || _ended || _handlingTurn) return;
@@ -486,6 +486,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     }
 
     final pace = beat['pace']?.toString() ?? 'normal';
+    final emotion = beat['emotion']?.toString() ?? 'calm';
     final ask = beat['askStudent']?.toString().trim();
     // Ensure check questions are spoken even if model forgot.
     if (ask != null &&
@@ -496,7 +497,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     for (final line in lines) {
       if (_cancelled) break;
       if (mounted) setState(() => _caption = line);
-      await _speakCloud(line, pace: pace);
+      await _speakCloud(line, pace: pace, emotion: emotion);
       await Future<void>.delayed(const Duration(milliseconds: 220));
     }
     _voiceBusy = false;
@@ -536,7 +537,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         _caption = phrase;
       });
     }
-    await _speakCloud(phrase, pace: 'normal');
+    await _speakCloud(phrase, pace: 'normal', emotion: _bridgeKindToEmotion(kind));
   }
 
   Future<void> _submitTurn(String transcript) async {
@@ -592,7 +593,11 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     }
   }
 
-  Future<void> _speakCloud(String text, {String pace = 'normal'}) async {
+  Future<void> _speakCloud(
+    String text, {
+    String pace = 'normal',
+    String emotion = 'calm',
+  }) async {
     if (!mounted) return;
     await _stopListeningQuietly();
     // Settle the audio session after mic release — iOS needs this or
@@ -605,11 +610,11 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       setState(() => _driveTeacherWave(active: true));
     });
     try {
-      var ok = await _speakCloudOnce(text, pace: pace);
+      var ok = await _speakCloudOnce(text, pace: pace, emotion: emotion);
       if (!ok && mounted && !_cancelled) {
         // One retry — a single failed TTS request must not silence the class.
         await Future<void>.delayed(const Duration(milliseconds: 500));
-        ok = await _speakCloudOnce(text, pace: pace);
+        ok = await _speakCloudOnce(text, pace: pace, emotion: emotion);
       }
       if (mounted) {
         setState(() => _ttsError = ok ? null : 'voice');
@@ -623,7 +628,11 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     }
   }
 
-  Future<bool> _speakCloudOnce(String text, {String pace = 'normal'}) async {
+  Future<bool> _speakCloudOnce(
+    String text, {
+    String pace = 'normal',
+    String emotion = 'calm',
+  }) async {
     File? tmp;
     try {
       try {
@@ -635,6 +644,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         'text': text,
         'language': _selectedLanguage ?? _lang,
         'pace': pace,
+        'emotion': emotion,
       };
       if (_countryCode != null && _countryCode!.isNotEmpty) {
         payload['country'] = _countryCode;
@@ -1147,6 +1157,22 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
   }
 }
 
+/// Maps a short spoken bridge to the emotion its delivery should carry —
+/// mirrors bridgeKindToEmotion in voice-accent.ts.
+String _bridgeKindToEmotion(String kind) {
+  switch (kind) {
+    case 'excellent':
+      return 'encouraging';
+    case 'reexplain':
+      return 'patient';
+    case 'check':
+    case 'listen':
+      return 'curious';
+    default:
+      return 'calm';
+  }
+}
+
 String _classroomBridgePhrase({
   required String lang,
   String? countryCode,
@@ -1396,6 +1422,67 @@ int _applyCue(
     );
     return shapeSlot;
   }
+  if (action == 'circle_highlight' || action == 'circle_text') {
+    // Circle a word/phrase already on the board — wrap an ellipse around the
+    // last text item's actual bounds instead of drawing a brand-new shape.
+    _BoardItem? target;
+    for (var j = items.length - 1; j >= 0; j--) {
+      if (items[j].kind == _Kind.text) {
+        target = items[j];
+        break;
+      }
+    }
+    if (target != null) {
+      final approxW = math.max(90.0, target.text.length * target.size * 0.52);
+      final cx = target.alignRight
+          ? target.x - approxW / 2
+          : target.x + approxW / 2;
+      final cy = target.y - target.size * 0.38;
+      items.add(
+        _BoardItem.circleHighlight(
+          id: id,
+          cx: cx,
+          cy: cy,
+          rx: approxW / 2 + 26,
+          ry: target.size * 0.75,
+          color: _color(p['color'], const Color(0xFFDC2626)),
+          width: 3.4,
+          bornAt: bornAt,
+          writeMs: 700,
+          seed: seed,
+        ),
+      );
+    }
+    return shapeSlot;
+  }
+  if (action == 'point_at' || action == 'point') {
+    // A brief pointer near existing content — never adds permanent ink.
+    _BoardItem? target;
+    for (var j = items.length - 1; j >= 0; j--) {
+      if (items[j].kind == _Kind.text) {
+        target = items[j];
+        break;
+      }
+    }
+    final px = target != null
+        ? (target.alignRight ? target.x - 16 : target.x + 16)
+        : diagramX;
+    final py = target != null ? target.y - target.size * 0.7 : getDiagramY();
+    items.add(
+      _BoardItem.pointer(
+        id: id,
+        x: px,
+        y: py,
+        color: _color(p['color'], const Color(0xFF2563EB)),
+        bornAt: bornAt,
+        writeMs: 260,
+        holdMs: 1200,
+        fadeMs: 650,
+        seed: seed,
+      ),
+    );
+    return shapeSlot;
+  }
   if (action == 'draw_arrow') {
     final ay = math.min(860.0, getDiagramY());
     items.add(
@@ -1524,18 +1611,45 @@ class _BoardItem {
     required this.seed,
   }) : kind = _Kind.rect;
 
+  _BoardItem.circleHighlight({
+    required this.id,
+    required this.cx,
+    required this.cy,
+    required this.rx,
+    required this.ry,
+    required this.color,
+    required this.width,
+    required this.bornAt,
+    required this.writeMs,
+    required this.seed,
+  }) : kind = _Kind.circleHighlight;
+
+  _BoardItem.pointer({
+    required this.id,
+    required this.x,
+    required this.y,
+    required this.color,
+    required this.bornAt,
+    required this.writeMs,
+    required this.holdMs,
+    required this.fadeMs,
+    required this.seed,
+  }) : kind = _Kind.pointer;
+
   final String id;
   final _Kind kind;
   String text = '';
   double x = 0, y = 0, w = 0, h = 0;
   double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
-  double cx = 0, cy = 0, r = 0;
+  double cx = 0, cy = 0, r = 0, rx = 0, ry = 0;
   double size = 28;
   double width = 3;
   bool arrow = false;
   bool alignRight = false;
   double bornAt = 0;
   double writeMs = 600;
+  double holdMs = 0;
+  double fadeMs = 0;
   int seed = 1;
   Color color = const Color(0xFF1E293B);
 
@@ -1544,9 +1658,22 @@ class _BoardItem {
     final t = raw.clamp(0.0, 1.0);
     return 1 - math.pow(1 - t, 2.4).toDouble();
   }
+
+  /// Grow-hold-fade opacity for transient pointer indicators — unlike
+  /// [progress], this returns to 0 once the pointer has faded out.
+  double pointerAlpha(double clockMs) {
+    final t = clockMs - bornAt;
+    if (t < 0) return 0;
+    if (t < writeMs) return 1 - math.pow(1 - (t / writeMs), 2.4).toDouble();
+    if (t < writeMs + holdMs) return 1;
+    if (t < writeMs + holdMs + fadeMs) {
+      return 1 - (t - writeMs - holdMs) / fadeMs;
+    }
+    return 0;
+  }
 }
 
-enum _Kind { text, line, circle, rect }
+enum _Kind { text, line, circle, rect, circleHighlight, pointer }
 
 class _VoiceWavePainter extends CustomPainter {
   _VoiceWavePainter({
@@ -1627,9 +1754,61 @@ class _BoardPainter extends CustomPainter {
     }
 
     for (final item in items) {
+      if (item.kind == _Kind.pointer) {
+        final alpha = item.pointerAlpha(clockMs);
+        if (alpha <= 0.01) continue;
+        final t = clockMs - item.bornAt;
+        final double pulse =
+            12.0 + 6.0 * math.min(1.0, t / math.max(1.0, item.writeMs));
+        canvas.drawCircle(
+          Offset(item.x, item.y),
+          pulse + 8,
+          Paint()..color = item.color.withValues(alpha: 0.16 * alpha),
+        );
+        canvas.drawCircle(
+          Offset(item.x, item.y),
+          pulse,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3
+            ..color = item.color.withValues(alpha: alpha),
+        );
+        canvas.drawCircle(
+          Offset(item.x, item.y),
+          4,
+          Paint()..color = item.color.withValues(alpha: alpha),
+        );
+        continue;
+      }
       final p = item.progress(clockMs);
       if (p <= 0) continue;
       switch (item.kind) {
+        case _Kind.circleHighlight:
+          final jx = _handJitter(item.seed, 3, 1.6);
+          final jy = _handJitter(item.seed, 4, 1.6);
+          final center = Offset(item.cx + jx, item.cy + jy);
+          canvas.drawOval(
+            Rect.fromCenter(
+              center: center,
+              width: item.rx * 2,
+              height: item.ry * 2,
+            ),
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = item.width + 2
+              ..color = item.color.withValues(alpha: 0.16 * p),
+          );
+          canvas.drawOval(
+            Rect.fromCenter(
+              center: center,
+              width: item.rx * 2 * math.max(0.3, p),
+              height: item.ry * 2 * math.max(0.3, p),
+            ),
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = item.width
+              ..color = item.color.withValues(alpha: 0.55 + 0.45 * p),
+          );
         case _Kind.text:
           final chars = p >= 0.995
               ? item.text.length
@@ -1773,6 +1952,9 @@ class _BoardPainter extends CustomPainter {
                 ),
             );
           }
+        case _Kind.pointer:
+          // Handled above via pointerAlpha before entering this switch.
+          break;
       }
     }
   }

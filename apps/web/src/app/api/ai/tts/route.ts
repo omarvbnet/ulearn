@@ -12,6 +12,8 @@ const schema = z.object({
   country: z.string().max(8).optional(),
   voice: z.string().max(40).optional(),
   pace: z.enum(["slow", "normal", "brisk"]).optional(),
+  /** Detected/chosen emotional state for this line — shapes vocal delivery */
+  emotion: z.string().max(24).optional(),
 });
 
 /**
@@ -65,6 +67,7 @@ export async function POST(request: Request) {
         // its own country accent voice (Fish reference_id / ElevenLabs / OpenAI).
         voice: parsed.data.voice,
         pace: parsed.data.pace || "normal",
+        emotion: parsed.data.emotion || null,
       },
       auth.session.userId
     );

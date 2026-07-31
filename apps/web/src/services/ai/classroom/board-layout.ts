@@ -84,6 +84,28 @@ export function normalizeBoardActions(
       continue;
     }
 
+    if (action === "circle_highlight" || action === "circle_text") {
+      // Coordinates are illustrative only — the client renderer positions
+      // this around the actual last-written text item it tracks locally.
+      // What matters here is that the action survives normalization instead
+      // of being silently dropped like an unrecognized action would be.
+      out.push({
+        time: out.length * 280,
+        action: "circle_highlight",
+        parameters: { color: String(p.color || "red") },
+      });
+      continue;
+    }
+
+    if (action === "point_at" || action === "point") {
+      out.push({
+        time: out.length * 280,
+        action: "point_at",
+        parameters: { color: String(p.color || "blue") },
+      });
+      continue;
+    }
+
     if (action === "underline" || action === "highlight") {
       // Convert heavy highlights into a thin underline under the last text line.
       const underlineY = Math.max(150, y - 72);

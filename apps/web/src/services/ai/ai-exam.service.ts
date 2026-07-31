@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { AiProviderService } from "./ai-provider.service";
 import { StudentMemoryService } from "./student-memory.service";
 import { languageInstruction } from "./types";
+import { SubjectAssessmentService } from "@/services/assessment/subject-assessment.service";
 import type { Prisma } from "@prisma/client";
 
 export type AiExamQuestion = {
@@ -451,6 +452,10 @@ export class AiExamService {
       documentIds: attempt.documentIds,
       weakQuestionHints: review.filter((r) => !r.isCorrect).map((r) => r.text.slice(0, 80)),
     });
+
+    void SubjectAssessmentService.recomputeFromDocuments(input.userId, attempt.documentIds).catch(
+      () => {}
+    );
 
     if (attempt.conversationId) {
       await prisma.aiMessage.create({

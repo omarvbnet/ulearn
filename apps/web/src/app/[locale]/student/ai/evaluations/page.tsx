@@ -27,6 +27,9 @@ type EvaluationEntry = {
   confidence: number | null;
   updatedAt: string;
   evaluation: EvaluationDetail | null;
+  completedLessonsCount?: number;
+  masteredCount?: number;
+  weakCount?: number;
 };
 
 function gradeFor(scorePercent: number): "excellent" | "good" | "fair" | "needsWork" {
@@ -143,6 +146,26 @@ export default function StudentEvaluationsPage() {
                         {t.evaluations.progress
                           .replace("{current}", String(Math.max(1, lessonsCompleted)))
                           .replace("{total}", String(totalLessons))}
+                      </p>
+                    )}
+                    {((entry.masteredCount || 0) > 0 || (entry.weakCount || 0) > 0) && (
+                      <p className="mt-1 flex flex-wrap gap-2 text-xs">
+                        {(entry.masteredCount || 0) > 0 && (
+                          <span className="text-emerald-300">
+                            {t.evaluations.masteredConcepts.replace(
+                              "{count}",
+                              String(entry.masteredCount)
+                            )}
+                          </span>
+                        )}
+                        {(entry.weakCount || 0) > 0 && (
+                          <span className="text-amber-300">
+                            {t.evaluations.conceptsToReview.replace(
+                              "{count}",
+                              String(entry.weakCount)
+                            )}
+                          </span>
+                        )}
                       </p>
                     )}
                   </div>

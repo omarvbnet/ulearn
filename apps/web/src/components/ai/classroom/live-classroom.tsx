@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
+  bridgeKindToEmotion,
   classroomBridgePhrase,
   type ClassroomBridgeKind,
 } from "@/services/ai/voice-accent";
@@ -74,6 +75,34 @@ type BoardItem =
       width: number;
       bornAt: number;
       writeMs: number;
+      seed: number;
+    }
+  | {
+      /** Emphasis ellipse drawn around a word/phrase already on the board. */
+      kind: "circleHighlight";
+      id: string;
+      cx: number;
+      cy: number;
+      rx: number;
+      ry: number;
+      color: string;
+      width: number;
+      bornAt: number;
+      writeMs: number;
+      seed: number;
+    }
+  | {
+      /** Brief pointer indicator near existing content — fades on its own,
+       *  never leaves permanent ink. */
+      kind: "pointer";
+      id: string;
+      x: number;
+      y: number;
+      color: string;
+      bornAt: number;
+      writeMs: number;
+      holdMs: number;
+      fadeMs: number;
       seed: number;
     };
 
@@ -207,6 +236,60 @@ function applyActions(
       penAt += 740;
       return;
     }
+    if (action === "circle_highlight" || action === "circle_text") {
+      // Circle a word/phrase already on the board — find the last text item
+      // and wrap an ellipse around its actual bounds, instead of drawing a
+      // brand-new diagram shape (that's draw_circle's job).
+      const target = [...acc].reverse().find(
+        (it): it is Extract<BoardItem, { kind: "text" }> => it.kind === "text"
+      );
+      if (target) {
+        const approxW = Math.max(90, target.text.length * target.size * 0.52);
+        const cx = target.align === "right" ? target.x - approxW / 2 : target.x + approxW / 2;
+        const cy = target.y - target.size * 0.38;
+        acc.push({
+          kind: "circleHighlight",
+          id,
+          cx,
+          cy,
+          rx: approxW / 2 + 26,
+          ry: target.size * 0.75,
+          color: resolveColor(p.color, "#dc2626"),
+          width: 3.4,
+          bornAt: penAt,
+          writeMs: 700,
+          seed,
+        });
+        penAt += 740;
+      }
+      return;
+    }
+    if (action === "point_at" || action === "point") {
+      // A brief pointer near existing content — never adds permanent ink.
+      const target = [...acc].reverse().find(
+        (it): it is Extract<BoardItem, { kind: "text" }> => it.kind === "text"
+      );
+      const px = target
+        ? target.align === "right"
+          ? target.x - 16
+          : target.x + 16
+        : diagramX;
+      const py = target ? target.y - target.size * 0.7 : diagramY;
+      acc.push({
+        kind: "pointer",
+        id,
+        x: px,
+        y: py,
+        color: resolveColor(p.color, "#2563eb"),
+        bornAt: penAt,
+        writeMs: 260,
+        holdMs: 1200,
+        fadeMs: 650,
+        seed,
+      });
+      penAt += 300;
+      return;
+    }
     if (action === "draw_arrow") {
       const ay = Math.min(860, diagramY);
       acc.push({
@@ -319,20 +402,22 @@ async function speakCloud(
   text: string,
   language: string,
   pace: string,
-  country?: string | null
+  country?: string | null,
+  emotion?: string | null
 ): Promise<boolean> {
-  const ok = await speakCloudOnce(text, language, pace, country);
+  const ok = await speakCloudOnce(text, language, pace, country, emotion);
   if (ok) return true;
   // One retry — a single failed TTS request must not silence the teacher.
   await new Promise((r) => setTimeout(r, 450));
-  return speakCloudOnce(text, language, pace, country);
+  return speakCloudOnce(text, language, pace, country, emotion);
 }
 
 async function speakCloudOnce(
   text: string,
   language: string,
   pace: string,
-  country?: string | null
+  country?: string | null,
+  emotion?: string | null
 ): Promise<boolean> {
   try {
     if (activeCloudAudio) {
@@ -351,6 +436,7 @@ async function speakCloudOnce(
         language,
         pace,
         ...(country ? { country } : {}),
+        ...(emotion ? { emotion } : {}),
       }),
     });
     if (!res.ok) return false;
@@ -473,6 +559,58 @@ function BoardStroke({
   item: BoardItem;
   clock: number;
 }) {
+  if (item.kind === "pointer") {
+    const t = clock - item.bornAt;
+    let alpha = 0;
+    if (t >= 0 && t < item.writeMs) {
+      alpha = easeOut(t / item.writeMs);
+    } else if (t < item.writeMs + item.holdMs) {
+      alpha = 1;
+    } else if (t < item.writeMs + item.holdMs + item.fadeMs) {
+      alpha = 1 - (t - item.writeMs - item.holdMs) / item.fadeMs;
+    }
+    if (alpha <= 0.01) return null;
+    const pulse = 12 + 6 * Math.min(1, t / item.writeMs);
+    return (
+      <g key={item.id} opacity={alpha}>
+        <circle cx={item.x} cy={item.y} r={pulse + 8} fill={item.color} opacity={0.16} />
+        <circle cx={item.x} cy={item.y} r={pulse} fill="none" stroke={item.color} strokeWidth={3} />
+        <circle cx={item.x} cy={item.y} r={4} fill={item.color} />
+      </g>
+    );
+  }
+
+  if (item.kind === "circleHighlight") {
+    const p = progressOf(item, clock);
+    if (p <= 0) return null;
+    const jx = jitter(item.seed, 3, 1.6);
+    const jy = jitter(item.seed, 4, 1.6);
+    return (
+      <g key={item.id}>
+        <ellipse
+          cx={item.cx + jx}
+          cy={item.cy + jy}
+          rx={item.rx}
+          ry={item.ry}
+          fill="none"
+          stroke={item.color}
+          strokeWidth={item.width + 2}
+          opacity={0.16 * p}
+        />
+        <ellipse
+          cx={item.cx + jx}
+          cy={item.cy + jy}
+          rx={item.rx * Math.max(0.3, p)}
+          ry={item.ry * Math.max(0.3, p)}
+          fill="none"
+          stroke={item.color}
+          strokeWidth={item.width}
+          opacity={0.55 + 0.45 * p}
+        />
+      </g>
+    );
+  }
+
   const p = progressOf(item, clock);
   if (p <= 0) return null;
 
@@ -728,7 +866,8 @@ export function LiveClassroom({
         phrase,
         locale,
         "normal",
-        session?.countryCode ?? countryCodeRef.current
+        session?.countryCode ?? countryCodeRef.current,
+        bridgeKindToEmotion(kind)
       );
       window.clearInterval(wave);
       voiceBusyRef.current = false;
@@ -831,7 +970,8 @@ export function LiveClassroom({
           line,
           locale,
           beat.pace || "normal",
-          countryCodeRef.current
+          countryCodeRef.current,
+          beat.emotion || "calm"
         );
         window.clearInterval(wave);
         await new Promise((r) => setTimeout(r, 280));
@@ -1091,7 +1231,7 @@ export function LiveClassroom({
         setPresence("speaking");
         setCaption(question);
         voiceBusyRef.current = true;
-        await speakCloud(question, locale, "slow", countryCodeRef.current);
+        await speakCloud(question, locale, "slow", countryCodeRef.current, "patient");
         voiceBusyRef.current = false;
         await new Promise((r) => setTimeout(r, 350));
       }

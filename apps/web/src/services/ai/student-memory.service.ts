@@ -34,11 +34,36 @@ export type MaterialProgressEntry = {
   learningSpeed?: string;
   mistakes?: string[];
   evaluation?: MaterialEvaluation | null;
+  /** Every curriculum lesson title the student has fully moved past for this
+   *  material — the AI Teacher never re-teaches these on resume; it always
+   *  continues from the next uncompleted lesson in the outline. */
+  completedLessons?: string[];
 };
 
 export type MaterialEvaluationSummary = MaterialProgressEntry & {
   materialsKey: string;
+  masteredCount?: number;
+  weakCount?: number;
 };
+
+/** A concept is only "mastered" after repeated, consistent evidence — never
+ *  after a single correct answer. A concept becomes "weak" after two wrong
+ *  attempts in a row, even if it was mastered before (a real signal that it
+ *  has weakened enough to deserve a brief review). */
+export type ConceptMasteryStatus = "learning" | "weak" | "mastered";
+
+export type ConceptMasteryEntry = {
+  status: ConceptMasteryStatus;
+  correctStreak: number;
+  wrongStreak: number;
+  totalCorrect: number;
+  totalWrong: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+};
+
+/** topic label -> mastery entry, scoped to one material (documentIds set). */
+export type ConceptMasteryMap = Record<string, ConceptMasteryEntry>;
 
 export class StudentMemoryService {
   static async getOrCreate(userId: string) {
@@ -261,6 +286,7 @@ export class StudentMemoryService {
         confidence: prev?.confidence,
         learningSpeed: prev?.learningSpeed,
         mistakes: prev?.mistakes,
+        completedLessons: prev?.completedLessons,
         evaluation,
       };
       await prisma.studentAiMemory.update({
@@ -281,11 +307,208 @@ export class StudentMemoryService {
       mem.materialProgress && typeof mem.materialProgress === "object"
         ? (mem.materialProgress as Record<string, MaterialProgressEntry>)
         : {};
+    const masteryAll =
+      mem.conceptMastery && typeof mem.conceptMastery === "object"
+        ? (mem.conceptMastery as Record<string, ConceptMasteryMap>)
+        : {};
     return Object.entries(map)
-      .map(([materialsKey, entry]) => ({ materialsKey, ...entry }))
+      .map(([materialsKey, entry]) => {
+        const concepts = masteryAll[materialsKey] || {};
+        const statuses = Object.values(concepts).map((c) => c.status);
+        return {
+          materialsKey,
+          ...entry,
+          masteredCount: statuses.filter((s) => s === "mastered").length,
+          weakCount: statuses.filter((s) => s === "weak").length,
+        };
+      })
       .sort(
         (a, b) =>
           new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
       );
+  }
+
+  /** Every curriculum-lesson-title -> per-concept mastery ledger for one
+   *  material (documentIds set), used to skip re-teaching mastered lessons
+   *  and to steer the prompt toward quiet reinforcement vs. review. */
+  static async getConceptMastery(
+    userId: string,
+    materialsKey: string
+  ): Promise<ConceptMasteryMap> {
+    if (!materialsKey) return {};
+    try {
+      const mem = await this.getOrCreate(userId);
+      const all =
+        mem.conceptMastery && typeof mem.conceptMastery === "object"
+          ? (mem.conceptMastery as Record<string, ConceptMasteryMap>)
+          : {};
+      return all[materialsKey] || {};
+    } catch {
+      return {};
+    }
+  }
+
+  /** Fire-and-forget: record one piece of evidence (a resolved check
+   *  question) toward whether a concept is mastered, still learning, or
+   *  weak. Mastery requires a real streak of consistent correct answers —
+   *  never assumed from a single explanation or a single correct answer. */
+  static async recordConceptEvidence(
+    userId: string,
+    materialsKey: string,
+    topic: string | null | undefined,
+    correct: boolean
+  ) {
+    const key = (topic || "").trim().slice(0, 80);
+    if (!materialsKey || !key) return;
+    try {
+      const mem = await this.getOrCreate(userId);
+      const all = (
+        mem.conceptMastery && typeof mem.conceptMastery === "object"
+          ? { ...(mem.conceptMastery as Record<string, unknown>) }
+          : {}
+      ) as Record<string, ConceptMasteryMap>;
+      const materialMap = { ...(all[materialsKey] || {}) };
+      const prev = materialMap[key];
+      const now = new Date().toISOString();
+      const correctStreak = correct ? (prev?.correctStreak || 0) + 1 : 0;
+      const wrongStreak = correct ? 0 : (prev?.wrongStreak || 0) + 1;
+      const totalCorrect = (prev?.totalCorrect || 0) + (correct ? 1 : 0);
+      const totalWrong = (prev?.totalWrong || 0) + (correct ? 0 : 1);
+      const ratio = totalCorrect / Math.max(1, totalCorrect + totalWrong);
+
+      let status: ConceptMasteryStatus = prev?.status || "learning";
+      if (wrongStreak >= 2) {
+        // Two wrong in a row is a real "weakened significantly" signal,
+        // even if it was mastered before.
+        status = "weak";
+      } else if (correctStreak >= 2 && totalCorrect >= 3 && ratio >= 0.7) {
+        status = "mastered";
+      } else if (status === "weak" && correct) {
+        status = "learning";
+      }
+
+      materialMap[key] = {
+        status,
+        correctStreak,
+        wrongStreak,
+        totalCorrect,
+        totalWrong,
+        firstSeenAt: prev?.firstSeenAt || now,
+        lastSeenAt: now,
+      };
+      all[materialsKey] = materialMap;
+      await prisma.studentAiMemory.update({
+        where: { userId },
+        data: { conceptMastery: all as unknown as Prisma.InputJsonValue },
+      });
+    } catch {
+      /* ignore mastery writeback failures */
+    }
+  }
+
+  /** Fire-and-forget: mark a curriculum lesson as fully completed for this
+   *  material so future sessions never restart or re-teach it — the AI
+   *  Teacher always resumes from the next uncompleted lesson in the
+   *  outline instead of jumping randomly or repeating what was covered. */
+  static async markLessonCompleted(
+    userId: string,
+    materialsKey: string,
+    lessonName: string | null | undefined
+  ) {
+    const lesson = (lessonName || "").trim();
+    if (!materialsKey || !lesson) return;
+    try {
+      const mem = await this.getOrCreate(userId);
+      const map = (
+        mem.materialProgress && typeof mem.materialProgress === "object"
+          ? { ...(mem.materialProgress as Record<string, unknown>) }
+          : {}
+      ) as Record<string, MaterialProgressEntry>;
+      const prev = map[materialsKey];
+      const completed = [...(prev?.completedLessons || [])];
+      if (!completed.includes(lesson)) completed.push(lesson);
+      map[materialsKey] = {
+        lessonName: prev?.lessonName || lesson,
+        lessonIndex: prev?.lessonIndex ?? null,
+        updatedAt: new Date().toISOString(),
+        materialNames: prev?.materialNames,
+        curriculumOutline: prev?.curriculumOutline,
+        understanding: prev?.understanding,
+        confidence: prev?.confidence,
+        learningSpeed: prev?.learningSpeed,
+        mistakes: prev?.mistakes,
+        evaluation: prev?.evaluation,
+        completedLessons: completed.slice(-60),
+      };
+      await prisma.studentAiMemory.update({
+        where: { userId },
+        data: { materialProgress: map as unknown as Prisma.InputJsonValue },
+      });
+    } catch {
+      /* ignore progress writeback failures */
+    }
+  }
+
+  /** Fire-and-forget: remember which language the student is usually
+   *  taught in during live classroom sessions. */
+  static async savePreferredLanguage(userId: string, language: string | null | undefined) {
+    const lang = (language || "").trim().slice(0, 12);
+    if (!lang) return;
+    try {
+      await prisma.studentAiMemory.update({
+        where: { userId },
+        data: { preferredLanguage: lang },
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Compose the long-term "don't start from zero" memory block fed into
+   *  the classroom prompt: what's already completed, what's mastered, what
+   *  is weak, and the student's usual language/style/pace for this
+   *  material specifically (on top of the generic cross-subject blurb from
+   *  toPromptBlurb). */
+  static classroomMemoryBlurb(input: {
+    preferredLanguage?: string | null;
+    preferredStyle?: string | null;
+    learningSpeed?: string | null;
+    completedLessons: string[];
+    conceptMastery?: ConceptMasteryMap;
+  }): string {
+    const mastery = input.conceptMastery || {};
+    const mastered = Object.entries(mastery)
+      .filter(([, v]) => v.status === "mastered")
+      .map(([topic]) => topic);
+    const weak = Object.entries(mastery)
+      .filter(([, v]) => v.status === "weak")
+      .map(([topic]) => topic);
+
+    const bits: string[] = [];
+    if (input.completedLessons.length) {
+      bits.push(
+        `Already completed in THIS material, do NOT re-teach or restart: ${input.completedLessons
+          .slice(-12)
+          .join(", ")}`
+      );
+    }
+    if (mastered.length) {
+      bits.push(
+        `Mastered concepts (build on these, reference briefly instead of re-explaining): ${mastered
+          .slice(-10)
+          .join(", ")}`
+      );
+    }
+    if (weak.length) {
+      bits.push(
+        `Weak concepts (weakened significantly — a short, natural review is welcome if relevant): ${weak
+          .slice(-8)
+          .join(", ")}`
+      );
+    }
+    if (input.preferredLanguage) bits.push(`Usually taught in: ${input.preferredLanguage}`);
+    if (input.preferredStyle) bits.push(`Preferred teaching style: ${input.preferredStyle}`);
+    if (input.learningSpeed) bits.push(`Usual learning pace: ${input.learningSpeed}`);
+    return bits.join("; ");
   }
 }

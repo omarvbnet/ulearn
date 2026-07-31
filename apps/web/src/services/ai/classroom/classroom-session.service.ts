@@ -1,12 +1,17 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { AiProviderService } from "../ai-provider.service";
-import { StudentMemoryService, type MaterialEvaluation } from "../student-memory.service";
+import {
+  StudentMemoryService,
+  type ConceptMasteryMap,
+  type MaterialEvaluation,
+} from "../student-memory.service";
 import { resolveTeacherVoice } from "../voice-accent";
 import { sanitizeClassroomPlainText } from "../ai-teacher-prompt";
 import type { ChatMessage } from "../types";
 import { normalizeBoardActions } from "./board-layout";
 import { buildClassroomBeatPrompt } from "./classroom-prompts";
+import { SubjectAssessmentService } from "@/services/assessment/subject-assessment.service";
 import {
   emptyClassroomState,
   type ClassroomBeat,
@@ -62,6 +67,19 @@ function wantsRestartFromFirstLesson(text?: string | null): boolean {
   return RESTART_PATTERNS.some((re) => re.test(t));
 }
 
+/** Split a concept-mastery ledger into the two lists the prompt needs:
+ *  concepts to build on quietly vs. concepts that weakened and deserve a
+ *  brief, natural review if the moment fits. */
+function masteryLists(map: ConceptMasteryMap): { mastered: string[]; weak: string[] } {
+  const mastered: string[] = [];
+  const weak: string[] = [];
+  for (const [topic, entry] of Object.entries(map)) {
+    if (entry.status === "mastered") mastered.push(topic);
+    else if (entry.status === "weak") weak.push(topic);
+  }
+  return { mastered, weak };
+}
+
 function parseBeat(raw: string): ClassroomBeat | null {
   const jsonText = extractJsonObject(raw);
   if (!jsonText) return null;
@@ -113,6 +131,7 @@ function parseBeat(raw: string): ClassroomBeat | null {
         : o.answerCorrect === false
           ? false
           : null;
+    const teachingStrategy = String(o.teachingStrategy || "").trim();
 
     return {
       speak: speak.slice(0, 2),
@@ -128,6 +147,8 @@ function parseBeat(raw: string): ClassroomBeat | null {
         "curious",
         "patient",
         "energetic",
+        "frustrated",
+        "confused",
       ].includes(emotion)
         ? emotion
         : "calm",
@@ -137,6 +158,16 @@ function parseBeat(raw: string): ClassroomBeat | null {
         : null,
       sessionComplete: Boolean(o.sessionComplete),
       answerCorrect,
+      teachingStrategy: [
+        "example",
+        "story",
+        "comparison",
+        "challenge_question",
+        "socratic_question",
+        "recap",
+      ].includes(teachingStrategy)
+        ? (teachingStrategy as ClassroomBeat["teachingStrategy"])
+        : null,
       memoryPatch:
         o.memoryPatch && typeof o.memoryPatch === "object"
           ? (o.memoryPatch as Partial<ClassroomSessionState>)
@@ -198,15 +229,20 @@ function finalizeBeat(
   );
   let board = [...(beat.board || [])];
 
+  const pickVariant = <T,>(arr: T[]): T =>
+    arr[Math.floor(Date.now() / 137) % arr.length]!;
+
   // Wrong answer must always continue with voice + board re-explanation.
   if (beat.answerCorrect === false) {
     if (!speak.length) {
       speak = [
-        ar
-          ? "نفس الفكرة مرة ثانية بهدوء."
-          : tr
-            ? "Aynı fikri sakin sakin tekrar edelim."
-            : "Same idea again, slowly and clearly.",
+        pickVariant(
+          ar
+            ? ["نفس الفكرة مرة ثانية بهدوء.", "لنعد هذه الفكرة خطوة بخطوة.", "خلّينا نبسّطها أكثر."]
+            : tr
+              ? ["Aynı fikri sakin sakin tekrar edelim.", "Bunu adım adım yeniden görelim.", "Biraz daha basitleştirelim."]
+              : ["Same idea again, slowly and clearly.", "Let's walk through this one more time.", "Let's simplify this a bit more."]
+        ),
       ];
     }
     const hasText = board.some((b) =>
@@ -256,11 +292,13 @@ function finalizeBeat(
     }
     if (!speak.length) {
       speak = [
-        ar
-          ? "لنكمل الخطوة التالية."
-          : tr
-            ? "Şimdi sonraki adıma geçelim."
-            : "Let’s continue with the next step.",
+        pickVariant(
+          ar
+            ? ["لنكمل الخطوة التالية.", "تمام، نكمل للفكرة الجاية.", "زين، خطوة جديدة الحين."]
+            : tr
+              ? ["Şimdi sonraki adıma geçelim.", "Harika, bir sonraki fikre geçiyoruz.", "Tamam, şimdi yeni bir adım."]
+              : ["Let’s continue with the next step.", "Great, let's move to the next idea.", "Alright, on to something new."]
+        ),
       ];
     }
   }
@@ -304,22 +342,55 @@ function finalizeBeat(
   };
 }
 
+/** Rotating fallback lines so a repeated fallback never sounds like a broken record. */
+const FALLBACK_REACT_LINES: Record<"ar" | "tr" | "en", string[]> = {
+  ar: [
+    "سؤال ممتاز. دعنا نوضّح الفكرة على السبورة، ثم نكمل معاً.",
+    "فكرة جيدة. لنرسمها على السبورة ونكمل خطوة بخطوة.",
+    "تمام، لنركّز على هذه النقطة قليلاً ثم نتابع.",
+  ],
+  tr: [
+    "Harika soru. Tahtada netleştirelim, sonra birlikte devam edelim.",
+    "Güzel nokta. Tahtada gösterelim, sonra devam edelim.",
+    "Tamam, buna biraz odaklanalım, sonra ilerleyelim.",
+  ],
+  en: [
+    "Excellent question. Let’s clarify it on the board, then continue together.",
+    "Good point — let’s sketch it on the board and keep going step by step.",
+    "Alright, let’s focus on that for a moment, then move forward.",
+  ],
+};
+const FALLBACK_REACT_ASK: Record<"ar" | "tr" | "en", string[]> = {
+  ar: [
+    "هل هذا واضح لك الآن؟",
+    "طيب، كيف تشرح هذه الفكرة بكلماتك؟",
+    "هل تقدر تعطيني مثالاً على هذه الفكرة؟",
+  ],
+  tr: [
+    "Şimdi bu netleşti mi?",
+    "Peki, bunu kendi cümlelerinle nasıl anlatırsın?",
+    "Bu fikre bir örnek verebilir misin?",
+  ],
+  en: [
+    "Does that feel clear now?",
+    "Okay, how would you explain that back in your own words?",
+    "Can you give me an example of that idea?",
+  ],
+};
+
 function fallbackBeat(
   language: string,
   mode: "open" | "next" | "react",
-  lessonName?: string | null
+  lessonName?: string | null,
+  variant = 0
 ): ClassroomBeat {
   const ar = language === "ar" || language === "ku";
   const tr = language === "tr";
+  const key: "ar" | "tr" | "en" = ar ? "ar" : tr ? "tr" : "en";
+  const i = Math.abs(variant) % 3;
   if (mode === "react") {
     return {
-      speak: [
-        ar
-          ? "سؤال ممتاز. دعنا نوضّح الفكرة على السبورة، ثم نكمل معاً."
-          : tr
-            ? "Harika soru. Tahtada netleştirelim, sonra birlikte devam edelim."
-            : "Excellent question. Let’s clarify it on the board, then continue together.",
-      ],
+      speak: [FALLBACK_REACT_LINES[key][i]!],
       board: [
         {
           time: 0,
@@ -334,14 +405,11 @@ function fallbackBeat(
           },
         },
       ],
-      askStudent: ar
-        ? "ما الذي فهمته الآن؟"
-        : tr
-          ? "Şimdi ne anladın?"
-          : "What do you understand now?",
+      askStudent: FALLBACK_REACT_ASK[key][i]!,
       waitForStudentMs: 4800,
       emotion: "encouraging",
       pace: "slow",
+      teachingStrategy: "recap",
       lessonName: lessonName || null,
     };
   }
@@ -386,6 +454,7 @@ function fallbackBeat(
     waitForStudentMs: 4500,
     emotion: "encouraging",
     pace: "normal",
+    teachingStrategy: "example",
     lessonName: lessonName || null,
   };
 }
@@ -468,12 +537,44 @@ function mergeState(
   else next.emotionalState = beat.emotion;
   if (typeof patch.understanding === "number")
     next.understanding = clamp01(patch.understanding, next.understanding);
-  if (typeof patch.attention === "number")
+  if (typeof patch.attention === "number") {
     next.attention = clamp01(patch.attention, next.attention);
+  } else if (mode === "silence") {
+    // The student didn't answer in time — a real signal of dropping
+    // attention, even if the model didn't self-report it.
+    next.attention = Math.max(0.2, next.attention - 0.12);
+  } else if (beat.answerCorrect === true) {
+    next.attention = clamp01(next.attention + 0.05, next.attention);
+  }
   if (typeof patch.confidence === "number")
     next.confidence = clamp01(patch.confidence, next.confidence);
   if (patch.learningSpeed === "slow" || patch.learningSpeed === "normal" || patch.learningSpeed === "fast") {
     next.learningSpeed = patch.learningSpeed;
+  }
+  // Deterministic answer streaks — never just trust the model's self-report,
+  // so challengeLevel adaptation below is always grounded in real outcomes.
+  if (beat.answerCorrect === true) {
+    next.consecutiveCorrect = (state.consecutiveCorrect || 0) + 1;
+    next.consecutiveWrong = 0;
+  } else if (beat.answerCorrect === false) {
+    next.consecutiveWrong = (state.consecutiveWrong || 0) + 1;
+    next.consecutiveCorrect = 0;
+  }
+  // Real difficulty adaptation: confident streaks push the teacher to
+  // challenge the student more; struggling streaks pull back to basics.
+  if (next.consecutiveCorrect >= 2 && next.confidence >= 0.65) {
+    next.challengeLevel = "advanced";
+  } else if (
+    next.consecutiveWrong >= 2 ||
+    next.emotionalState === "frustrated" ||
+    next.confidence <= 0.35
+  ) {
+    next.challengeLevel = "gentle";
+  } else if (next.consecutiveWrong === 0 && next.consecutiveCorrect <= 1) {
+    next.challengeLevel = "standard";
+  }
+  if (beat.teachingStrategy) {
+    next.strategyHistory = [...(state.strategyHistory || []), beat.teachingStrategy].slice(-3);
   }
   if (typeof patch.boardCursorY === "number" && Number.isFinite(patch.boardCursorY)) {
     next.boardCursorY = Math.max(120, Math.min(980, patch.boardCursorY));
@@ -515,7 +616,11 @@ function mergeState(
         studentTranscript?.trim() || "incorrect attempt",
       ].slice(-12);
       next.understanding = Math.max(0.15, next.understanding - 0.08);
-      next.emotionalState = "patient";
+      next.confidence = Math.max(0.15, next.confidence - 0.06);
+      // Two or more wrong attempts in a row is a real frustration signal —
+      // one miss is just "patient" re-teaching, a repeated miss is the
+      // student genuinely struggling and needs a slower, simpler pass.
+      next.emotionalState = next.consecutiveWrong >= 2 ? "frustrated" : "patient";
       next.learningSpeed = "slow";
     }
   }
@@ -526,6 +631,56 @@ function mergeState(
     );
   }
   return next;
+}
+
+/** Fire-and-forget long-term memory updates every time a beat resolves:
+ *  record concept evidence when a check question was just judged, and mark
+ *  the previous lesson complete the moment the teacher moves to a new one
+ *  — this is what lets future sessions skip straight past what's already
+ *  done instead of starting from zero. */
+function applyLongTermMemory(
+  userId: string,
+  materialsKey: string,
+  state: ClassroomSessionState,
+  beat: ClassroomBeat,
+  nextState: ClassroomSessionState
+) {
+  if (!materialsKey) return;
+  if (beat.answerCorrect === true || beat.answerCorrect === false) {
+    const topic = (state.currentTopic || state.currentLessonName || "").trim();
+    if (topic) {
+      void StudentMemoryService.recordConceptEvidence(
+        userId,
+        materialsKey,
+        topic,
+        beat.answerCorrect
+      );
+    }
+  }
+  if (
+    beat.lessonName &&
+    state.currentLessonName &&
+    beat.lessonName !== state.currentLessonName
+  ) {
+    void StudentMemoryService.markLessonCompleted(
+      userId,
+      materialsKey,
+      state.currentLessonName
+    );
+    if (!nextState.materialCompletedLessons.includes(state.currentLessonName)) {
+      nextState.materialCompletedLessons = [
+        ...nextState.materialCompletedLessons,
+        state.currentLessonName,
+      ];
+    }
+  }
+  // Opportunistically refresh the Subject Scorecard whenever new concept
+  // evidence or a completed lesson lands — throttled so a live beat loop
+  // never adds noticeable latency.
+  void SubjectAssessmentService.recomputeFromDocumentsThrottled(
+    userId,
+    materialsKey.split(",").filter(Boolean)
+  ).catch(() => {});
 }
 
 function toPublic(
@@ -618,7 +773,6 @@ export class ClassroomSessionService {
     });
 
     const memory = await StudentMemoryService.getOrCreate(input.userId);
-    const memoryBlurb = StudentMemoryService.toPromptBlurb(memory);
     const studentBlurb = [
       profile?.fullLegalName ? `Student: ${profile.fullLegalName}` : null,
       profile?.studentProfile?.educationalStage?.nameEn
@@ -686,20 +840,55 @@ export class ClassroomSessionService {
     const materialsKey = StudentMemoryService.materialsKey(documentIds);
     const restart = wantsRestartFromFirstLesson(input.question);
     let resumeLessonName: string | null = null;
+    let completedLessonsForMaterial: string[] = [];
+    let conceptMastery: ConceptMasteryMap = {};
+    if (materialsKey) {
+      conceptMastery = await StudentMemoryService.getConceptMastery(
+        input.userId,
+        materialsKey
+      );
+    }
     if (!restart && materialsKey) {
       const progress = await StudentMemoryService.getMaterialProgress(
         input.userId,
         materialsKey
       );
+      completedLessonsForMaterial = progress?.completedLessons || [];
+      // Structured learning path: continue from the first curriculum lesson
+      // NOT yet completed, never a random jump. Fall back to the last known
+      // in-progress lesson (e.g. the whole outline is done — reinforcement
+      // territory) when every lesson has already been completed.
+      const nextUncompleted = curriculumOutline.find(
+        (l) => !completedLessonsForMaterial.includes(l)
+      );
+      const candidate = nextUncompleted || progress?.lessonName || null;
       if (
-        progress?.lessonName &&
-        curriculumOutline.includes(progress.lessonName) &&
-        progress.lessonName !== curriculumOutline[0]
+        candidate &&
+        curriculumOutline.includes(candidate) &&
+        candidate !== curriculumOutline[0]
       ) {
-        state.currentLessonName = progress.lessonName;
-        resumeLessonName = progress.lessonName;
+        state.currentLessonName = candidate;
+        resumeLessonName = candidate;
       }
     }
+    state.materialCompletedLessons = completedLessonsForMaterial;
+    const { mastered: masteredTopics, weak: weakTopics } = masteryLists(conceptMastery);
+    state.masteredTopics = masteredTopics;
+    state.weakTopics = weakTopics;
+
+    const memoryBlurb = [
+      StudentMemoryService.toPromptBlurb(memory),
+      StudentMemoryService.classroomMemoryBlurb({
+        preferredLanguage: memory.preferredLanguage,
+        preferredStyle: memory.preferredStyle,
+        learningSpeed: memory.learningSpeed,
+        completedLessons: completedLessonsForMaterial,
+        conceptMastery,
+      }),
+    ]
+      .filter(Boolean)
+      .join("; ");
+    void StudentMemoryService.savePreferredLanguage(input.userId, language);
 
     const row = await prisma.aiClassroomSession.create({
       data: {
@@ -733,6 +922,7 @@ export class ClassroomSessionService {
     });
 
     const nextState = mergeState(state, beat, undefined, "open");
+    applyLongTermMemory(input.userId, materialsKey, state, beat, nextState);
     await prisma.aiClassroomSession.update({
       where: { id: row.id },
       data: {
@@ -770,7 +960,21 @@ export class ClassroomSessionService {
     const state = row.state as unknown as ClassroomSessionState;
     const curriculumOutline = asStringArray(row.curriculumOutline);
     const memory = await StudentMemoryService.getOrCreate(input.userId);
-    const memoryBlurb = StudentMemoryService.toPromptBlurb(memory);
+    const materialsKey = StudentMemoryService.materialsKey(row.documentIds);
+    // Mastered/weak/completed lists live inside `state` itself (loaded once
+    // at session open and carried forward beat to beat) so this never needs
+    // an extra round trip to stay fast.
+    const memoryBlurb = [
+      StudentMemoryService.toPromptBlurb(memory),
+      StudentMemoryService.classroomMemoryBlurb({
+        preferredLanguage: memory.preferredLanguage,
+        preferredStyle: memory.preferredStyle,
+        learningSpeed: memory.learningSpeed,
+        completedLessons: state.materialCompletedLessons || [],
+      }),
+    ]
+      .filter(Boolean)
+      .join("; ");
 
     const beat = await this.generateBeat({
       userId: input.userId,
@@ -786,6 +990,7 @@ export class ClassroomSessionService {
     });
 
     const nextState = mergeState(state, beat, undefined, "next");
+    applyLongTermMemory(input.userId, materialsKey, state, beat, nextState);
     const beatIndex = row.beatIndex + 1;
     const ended = Boolean(beat.sessionComplete) || beatIndex > 150;
     await prisma.aiClassroomSession.update({
@@ -798,7 +1003,6 @@ export class ClassroomSessionService {
       },
     });
 
-    const materialsKey = StudentMemoryService.materialsKey(row.documentIds);
     if (materialsKey && nextState.currentLessonName) {
       void StudentMemoryService.saveMaterialProgress(input.userId, materialsKey, {
         lessonName: nextState.currentLessonName,
@@ -860,11 +1064,12 @@ export class ClassroomSessionService {
     };
     if (typeof input.signals?.confusion === "number" && input.signals.confusion > 0.55) {
       state.understanding = Math.max(0.15, state.understanding - 0.12);
-      state.emotionalState = "patient";
+      state.emotionalState = "confused";
     }
     if (typeof input.signals?.frustration === "number" && input.signals.frustration > 0.55) {
-      state.emotionalState = "patient";
+      state.emotionalState = "frustrated";
       state.learningSpeed = "slow";
+      state.challengeLevel = "gentle";
     }
     if (typeof input.signals?.confidence === "number" && input.signals.confidence > 0.65) {
       state.confidence = clamp01(input.signals.confidence);
@@ -873,7 +1078,17 @@ export class ClassroomSessionService {
 
     const curriculumOutline = asStringArray(row.curriculumOutline);
     const memory = await StudentMemoryService.getOrCreate(input.userId);
-    const memoryBlurb = StudentMemoryService.toPromptBlurb(memory);
+    const memoryBlurb = [
+      StudentMemoryService.toPromptBlurb(memory),
+      StudentMemoryService.classroomMemoryBlurb({
+        preferredLanguage: memory.preferredLanguage,
+        preferredStyle: memory.preferredStyle,
+        learningSpeed: memory.learningSpeed,
+        completedLessons: state.materialCompletedLessons || [],
+      }),
+    ]
+      .filter(Boolean)
+      .join("; ");
 
     const beat = await this.generateBeat({
       userId: input.userId,
@@ -895,6 +1110,8 @@ export class ClassroomSessionService {
       silence ? undefined : transcript,
       silence ? "silence" : "react"
     );
+    const materialsKey = StudentMemoryService.materialsKey(row.documentIds);
+    applyLongTermMemory(input.userId, materialsKey, state, beat, nextState);
     if (silence) {
       nextState.pendingAttempts = (nextState.pendingAttempts || 0) + 1;
       nextState.awaitingCorrectAnswer = true;
@@ -917,7 +1134,6 @@ export class ClassroomSessionService {
       void StudentMemoryService.recordQuestion(input.userId, transcript);
     }
 
-    const materialsKey = StudentMemoryService.materialsKey(row.documentIds);
     if (materialsKey && nextState.currentLessonName) {
       void StudentMemoryService.saveMaterialProgress(input.userId, materialsKey, {
         lessonName: nextState.currentLessonName,
@@ -1002,6 +1218,10 @@ export class ClassroomSessionService {
     } catch {
       /* ignore memory writeback failures */
     }
+
+    // Session just ended — always recompute regardless of the throttle so
+    // the scorecard reflects this session's final state immediately.
+    void SubjectAssessmentService.recomputeFromDocuments(userId, row.documentIds).catch(() => {});
 
     const materialsKey = StudentMemoryService.materialsKey(row.documentIds);
     if (!materialsKey) return;
@@ -1139,6 +1359,9 @@ export class ClassroomSessionService {
       confidence: typeof e.confidence === "number" ? e.confidence : null,
       updatedAt: e.updatedAt,
       evaluation: e.evaluation || null,
+      completedLessonsCount: e.completedLessons?.length || 0,
+      masteredCount: e.masteredCount || 0,
+      weakCount: e.weakCount || 0,
     }));
   }
 
@@ -1201,34 +1424,47 @@ export class ClassroomSessionService {
 
     const fallbackMode =
       input.mode === "silence" ? "react" : input.mode === "react" ? "react" : input.mode === "open" ? "open" : "next";
+    const temperature = input.mode === "react" || input.mode === "silence" ? 0.35 : 0.45;
+    // Beats are always a couple of short sentences + a few board actions, but
+    // Arabic with full diacritics (required for accurate pronunciation — see
+    // accentInstruction) can run notably longer per line than plain text, and
+    // REACT beats often both react AND teach the next micro-idea. Too tight a
+    // cap truncates the JSON mid-response, parseBeat then fails, and the
+    // student hears the same generic fallback question over and over — worse
+    // than a slightly slower real response. Keep a real but generous ceiling.
+    const maxTokensExact = input.mode === "open" ? 1000 : 900;
+
+    const runOnce = (tokenCap: number) =>
+      AiProviderService.chat("TEACHING_ASSISTANT", messages, input.userId, {
+        temperature,
+        maxTokensExact: tokenCap,
+      });
 
     try {
-      const result = await AiProviderService.chat(
-        "TEACHING_ASSISTANT",
-        messages,
-        input.userId,
-        {
-          temperature: input.mode === "react" || input.mode === "silence" ? 0.35 : 0.45,
-          // Beats are always a couple of short sentences + a few board
-          // actions — capping output keeps every provider's generation time
-          // short instead of letting it use a large admin-configured budget.
-          maxTokensExact: input.mode === "open" ? 700 : 550,
-        }
-      );
-      const parsed =
-        parseBeat(result.text) ||
+      let result = await runOnce(maxTokensExact);
+      let parsed = parseBeat(result.text);
+      if (!parsed) {
+        // Likely truncated output — retry once with a much bigger ceiling
+        // before falling back to a generic line.
+        result = await runOnce(maxTokensExact * 2);
+        parsed = parseBeat(result.text);
+      }
+      const beat =
+        parsed ||
         fallbackBeat(
           input.language,
           fallbackMode,
-          input.state.currentLessonName || input.curriculumOutline[0] || null
+          input.state.currentLessonName || input.curriculumOutline[0] || null,
+          Date.now()
         );
-      return finalizeBeat(parsed, input.state, input.language, input.mode);
+      return finalizeBeat(beat, input.state, input.language, input.mode);
     } catch {
       return finalizeBeat(
         fallbackBeat(
           input.language,
           fallbackMode,
-          input.state.currentLessonName || input.curriculumOutline[0] || null
+          input.state.currentLessonName || input.curriculumOutline[0] || null,
+          Date.now()
         ),
         input.state,
         input.language,

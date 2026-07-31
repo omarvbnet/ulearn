@@ -256,6 +256,7 @@ model User {
   aiClassroomSessions  AiClassroomSession[]
   aiUsageLogs          AiUsageLog[]
   studentAiMemory      StudentAiMemory?
+  subjectAssessments   SubjectAssessment[]
   aiMessages           AiMessage[]
   aiExamAttempts       AiExamAttempt[]
   professorJobs        ProfessorJob[]
@@ -1270,6 +1271,7 @@ model Subject {
   certificates Certificate[]
   courses    Course[]
   certificateInterests CertificateProfileInterest[]
+  assessments SubjectAssessment[]
 
   @@index([countryId])
   @@index([stageId])
@@ -2043,9 +2045,88 @@ model StudentAiMemory {
   /// with ",". Lets the AI Teacher resume each material's lesson instead of
   /// restarting from lesson 1 on every new session.
   materialProgress   Json?
+  /// Per-material, per-concept mastery ledger: { [materialsKey]: { [topic]:
+  /// { status, correctStreak, wrongStreak, totalCorrect, totalWrong,
+  /// firstSeenAt, lastSeenAt } } }. This is the long-term "does the student
+  /// already know this" memory that stops the AI Teacher from re-teaching
+  /// mastered concepts and from declaring mastery after a single beat.
+  conceptMastery     Json?
+  /// Language the student is usually taught in during live classroom
+  /// sessions — distinct from the site UI locale, set explicitly whenever a
+  /// classroom session starts so future sessions default to it.
+  preferredLanguage  String?
   updatedAt          DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum PerformanceLevel {
+  BEGINNER
+  BASIC
+  DEVELOPING
+  INTERMEDIATE
+  ADVANCED
+  EXPERT
+}
+
+enum LearningTrend {
+  RAPID_IMPROVEMENT
+  STEADY_IMPROVEMENT
+  STABLE
+  SLIGHT_DECLINE
+  CRITICAL_DECLINE
+}
+
+/// Continuously-recomputed, multi-dimensional academic scorecard for ONE
+/// student on ONE curriculum Subject — the "Subject Scorecard" foundation.
+/// Aggregates every existing signal (Quiz/QuizAttempt, AiExamAttempt, the AI
+/// Teacher's StudentAiMemory conceptMastery/materialProgress, and store
+/// Course progress) into one persisted, queryable row instead of scattered
+/// JSON blobs, so later phases (rankings, admin analytics, parent
+/// dashboard) can read/sort/filter it directly.
+model SubjectAssessment {
+  id                    String           @id @default(cuid())
+  userId                String
+  subjectId             String
+  /// Headline 0-100 mastery percentage shown on the Subject Card.
+  masteryScore          Int              @default(0)
+  performanceLevel      PerformanceLevel @default(BEGINNER)
+  /// How statistically confident the engine is that masteryScore reflects
+  /// real understanding (low with little evidence, even if the raw average
+  /// is high) — see SubjectAssessmentService for the exact formula.
+  aiConfidenceScore     Int              @default(0)
+  retentionScore        Int              @default(0)
+  /// Every dimension below is nullable: null means "not enough data yet"
+  /// and is rendered as an explicit empty state — never a fabricated
+  /// number. Several are labeled estimates/proxies in the UI (see plan).
+  problemSolvingScore   Int?
+  practicalSkillsScore  Int?
+  criticalThinkingScore Int?
+  communicationScore    Int?
+  creativityScore       Int?
+  learningSpeedScore    Int?
+  participationScore    Int?
+  /// Reserved: always null until a real Homework/Assignment feature
+  /// exists. Never backed by a proxy — there is no related signal at all.
+  homeworkScore         Int?
+  quizAccuracyScore     Int?
+  /// Session-activity proxy (active days in period), NOT physical
+  /// attendance — always labeled as such wherever it's displayed.
+  attendanceScore       Int?
+  consistencyScore      Int?
+  improvementScore      Int?
+  trend                 LearningTrend    @default(STABLE)
+  /// Capped array of { date, masteryScore } snapshots (~1/day, last ~120)
+  /// used to render the trend chart and compute improvementScore/trend.
+  trendHistory          Json             @default("[]")
+  lastComputedAt        DateTime         @updatedAt
+  createdAt             DateTime         @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, subjectId])
+  @@index([subjectId, masteryScore])
 }
 
 enum AiClassroomSessionStatus {

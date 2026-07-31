@@ -26,6 +26,7 @@
     "store": "Kurs Mağazası",
     "aiAssistant": "YZ Öğretmeni",
     "evaluations": "Değerlendirmelerim",
+    "mySubjects": "Derslerim",
     "myCourses": "Kurslarım",
     "courseReview": "Kurs İncelemesi",
     "courseGroups": "Kurs Grupları",
@@ -275,7 +276,56 @@
     "gradeExcellent": "Mükemmel",
     "gradeGood": "İyi",
     "gradeFair": "Orta",
-    "gradeNeedsWork": "Geliştirilmeli"
+    "gradeNeedsWork": "Geliştirilmeli",
+    "masteredConcepts": "{count} kavram öğrenildi",
+    "conceptsToReview": "{count} tekrar gerekiyor"
+  },
+  "subjects": {
+    "title": "Derslerim",
+    "description": "Her ders için tam akademik karnen — ustalık, yapay zeka güveni ve zaman içindeki ilerleme.",
+    "empty": "Henüz ders etkinliği yok — ilk karnenizi oluşturmak için bir sınav çözün veya yapay zeka öğretmeniyle bir sınıf oturumu başlatın.",
+    "loadError": "Derslerin yüklenemedi",
+    "notFound": "Bu ders için henüz bir karne bulunmuyor.",
+    "backToSubjects": "Derslerime Dön",
+    "mastery": "Ustalık",
+    "aiConfidence": "Yapay Zeka Güveni",
+    "retention": "Kalıcılık",
+    "lastUpdated": "Son güncelleme {date}",
+    "notEnoughData": "Henüz yeterli veri yok",
+    "estimated": "Tahmini",
+    "activityBased": "Etkinlik tabanlı, fiziksel devamsızlık değil",
+    "practiceThisSubject": "Yapay Zeka Öğretmeninle Pratik Yap",
+    "trendChart": "Ustalık eğilimi",
+    "dimensionsTitle": "Tam karne",
+    "levels": {
+      "BEGINNER": "Başlangıç",
+      "BASIC": "Temel",
+      "DEVELOPING": "Gelişmekte",
+      "INTERMEDIATE": "Orta",
+      "ADVANCED": "İleri",
+      "EXPERT": "Uzman"
+    },
+    "trends": {
+      "RAPID_IMPROVEMENT": "Hızlı ilerleme",
+      "STEADY_IMPROVEMENT": "İstikrarlı ilerleme",
+      "STABLE": "Sabit",
+      "SLIGHT_DECLINE": "Hafif düşüş",
+      "CRITICAL_DECLINE": "Kritik düşüş"
+    },
+    "dimensions": {
+      "problemSolving": "Problem Çözme",
+      "practicalSkills": "Pratik Beceriler",
+      "criticalThinking": "Eleştirel Düşünme",
+      "communication": "İletişim",
+      "creativity": "Yaratıcılık",
+      "learningSpeed": "Öğrenme Hızı",
+      "participation": "Katılım",
+      "homework": "Ödev Tamamlama",
+      "quizAccuracy": "Sınav Doğruluğu",
+      "attendance": "Devam",
+      "consistency": "Tutarlılık",
+      "improvement": "Gelişim"
+    }
   },
   "dashboard": {
     "totalUsers": "Toplam Kullanıcı",

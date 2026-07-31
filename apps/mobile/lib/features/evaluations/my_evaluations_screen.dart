@@ -156,6 +156,8 @@ class _EvaluationCard extends StatelessWidget {
     final lessonsCompleted =
         (evaluation?['lessonsCompleted'] as num?)?.toInt() ??
             (lessonIndex != null ? lessonIndex + 1 : 1);
+    final masteredCount = (entry['masteredCount'] as num?)?.toInt() ?? 0;
+    final weakCount = (entry['weakCount'] as num?)?.toInt() ?? 0;
     final strengths = ((evaluation?['strengths'] as List<dynamic>?) ?? []).cast<String>();
     final weaknesses = ((evaluation?['weaknesses'] as List<dynamic>?) ?? []).cast<String>();
     final recommendation = evaluation?['recommendation']?.toString() ?? '';
@@ -194,6 +196,36 @@ class _EvaluationCard extends StatelessWidget {
                             'total': '$totalLessons',
                           }),
                           style: TextStyle(color: AppTheme.muted, fontSize: 11),
+                        ),
+                      ],
+                      if (masteredCount > 0 || weakCount > 0) ...[
+                        const SizedBox(height: 4),
+                        Wrap(
+                          spacing: 10,
+                          children: [
+                            if (masteredCount > 0)
+                              Text(
+                                l10n.t('mobile.evaluations.masteredConcepts', {
+                                  'count': '$masteredCount',
+                                }),
+                                style: const TextStyle(
+                                  color: Colors.greenAccent,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            if (weakCount > 0)
+                              Text(
+                                l10n.t('mobile.evaluations.conceptsToReview', {
+                                  'count': '$weakCount',
+                                }),
+                                style: const TextStyle(
+                                  color: Colors.orangeAccent,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                          ],
                         ),
                       ],
                     ],

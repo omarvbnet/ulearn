@@ -341,6 +341,22 @@ export type ClassroomBridgeKind =
   | "reexplain"
   | "excellent";
 
+/** Maps a short spoken bridge to the emotion its delivery should carry. */
+export function bridgeKindToEmotion(kind: ClassroomBridgeKind): ClassroomVoiceEmotion {
+  switch (kind) {
+    case "excellent":
+      return "encouraging";
+    case "reexplain":
+      return "patient";
+    case "check":
+      return "curious";
+    case "listen":
+      return "curious";
+    default:
+      return "calm";
+  }
+}
+
 /**
  * Natural spoken bridge while the teacher prepares the next beat / answer.
  * Matches selected language + regional classroom accent.
@@ -439,12 +455,47 @@ export function classroomBridgePhrase(
   return ["Let me think for a moment", "One moment while I gather that", "Give me a second to think"][i]!;
 }
 
+export type ClassroomVoiceEmotion =
+  | "calm"
+  | "encouraging"
+  | "curious"
+  | "patient"
+  | "energetic"
+  | "frustrated"
+  | "confused";
+
+/**
+ * How each emotional state should actually change vocal delivery — separate
+ * from pace, so "energetic" and "frustrated" sound distinct even at the same
+ * speaking speed. Without this, `emotion` was cosmetic: chosen by the model
+ * but never reaching the voice engine.
+ */
+function emotionDeliveryHint(emotion?: string | null): string {
+  switch ((emotion || "calm") as ClassroomVoiceEmotion) {
+    case "encouraging":
+      return "Warm, uplifting tone — like praising a student who just got something right.";
+    case "curious":
+      return "Bright, inquisitive tone, as if genuinely intrigued by the question.";
+    case "energetic":
+      return "Lively, confident, upbeat energy — a teacher excited to go further.";
+    case "patient":
+      return "Extra gentle and unhurried, softening every word, no impatience at all.";
+    case "frustrated":
+      return "Extra warm, slow, and reassuring — the student is struggling, so soften the voice and never sound impatient or annoyed.";
+    case "confused":
+      return "Deliberate and calm, articulating each word clearly to rebuild clarity.";
+    default:
+      return "Steady, warm, composed classroom tone.";
+  }
+}
+
 /** Short delivery instruction for TTS engines that support style prompts. */
 export function ttsDeliveryInstruction(
   language?: string | null,
   countryCode?: string | null,
   provinceName?: string | null,
-  pace?: "slow" | "normal" | "brisk" | null
+  pace?: "slow" | "normal" | "brisk" | null,
+  emotion?: string | null
 ): string {
   const v = resolveTeacherVoice({ language, countryCode, provinceName });
   const paceHint =
@@ -463,6 +514,7 @@ export function ttsDeliveryInstruction(
     "You are a world-class human teacher speaking live in class.",
     accentHint,
     paceHint,
+    emotionDeliveryHint(emotion),
     "Sound human: soft emphasis, natural breath, no chatbot cadence.",
   ].join(" ");
 }
@@ -472,11 +524,32 @@ export function ttsDeliveryInstruction(
  * S2 reads natural-language tags in [square brackets] before the spoken text.
  * @see https://fish.audio/blog/fish-audio-s2-fine-grained-ai-voice-control-at-the-word-level/
  */
+/** Short emotion descriptor appended to the Fish Audio S2 bracket cue. */
+function emotionTagBit(emotion?: string | null): string {
+  switch ((emotion || "calm") as ClassroomVoiceEmotion) {
+    case "encouraging":
+      return "warm encouraging tone";
+    case "curious":
+      return "bright curious tone";
+    case "energetic":
+      return "lively upbeat energy";
+    case "patient":
+      return "extra gentle unhurried tone";
+    case "frustrated":
+      return "extra warm reassuring tone, never impatient";
+    case "confused":
+      return "deliberate calm tone, clear articulation";
+    default:
+      return "steady warm tone";
+  }
+}
+
 export function fishAccentSpeechTag(
   language?: string | null,
   countryCode?: string | null,
   provinceName?: string | null,
-  pace?: "slow" | "normal" | "brisk" | null
+  pace?: "slow" | "normal" | "brisk" | null,
+  emotion?: string | null
 ): string {
   const v = resolveTeacherVoice({ language, countryCode, provinceName });
   const paceBit =
@@ -485,56 +558,58 @@ export function fishAccentSpeechTag(
       : pace === "brisk"
         ? "energetic clear pace"
         : "natural teacher pace";
+  const emoBit = emotionTagBit(emotion);
 
   if (v.selectedLanguage === "ar") {
     if (v.accent.startsWith("iraqi") || v.accent === "iraqi_levantine") {
-      return `[warm professional Iraqi Arabic classroom accent, ${paceBit}, clear diction]`;
+      return `[warm professional Iraqi Arabic classroom accent, ${paceBit}, ${emoBit}, clear diction]`;
     }
     if (v.accent === "levantine") {
-      return `[warm Levantine Arabic classroom accent, ${paceBit}, clear diction]`;
+      return `[warm Levantine Arabic classroom accent, ${paceBit}, ${emoBit}, clear diction]`;
     }
     if (v.accent === "gulf") {
-      return `[polished Gulf Arabic educational accent, ${paceBit}, respectful and clear]`;
+      return `[polished Gulf Arabic educational accent, ${paceBit}, ${emoBit}, respectful and clear]`;
     }
     if (v.accent === "egyptian") {
-      return `[warm Egyptian Arabic teaching accent, ${paceBit}, engaging and clear]`;
+      return `[warm Egyptian Arabic teaching accent, ${paceBit}, ${emoBit}, engaging and clear]`;
     }
     if (v.accent === "maghrebi") {
-      return `[clear Maghrebi Arabic classroom accent leaning MSA, ${paceBit}]`;
+      return `[clear Maghrebi Arabic classroom accent leaning MSA, ${paceBit}, ${emoBit}]`;
     }
-    return `[clear Modern Standard Arabic classroom accent, ${paceBit}]`;
+    return `[clear Modern Standard Arabic classroom accent, ${paceBit}, ${emoBit}]`;
   }
   if (v.selectedLanguage === "tr") {
-    return `[clear professional Turkish classroom teacher accent, ${paceBit}]`;
+    return `[clear professional Turkish classroom teacher accent, ${paceBit}, ${emoBit}]`;
   }
   if (v.selectedLanguage === "ku") {
     return v.countryCode === "TR"
-      ? `[clear Turkish classroom teacher accent, ${paceBit}]`
-      : `[warm professional Iraqi Arabic classroom accent, ${paceBit}]`;
+      ? `[clear Turkish classroom teacher accent, ${paceBit}, ${emoBit}]`
+      : `[warm professional Iraqi Arabic classroom accent, ${paceBit}, ${emoBit}]`;
   }
   if (v.accent === "british") {
-    return `[polished British English classroom accent, ${paceBit}]`;
+    return `[polished British English classroom accent, ${paceBit}, ${emoBit}]`;
   }
   if (v.accent === "australian") {
-    return `[clear Australian English classroom accent, ${paceBit}]`;
+    return `[clear Australian English classroom accent, ${paceBit}, ${emoBit}]`;
   }
   if (v.accent === "canadian") {
-    return `[clear Canadian English classroom accent, ${paceBit}]`;
+    return `[clear Canadian English classroom accent, ${paceBit}, ${emoBit}]`;
   }
-  return `[clear American English classroom accent, ${paceBit}]`;
+  return `[clear American English classroom accent, ${paceBit}, ${emoBit}]`;
 }
 
-/** Prefixed spoken text so Fish Audio S2 delivers the student's regional accent. */
+/** Prefixed spoken text so Fish Audio S2 delivers the student's regional accent + emotion. */
 export function withFishAccentSpeech(
   text: string,
   language?: string | null,
   countryCode?: string | null,
   provinceName?: string | null,
-  pace?: "slow" | "normal" | "brisk" | null
+  pace?: "slow" | "normal" | "brisk" | null,
+  emotion?: string | null
 ): string {
   const trimmed = text.trim();
   if (!trimmed) return trimmed;
-  const tag = fishAccentSpeechTag(language, countryCode, provinceName, pace);
+  const tag = fishAccentSpeechTag(language, countryCode, provinceName, pace, emotion);
   if (trimmed.startsWith("[")) return trimmed;
   return `${tag} ${trimmed}`;
 }

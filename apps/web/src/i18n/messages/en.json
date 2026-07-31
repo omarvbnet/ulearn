@@ -26,6 +26,7 @@
     "store": "Course Store",
     "aiAssistant": "AI Tutor",
     "evaluations": "My Evaluations",
+    "mySubjects": "My Subjects",
     "myCourses": "My Courses",
     "courseReview": "Course Review",
     "courseGroups": "Course Groups",
@@ -275,7 +276,56 @@
     "gradeExcellent": "Excellent",
     "gradeGood": "Good",
     "gradeFair": "Fair",
-    "gradeNeedsWork": "Needs work"
+    "gradeNeedsWork": "Needs work",
+    "masteredConcepts": "{count} concepts mastered",
+    "conceptsToReview": "{count} to review"
+  },
+  "subjects": {
+    "title": "My Subjects",
+    "description": "Your complete academic scorecard for every subject — mastery, AI confidence, and progress over time.",
+    "empty": "No subject activity yet — take a quiz or start an AI classroom session to build your first scorecard.",
+    "loadError": "Failed to load your subjects",
+    "notFound": "No scorecard found for this subject yet.",
+    "backToSubjects": "Back to My Subjects",
+    "mastery": "Mastery",
+    "aiConfidence": "AI Confidence",
+    "retention": "Retention",
+    "lastUpdated": "Last updated {date}",
+    "notEnoughData": "Not enough data yet",
+    "estimated": "Estimated",
+    "activityBased": "Activity-based, not physical attendance",
+    "practiceThisSubject": "Practice with your AI Teacher",
+    "trendChart": "Mastery trend",
+    "dimensionsTitle": "Full scorecard",
+    "levels": {
+      "BEGINNER": "Beginner",
+      "BASIC": "Basic",
+      "DEVELOPING": "Developing",
+      "INTERMEDIATE": "Intermediate",
+      "ADVANCED": "Advanced",
+      "EXPERT": "Expert"
+    },
+    "trends": {
+      "RAPID_IMPROVEMENT": "Rapid improvement",
+      "STEADY_IMPROVEMENT": "Steady improvement",
+      "STABLE": "Stable",
+      "SLIGHT_DECLINE": "Slight decline",
+      "CRITICAL_DECLINE": "Critical decline"
+    },
+    "dimensions": {
+      "problemSolving": "Problem Solving",
+      "practicalSkills": "Practical Skills",
+      "criticalThinking": "Critical Thinking",
+      "communication": "Communication",
+      "creativity": "Creativity",
+      "learningSpeed": "Learning Speed",
+      "participation": "Participation",
+      "homework": "Homework Completion",
+      "quizAccuracy": "Quiz Accuracy",
+      "attendance": "Attendance",
+      "consistency": "Consistency",
+      "improvement": "Improvement"
+    }
   },
   "dashboard": {
     "totalUsers": "Total Users",

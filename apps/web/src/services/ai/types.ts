@@ -51,6 +51,8 @@ export type SpeechSynthesisInput = {
   voice?: string | null;
   /** Speaking pace hint for more natural classroom delivery */
   pace?: "slow" | "normal" | "brisk" | null;
+  /** Detected/chosen emotional state — changes vocal delivery, not just pace */
+  emotion?: string | null;
 };
 
 export type SpeechSynthesisResult = {

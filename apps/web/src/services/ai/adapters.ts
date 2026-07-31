@@ -308,7 +308,8 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
         input.language,
         input.countryCode,
         input.provinceName,
-        input.pace
+        input.pace,
+        input.emotion
       );
     }
     const res = await fetchJson(
@@ -764,13 +765,14 @@ export class FishAudioAdapter implements AiProviderAdapter {
     const pace = input.pace || "normal";
     const speed =
       pace === "slow" ? 0.88 : pace === "brisk" ? 1.08 : 1.0;
-    // Country accent must reach the voice engine — Fish S2 follows [bracket] cues.
+    // Country accent + emotion must reach the voice engine — Fish S2 follows [bracket] cues.
     const spoken = withFishAccentSpeech(
       text,
       input.language,
       input.countryCode,
       input.provinceName,
-      pace
+      pace,
+      input.emotion
     );
 
     const body: Record<string, unknown> = {
@@ -874,27 +876,33 @@ export class ElevenLabsAdapter implements AiProviderAdapter {
     const base = normalizeElevenLabsBase(config.baseUrl);
     const url = `${base}/v1/text-to-speech/${encodeURIComponent(voiceId)}`;
     const pace = input.pace || "normal";
-    const voice_settings =
+    const baseSettings =
       pace === "slow"
-        ? {
-            stability: 0.58,
-            similarity_boost: 0.82,
-            style: 0.08,
-            use_speaker_boost: true,
-          }
+        ? { stability: 0.58, similarity_boost: 0.82, style: 0.08 }
         : pace === "brisk"
-          ? {
-              stability: 0.38,
-              similarity_boost: 0.78,
-              style: 0.32,
-              use_speaker_boost: true,
-            }
-          : {
-              stability: 0.48,
-              similarity_boost: 0.85,
-              style: 0.22,
-              use_speaker_boost: true,
-            };
+          ? { stability: 0.38, similarity_boost: 0.78, style: 0.32 }
+          : { stability: 0.48, similarity_boost: 0.85, style: 0.22 };
+    // Emotion nudges stability/style on top of the pace baseline so
+    // "frustrated" and "energetic" don't sound identical at the same speed —
+    // emotion used to be chosen by the model but never reach the voice engine.
+    const emotionDelta: Record<string, { stability: number; style: number }> = {
+      encouraging: { stability: -0.04, style: 0.08 },
+      curious: { stability: -0.06, style: 0.1 },
+      energetic: { stability: -0.1, style: 0.15 },
+      patient: { stability: 0.12, style: -0.08 },
+      frustrated: { stability: 0.16, style: -0.12 },
+      confused: { stability: 0.1, style: -0.06 },
+    };
+    const delta = emotionDelta[(input.emotion || "").toLowerCase()] || {
+      stability: 0,
+      style: 0,
+    };
+    const voice_settings = {
+      stability: Math.max(0.1, Math.min(0.9, baseSettings.stability + delta.stability)),
+      similarity_boost: baseSettings.similarity_boost,
+      style: Math.max(0, Math.min(0.9, baseSettings.style + delta.style)),
+      use_speaker_boost: true,
+    };
 
     const body: Record<string, unknown> = {
       text,
