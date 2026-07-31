@@ -118,7 +118,20 @@ export class ReasoningEngine {
               speakIdx = 1;
             }
           }
-          if (/"sessionComplete"\s*:/.test(full) && findJson(full)) return true;
+          // Early-stop ONLY when the JSON object is actually complete —
+          // aborting on the bare "sessionComplete": key truncates the JSON
+          // mid-stream and forces the fallback line on every beat.
+          if (/"sessionComplete"\s*:\s*(?:true|false)/.test(full)) {
+            const j = findJson(full);
+            if (j) {
+              try {
+                JSON.parse(j);
+                return true;
+              } catch {
+                /* JSON not complete yet — keep streaming */
+              }
+            }
+          }
           return false;
         }
       );

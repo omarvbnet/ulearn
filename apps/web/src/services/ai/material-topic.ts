@@ -3,8 +3,16 @@
  * teacher names, PDF filenames, grade banners, or "Pages 1–3".
  */
 
-function norm(s: string): string {
+/** Remove Arabic tatweel (kashida) + diacritics — PDF covers stretch words
+ * like "الاســتاذ اركـــان" which defeats plain-text regex matching. */
+function stripArabicNoise(s: string): string {
   return String(s || "")
+    .replace(/\u0640/g, "")
+    .replace(/[\u064B-\u065F\u0670]/g, "");
+}
+
+function norm(s: string): string {
+  return stripArabicNoise(String(s || ""))
     .toLowerCase()
     .replace(/[_\-.]+/g, " ")
     .replace(/\.[a-z0-9]{2,5}$/i, "")
@@ -17,7 +25,9 @@ export function isCoverOrMetaLine(
   line: string,
   materialNames: string[] = []
 ): boolean {
-  const raw = String(line || "").replace(/\s+/g, " ").trim();
+  const raw = stripArabicNoise(String(line || ""))
+    .replace(/\s+/g, " ")
+    .trim();
   if (!raw || raw.length < 3) return true;
   if (/^https?:/i.test(raw) || /^\d+$/.test(raw)) return true;
   if (/^pages?\s*\d+/i.test(raw)) return true;
@@ -97,7 +107,7 @@ export function topicTitleFromChunkText(
   const lines: string[] = [];
   for (const raw of texts) {
     for (const line of String(raw || "").split(/\n+/)) {
-      const cleaned = line
+      const cleaned = stripArabicNoise(line)
         .replace(/^#+\s*/, "")
         .replace(/^\d+(\.\d+)*[.)]?\s+/, "")
         .replace(/^pages?\s+\d+.*/i, "")
@@ -161,7 +171,7 @@ export function topicTitleFromChunkText(
 }
 
 function scrubExcerptLine(line: string, materialNames: string[]): string | null {
-  const l = String(line || "")
+  const l = stripArabicNoise(String(line || ""))
     .replace(/^\[[^\]]+\]\s*/, "")
     .replace(/\s*·\s*Pages?\s+\d+\s*[–\-]\s*\d+/gi, "")
     .replace(/\bPages?\s+\d+\s*[–\-]\s*\d+\b/gi, "")
@@ -208,7 +218,7 @@ export function topicFromExcerpt(
 ): string {
   const lines = excerpt
     .split(/\n+/)
-    .map((l) => l.replace(/^\[[^\]]+\]\s*/, "").trim())
+    .map((l) => stripArabicNoise(l).replace(/^\[[^\]]+\]\s*/, "").trim())
     .filter((l) => l.length >= 6 && !/^---/.test(l));
   const order = [
     ...lines.slice(Math.min(4, Math.floor(lines.length * 0.2))),
@@ -235,7 +245,7 @@ export function nextBoardTopicFromExcerpt(
   const alreadyNorm = new Set(already.map((s) => norm(s).slice(0, 24)));
   const lines = excerpt
     .split(/\n+/)
-    .map((l) => l.replace(/^\[[^\]]+\]\s*/, "").trim())
+    .map((l) => stripArabicNoise(l).replace(/^\[[^\]]+\]\s*/, "").trim())
     .filter(Boolean);
   for (const line of lines) {
     if (isCoverOrMetaLine(line, materialNames)) continue;
