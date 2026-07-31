@@ -559,10 +559,10 @@ export function ttsDeliveryInstruction(
   const v = resolveTeacherVoice({ language, countryCode, provinceName });
   const paceHint =
     pace === "slow"
-      ? "Speak slowly and patiently, with clear pauses between ideas."
+      ? "Speak slowly and patiently, with clear pauses between ideas, like sitting beside the student."
       : pace === "brisk"
-        ? "Speak with energetic, confident classroom pace — still clear."
-        : "Speak at a natural teacher pace with gentle emphasis.";
+        ? "Speak with energetic, confident classroom pace — alive, still crystal clear."
+        : "Speak at a natural conversational teacher pace with gentle emphasis and easy rhythm.";
   // Use delivery language (v.language), not UI language — KU UI maps to ar/tr TTS.
   const accentHint =
     v.language === "ar"
@@ -571,11 +571,12 @@ export function ttsDeliveryInstruction(
         ? "Use a clear professional Turkish classroom voice."
         : `Use a professional ${String(v.accent).replace(/_/g, " ")} English classroom voice.`;
   return [
-    "You are a world-class human teacher speaking live in class.",
+    "You are a world-class human teacher speaking live, one-on-one with your student.",
     accentHint,
     paceHint,
     emotionDeliveryHint(emotion),
-    "Sound human: soft emphasis, natural breath, no chatbot cadence.",
+    "Deliver like natural conversation, not narration: micro-pauses where a human breathes, rising intonation on hooks and questions, soft emphasis on key words, a smile in the voice.",
+    "Vary pitch and energy across sentences — never flat, never monotone, never chatbot cadence.",
   ].join(" ");
 }
 
@@ -588,19 +589,19 @@ export function ttsDeliveryInstruction(
 function emotionTagBit(emotion?: string | null): string {
   switch ((emotion || "calm") as ClassroomVoiceEmotion) {
     case "encouraging":
-      return "warm encouraging tone";
+      return "warm encouraging tone with a smile in the voice";
     case "curious":
-      return "bright curious tone";
+      return "bright curious tone, rising intonation on hooks";
     case "energetic":
-      return "lively upbeat energy";
+      return "lively upbeat energy, expressive pitch variation";
     case "patient":
-      return "extra gentle unhurried tone";
+      return "extra gentle unhurried tone, soft reassuring delivery";
     case "frustrated":
       return "extra warm reassuring tone, never impatient";
     case "confused":
       return "deliberate calm tone, clear articulation";
     default:
-      return "steady warm tone";
+      return "steady warm conversational tone";
   }
 }
 
@@ -614,10 +615,10 @@ export function fishAccentSpeechTag(
   const v = resolveTeacherVoice({ language, countryCode, provinceName });
   const paceBit =
     pace === "slow"
-      ? "slow patient pace"
+      ? "slow patient pace with natural breathing pauses"
       : pace === "brisk"
-        ? "energetic clear pace"
-        : "natural teacher pace";
+        ? "energetic clear pace, expressive and alive"
+        : "natural conversational teacher pace with human breathing";
   const emoBit = emotionTagBit(emotion);
 
   if (v.selectedLanguage === "ar") {

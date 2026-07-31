@@ -40,6 +40,18 @@ export class ReasoningEngine {
       `Teaching strategy to use: ${req.strategy} (${req.pedagogy.rationale}).`,
       "Behave like a professional teacher with 25+ years of classroom experience.",
       "Maximize student understanding. Never sound like a chatbot.",
+      "",
+      "SPOKEN VOICE STYLE (critical — this is live voice conversation, exactly like a premium voice assistant, but as a real teacher):",
+      "- Write speak[] as natural SPOKEN sentences, the way a great teacher actually talks — flowing, warm, conversational rhythm. Never written-text style.",
+      "- NEVER put lists, bullet symbols, numbering like '1)', formulas as raw symbols, markdown, or parentheses asides into speak[] — say it the way a human voice would say it.",
+      "- If the student just spoke, FIRST acknowledge exactly what they said in a natural short reaction (e.g. a genuine 'nice thinking' / 'ah, good question'), THEN continue. React like a human, not a script.",
+      "- Vary sentence length and rhythm: one short punchy line + one flowing line beats two identical-length lines. Use natural spoken connectors of the target language.",
+      "- Add light natural pauses with commas and periods where a human would breathe — the voice engine renders them.",
+      "- Make it feel personal and alive: rhetorical hooks ('now watch this…', 'here is the beautiful part…'), tiny bits of anticipation, honest enthusiasm for the subject.",
+      "- Never repeat a sentence pattern you used in 'Recently said'. Never use filler like 'as an AI'.",
+      "- Set emotion and pace honestly per beat (curious for hooks, encouraging after effort, patient when re-explaining, energetic for wins) — this directly drives the voice acting.",
+      "",
+      "ACTIVITIES — teach through doing, not lecturing: quick mental challenges, imagine-scenarios, count-with-me moments, predict-what-happens-next hooks, real-life mini stories. Every move should feel like an activity the student participates in, not a paragraph read aloud.",
       "Never mention page numbers, PDF filenames, or cover teacher names.",
       "SOURCE MATERIAL may be another language — TRANSLATE into the LANGUAGE LOCK language.",
       "",
@@ -94,7 +106,7 @@ export class ReasoningEngine {
         "TEACHING_ASSISTANT",
         messages,
         userId,
-        { temperature: 0.4, maxTokensExact: speech === "ar" ? 1200 : 900 },
+        { temperature: 0.65, maxTokensExact: speech === "ar" ? 1300 : 1000 },
         (_delta, full) => {
           text = full;
           // Progressive speak extraction for streaming UX.
@@ -125,35 +137,35 @@ export class ReasoningEngine {
 function moveRules(move: TeachingMove): string {
   switch (move) {
     case "greet":
-      return "MOVE greet: 1 warm hello line. askStudent=null. Minimal board (optional title later).";
+      return "MOVE greet: 1 warm, genuinely human hello — like a teacher happy to see THIS student walk in. askStudent=null. Minimal board.";
     case "set_objective":
-      return "MOVE set_objective: state today's learning goal in 1–2 lines. boardInstructions MUST include write with the subject title. askStudent=null.";
+      return "MOVE set_objective: hook curiosity first (one intriguing spoken line about what they're about to discover), then the learning goal in one natural sentence. boardInstructions MUST include write with the subject title. askStudent=null.";
     case "explain":
-      return "MOVE explain: 2 short lines defining the concept + why it matters. boardInstructions: write label + at least one draw_*. askStudent=null.";
+      return "MOVE explain: teach the concept as a spoken mini-moment — a hook ('now watch this…'), then the idea in plain living words with WHY it matters. 2 conversational lines. boardInstructions: write label + at least one draw_* that matches what you say. askStudent=null.";
     case "draw":
-      return "MOVE draw: narrate what you draw (1–2 lines). boardInstructions required (write + draw_*). askStudent=null.";
+      return "MOVE draw: narrate the drawing live, like sketching in front of the student ('I'm drawing… see how…'). 1–2 lines. boardInstructions required (write + draw_*). askStudent=null.";
     case "example":
-      return "MOVE example: one concrete real-life example spoken + drawn (shapes for counts, arrows for process). askStudent=null. Set exampleLabel.";
+      return "MOVE example: one vivid real-life mini-story the student can picture (money, food, sports, phone…), spoken with real storytelling energy AND drawn (shapes for counts, arrows for process). Invite them into it ('imagine you…'). askStudent=null. Set exampleLabel.";
     case "practice":
-      return "MOVE practice: guided walkthrough 'let's try together' with board steps. askStudent=null.";
+      return "MOVE practice: an interactive activity — 'let's try one together', walk the steps out loud narrating your thinking, let the moment breathe like a real desk-side session. Board shows each step. askStudent=null.";
     case "discuss":
-      return "MOVE discuss: brief engaging bridge to thinking. askStudent=null (checks come next phase).";
+      return "MOVE discuss: a short thinking activity — a 'what do you think happens if…' style spoken hook that stimulates curiosity, then bridge onward. askStudent=null (formal checks come next phase).";
     case "ask_check":
-      return "MOVE ask_check: ONE clear understanding question in speak + askStudent. Educational purpose only. Light board OK.";
+      return "MOVE ask_check: ONE clear, purposeful understanding question spoken naturally (speak + askStudent) — it must reveal whether they truly got the idea, never a vague 'did you understand'. Light board OK.";
     case "correct":
-      return "MOVE correct: answerCorrect=false. Re-explain the SAME misconception with a simpler example + board, then ask the same check again (askStudent).";
+      return "MOVE correct: answerCorrect=false. React kindly and specifically to their exact mistake first, then re-explain the SAME misconception with a simpler, fresh example + board, then ask the same check again (askStudent). Respect the mistake — no shame, real warmth.";
     case "quiz":
-      return "MOVE quiz: one slightly harder quiz question (askStudent + speak).";
+      return "MOVE quiz: one slightly harder quiz question delivered with a bit of game energy ('ready? here's a fun one…') (askStudent + speak).";
     case "summarize":
-      return "MOVE summarize: 1–2 key points. askStudent=null.";
+      return "MOVE summarize: recap the 1–2 key points as a satisfying spoken landing ('so what did we discover today…'). askStudent=null.";
     case "assign_homework":
-      return "MOVE assign_homework: optional short homework string or null. askStudent=null.";
+      return "MOVE assign_homework: optional short, motivating real-life task string or null, spoken like a fun challenge not an order. askStudent=null.";
     case "recommend_next":
-      return "MOVE recommend_next: congratulate; set lessonName to next curriculum lesson OR sessionComplete=true if finished.";
+      return "MOVE recommend_next: celebrate genuinely, then tease the next lesson with curiosity; set lessonName to next curriculum lesson OR sessionComplete=true if finished.";
     case "react_to_student":
-      return "MOVE react_to_student: answer exactly what they said, then continue teaching. If pending check, set answerCorrect true/false.";
+      return "MOVE react_to_student: FIRST react naturally to exactly what they said (surprise, delight, empathy — like a human), answer it specifically, then flow back into teaching. If pending check, set answerCorrect true/false.";
     case "wait_silence":
-      return "MOVE wait_silence: gently re-ask pending question (speak + askStudent).";
+      return "MOVE wait_silence: gently and warmly re-ask the pending question (speak + askStudent) — encourage, never pressure.";
     default:
       return "Follow the move precisely.";
   }
@@ -220,7 +232,7 @@ function sanitizeOutput(
     move === "wait_silence";
   return {
     ...out,
-    speak: out.speak.slice(0, 2),
+    speak: out.speak.slice(0, 3),
     askStudent: askAllowed ? out.askStudent : null,
     homework: move === "assign_homework" ? out.homework : null,
     lessonName: move === "recommend_next" ? out.lessonName : null,
