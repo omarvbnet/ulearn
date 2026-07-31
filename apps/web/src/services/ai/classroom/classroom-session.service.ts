@@ -34,6 +34,97 @@ function asStringArray(v: unknown): string[] {
   return v.map((x) => String(x || "").trim()).filter(Boolean);
 }
 
+function isPageLessonLabel(title: string | null | undefined): boolean {
+  return /^pages?\s*\d+/i.test(String(title || "").trim());
+}
+
+/** Strip page-number narration so the teacher never "views pages". */
+function stripPageNarration(speak: string[]): string[] {
+  return speak
+    .map((line) =>
+      String(line || "")
+        .replace(/\bpages?\s+\d+\s*[–\-]\s*\d+\b/gi, "")
+        .replace(/\b(view|open|see|look at|go to|turn to)\s+(the\s+)?pages?\s*\d*\b/gi, "")
+        .replace(/\b(page|صفحة|sayfa)\s*\d+\b/gi, "")
+        .replace(/\s{2,}/g, " ")
+        .replace(/^[,.\s:;\-–—]+|[,.\s:;\-–—]+$/g, "")
+        .trim()
+    )
+    .filter(Boolean);
+}
+
+function cleanMaterialExcerpt(text: string): string {
+  return String(text || "")
+    .replace(/\s*·\s*Pages?\s+\d+\s*[–\-]\s*\d+/gi, "")
+    .replace(/\bPages?\s+\d+\s*[–\-]\s*\d+\b/gi, "")
+    .replace(/\b(page|صفحة|sayfa)\s*\d+\b/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function topicFromExcerpt(excerpt: string, fallback: string): string {
+  const lines = excerpt
+    .split(/\n+/)
+    .map((l) => l.replace(/^\[[^\]]+\]\s*/, "").trim())
+    .filter((l) => l.length >= 6 && !/^---/.test(l));
+  for (const line of lines.slice(0, 8)) {
+    const words = line.split(/\s+/);
+    if (words.length >= 2 && words.length <= 12 && line.length <= 60) {
+      return line.slice(0, 48);
+    }
+  }
+  const words = excerpt
+    .replace(/\[[^\]]+\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 2)
+    .slice(0, 6);
+  return words.length >= 2 ? words.join(" ").slice(0, 48) : fallback;
+}
+
+async function loadLessonMaterialExcerpt(input: {
+  userId: string;
+  documentIds: string[];
+  lessonName?: string | null;
+}): Promise<string> {
+  const { AiExamService } = await import("../ai-exam.service");
+  const { ExamGeneratorService } = await import("../exam-generator.service");
+  let chapter: {
+    title: string;
+    chunkFrom: number;
+    chunkTo: number;
+    pageStart: number | null;
+    pageEnd: number | null;
+  } | null = null;
+  const lesson = (input.lessonName || "").trim();
+  if (lesson) {
+    for (const docId of input.documentIds) {
+      const chapters = await AiExamService.listDocumentChapters(
+        input.userId,
+        docId
+      );
+      const hit = chapters.find((c) => c.title === lesson);
+      if (hit) {
+        chapter = hit;
+        break;
+      }
+    }
+  }
+  const material = await ExamGeneratorService.loadMaterialForDocuments({
+    userId: input.userId,
+    documentIds: input.documentIds,
+    chapterHeading: chapter?.title || lesson || "__all__",
+    chunkFrom: chapter?.chunkFrom ?? null,
+    chunkTo: chapter?.chunkTo ?? null,
+    pageFrom: chapter?.pageStart ?? null,
+    pageTo: chapter?.pageEnd ?? null,
+    ordered: true,
+    question: lesson || "teach this lesson from the material",
+  });
+  return cleanMaterialExcerpt((material?.text?.trim() || "").slice(0, 8000));
+}
+
 function extractJsonObject(raw: string): string | null {
   const t = raw.trim();
   if (t.startsWith("{") && t.endsWith("}")) return t;
@@ -189,7 +280,7 @@ function parseBeat(raw: string): ClassroomBeat | null {
 }
 
 /** Minimum consecutive teaching beats on an idea before a check is allowed. */
-const MIN_EXPLAIN_BEATS = 2;
+const MIN_EXPLAIN_BEATS = 3;
 
 /** Ordered lesson-flow state machine — see ClassroomLessonStage. One full
  *  pass teaches exactly one curriculum lesson; recommend_next loops back to
@@ -292,7 +383,22 @@ function finalizeBeat(
     mode
   );
   speak = stripPrematureUnderstandingCheck(speak, stage);
-  let board = [...(beat.board || [])];
+  speak = stripPageNarration(speak);
+  let board = [...(beat.board || [])].map((b) => {
+    const text = b.parameters?.text;
+    if (typeof text === "string" && isPageLessonLabel(text)) {
+      return {
+        ...b,
+        parameters: {
+          ...b.parameters,
+          text:
+            sanitizeClassroomPlainText(state.currentTopic, 28) ||
+            topicFromExcerpt(state.materialExcerpt || "", "Key idea"),
+        },
+      };
+    }
+    return b;
+  });
 
   const pickVariant = <T,>(arr: T[]): T =>
     arr[Math.floor(Date.now() / 137) % arr.length]!;
@@ -428,9 +534,17 @@ function finalizeBeat(
       stage === "guided_practice" ||
       stage === "objective")
   ) {
-    const title =
-      sanitizeClassroomPlainText(beat.lessonName || state.currentLessonName, 28) ||
+    const rawTitle =
       sanitizeClassroomPlainText(state.currentTopic, 28) ||
+      sanitizeClassroomPlainText(beat.lessonName || state.currentLessonName, 28) ||
+      "";
+    const title =
+      (rawTitle && !isPageLessonLabel(rawTitle)
+        ? rawTitle
+        : topicFromExcerpt(
+            state.materialExcerpt || "",
+            ar ? "درس اليوم" : tr ? "Bugünün dersi" : "Today's lesson"
+          )) ||
       (ar ? "درس اليوم" : tr ? "Bugünün dersi" : "Today's lesson");
     board = [
       {
@@ -452,8 +566,14 @@ function finalizeBeat(
   // Curriculum can only advance to a genuinely new lesson from the
   // recommend_next stage (or the very first MODE OPEN beat of the whole
   // session) — this is what stops the AI from randomly jumping topics.
-  const lessonName =
+  let lessonName =
     mode === "open" || stage === "recommend_next" ? beat.lessonName || null : null;
+  if (lessonName && isPageLessonLabel(lessonName)) {
+    lessonName =
+      sanitizeClassroomPlainText(state.currentTopic, 48) ||
+      topicFromExcerpt(state.materialExcerpt || "", lessonName);
+    if (isPageLessonLabel(lessonName)) lessonName = null;
+  }
   return {
     ...beat,
     speak: speak.slice(0, 3),
@@ -827,11 +947,13 @@ function advanceLessonStage(
   let homeworkGiven = Boolean(state.homeworkGiven);
   const artifacts = updateLessonStateMemory(state, beat, stage);
 
+  // A real example needs spoken content AND a matching drawing — a lone
+  // decorative shape must not end the explain stage early.
   if (
     stage === "explain" &&
-    (beat.teachingStrategy === "example" ||
-      beat.board.some((b) => /^draw_/.test(String(b.action || ""))) ||
-      Boolean(artifacts.currentExample))
+    Boolean(artifacts.currentExample || beat.teachingStrategy === "example") &&
+    beat.board.some((b) => /^draw_/.test(String(b.action || ""))) &&
+    (beat.speak || []).some((s) => String(s || "").trim().length > 12)
   ) {
     hasGivenExample = true;
   }
@@ -1279,34 +1401,80 @@ export class ClassroomSessionService {
     documentIds = allowed;
     perf.mark("assertDocuments");
 
-    // These three only depend on `allowed`, not on each other — loading the
-    // full material text (usually the slowest of the three) no longer has
-    // to wait for the doc-name lookup and chapter listing to finish first.
-    const [docs, chaptersByDoc, material] = await Promise.all([
+    // Doc names + chapter outline first so we can load the CURRENT lesson's
+    // subject text (not a shuffled whole-PDF sample of page windows).
+    const [docs, chaptersByDoc] = await Promise.all([
       prisma.kbDocument.findMany({
         where: { id: { in: allowed }, deletedAt: null },
         select: { id: true, fileName: true },
       }),
-      Promise.all(allowed.map((docId) => AiExamService.listDocumentChapters(input.userId, docId))),
-      ExamGeneratorService.loadMaterialForDocuments({
-        userId: input.userId,
-        documentIds: allowed,
-        chapterHeading: "__all__",
-        question: input.question || undefined,
-      }),
+      Promise.all(
+        allowed.map((docId) =>
+          AiExamService.listDocumentChapters(input.userId, docId)
+        )
+      ),
     ]);
-    perf.mark("loadMaterial");
     materialNames = docs.map((d) => d.fileName).filter(Boolean);
+    const chapterMeta: Array<{
+      title: string;
+      chunkFrom: number;
+      chunkTo: number;
+      pageStart: number | null;
+      pageEnd: number | null;
+    }> = [];
     for (const chapters of chaptersByDoc) {
       for (const c of chapters) {
-        if (!c.title || c.title === "__all__") continue;
-        if (!curriculumOutline.includes(c.title)) curriculumOutline.push(c.title);
+        if (!c.title || c.title === "__all__" || isPageLessonLabel(c.title))
+          continue;
+        if (!curriculumOutline.includes(c.title)) {
+          curriculumOutline.push(c.title);
+          chapterMeta.push(c);
+        }
       }
     }
-    materialExcerpt = (material?.text?.trim() || "").slice(0, 6500);
+    // Legacy PDFs that somehow still produced page titles — humanize them.
+    if (!curriculumOutline.length) {
+      for (const chapters of chaptersByDoc) {
+        for (const c of chapters) {
+          if (!c.title || c.title === "__all__") continue;
+          if (!curriculumOutline.includes(c.title)) {
+            curriculumOutline.push(c.title);
+            chapterMeta.push(c);
+          }
+        }
+      }
+    }
+
+    let openingLesson = curriculumOutline[0] || null;
+    const openingChapter =
+      chapterMeta.find((c) => c.title === openingLesson) || chapterMeta[0] || null;
+    const material = await ExamGeneratorService.loadMaterialForDocuments({
+      userId: input.userId,
+      documentIds: allowed,
+      chapterHeading: openingChapter?.title || openingLesson || "__all__",
+      chunkFrom: openingChapter?.chunkFrom ?? null,
+      chunkTo: openingChapter?.chunkTo ?? null,
+      pageFrom: openingChapter?.pageStart ?? null,
+      pageTo: openingChapter?.pageEnd ?? null,
+      ordered: true,
+      question: input.question || openingLesson || "teach the subject",
+    });
+    perf.mark("loadMaterial");
+    materialExcerpt = cleanMaterialExcerpt(
+      (material?.text?.trim() || "").slice(0, 8000)
+    );
+    if (openingLesson && isPageLessonLabel(openingLesson)) {
+      openingLesson = topicFromExcerpt(materialExcerpt, openingLesson);
+      if (curriculumOutline[0] && isPageLessonLabel(curriculumOutline[0])) {
+        curriculumOutline[0] = openingLesson;
+      }
+    }
 
     const state = emptyClassroomState(materialExcerpt);
-    if (curriculumOutline[0]) state.currentLessonName = curriculumOutline[0];
+    if (openingLesson) state.currentLessonName = openingLesson;
+    if (!state.currentTopic && openingLesson && !isPageLessonLabel(openingLesson)) {
+      state.currentTopic = openingLesson.slice(0, 40);
+    }
 
     const materialsKey = StudentMemoryService.materialsKey(documentIds);
     const restart = wantsRestartFromFirstLesson(input.question);
@@ -1340,6 +1508,25 @@ export class ClassroomSessionService {
           state.currentLessonName = candidate;
           resumeLessonName = candidate;
         }
+      }
+    }
+    // If we resumed a later lesson, reload that lesson's subject excerpt
+    // so the teacher doesn't keep teaching from lesson 1's pages.
+    if (
+      resumeLessonName &&
+      resumeLessonName !== openingLesson
+    ) {
+      try {
+        state.materialExcerpt = await loadLessonMaterialExcerpt({
+          userId: input.userId,
+          documentIds: allowed,
+          lessonName: resumeLessonName,
+        });
+        if (!isPageLessonLabel(resumeLessonName)) {
+          state.currentTopic = resumeLessonName.slice(0, 40);
+        }
+      } catch {
+        /* keep opening excerpt */
       }
     }
     perf.mark("longTermMemory");
@@ -1542,6 +1729,25 @@ export class ClassroomSessionService {
     perf.mark("llm");
 
     const nextState = mergeState(state, beat, undefined, "next");
+    if (
+      nextState.currentLessonName &&
+      nextState.currentLessonName !== state.currentLessonName &&
+      Array.isArray(row.documentIds) &&
+      row.documentIds.length
+    ) {
+      try {
+        nextState.materialExcerpt = await loadLessonMaterialExcerpt({
+          userId: input.userId,
+          documentIds: row.documentIds,
+          lessonName: nextState.currentLessonName,
+        });
+        if (!isPageLessonLabel(nextState.currentLessonName)) {
+          nextState.currentTopic = nextState.currentLessonName.slice(0, 40);
+        }
+      } catch {
+        /* keep previous excerpt */
+      }
+    }
     applyLongTermMemory(input.userId, materialsKey, state, beat, nextState);
     const beatIndex = row.beatIndex + 1;
     const ended = Boolean(beat.sessionComplete) || beatIndex > 150;
@@ -1685,6 +1891,25 @@ export class ClassroomSessionService {
       silence ? undefined : transcript,
       silence ? "silence" : "react"
     );
+    if (
+      nextState.currentLessonName &&
+      nextState.currentLessonName !== state.currentLessonName &&
+      Array.isArray(row.documentIds) &&
+      row.documentIds.length
+    ) {
+      try {
+        nextState.materialExcerpt = await loadLessonMaterialExcerpt({
+          userId: input.userId,
+          documentIds: row.documentIds,
+          lessonName: nextState.currentLessonName,
+        });
+        if (!isPageLessonLabel(nextState.currentLessonName)) {
+          nextState.currentTopic = nextState.currentLessonName.slice(0, 40);
+        }
+      } catch {
+        /* keep previous excerpt */
+      }
+    }
     const materialsKey = StudentMemoryService.materialsKey(row.documentIds);
     applyLongTermMemory(input.userId, materialsKey, state, beat, nextState);
     // Silence only re-arms a pending check inside check/quiz stages. Outside

@@ -27,6 +27,46 @@ export function stripCorrectKeys(questions: AiExamQuestion[]) {
   }));
 }
 
+/** Pull a short subject title from chunk text — never "Pages 1–3". */
+export function topicTitleFromChunkText(
+  texts: string[],
+  fallbackIndex = 1
+): string {
+  for (const raw of texts) {
+    const lines = String(raw || "")
+      .split(/\n+/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    for (const line of lines.slice(0, 6)) {
+      const cleaned = line
+        .replace(/^#+\s*/, "")
+        .replace(/^\d+(\.\d+)*[.)]?\s+/, "")
+        .replace(/^pages?\s+\d+.*/i, "")
+        .replace(/\bpage\s*\d+\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (cleaned.length < 6 || cleaned.length > 72) continue;
+      if (/^https?:/i.test(cleaned) || /^\d+$/.test(cleaned)) continue;
+      if (/^(contents|index|references|bibliography|مقدمة|فهرس)/i.test(cleaned))
+        continue;
+      const words = cleaned.split(/\s+/);
+      if (words.length >= 2 && words.length <= 12) return cleaned.slice(0, 60);
+    }
+  }
+  const blob = texts
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .replace(/\bpage\s*\d+\b/gi, "")
+    .trim();
+  const words = blob
+    .split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}-]/gu, ""))
+    .filter((w) => w.length > 2)
+    .slice(0, 6);
+  if (words.length >= 2) return words.join(" ").slice(0, 48);
+  return `Lesson ${fallbackIndex}`;
+}
+
 export class AiExamService {
   static async createAttempt(input: {
     userId: string;
@@ -247,6 +287,7 @@ export class AiExamService {
         chunkFrom: number;
         chunkTo: number;
         pageStart: number | null;
+        pageEnd: number | null;
       }>;
     }
 
@@ -267,6 +308,7 @@ export class AiExamService {
       chunkFrom: number;
       chunkTo: number;
       pageStart: number | null;
+      pageEnd: number | null;
     };
 
     const headings: Array<{
@@ -310,6 +352,7 @@ export class AiExamService {
           chunkFrom: 0,
           chunkTo: Math.max(0, chunks.at(-1)?.chunkIndex ?? 0),
           pageStart: chunks[0]?.pageNumber ?? null,
+          pageEnd: chunks.at(-1)?.pageNumber ?? null,
         },
       ];
     }
@@ -319,44 +362,113 @@ export class AiExamService {
       for (let i = 0; i < headings.length; i++) {
         const h = headings[i]!;
         const next = headings[i + 1];
+        const chunkTo = next
+          ? next.chunkIndex - 1
+          : (chunks.at(-1)?.chunkIndex ?? h.chunkIndex);
+        const section = chunks.filter(
+          (c) => c.chunkIndex >= h.chunkIndex && c.chunkIndex <= chunkTo
+        );
+        const pages = section
+          .map((c) => c.pageNumber)
+          .filter((p): p is number => typeof p === "number");
         out.push({
           id: h.title,
           title: h.title,
           chunkFrom: h.chunkIndex,
-          chunkTo: next
-            ? next.chunkIndex - 1
-            : (chunks.at(-1)?.chunkIndex ?? h.chunkIndex),
-          pageStart: h.page,
+          chunkTo,
+          pageStart: h.page ?? pages[0] ?? null,
+          pageEnd: pages.at(-1) ?? h.page ?? null,
         });
       }
       return out.slice(0, 40);
     }
 
+    // No clear headings — split the document into lesson windows, but name
+    // each window from the SUBJECT TEXT inside it (never "Pages 1–3").
     const pageCount = doc.pageCount || 0;
-    if (pageCount >= 4) {
+    const numbered = chunks.filter((c) => c.pageNumber != null);
+    if (pageCount >= 4 && numbered.length >= 2) {
       const window = Math.max(3, Math.ceil(pageCount / 6));
       const out: Outline[] = [];
+      let lessonNo = 1;
       for (let start = 1; start <= pageCount; start += window) {
         const end = Math.min(pageCount, start + window - 1);
-        const title = `Pages ${start}–${end}`;
+        const inRange = chunks.filter(
+          (c) =>
+            c.pageNumber != null &&
+            c.pageNumber >= start &&
+            c.pageNumber <= end
+        );
+        const pool = inRange.length ? inRange : chunks;
+        let title = topicTitleFromChunkText(
+          pool.map((c) => c.text || ""),
+          lessonNo
+        );
+        // Keep titles unique across the outline.
+        const base = title;
+        let n = 2;
+        while (out.some((o) => o.title.toLowerCase() === title.toLowerCase())) {
+          title = `${base} (${n})`;
+          n += 1;
+        }
         out.push({
           id: title,
           title,
-          chunkFrom: 0,
-          chunkTo: chunks.at(-1)?.chunkIndex ?? 0,
+          chunkFrom: pool[0]?.chunkIndex ?? 0,
+          chunkTo: pool.at(-1)?.chunkIndex ?? chunks.at(-1)?.chunkIndex ?? 0,
           pageStart: start,
+          pageEnd: end,
         });
+        lessonNo += 1;
       }
       return out.slice(0, 12);
     }
 
+    if (chunks.length >= 8) {
+      const window = Math.max(4, Math.ceil(chunks.length / 6));
+      const out: Outline[] = [];
+      let lessonNo = 1;
+      for (let i = 0; i < chunks.length; i += window) {
+        const slice = chunks.slice(i, i + window);
+        let title = topicTitleFromChunkText(
+          slice.map((c) => c.text || ""),
+          lessonNo
+        );
+        const base = title;
+        let n = 2;
+        while (out.some((o) => o.title.toLowerCase() === title.toLowerCase())) {
+          title = `${base} (${n})`;
+          n += 1;
+        }
+        const pages = slice
+          .map((c) => c.pageNumber)
+          .filter((p): p is number => typeof p === "number");
+        out.push({
+          id: title,
+          title,
+          chunkFrom: slice[0]!.chunkIndex,
+          chunkTo: slice.at(-1)!.chunkIndex,
+          pageStart: pages[0] ?? null,
+          pageEnd: pages.at(-1) ?? null,
+        });
+        lessonNo += 1;
+      }
+      return out.slice(0, 12);
+    }
+
+    const topic =
+      topicTitleFromChunkText(
+        chunks.slice(0, 6).map((c) => c.text || ""),
+        1
+      ) || doc.fileName.replace(/\.[^.]+$/, "");
     return [
       {
-        id: "__all__",
-        title: doc.fileName,
+        id: topic,
+        title: topic,
         chunkFrom: 0,
         chunkTo: chunks.at(-1)?.chunkIndex ?? 0,
         pageStart: chunks[0]?.pageNumber ?? null,
+        pageEnd: chunks.at(-1)?.pageNumber ?? null,
       },
     ];
   }

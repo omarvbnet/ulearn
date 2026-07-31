@@ -196,7 +196,7 @@ function applyActions(
         48,
         Math.min(64, num(p.size, text.length < 12 ? 60 : 52))
       );
-      const writeMs = Math.max(900, Math.min(4200, text.length * 70));
+      const writeMs = Math.max(1100, Math.min(4800, text.length * 85));
       acc.push({
         kind: "text",
         id,
@@ -211,7 +211,8 @@ function applyActions(
         seed,
       });
       yCursor += Math.max(120, size + 68);
-      penAt += writeMs + 160;
+      // Extra pause between strokes so the board plays like a short video.
+      penAt += writeMs + 280;
       return;
     }
     if (
@@ -233,7 +234,7 @@ function applyActions(
         writeMs: 700,
         seed,
       });
-      penAt += 740;
+      penAt += 900;
       return;
     }
     if (action === "circle_highlight" || action === "circle_text") {
@@ -260,7 +261,7 @@ function applyActions(
           writeMs: 700,
           seed,
         });
-        penAt += 740;
+        penAt += 900;
       }
       return;
     }
@@ -302,10 +303,10 @@ function applyActions(
         color: resolveColor(p.color, "#059669"),
         width: 3.2,
         bornAt: penAt,
-        writeMs: 1000,
+        writeMs: 1200,
         seed,
       });
-      penAt += 1050;
+      penAt += 1200;
       diagramY += 140;
       shapeSlot = 0;
     } else if (action === "draw_circle" || action === "circle") {
@@ -328,10 +329,10 @@ function applyActions(
         color: resolveColor(p.color, "#dc2626"),
         width: 3,
         bornAt: penAt,
-        writeMs: 900,
+        writeMs: 1100,
         seed,
       });
-      penAt += 750;
+      penAt += 950;
       shapeSlot += 1;
     } else if (action === "draw_rectangle" || action === "draw_rect") {
       const w = 130;
@@ -354,10 +355,10 @@ function applyActions(
         color: resolveColor(p.color, "#92400e"),
         width: 3,
         bornAt: penAt,
-        writeMs: 850,
+        writeMs: 1050,
         seed,
       });
-      penAt += 750;
+      penAt += 950;
       shapeSlot += 1;
     }
   });

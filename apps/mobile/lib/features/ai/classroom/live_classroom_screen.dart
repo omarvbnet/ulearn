@@ -477,7 +477,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         shapeSlot,
       );
       if (_items.length > before) {
-        penAt += _items.last.writeMs + 160;
+        penAt += _items.last.writeMs + 280;
       }
     }
     if (shapeSlot > 0) _diagramCursorY += 60;
@@ -789,7 +789,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
           shapeSlot,
         );
         if (_items.length > before) {
-          penAt += _items.last.writeMs + 160;
+          penAt += _items.last.writeMs + 280;
         }
       }
       if (shapeSlot > 0) _diagramCursorY += 60;
@@ -1781,7 +1781,7 @@ int _applyCue(
         color: _color(p['color'], const Color(0xFF1E3A8A)),
         size: size.toDouble(),
         bornAt: bornAt,
-        writeMs: math.max(900, math.min(4200, text.length * 70)).toDouble(),
+        writeMs: math.max(1100, math.min(4800, text.length * 85)).toDouble(),
         alignRight: rtl,
         seed: seed,
       ),

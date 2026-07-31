@@ -38,20 +38,23 @@ export function normalizeBoardActions(
 
   const ensureRoom = (need = 130) => {
     if (y + need <= 980) return;
-    out.push({ time: out.length * 200, action: "clear_board", parameters: {} });
+    out.push({ time: out.length * 480, action: "clear_board", parameters: {} });
     y = 160;
     diagramY = 200;
     cleared = true;
   };
 
-  for (const raw of actions.slice(0, 4)) {
+  // Up to 6 sequenced strokes so a teaching beat can feel like a short
+  // chalk video (label → draw → emphasize) instead of a single stamp.
+  for (const raw of actions.slice(0, 6)) {
     const action = String(raw.action || "")
       .toLowerCase()
       .replace(/\s+/g, "_");
     const p = { ...(raw.parameters || {}) };
 
+    const beatMs = 480;
     if (action === "clear_board" || action === "open_new_board") {
-      out.push({ time: out.length * 200, action: "clear_board", parameters: {} });
+      out.push({ time: out.length * beatMs, action: "clear_board", parameters: {} });
       y = 160;
       diagramY = 200;
       cleared = true;
@@ -69,7 +72,7 @@ export function normalizeBoardActions(
       // Large classroom chalk size — readable on phone and desktop.
       const size = Math.max(48, Math.min(64, num(p.size, text.length < 12 ? 60 : 52)));
       out.push({
-        time: out.length * 280,
+        time: out.length * 480,
         action: "write_text",
         parameters: {
           text,
@@ -90,7 +93,7 @@ export function normalizeBoardActions(
       // What matters here is that the action survives normalization instead
       // of being silently dropped like an unrecognized action would be.
       out.push({
-        time: out.length * 280,
+        time: out.length * 480,
         action: "circle_highlight",
         parameters: { color: String(p.color || "red") },
       });
@@ -99,7 +102,7 @@ export function normalizeBoardActions(
 
     if (action === "point_at" || action === "point") {
       out.push({
-        time: out.length * 280,
+        time: out.length * 480,
         action: "point_at",
         parameters: { color: String(p.color || "blue") },
       });
@@ -110,7 +113,7 @@ export function normalizeBoardActions(
       // Convert heavy highlights into a thin underline under the last text line.
       const underlineY = Math.max(150, y - 72);
       out.push({
-        time: out.length * 280,
+        time: out.length * 480,
         action: "underline",
         parameters: {
           x1: input.rtl ? textX : textX,
@@ -128,7 +131,7 @@ export function normalizeBoardActions(
       ensureRoom(20);
       const ly = Math.min(980, diagramY);
       out.push({
-        time: out.length * 280,
+        time: out.length * 480,
         action: "draw_line",
         parameters: {
           x1: diagramX - 80,
@@ -146,7 +149,7 @@ export function normalizeBoardActions(
     if (action === "draw_arrow") {
       const ay = Math.min(900, diagramY + 40);
       out.push({
-        time: out.length * 280,
+        time: out.length * 480,
         action: "draw_arrow",
         parameters: {
           x1: diagramX - 40,
@@ -165,7 +168,7 @@ export function normalizeBoardActions(
       const cy = Math.min(860, diagramY + 60);
       const r = Math.max(36, Math.min(70, num(p.r, 55)));
       out.push({
-        time: out.length * 280,
+        time: out.length * 480,
         action: "draw_circle",
         parameters: {
           cx: diagramX + 40,
@@ -182,7 +185,7 @@ export function normalizeBoardActions(
     if (action === "draw_rectangle" || action === "draw_rect") {
       const ry = Math.min(860, diagramY);
       out.push({
-        time: out.length * 280,
+        time: out.length * 480,
         action: "draw_rectangle",
         parameters: {
           x: diagramX - 40,
