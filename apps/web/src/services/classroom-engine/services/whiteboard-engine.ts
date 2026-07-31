@@ -1,5 +1,36 @@
 import { normalizeBoardActions } from "@/services/ai/classroom/board-layout";
+import { isWeakLessonTitle } from "@/services/ai/material-topic";
 import type { BoardInstruction, ClassroomBoardAction, SpeechLang } from "../types";
+
+const SUPERSCRIPTS: Record<string, string> = {
+  "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+  "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "-": "⁻", "+": "⁺",
+};
+
+/** "2×10^-9" → "2×10⁻⁹" so formulas read like a real board, not source code. */
+function prettifyMath(text: string): string {
+  return text.replace(/\^\s*([+-]?\d{1,3})/g, (_, exp: string) =>
+    exp.split("").map((ch) => SUPERSCRIPTS[ch] || ch).join("")
+  );
+}
+
+/** Wrap at word boundaries into up to `maxLines` board lines — never "…". */
+function wrapBoardText(text: string, maxChars = 32, maxLines = 2): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let line = "";
+  for (const w of words) {
+    if (!line) line = w;
+    else if ((line + " " + w).length <= maxChars) line += " " + w;
+    else {
+      lines.push(line);
+      line = w;
+      if (lines.length === maxLines) break;
+    }
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  return lines.length ? lines : [text.slice(0, maxChars)];
+}
 
 /**
  * Whiteboard Engine — DeepSeek never draws.
@@ -22,14 +53,17 @@ export class WhiteboardEngine {
           raw.push({ time: t, action: "clear_board", parameters: {} });
           break;
         case "write": {
-          const text = String(ins.text || "").trim().slice(0, 28);
+          const text = prettifyMath(String(ins.text || "").trim());
           if (!text) break;
-          labels.push(text);
-          raw.push({
-            time: t,
-            action: "write_text",
-            parameters: { text, color, size: 56 },
-          });
+          labels.push(text.slice(0, 48));
+          for (const line of wrapBoardText(text)) {
+            raw.push({
+              time: t,
+              action: "write_text",
+              parameters: { text: line, color, size: 56 },
+            });
+            t += 1;
+          }
           break;
         }
         case "draw_circle": {
@@ -120,23 +154,19 @@ export class WhiteboardEngine {
       /write_text|draw_/i.test(String(a.action || ""))
     );
     if (hasInk) return actions;
-    const label =
-      topic.slice(0, 28) ||
-      (speechLanguage === "ar"
+    const neutral =
+      speechLanguage === "ar"
         ? "فكرة الدرس"
         : speechLanguage === "tr"
           ? "Ders fikri"
-          : "Key idea");
+          : "Key idea";
+    // Never ink a cover-page teacher name or filename as the "topic".
+    const safeTopic = topic && !isWeakLessonTitle(topic) ? topic : neutral;
     return [
       {
         time: 0,
         action: "write_text",
-        parameters: { text: label, color: "blue", size: 58 },
-      },
-      {
-        time: 1,
-        action: "draw_circle",
-        parameters: { color: "red", r: 48 },
+        parameters: { text: safeTopic.slice(0, 32), color: "blue", size: 58 },
       },
       ...actions,
     ];

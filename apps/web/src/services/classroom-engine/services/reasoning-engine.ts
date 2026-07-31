@@ -1,4 +1,5 @@
 import { AiProviderService } from "@/services/ai/ai-provider.service";
+import { isWeakLessonTitle } from "@/services/ai/material-topic";
 import {
   classroomLanguageLock,
   classroomSpeechLanguage,
@@ -332,10 +333,14 @@ function fallbackOutput(
   req: ReasoningRequest,
   speech: "ar" | "en" | "tr"
 ): ReasoningOutput {
+  const neutral =
+    speech === "ar" ? "فكرة الدرس" : speech === "tr" ? "Ders fikri" : "Key idea";
+  const candidate = req.lesson.objective || req.lesson.lessonName || "";
+  // Never speak/write a cover-page teacher name or filename as the topic.
   const topic =
-    req.lesson.objective ||
-    req.lesson.lessonName ||
-    (speech === "ar" ? "فكرة الدرس" : speech === "tr" ? "Ders fikri" : "Key idea");
+    candidate && !isWeakLessonTitle(candidate, req.lesson.materialNames)
+      ? candidate
+      : neutral;
   const lines: Record<"ar" | "tr" | "en", string[]> = {
     ar: [`خلّينا نشرح ${topic} بوضوح على السبورة.`, "شوف الفكرة وياي خطوة خطوة."],
     tr: [`${topic} konusunu tahtada net anlatalım.`, "Adım adım birlikte gidelim."],

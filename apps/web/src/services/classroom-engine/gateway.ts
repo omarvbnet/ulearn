@@ -6,6 +6,7 @@ import {
   normLang,
   resolveTeacherVoice,
 } from "@/services/ai/voice-accent";
+import { isWeakLessonTitle } from "@/services/ai/material-topic";
 import { TeachingOrchestrator } from "./orchestrator";
 import { ClassroomMemoryService } from "./services/student-memory";
 import { KnowledgeRetrievalService } from "./services/knowledge-retrieval";
@@ -351,6 +352,44 @@ async function requireSession(userId: string, sessionId: string) {
   return row;
 }
 
+/** Old sessions may have saved a cover-page teacher name as the lesson —
+ * swap any weak title for the first real curriculum entry or a neutral label. */
+function sanitizeLessonNaming(
+  state: EngineSessionState,
+  materialNames: string[]
+): EngineSessionState {
+  const neutral =
+    state.speechLanguage === "ar"
+      ? "درس اليوم"
+      : state.speechLanguage === "tr"
+        ? "Bugünün dersi"
+        : "Today's lesson";
+  const outline = state.lessonPlan?.curriculumOutline || [];
+  const firstGood =
+    outline.find((l) => !isWeakLessonTitle(l, materialNames)) || null;
+  const fix = (v: string | null | undefined): string | null =>
+    v && !isWeakLessonTitle(v, materialNames) ? v : firstGood || neutral;
+
+  if (state.lessonName && isWeakLessonTitle(state.lessonName, materialNames)) {
+    state.lessonName = fix(state.lessonName);
+  }
+  if (state.currentTopic && isWeakLessonTitle(state.currentTopic, materialNames)) {
+    state.currentTopic = (firstGood || neutral).slice(0, 48);
+  }
+  if (state.lessonPlan) {
+    if (isWeakLessonTitle(state.lessonPlan.lessonName, materialNames)) {
+      state.lessonPlan.lessonName = fix(state.lessonPlan.lessonName) || neutral;
+    }
+    if (isWeakLessonTitle(state.lessonPlan.objective, materialNames)) {
+      state.lessonPlan.objective = state.lessonPlan.lessonName;
+    }
+  }
+  if (state.objective && isWeakLessonTitle(state.objective, materialNames)) {
+    state.objective = state.lessonPlan?.objective || neutral;
+  }
+  return state;
+}
+
 function ensureV3State(row: {
   state: unknown;
   locale: string;
@@ -362,21 +401,24 @@ function ensureV3State(row: {
 }): EngineSessionState {
   const raw = row.state as Partial<EngineSessionState> | null;
   if (raw && raw.version === 3) {
-    return {
-      ...emptyEngineState(
-        (raw.uiLanguage || normLang(row.locale)) as ClassroomLang,
-        raw.speechLanguage ||
-          classroomSpeechLanguage({
-            language: row.locale,
-            countryCode: row.countryCode,
-            provinceName: row.provinceName,
-          }),
-        row.countryCode,
-        row.provinceName
-      ),
-      ...raw,
-      version: 3,
-    };
+    return sanitizeLessonNaming(
+      {
+        ...emptyEngineState(
+          (raw.uiLanguage || normLang(row.locale)) as ClassroomLang,
+          raw.speechLanguage ||
+            classroomSpeechLanguage({
+              language: row.locale,
+              countryCode: row.countryCode,
+              provinceName: row.provinceName,
+            }),
+          row.countryCode,
+          row.provinceName
+        ),
+        ...raw,
+        version: 3,
+      },
+      row.materialNames
+    );
   }
   // Old v1/v2 sessions cannot drive v3 — start a clean teaching state.
   const ui = normLang(row.locale) as ClassroomLang;
@@ -397,7 +439,7 @@ function ensureV3State(row: {
   };
   state.lessonName = outline[0] || null;
   state.phase = "concept_explanation";
-  return state;
+  return sanitizeLessonNaming(state, row.materialNames);
 }
 
 function toPublicSession(

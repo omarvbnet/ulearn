@@ -30,6 +30,7 @@ export function normalizeBoardActions(
 ): { actions: ClassroomBoardAction[]; nextCursorY: number; cleared: boolean } {
   let y = Math.max(140, Math.min(880, input.cursorY ?? 160));
   let diagramY = 200;
+  let circleRow = 0;
   let cleared = false;
   const out: ClassroomBoardAction[] = [];
   const textX = input.rtl ? 1720 : 120;
@@ -57,6 +58,7 @@ export function normalizeBoardActions(
       out.push({ time: out.length * beatMs, action: "clear_board", parameters: {} });
       y = 160;
       diagramY = 200;
+      circleRow = 0;
       cleared = true;
       continue;
     }
@@ -66,7 +68,7 @@ export function normalizeBoardActions(
       action === "draw_formula" ||
       action === "draw_equation"
     ) {
-      const text = shortText(p.text ?? p.content ?? p.latex, 26);
+      const text = shortText(p.text ?? p.content ?? p.latex, 36);
       if (!text) continue;
       ensureRoom(140);
       // Large classroom chalk size — readable on phone and desktop.
@@ -84,6 +86,7 @@ export function normalizeBoardActions(
         },
       });
       y += Math.max(120, size + 68);
+      circleRow = 0;
       continue;
     }
 
@@ -167,18 +170,27 @@ export function normalizeBoardActions(
     if (action === "draw_circle" || action === "circle") {
       const cy = Math.min(860, diagramY + 60);
       const r = Math.max(36, Math.min(70, num(p.r, 55)));
+      // Counting circles sit in a horizontal row like a teacher tallying
+      // objects — not stacked/overlapping down the diagram column.
+      const cx = input.rtl
+        ? diagramX + 40 - circleRow * (r * 2 + 24)
+        : diagramX + 40 + circleRow * (r * 2 + 24);
       out.push({
         time: out.length * 480,
         action: "draw_circle",
         parameters: {
-          cx: diagramX + 40,
+          cx,
           cy,
           r,
           color: String(p.color || "red"),
           width: 3.2,
         },
       });
-      diagramY += r * 2 + 50;
+      circleRow += 1;
+      if (circleRow >= 4) {
+        circleRow = 0;
+        diagramY += r * 2 + 50;
+      }
       continue;
     }
 
