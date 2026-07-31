@@ -1,7 +1,7 @@
 import { error, json, requireAuth } from "@/lib/api";
-import { ClassroomSessionService } from "@/services/ai/classroom/classroom-session.service";
+import { ClassroomGateway } from "@/services/classroom-engine";
 
-/** End a live classroom session and write long-term memory. */
+/** Classroom Engine v3 — end session + persist memory. */
 export async function POST(
   _request: Request,
   ctx: { params: Promise<{ id: string }> }
@@ -12,7 +12,7 @@ export async function POST(
   if (!id) return error("Missing session id", 422, "VALIDATION");
 
   try {
-    const result = await ClassroomSessionService.endSession({
+    const result = await ClassroomGateway.endSession({
       userId: auth.session.userId,
       sessionId: id,
     });

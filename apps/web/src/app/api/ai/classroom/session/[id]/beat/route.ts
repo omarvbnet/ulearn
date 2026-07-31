@@ -1,6 +1,5 @@
 import { error, json, requireAuth } from "@/lib/api";
-import { ClassroomSessionService } from "@/services/ai/classroom/classroom-session.service";
-import { classroomSseResponse } from "@/services/ai/classroom/sse";
+import { ClassroomGateway, classroomEngineSse } from "@/services/classroom-engine";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +9,7 @@ const schema = z.object({
   stream: z.boolean().optional().default(false),
 });
 
-/** Generate the next live classroom teaching beat. */
+/** Classroom Engine v3 — next teaching beat (Orchestrator-owned). */
 export async function POST(
   request: Request,
   ctx: { params: Promise<{ id: string }> }
@@ -24,8 +23,8 @@ export async function POST(
   const stream = parsed.success ? parsed.data.stream : false;
 
   if (stream) {
-    return classroomSseResponse(async (emit) => {
-      await ClassroomSessionService.nextBeat({
+    return classroomEngineSse(async (emit) => {
+      await ClassroomGateway.nextBeat({
         userId: auth.session.userId,
         sessionId: id,
         onEvent: emit,
@@ -34,7 +33,7 @@ export async function POST(
   }
 
   try {
-    const result = await ClassroomSessionService.nextBeat({
+    const result = await ClassroomGateway.nextBeat({
       userId: auth.session.userId,
       sessionId: id,
     });

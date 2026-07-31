@@ -1,6 +1,5 @@
 import { error, json, requireAuth } from "@/lib/api";
-import { ClassroomSessionService } from "@/services/ai/classroom/classroom-session.service";
-import { classroomSseResponse } from "@/services/ai/classroom/sse";
+import { ClassroomGateway, classroomEngineSse } from "@/services/classroom-engine";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -11,11 +10,10 @@ const schema = z.object({
   language: z.string().max(16).optional(),
   conversationId: z.string().optional(),
   documentIds: z.array(z.string().min(1)).max(20).optional(),
-  /** When true, return text/event-stream with progressive speak/board events. */
   stream: z.boolean().optional().default(false),
 });
 
-/** Start a live AI Teacher classroom session (beat-by-beat). */
+/** Classroom Engine v3 — start session via AI Gateway. */
 export async function POST(request: Request) {
   const auth = await requireAuth();
   if (auth.error) return auth.error;
@@ -26,9 +24,9 @@ export async function POST(request: Request) {
   const { stream, ...data } = parsed.data;
 
   if (stream) {
-    return classroomSseResponse(async (emit) => {
+    return classroomEngineSse(async (emit) => {
       try {
-        await ClassroomSessionService.startSession({
+        await ClassroomGateway.startSession({
           userId: auth.session.userId,
           ...data,
           onEvent: emit,
@@ -45,7 +43,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await ClassroomSessionService.startSession({
+    const result = await ClassroomGateway.startSession({
       userId: auth.session.userId,
       ...data,
     });

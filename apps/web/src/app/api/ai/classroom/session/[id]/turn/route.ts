@@ -1,6 +1,5 @@
 import { error, json, requireAuth } from "@/lib/api";
-import { ClassroomSessionService } from "@/services/ai/classroom/classroom-session.service";
-import { classroomSseResponse } from "@/services/ai/classroom/sse";
+import { ClassroomGateway, classroomEngineSse } from "@/services/classroom-engine";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +18,7 @@ const schema = z.object({
     .optional(),
 });
 
-/** Student spoke / typed during the live classroom (or timed out silently). */
+/** Classroom Engine v3 — student turn / silence. */
 export async function POST(
   request: Request,
   ctx: { params: Promise<{ id: string }> }
@@ -35,25 +34,23 @@ export async function POST(
   const { stream, ...data } = parsed.data;
 
   if (stream) {
-    return classroomSseResponse(async (emit) => {
-      await ClassroomSessionService.studentTurn({
+    return classroomEngineSse(async (emit) => {
+      await ClassroomGateway.studentTurn({
         userId: auth.session.userId,
         sessionId: id,
         transcript: data.transcript,
         noAnswer: data.noAnswer,
-        signals: data.signals,
         onEvent: emit,
       });
     });
   }
 
   try {
-    const result = await ClassroomSessionService.studentTurn({
+    const result = await ClassroomGateway.studentTurn({
       userId: auth.session.userId,
       sessionId: id,
       transcript: data.transcript,
       noAnswer: data.noAnswer,
-      signals: data.signals,
     });
     return json(result);
   } catch (e) {
