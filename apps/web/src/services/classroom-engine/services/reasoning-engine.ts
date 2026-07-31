@@ -106,7 +106,7 @@ export class ReasoningEngine {
         "TEACHING_ASSISTANT",
         messages,
         userId,
-        { temperature: 0.65, maxTokensExact: speech === "ar" ? 1300 : 1000 },
+        { temperature: 0.65, maxTokensExact: speech === "ar" ? 1800 : 1200 },
         (_delta, full) => {
           text = full;
           // Progressive speak extraction for streaming UX.
@@ -136,13 +136,20 @@ export class ReasoningEngine {
         }
       );
       text = result.text || text;
-    } catch {
-      /* fallback below */
+    } catch (e) {
+      console.error(
+        "[classroom-engine] reasoning stream failed:",
+        e instanceof Error ? e.message : e
+      );
     }
 
     const parsed = parseReasoning(text);
     if (parsed) return sanitizeOutput(parsed, req.move, speech);
 
+    console.error(
+      "[classroom-engine] reasoning parse failed, using fallback. Raw tail:",
+      JSON.stringify((text || "").slice(-400))
+    );
     return fallbackOutput(req, speech);
   }
 }
@@ -200,37 +207,106 @@ function findJson(raw: string): string | null {
   return t.slice(start, end + 1);
 }
 
+/** Close unterminated strings/brackets so truncated model output still parses. */
+function balanceJson(s: string): string {
+  let out = s;
+  let inStr = false;
+  const stack: string[] = [];
+  for (let i = 0; i < out.length; i++) {
+    const c = out[i];
+    if (c === '"' && out[i - 1] !== "\\") inStr = !inStr;
+    if (inStr) continue;
+    if (c === "{" || c === "[") stack.push(c);
+    else if (c === "}" || c === "]") stack.pop();
+  }
+  if (inStr) out += '"';
+  while (stack.length) out += stack.pop() === "{" ? "}" : "]";
+  return out;
+}
+
+/** Parse, then progressively cut back + re-balance when the JSON is truncated. */
+function parseJsonLenient(json: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    /* try repair below */
+  }
+  let cut = json.length;
+  for (let attempts = 0; attempts < 24 && cut > 40; attempts++) {
+    const cand = json.slice(0, cut).replace(/,\s*$/, "");
+    try {
+      return JSON.parse(balanceJson(cand)) as Record<string, unknown>;
+    } catch {
+      const next = Math.max(
+        cand.lastIndexOf(","),
+        cand.lastIndexOf("{"),
+        cand.lastIndexOf("[")
+      );
+      if (next <= 0 || next >= cut) break;
+      cut = next;
+    }
+  }
+  return null;
+}
+
+/** Last resort: pull speak lines out of broken output so the lesson continues. */
+function salvageSpeak(raw: string): string[] {
+  const m = raw.match(/"speak"\s*:\s*\[([\s\S]*?)(?:\]|$)/);
+  if (!m?.[1]) return [];
+  const lines: string[] = [];
+  const re = /"((?:\\.|[^"\\])+)"/g;
+  let item: RegExpExecArray | null;
+  while ((item = re.exec(m[1])) && lines.length < 3) {
+    const line = unescapeJson(item[1]).trim();
+    if (line.length > 3) lines.push(line);
+  }
+  return lines;
+}
+
 function parseReasoning(raw: string): ReasoningOutput | null {
   const json = findJson(raw || "");
   if (!json) return null;
-  try {
-    const o = JSON.parse(json) as Record<string, unknown>;
-    const speak = Array.isArray(o.speak)
-      ? o.speak.map((s) => String(s || "").trim()).filter(Boolean).slice(0, 3)
-      : [];
-    const boardInstructions = Array.isArray(o.boardInstructions)
-      ? (o.boardInstructions as BoardInstruction[]).slice(0, 6)
-      : [];
+  const o = parseJsonLenient(json);
+  if (!o) {
+    const speak = salvageSpeak(raw);
+    if (!speak.length) return null;
     return {
       speak,
-      boardInstructions,
-      askStudent: o.askStudent ? String(o.askStudent) : null,
-      answerCorrect:
-        o.answerCorrect === true ? true : o.answerCorrect === false ? false : null,
-      emotion: (String(o.emotion || "encouraging") as Emotion) || "encouraging",
-      pace:
-        o.pace === "slow" || o.pace === "brisk"
-          ? o.pace
-          : "normal",
-      lessonName: o.lessonName ? String(o.lessonName) : null,
-      homework: o.homework ? String(o.homework) : null,
-      sessionComplete: Boolean(o.sessionComplete),
-      topic: o.topic ? String(o.topic) : null,
-      exampleLabel: o.exampleLabel ? String(o.exampleLabel) : null,
+      boardInstructions: [],
+      askStudent: null,
+      answerCorrect: null,
+      emotion: "encouraging",
+      pace: "normal",
+      lessonName: null,
+      homework: null,
+      sessionComplete: false,
+      topic: null,
+      exampleLabel: null,
     };
-  } catch {
-    return null;
   }
+  const speak = Array.isArray(o.speak)
+    ? o.speak.map((s) => String(s || "").trim()).filter(Boolean).slice(0, 3)
+    : salvageSpeak(raw);
+  const boardInstructions = Array.isArray(o.boardInstructions)
+    ? (o.boardInstructions as BoardInstruction[]).slice(0, 6)
+    : [];
+  return {
+    speak,
+    boardInstructions,
+    askStudent: o.askStudent ? String(o.askStudent) : null,
+    answerCorrect:
+      o.answerCorrect === true ? true : o.answerCorrect === false ? false : null,
+    emotion: (String(o.emotion || "encouraging") as Emotion) || "encouraging",
+    pace:
+      o.pace === "slow" || o.pace === "brisk"
+        ? o.pace
+        : "normal",
+    lessonName: o.lessonName ? String(o.lessonName) : null,
+    homework: o.homework ? String(o.homework) : null,
+    sessionComplete: Boolean(o.sessionComplete),
+    topic: o.topic ? String(o.topic) : null,
+    exampleLabel: o.exampleLabel ? String(o.exampleLabel) : null,
+  };
 }
 
 function sanitizeOutput(
