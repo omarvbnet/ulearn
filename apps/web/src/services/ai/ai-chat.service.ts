@@ -1375,12 +1375,12 @@ export class AiChatService {
     // Never surface the markdown dump as the student-facing lesson body.
     const answer =
       input.language === "ar"
-        ? `الفصل المباشر جاهز: ${lesson.lesson_title}`
+        ? `الدرس المباشر جاهز: ${lesson.lesson_title}`
         : input.language === "tr"
-          ? `Canlı sınıf hazır: ${lesson.lesson_title}`
+          ? `Canlı ders hazır: ${lesson.lesson_title}`
           : input.language === "ku"
             ? `پۆلی ڕاستەوخۆ ئامادەیە: ${lesson.lesson_title}`
-            : `Live classroom ready: ${lesson.lesson_title}`;
+            : `Live lesson ready: ${lesson.lesson_title}`;
     return this.persistTurn({
       userId: input.userId,
       conversationId: input.conversationId,

@@ -367,16 +367,16 @@ export default function StudentAiPage() {
             text:
               q ||
               (locale === "ar"
-                ? "ابدأ الفصل المباشر على السبورة"
-                : "Start the live whiteboard classroom"),
+                ? "ابدأ الدرس المباشر على السبورة"
+                : "Start the live whiteboard lesson"),
           },
           {
             id: crypto.randomUUID(),
             role: "assistant",
             text:
               locale === "ar"
-                ? "جاري فتح الفصل المباشر…"
-                : "Opening the live classroom…",
+                ? "جاري فتح الدرس المباشر…"
+                : "Opening the live lesson…",
           },
         ]);
       }
@@ -398,8 +398,8 @@ export default function StudentAiPage() {
           text:
             q ||
             (locale === "ar"
-              ? "ابدأ الفصل المباشر على السبورة"
-              : "Start the live whiteboard classroom"),
+              ? "ابدأ الدرس المباشر على السبورة"
+              : "Start the live whiteboard lesson"),
         },
       ]);
     }
@@ -443,8 +443,8 @@ export default function StudentAiPage() {
             text:
               data.answer ||
               (locale === "ar"
-                ? "اختر المادة لفتح الفصل المباشر على السبورة"
-                : "Choose a material to open the live whiteboard classroom"),
+                ? "اختر المادة لفتح الدرس المباشر على السبورة"
+                : "Choose a material to open the live whiteboard lesson"),
             selectableMaterials: materials,
             pendingMode: "ai_teacher",
             pendingQuestion: String(data.pendingQuestion || q || "").trim() || q,
@@ -462,8 +462,8 @@ export default function StudentAiPage() {
 
       throw new Error(
         locale === "ar"
-          ? "اختر المادة لفتح الفصل المباشر"
-          : "Choose a material to open the live classroom"
+          ? "اختر المادة لفتح الدرس المباشر"
+          : "Choose a material to open the live lesson"
       );
     } catch (e) {
       setMessages((m) => [
@@ -886,12 +886,12 @@ export default function StudentAiPage() {
                   className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/25"
                 >
                   {locale === "ar"
-                    ? "ابدأ فصل المعلم AI (سبورة + صوت)"
+                    ? "ابدأ درس المعلم AI (سبورة + صوت)"
                     : locale === "tr"
-                      ? "AI Tahta Sınıfını Başlat"
+                      ? "AI Tahta Dersini Başlat"
                       : locale === "ku"
-                        ? "پۆلی مامۆستای AI دەستپێبکە"
-                        : "Start AI Teacher classroom (board + voice)"}
+                        ? "وانەی مامۆستای AI دەستپێبکە"
+                        : "Start AI Teacher lesson (board + voice)"}
                 </button>
               </div>
               <div className="flex flex-wrap justify-center gap-2">
@@ -938,15 +938,15 @@ export default function StudentAiPage() {
                     >
                       <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
                         U Learn ·{" "}
-                        {locale === "ar" ? "الفصل المباشر" : "Live classroom"}
+                        {locale === "ar" ? "الدرس المباشر" : "Live lesson"}
                       </p>
                       <p className="mt-1 text-sm font-semibold text-foreground">
                         {m.aiTeacherLesson.lesson_title}
                       </p>
                       <p className="mt-1 text-xs text-emerald-100/80">
                         {locale === "ar"
-                          ? "اضغط لبدء جلسة فصل مباشرة جديدة"
-                          : "Tap to start a new live classroom session"}
+                          ? "اضغط لبدء جلسة درس مباشرة جديدة"
+                          : "Tap to start a new live lesson session"}
                       </p>
                     </button>
                   </div>
@@ -955,8 +955,8 @@ export default function StudentAiPage() {
                   <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3">
                     <p className="mb-2 text-xs font-semibold text-emerald-200">
                       {locale === "ar"
-                        ? "اختر المادة لبدء الفصل المباشر"
-                        : "Choose a material to start the live classroom"}
+                        ? "اختر المادة لبدء الدرس المباشر"
+                        : "Choose a material to start the live lesson"}
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {m.selectableMaterials.map((mat) => (
@@ -1012,10 +1012,10 @@ export default function StudentAiPage() {
             <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-100/90">
               {preparingClassroom
                 ? locale === "ar"
-                  ? "جارٍ تجهيز الفصل المباشر والسبورة…"
+                  ? "جارٍ تجهيز الدرس المباشر والسبورة…"
                   : locale === "tr"
-                    ? "Canlı sınıf ve tahta hazırlanıyor…"
-                    : "Preparing live classroom & board…"
+                    ? "Canlı ders ve tahta hazırlanıyor…"
+                    : "Preparing live lesson & board…"
                 : t.student.aiThinking}
             </div>
           )}

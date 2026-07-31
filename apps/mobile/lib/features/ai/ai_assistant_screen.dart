@@ -814,7 +814,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
               role: 'assistant',
               text: locale == 'ar'
                   ? 'جاري فتح الفصل المباشر…'
-                  : 'Opening the live classroom…',
+                  : 'Opening the live lesson…',
             ),
           );
         });

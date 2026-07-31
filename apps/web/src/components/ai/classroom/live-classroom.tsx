@@ -1794,7 +1794,7 @@ export function LiveClassroom({
     setPresence("thinking");
     setCaption(
       lang === "ar"
-        ? "جارٍ تجهيز الفصل…"
+        ? "جارٍ تجهيز الدرس…"
         : lang === "tr"
           ? "Sınıf hazırlanıyor…"
           : "Preparing classroom…"
@@ -1836,10 +1836,10 @@ export function LiveClassroom({
       session?.state?.currentLessonName ||
       session?.materialNames?.[0] ||
       (lang === "ar"
-        ? "الفصل المباشر"
+        ? "الدرس المباشر"
         : lang === "tr"
-          ? "Canlı sınıf"
-          : "Live classroom")
+          ? "Canlı ders"
+          : "Live lesson")
     );
   }, [lang, session]);
 
@@ -1853,7 +1853,7 @@ export function LiveClassroom({
       <header className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-300/80">
-            U Learn · Classroom
+            U Learn · Live Lesson
           </p>
           <h1 className="truncate text-lg font-semibold tracking-tight sm:text-xl">
             {title}
@@ -2038,7 +2038,7 @@ export function LiveClassroom({
       {ended ? (
         <p className="px-5 pb-4 text-center text-sm font-semibold text-emerald-200">
           {lang === "ar"
-            ? "انتهى هذا الجزء من الفصل. يمكنك الإغلاق أو البدء من جديد."
+            ? "انتهى هذا الجزء من الدرس. يمكنك الإغلاق أو البدء من جديد."
             : lang === "tr"
               ? "Bu sınıf bölümü tamamlandı."
               : "This classroom segment is complete."}

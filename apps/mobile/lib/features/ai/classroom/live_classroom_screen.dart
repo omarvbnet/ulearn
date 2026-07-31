@@ -46,7 +46,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
 
   var _presence = _Presence.thinking;
   var _caption = '';
-  var _title = 'Classroom';
+  var _title = 'Live lesson';
   String? _error;
   String? _ttsError;
   List<String>? _sttLocales;
@@ -226,7 +226,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
           ? 'جارٍ تجهيز الفصل…'
           : _lang == 'tr'
               ? 'Sınıf hazırlanıyor…'
-              : 'Preparing classroom…';
+              : 'Preparing live lesson…';
     });
     try {
       final api = context.read<ApiClient>();
@@ -251,7 +251,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
             ? e.message
             : (_lang == 'ar'
                 ? 'تعذر بدء الفصل'
-                : 'Could not start classroom');
+                : 'Could not start live lesson');
       });
     }
   }
@@ -411,7 +411,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         });
       } else {
         setState(() {
-          _error = e is ApiException ? e.message : 'Classroom failed';
+          _error = e is ApiException ? e.message : 'Live lesson failed';
         });
       }
     } finally {
@@ -440,7 +440,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     setState(() {
       if (lessonName != null && lessonName.isNotEmpty) {
         _title = lessonName;
-      } else if (names is List && names.isNotEmpty && _title == 'Classroom') {
+      } else if (names is List && names.isNotEmpty && _title == 'Live lesson') {
         _title = names.first.toString();
       }
     });
@@ -1262,7 +1262,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            'U Learn · Classroom',
+                            'U Learn · Live Lesson',
                             style: TextStyle(
                               color: Color(0xFF7DD3FC),
                               fontWeight: FontWeight.w800,
@@ -1527,7 +1527,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
                         ? 'انتهى هذا الجزء من الفصل.'
                         : _lang == 'tr'
                             ? 'Bu sınıf bölümü tamamlandı.'
-                            : 'This classroom segment is complete.',
+                            : 'This lesson segment is complete.',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: Color(0xFFA7F3D0),

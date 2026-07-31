@@ -1,4 +1,5 @@
 import type { ClassroomBoardAction } from "./types";
+// (moved from services/ai/classroom — now owned by the v3 engine)
 
 function num(v: unknown, fallback = 0) {
   const n = typeof v === "number" ? v : Number(v);

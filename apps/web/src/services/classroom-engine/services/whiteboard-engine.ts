@@ -1,4 +1,4 @@
-import { normalizeBoardActions } from "@/services/ai/classroom/board-layout";
+import { normalizeBoardActions } from "../board-layout";
 import { isWeakLessonTitle } from "@/services/ai/material-topic";
 import type { BoardInstruction, ClassroomBoardAction, SpeechLang } from "../types";
 

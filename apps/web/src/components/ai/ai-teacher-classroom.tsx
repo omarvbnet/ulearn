@@ -128,7 +128,7 @@ function t(locale: string): Labels {
   const ui = normalizeUiLocale(locale);
   if (ui === "ar") {
     return {
-      classroom: "الفصل المباشر",
+      classroom: "الدرس المباشر",
       voice: "صوت",
       text: "نص",
       start: "ابدأ الدرس",
@@ -152,9 +152,9 @@ function t(locale: string): Labels {
       soundOn: "الصوت يعمل",
       soundOff: "الصوت متوقف",
       writing: "يكتب على السبورة…",
-      tapToBegin: "ادخل الفصل المباشر",
+      tapToBegin: "ادخل الدرس المباشر",
       tapHint: "معلم حقيقي: يتحدث ويرسم ويسأل ويستمع إليك",
-      liveVoice: "فصل مباشر",
+      liveVoice: "درس مباشر",
       voiceMissing: "صوت المعلم غير متاح. عيّن VOICE_TTS (Fish Audio/ElevenLabs/OpenAI) من لوحة الإدارة.",
       phaseReady: "جاهز",
       phaseTeaching: "يشرح",
@@ -168,7 +168,7 @@ function t(locale: string): Labels {
   }
   if (ui === "tr") {
     return {
-      classroom: "Canlı sınıf",
+      classroom: "Canlı ders",
       voice: "Ses",
       text: "Metin",
       start: "Dersi başlat",
@@ -192,9 +192,9 @@ function t(locale: string): Labels {
       soundOn: "Ses açık",
       soundOff: "Ses kapalı",
       writing: "Tahtaya yazıyor…",
-      tapToBegin: "Canlı sınıfa gir",
+      tapToBegin: "Canlı derse gir",
       tapHint: "Gerçek bir öğretmen: konuşur, çizer, sorar ve seni dinler",
-      liveVoice: "Canlı sınıf",
+      liveVoice: "Canlı ders",
       voiceMissing: "Öğretmen sesi yok. Yönetim panelinden VOICE_TTS (Fish Audio/ElevenLabs/OpenAI) atayın.",
       phaseReady: "Hazır",
       phaseTeaching: "Anlatıyor",
@@ -207,7 +207,7 @@ function t(locale: string): Labels {
     };
   }
   return {
-    classroom: "Live classroom",
+    classroom: "Live lesson",
     voice: "Voice",
     text: "Text",
     start: "Start lesson",
@@ -231,9 +231,9 @@ function t(locale: string): Labels {
     soundOn: "Sound on",
     soundOff: "Sound off",
     writing: "Writing on the board…",
-    tapToBegin: "Enter the live classroom",
+    tapToBegin: "Enter the live lesson",
     tapHint: "A real teacher: speaks, draws, asks, and listens to you",
-    liveVoice: "Live classroom",
+    liveVoice: "Live lesson",
     voiceMissing: "AI voice unavailable. Assign VOICE_TTS (Fish Audio/ElevenLabs/OpenAI) in admin.",
     phaseReady: "Ready",
     phaseTeaching: "Teaching",
@@ -249,12 +249,12 @@ function t(locale: string): Labels {
 export function classroomOverlayLabels(locale?: string | null) {
   const ui = normalizeUiLocale(locale);
   if (ui === "ar") {
-    return { classroom: "الفصل المباشر", closeBoard: "إغلاق السبورة" };
+    return { classroom: "الدرس المباشر", closeBoard: "إغلاق السبورة" };
   }
   if (ui === "tr") {
-    return { classroom: "Canlı sınıf", closeBoard: "Tahtayı kapat" };
+    return { classroom: "Canlı ders", closeBoard: "Tahtayı kapat" };
   }
-  return { classroom: "Live classroom", closeBoard: "Close board" };
+  return { classroom: "Live lesson", closeBoard: "Close board" };
 }
 
 function resolveColor(raw: unknown, fallback = "#1e293b"): string {
