@@ -64,6 +64,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
   DateTime? _speechActivityAt;
   var _askWaitMs = 0;
   var _boardCursorY = 160.0;
+  var _diagramCursorY = 220.0;
   var _turnStarted = false;
   String? _pendingAsk;
   // Stays true across the whole ask→wait→answer cycle (unlike _pendingAsk,
@@ -430,6 +431,11 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     final board = beat['board'];
     if (board is List) {
       var penAt = DateTime.now().millisecondsSinceEpoch.toDouble();
+      // Consecutive counting-style shapes (circles/rectangles) drawn within
+      // THIS beat line up left-to-right in one row like real objects; the
+      // row itself advances via _diagramCursorY so the next beat's drawing
+      // never overlaps what this one already drew on the board.
+      var shapeSlot = 0;
       for (var i = 0; i < board.length; i++) {
         final row = board[i];
         if (row is! Map) continue;
@@ -439,17 +445,29 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         if (action == 'clear_board' || action == 'open_new_board') {
           _items.clear();
           _boardCursorY = 160;
+          _diagramCursorY = 220;
+          shapeSlot = 0;
           penAt = DateTime.now().millisecondsSinceEpoch.toDouble();
           continue;
         }
         final before = _items.length;
-        _applyCue(_items, cue, i, penAt, _rtl, () => _boardCursorY, (y) {
-          _boardCursorY = y;
-        });
+        shapeSlot = _applyCue(
+          _items,
+          cue,
+          i,
+          penAt,
+          _rtl,
+          () => _boardCursorY,
+          (y) => _boardCursorY = y,
+          () => _diagramCursorY,
+          (y) => _diagramCursorY = y,
+          shapeSlot,
+        );
         if (_items.length > before) {
           penAt += _items.last.writeMs + 160;
         }
       }
+      if (shapeSlot > 0) _diagramCursorY += 60;
       if (mounted) setState(() {});
     }
 
@@ -1307,7 +1325,7 @@ double _handJitter(int seed, int i, [double amp = 4.5]) {
   return (x - x.floor()) * 2 * amp - amp;
 }
 
-void _applyCue(
+int _applyCue(
   List<_BoardItem> items,
   Map<String, dynamic> cue,
   int idx,
@@ -1315,6 +1333,9 @@ void _applyCue(
   bool rtl,
   double Function() getCursorY,
   void Function(double y) setCursorY,
+  double Function() getDiagramY,
+  void Function(double y) setDiagramY,
+  int shapeSlot,
 ) {
   final p = cue['parameters'] is Map
       ? Map<String, dynamic>.from(cue['parameters'] as Map)
@@ -1330,7 +1351,7 @@ void _applyCue(
       action == 'draw_formula' ||
       action == 'draw_equation') {
     final text = _cleanText(p['text'] ?? p['latex'] ?? p['content']);
-    if (text == null || text.isEmpty) return;
+    if (text == null || text.isEmpty) return shapeSlot;
     var y = getCursorY();
     if (y > 900) {
       items.clear();
@@ -1354,7 +1375,7 @@ void _applyCue(
       ),
     );
     setCursorY(y + math.max(120.0, size + 68));
-    return;
+    return shapeSlot;
   }
   if (action == 'highlight' || action == 'underline' || action == 'draw_line') {
     // Soft underline only — never opaque blobs over text.
@@ -1373,10 +1394,10 @@ void _applyCue(
         seed: seed,
       ),
     );
-    return;
+    return shapeSlot;
   }
   if (action == 'draw_arrow') {
-    final ay = math.min(860.0, 220.0 + items.where((e) => e.kind != _Kind.text).length * 120);
+    final ay = math.min(860.0, getDiagramY());
     items.add(
       _BoardItem.line(
         id: id,
@@ -1392,42 +1413,62 @@ void _applyCue(
         seed: seed,
       ),
     );
-    return;
+    setDiagramY(getDiagramY() + 140);
+    return 0;
   }
   if (action == 'draw_circle' || action == 'circle') {
-    final cy = math.min(820.0, 240.0 + items.where((e) => e.kind == _Kind.circle).length * 150);
+    final r = _num(p['r'], 42).toDouble().clamp(32.0, 48.0);
+    final slotGap = r * 2 + 34;
+    var slot = shapeSlot;
+    if (slot >= 3) {
+      setDiagramY(getDiagramY() + r * 2 + 46);
+      slot = 0;
+    }
+    final cx = diagramX + 40 + slot * (rtl ? -slotGap : slotGap);
+    final cy = math.min(860.0, getDiagramY() + r);
     items.add(
       _BoardItem.circle(
         id: id,
-        cx: diagramX + 40,
+        cx: cx,
         cy: cy,
-        r: math.min(60.0, math.max(36.0, _num(p['r'], 50).toDouble())),
+        r: r,
         color: _color(p['color'], const Color(0xFFDC2626)),
         width: 3.0,
         bornAt: bornAt,
-        writeMs: 1100,
+        writeMs: 900,
         seed: seed,
       ),
     );
-    return;
+    return slot + 1;
   }
   if (action == 'draw_rectangle' || action == 'draw_rect') {
-    final ry = math.min(820.0, 240.0 + items.where((e) => e.kind == _Kind.rect).length * 130);
+    const w = 130.0;
+    const h = 84.0;
+    final slotGap = w + 36;
+    var slot = shapeSlot;
+    if (slot >= 3) {
+      setDiagramY(getDiagramY() + h + 46);
+      slot = 0;
+    }
+    final rx = diagramX - w / 2 + slot * (rtl ? -slotGap : slotGap);
+    final ry = math.min(860.0, getDiagramY());
     items.add(
       _BoardItem.rect(
         id: id,
-        x: diagramX - 40,
+        x: rx,
         y: ry,
-        w: 180,
-        h: 80,
+        w: w,
+        h: h,
         color: _color(p['color'], const Color(0xFF92400E)),
         width: 3.0,
         bornAt: bornAt,
-        writeMs: 1000,
+        writeMs: 850,
         seed: seed,
       ),
     );
+    return slot + 1;
   }
+  return shapeSlot;
 }
 
 class _BoardItem {
@@ -1630,8 +1671,21 @@ class _BoardPainter extends CustomPainter {
           shadow.paint(canvas, Offset(paintX + jx + 1.4, item.y - item.size + 1.6));
           tp.paint(canvas, Offset(paintX + jx, item.y - item.size));
         case _Kind.circle:
+          final jcx = item.cx + _handJitter(item.seed, 3, 1.4);
+          final jcy = item.cy + _handJitter(item.seed, 4, 1.4);
           canvas.drawArc(
-            Rect.fromCircle(center: Offset(item.cx, item.cy), radius: item.r),
+            Rect.fromCircle(center: Offset(jcx, jcy), radius: item.r),
+            -math.pi / 2,
+            2 * math.pi * p,
+            false,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = item.width + 2
+              ..strokeCap = StrokeCap.round
+              ..color = item.color.withValues(alpha: 0.14 * p),
+          );
+          canvas.drawArc(
+            Rect.fromCircle(center: Offset(jcx, jcy), radius: item.r),
             -math.pi / 2,
             2 * math.pi * p,
             false,
@@ -1639,16 +1693,29 @@ class _BoardPainter extends CustomPainter {
               ..style = PaintingStyle.stroke
               ..strokeWidth = item.width
               ..strokeCap = StrokeCap.round
-              ..color = item.color.withValues(alpha: 0.45 + 0.55 * p),
+              ..color = item.color.withValues(alpha: 0.5 + 0.5 * p),
           );
         case _Kind.rect:
-          final path = Path()
-            ..addRRect(
-              RRect.fromRectAndRadius(
-                Rect.fromLTWH(item.x, item.y, item.w, item.h),
-                const Radius.circular(6),
-              ),
+          final jx = _handJitter(item.seed, 3, 1.2);
+          final jy = _handJitter(item.seed, 4, 1.2);
+          final rrect = RRect.fromRectAndRadius(
+            Rect.fromLTWH(item.x, item.y, item.w, item.h),
+            const Radius.circular(8),
+          );
+          final shadowPath = Path()
+            ..addRRect(rrect.shift(Offset(jx, jy)));
+          for (final metric in shadowPath.computeMetrics()) {
+            canvas.drawPath(
+              metric.extractPath(0, metric.length * p),
+              Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = item.width + 2
+                ..strokeCap = StrokeCap.round
+                ..strokeJoin = StrokeJoin.round
+                ..color = item.color.withValues(alpha: 0.14 * p),
             );
+          }
+          final path = Path()..addRRect(rrect);
           for (final metric in path.computeMetrics()) {
             canvas.drawPath(
               metric.extractPath(0, metric.length * p),

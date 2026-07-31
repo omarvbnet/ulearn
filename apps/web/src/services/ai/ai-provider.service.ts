@@ -371,6 +371,11 @@ export class AiProviderService {
     userId?: string,
     overrides?: {
       maxTokens?: number;
+      /** Exact token ceiling regardless of the provider's configured default —
+       * use for latency-sensitive callers (e.g. live classroom beats) whose
+       * output is always tiny, where the admin-configured default would be
+       * needlessly high and let slower models ramble/think longer than needed. */
+      maxTokensExact?: number;
       temperature?: number;
       preferTypes?: string[];
       skipTypes?: string[];
@@ -388,6 +393,9 @@ export class AiProviderService {
           ...config,
           ...(overrides?.maxTokens != null
             ? { maxTokens: Math.max(config.maxTokens, overrides.maxTokens) }
+            : {}),
+          ...(overrides?.maxTokensExact != null
+            ? { maxTokens: Math.max(64, overrides.maxTokensExact) }
             : {}),
           ...(overrides?.temperature != null
             ? { temperature: overrides.temperature }

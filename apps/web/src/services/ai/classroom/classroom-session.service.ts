@@ -150,6 +150,35 @@ function parseBeat(raw: string): ClassroomBeat | null {
 /** Minimum consecutive teaching beats on an idea before a check is allowed. */
 const MIN_EXPLAIN_BEATS = 2;
 
+/**
+ * Safety net against the model looping back to the lesson intro: drops any
+ * spoken line that is a verbatim repeat of something already said, or that
+ * is just a short re-announcement of the current lesson's name (e.g. "Today
+ * we'll learn about X" said again three beats later). Never touches MODE
+ * OPEN, where announcing the lesson is expected exactly once.
+ */
+function stripRepeatedIntro(
+  speak: string[],
+  state: ClassroomSessionState,
+  mode: "open" | "next" | "react" | "silence"
+): string[] {
+  if (mode === "open" || !speak.length) return speak;
+  const lessonName = (state.currentLessonName || "").trim().toLowerCase();
+  const alreadySaid = new Set(
+    state.spokenHistory.map((s) => s.trim().toLowerCase())
+  );
+  const filtered = speak.filter((line) => {
+    const norm = line.trim().toLowerCase();
+    if (!norm) return false;
+    if (alreadySaid.has(norm)) return false;
+    if (lessonName && norm.includes(lessonName) && norm.length < lessonName.length + 40) {
+      return false;
+    }
+    return true;
+  });
+  return filtered.length ? filtered : speak;
+}
+
 function finalizeBeat(
   beat: ClassroomBeat,
   state: ClassroomSessionState,
@@ -162,7 +191,11 @@ function finalizeBeat(
   const ar = rtl;
   const tr = language.toLowerCase().startsWith("tr");
 
-  let speak = [...(beat.speak || [])].filter(Boolean);
+  let speak = stripRepeatedIntro(
+    [...(beat.speak || [])].filter(Boolean),
+    state,
+    mode
+  );
   let board = [...(beat.board || [])];
 
   // Wrong answer must always continue with voice + board re-explanation.
@@ -1176,6 +1209,10 @@ export class ClassroomSessionService {
         input.userId,
         {
           temperature: input.mode === "react" || input.mode === "silence" ? 0.35 : 0.45,
+          // Beats are always a couple of short sentences + a few board
+          // actions — capping output keeps every provider's generation time
+          // short instead of letting it use a large admin-configured budget.
+          maxTokensExact: input.mode === "open" ? 700 : 550,
         }
       );
       const parsed =

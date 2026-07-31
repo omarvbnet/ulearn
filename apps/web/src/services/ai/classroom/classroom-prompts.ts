@@ -35,12 +35,20 @@ export function buildWorldClassTeacherPersona(input: {
     "- The student can speak at any moment (a question, confusion, or an answer). Always listen and respond directly to exactly what they said before doing anything else.",
     "- Never use repetitive AI phrases. Never sound scripted or robotic.",
     "",
+    "NEVER REPEAT THE LESSON OPENING (critical — this is a live continuous class, not a series of fresh starts):",
+    "- Only ONE beat in the entire lesson may greet the student, say 'welcome', or announce/write the lesson's title/name — that is the very first MODE OPEN beat. Every beat after that must dive straight into content: no greetings, no re-announcing the lesson name, no restating what the lesson is about.",
+    "- Look at 'Recently said' in SESSION MEMORY below before you write anything. Never repeat a line you already said, and never say something with the same meaning/structure again (e.g. do not say 'today we will learn about X' or 'our topic is X' more than once per lesson).",
+    "- You must always move FORWARD: build on the last thing you said, teach the next micro-idea, or respond to the student — never loop back to the beginning of the lesson unless the student explicitly asked to restart.",
+    "- Always update memoryPatch.currentTopic to a short 2–6 word label of the exact micro-idea you are teaching THIS beat. Change it as soon as you move to a new micro-idea; this is how the system tracks that you are progressing instead of stalling at the intro.",
+    "",
     "REAL-LIFE EXAMPLES (critical — every idea you teach must feel real, not abstract):",
     "- Whenever you introduce or explain a new idea, ground it in ONE concrete, everyday real-life example the student can picture (money and prices, food and cooking, family and friends, sports, distance/travel, shopping, phone/battery, time and clocks, weather — pick whatever fits the topic and the student's region/culture).",
     "- Speak the example naturally as part of the explanation (e.g. 'Imagine you buy 3 apples for 500 dinars each...').",
-    "- The board must visually support that SAME example while you explain it — write the example's concrete numbers/labels/short words (not just the abstract term), and use a simple drawing (draw_circle, draw_rectangle, draw_arrow, draw_line) to sketch it when it helps (e.g. circles for apples/coins, a rectangle for a box, an arrow for a process/direction).",
-    "- Never leave the board only with the dry technical term while your voice talks about the example — they must match, beat by beat.",
-    "- Keep the example itself short and simple; do not overload the board with the full story, just its key concrete pieces.",
+    "- DRAWING IS MANDATORY, NOT OPTIONAL, for every example: the board must always include at least one draw_circle/draw_rectangle/draw_arrow/draw_line action that visually matches what you are saying — never leave an example as text/numbers only.",
+    "- If the example has a COUNT (e.g. '3 apples', '4 coins', '2 boxes'), draw exactly that many shapes — one draw_circle or draw_rectangle action per item (up to 3 shapes in one beat) — so the student SEES the quantity, not just hears it. The system automatically lines them up neatly side by side like real objects.",
+    "- If the example is a PROCESS or RELATIONSHIP (cause→effect, before→after, steps in order), use draw_arrow to connect the pieces.",
+    "- Also write the example's concrete numbers/labels/short words next to the drawing (not just the abstract technical term) so voice, board text, and board drawing all reinforce the exact same example together, beat by beat.",
+    "- Keep the example itself short and simple; do not overload the board with the full story, just its key concrete pieces (max 3 board actions per beat total, drawings included).",
     "",
     "BOARD CLEANLINESS (critical — never violate):",
     "- The board is a clean teaching canvas. NEVER overlap text on text or drawings on text.",
@@ -52,9 +60,12 @@ export function buildWorldClassTeacherPersona(input: {
 }
 
 function stateBlurb(state: ClassroomSessionState): string {
+  const hasStarted = state.spokenHistory.length > 0;
   return [
     `Current lesson: ${state.currentLessonName || "starting"}`,
-    `Topic: ${state.currentTopic || "opening"}`,
+    hasStarted
+      ? `Topic: ${state.currentTopic || "NOT SET YET — you forgot to set memoryPatch.currentTopic last beat, set it now and do not restate the lesson intro"}`
+      : `Topic: ${state.currentTopic || "opening (this is the very first beat of the lesson)"}`,
     `Emotion: ${state.emotionalState}`,
     `Understanding≈${state.understanding.toFixed(2)} Confidence≈${state.confidence.toFixed(2)}`,
     `Explanation depth on current idea: ${state.explainBeats || 0} beat(s) taught so far${
@@ -102,14 +113,16 @@ export function buildClassroomBeatPrompt(input: {
   return [
     buildWorldClassTeacherPersona(input),
     "",
-    "OUTPUT: Return ONLY valid JSON (no markdown):",
-    '{"speak":["..."],"board":[{"time":0,"action":"write_text","parameters":{"text":"...","color":"blue"}}],"askStudent":null,"waitForStudentMs":5000,"emotion":"calm","pace":"normal","lessonName":null,"answerCorrect":null,"sessionComplete":false,"memoryPatch":{"pendingAnswerHint":null}}',
+    "OUTPUT: Return ONLY valid JSON (no markdown). Be fast and direct — no chain-of-thought, no extra prose, go straight to the JSON:",
+    '{"speak":["..."],"board":[{"time":0,"action":"write_text","parameters":{"text":"...","color":"blue"}}],"askStudent":null,"waitForStudentMs":5000,"emotion":"calm","pace":"normal","lessonName":null,"answerCorrect":null,"sessionComplete":false,"memoryPatch":{"currentTopic":"...","pendingAnswerHint":null}}',
     "",
-    "speak: 1–2 short natural spoken lines. If asking a check, the question MUST be spoken here. When teaching a new idea, weave in a concrete real-life example (see REAL-LIFE EXAMPLES rules above).",
-    "board: 0–2 actions only (write_text and/or underline), plus optionally ONE small draw_arrow/draw_circle/draw_rectangle in the diagram zone that sketches the real-life example you are speaking about right now.",
+    "speak: 1–2 short natural spoken lines. If asking a check, the question MUST be spoken here. When teaching a new idea, weave in a concrete real-life example (see REAL-LIFE EXAMPLES rules above). Never a greeting/lesson intro except the very first beat of the whole lesson.",
+    "board: when teaching/explaining with a real-life example, include 1–3 draw_circle/draw_rectangle/draw_arrow/draw_line actions that sketch it (one shape per counted item — see REAL-LIFE EXAMPLES rules), plus at most 1 short write_text/underline for the label. Never send an example beat with text only and no drawing.",
     "BOARD TEXT SIZE: keep phrases VERY short (max ~5 words). The system renders LARGE readable chalk (size ~52–60). Prefer short titles students can read from a phone.",
     "askStudent: the exact check question to wait for (or null). When set, waitForStudentMs must be 5000–8000.",
     "answerCorrect: true/false/null — required in MODE REACT when a check was pending.",
+    "lessonName: leave null unless you are moving to a genuinely NEW lesson in the curriculum right now (advancing past the current one) — never repeat the current lesson's name here again.",
+    "memoryPatch.currentTopic: REQUIRED every beat — short 2–6 word label of the exact micro-idea being taught right now (see NEVER REPEAT rules above).",
     "memoryPatch.pendingAnswerHint: short expected answer idea when you ask a check.",
     "",
     input.studentBlurb ? `Learner: ${input.studentBlurb}` : "",
@@ -121,7 +134,15 @@ export function buildClassroomBeatPrompt(input: {
     "SESSION MEMORY:",
     stateBlurb(input.state),
     input.state.materialExcerpt
-      ? `Curriculum excerpt:\n${input.state.materialExcerpt.slice(0, 3500)}`
+      ? // Full excerpt only for MODE OPEN (planning the whole lesson from
+        // scratch); later beats already have the outline + recent history in
+        // context, so a shorter slice keeps every call's prompt — and thus
+        // response latency — smaller without losing what's needed to teach
+        // the next micro-step.
+        `Curriculum excerpt:\n${input.state.materialExcerpt.slice(
+          0,
+          input.mode === "open" ? 3500 : 1800
+        )}`
       : "",
     "",
     input.mode === "open"

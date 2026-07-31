@@ -124,10 +124,17 @@ function applyActions(
   items: BoardItem[],
   actions: BoardAction[],
   rtl: boolean,
-  cursorY: number
-): { items: BoardItem[]; cursorY: number } {
+  cursorY: number,
+  diagramCursorY: number
+): { items: BoardItem[]; cursorY: number; diagramCursorY: number } {
   let acc = [...items];
   let yCursor = cursorY || 160;
+  let diagramY = diagramCursorY || 220;
+  // Consecutive counting-style shapes (circles/rectangles) inside the SAME
+  // beat lay out left-to-right in one row — e.g. "3 apples" reads as three
+  // circles side by side, not stacked in a totem pole — instead of each
+  // shape claiming its own vertical slot.
+  let shapeSlot = 0;
   let penAt = nowMs();
   const textX = rtl ? 1720 : 120;
   const diagramX = rtl ? 380 : 1320;
@@ -140,6 +147,8 @@ function applyActions(
     if (action === "clear_board" || action === "open_new_board") {
       acc = [];
       yCursor = 160;
+      diagramY = 220;
+      shapeSlot = 0;
       penAt = nowMs();
       return;
     }
@@ -199,7 +208,7 @@ function applyActions(
       return;
     }
     if (action === "draw_arrow") {
-      const ay = Math.min(860, 220 + idx * 90);
+      const ay = Math.min(860, diagramY);
       acc.push({
         kind: "arrow",
         id,
@@ -214,42 +223,65 @@ function applyActions(
         seed,
       });
       penAt += 1050;
+      diagramY += 140;
+      shapeSlot = 0;
     } else if (action === "draw_circle" || action === "circle") {
-      const cy = Math.min(820, 240 + idx * 120);
-      const r = Math.max(36, Math.min(60, num(p.r, 50)));
+      const r = Math.max(32, Math.min(48, num(p.r, 42)));
+      const slotGap = r * 2 + 34;
+      const rowMax = 3;
+      if (shapeSlot >= rowMax) {
+        diagramY += r * 2 + 46;
+        shapeSlot = 0;
+      }
+      const cx = diagramX + 40 + shapeSlot * (rtl ? -slotGap : slotGap);
+      const cy = Math.min(860, diagramY + r);
       acc.push({
         kind: "circle",
         id,
-        x1: diagramX + 40 - r,
+        x1: cx - r,
         y1: cy - r,
-        x2: diagramX + 40 + r,
+        x2: cx + r,
         y2: cy + r,
         color: resolveColor(p.color, "#dc2626"),
         width: 3,
         bornAt: penAt,
-        writeMs: 1100,
+        writeMs: 900,
         seed,
       });
-      penAt += 1150;
+      penAt += 750;
+      shapeSlot += 1;
     } else if (action === "draw_rectangle" || action === "draw_rect") {
-      const ry = Math.min(820, 240 + idx * 110);
+      const w = 130;
+      const h = 84;
+      const slotGap = w + 36;
+      const rowMax = 3;
+      if (shapeSlot >= rowMax) {
+        diagramY += h + 46;
+        shapeSlot = 0;
+      }
+      const rx = diagramX - w / 2 + shapeSlot * (rtl ? -slotGap : slotGap);
+      const ry = Math.min(860, diagramY);
       acc.push({
         kind: "rect",
         id,
-        x1: diagramX - 40,
+        x1: rx,
         y1: ry,
-        x2: diagramX + 140,
-        y2: ry + 80,
+        x2: rx + w,
+        y2: ry + h,
         color: resolveColor(p.color, "#92400e"),
         width: 3,
         bornAt: penAt,
-        writeMs: 1000,
+        writeMs: 850,
         seed,
       });
-      penAt += 1050;
+      penAt += 750;
+      shapeSlot += 1;
     }
   });
-  return { items: acc, cursorY: yCursor };
+  // Leave room below whatever this beat drew so the next beat's diagram
+  // never overlaps it — mirrors how the text column advances via yCursor.
+  if (shapeSlot > 0) diagramY += 60;
+  return { items: acc, cursorY: yCursor, diagramCursorY: Math.min(diagramY, 780) };
 }
 
 function progressOf(item: BoardItem, clock: number) {
@@ -505,45 +537,74 @@ function BoardStroke({
   const my = (item.y1 + y2) / 2 + jitter(item.seed, 2, 10);
 
   if (item.kind === "circle") {
-    const cx = (item.x1 + item.x2) / 2;
-    const cy = (item.y1 + item.y2) / 2;
+    const cx = (item.x1 + item.x2) / 2 + jitter(item.seed, 3, 1.4);
+    const cy = (item.y1 + item.y2) / 2 + jitter(item.seed, 4, 1.4);
     const r = Math.abs(item.x2 - item.x1) / 2;
     const circ = 2 * Math.PI * r;
     return (
-      <circle
-        key={item.id}
-        cx={cx}
-        cy={cy}
-        r={r}
-        fill="none"
-        stroke={item.color}
-        strokeWidth={item.width}
-        strokeLinecap="round"
-        strokeDasharray={circ}
-        strokeDashoffset={circ * (1 - p)}
-        opacity={0.4 + 0.6 * p}
-      />
+      <g key={item.id}>
+        <circle
+          cx={cx}
+          cy={cy}
+          r={r}
+          fill="none"
+          stroke={item.color}
+          strokeWidth={item.width + 2}
+          strokeLinecap="round"
+          strokeDasharray={circ}
+          strokeDashoffset={circ * (1 - p)}
+          opacity={0.14 * p}
+        />
+        <circle
+          cx={cx}
+          cy={cy}
+          r={r}
+          fill="none"
+          stroke={item.color}
+          strokeWidth={item.width}
+          strokeLinecap="round"
+          strokeDasharray={circ}
+          strokeDashoffset={circ * (1 - p)}
+          opacity={0.5 + 0.5 * p}
+        />
+      </g>
     );
   }
 
   if (item.kind === "rect") {
     const w = (item.x2 - item.x1) * p;
     const h = (item.y2 - item.y1) * p;
+    const jx = jitter(item.seed, 3, 1.2);
+    const jy = jitter(item.seed, 4, 1.2);
     return (
-      <rect
-        key={item.id}
-        x={item.x1}
-        y={item.y1}
-        width={Math.max(1, w)}
-        height={Math.max(1, h)}
-        fill="none"
-        stroke={item.color}
-        strokeWidth={item.width}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        opacity={0.45 + 0.55 * p}
-        rx={6}
-      />
+      <g key={item.id}>
+        <rect
+          x={item.x1 + jx}
+          y={item.y1 + jy}
+          width={Math.max(1, w)}
+          height={Math.max(1, h)}
+          fill="none"
+          stroke={item.color}
+          strokeWidth={item.width + 2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={0.14 * p}
+          rx={8}
+        />
+        <rect
+          x={item.x1}
+          y={item.y1}
+          width={Math.max(1, w)}
+          height={Math.max(1, h)}
+          fill="none"
+          stroke={item.color}
+          strokeWidth={item.width}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={0.5 + 0.5 * p}
+          rx={8}
+        />
+      </g>
     );
   }
 
@@ -631,6 +692,7 @@ export function LiveClassroom({
   const speechActivityRef = useRef(0);
   const lastAskWaitRef = useRef(0);
   const boardCursorRef = useRef(160);
+  const diagramCursorRef = useRef(220);
   const turnStartedRef = useRef(false);
   const pendingAskRef = useRef<string | null>(null);
   // Stays true across the whole ask→wait→answer cycle (unlike pendingAskRef,
@@ -742,9 +804,11 @@ export function LiveClassroom({
           prev,
           beat.board || [],
           rtl,
-          boardCursorRef.current
+          boardCursorRef.current,
+          diagramCursorRef.current
         );
         boardCursorRef.current = next.cursorY;
+        diagramCursorRef.current = next.diagramCursorY;
         return next.items;
       });
       voiceBusyRef.current = true;
