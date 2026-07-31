@@ -61,8 +61,7 @@ function resolveDatabaseUrl() {
     ) {
       url = direct;
       if (process.env.NODE_ENV === "production") {
-        // Informational only — not an error. Prefer session pooler for Prisma latency.
-        console.info(
+        console.warn(
           "[prisma] Using DIRECT_DATABASE_URL (session :5432) instead of transaction :6543 for lower latency. Set SUPABASE_FORCE_TRANSACTION_POOL=1 to keep :6543."
         );
       }

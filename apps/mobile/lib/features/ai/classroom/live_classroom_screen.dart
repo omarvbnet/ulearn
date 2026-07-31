@@ -354,8 +354,9 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
           continue;
         }
 
-        // Short interrupt window between teaching beats
-        final answered = await _waitForStudentWindow(2800);
+        // Beats without a check question are pure explanation — give the
+        // student a real window to jump in with a question before moving on.
+        final answered = await _waitForStudentWindow(4200);
         if (_cancelled || _ended) break;
         if (answered || _handlingTurn) {
           while (_handlingTurn && !_cancelled) {
@@ -394,9 +395,31 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e is ApiException ? e.message : 'Classroom failed';
-      });
+      // A stalled connection (timeout/socket drop) must not freeze the
+      // class forever — briefly show a status and auto-resume instead of
+      // dying silently or requiring the student to reopen the screen.
+      final transient =
+          e is SocketException ||
+          e is TimeoutException ||
+          (e is ApiException && (e.statusCode == 408 || e.statusCode == 0));
+      if (transient && !_cancelled && !_ended) {
+        setState(() {
+          _error = _lang == 'ar'
+              ? 'انقطع الاتصال، جارٍ إعادة المحاولة…'
+              : _lang == 'tr'
+                  ? 'Bağlantı kesildi, yeniden deneniyor…'
+                  : 'Connection hiccup — reconnecting…';
+        });
+        Future<void>.delayed(const Duration(seconds: 2), () {
+          if (!mounted || _cancelled || _ended) return;
+          setState(() => _error = null);
+          _runLoop();
+        });
+      } else {
+        setState(() {
+          _error = e is ApiException ? e.message : 'Classroom failed';
+        });
+      }
     } finally {
       _loopActive = false;
     }

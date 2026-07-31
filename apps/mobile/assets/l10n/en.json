@@ -821,6 +821,26 @@
       "answerFailed": "Could not post your answer",
       "reply": "Reply"
     },
+    "evaluations": {
+      "title": "My Evaluations",
+      "description": "See how your AI teacher is grading your progress on each material.",
+      "empty": "No evaluations yet",
+      "emptyHint": "Start a classroom session with the AI teacher to get your first evaluation.",
+      "loadError": "Failed to load your evaluations",
+      "understanding": "Understanding",
+      "confidence": "Confidence",
+      "progress": "Lesson {current} of {total}",
+      "strengths": "Strengths",
+      "weaknesses": "Needs practice",
+      "recommendation": "Teacher's advice",
+      "updatedAt": "Last studied {date}",
+      "continueLesson": "Continue this material",
+      "pendingEvaluation": "Your written evaluation will appear after this session ends.",
+      "gradeExcellent": "Excellent",
+      "gradeGood": "Good",
+      "gradeFair": "Fair",
+      "gradeNeedsWork": "Needs work"
+    },
     "report": {
       "submitted": "Report submitted. Our team will review it.",
       "noReports": "No reports yet",

@@ -263,6 +263,24 @@ function base64ToBlob(b64: string, mimeType: string): Blob {
   return new Blob([bytes], { type: mimeType || "audio/mpeg" });
 }
 
+/**
+ * A stalled request (weak connection, backend hiccup) with no timeout used
+ * to freeze the whole classroom forever — nothing ever rejected, so the
+ * loop just waited on a promise that never settled. Every classroom fetch
+ * must have a hard ceiling so failures can be retried/surfaced instead.
+ */
+function fetchWithTimeout(
+  input: string,
+  init?: RequestInit,
+  timeoutMs = 30000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(input, { ...init, signal: controller.signal }).finally(() =>
+    clearTimeout(timer)
+  );
+}
+
 let activeCloudAudio: HTMLAudioElement | null = null;
 
 async function speakCloud(
@@ -293,7 +311,7 @@ async function speakCloudOnce(
       }
       activeCloudAudio = null;
     }
-    const res = await fetch("/api/ai/tts", {
+    const res = await fetchWithTimeout("/api/ai/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -815,7 +833,7 @@ export function LiveClassroom({
       // Consumed for this turn — the next beat will re-arm it if another
       // check question is asked (e.g. re-asking after a wrong answer).
       awaitingCheckRef.current = false;
-      const apiP = fetch(
+      const apiP = fetchWithTimeout(
         `/api/ai/classroom/session/${sessionIdRef.current}/turn`,
         {
           method: "POST",
@@ -1038,7 +1056,9 @@ export function LiveClassroom({
           continue;
         }
 
-        const answered = await waitForStudentWindow(2800);
+        // Beats without a check question are pure explanation — give the
+        // student a real window to jump in with a question before moving on.
+        const answered = await waitForStudentWindow(4200);
         if (cancelledRef.current || ended) break;
         if (answered || handlingTurnRef.current) {
           while (handlingTurnRef.current && !cancelledRef.current) {
@@ -1048,7 +1068,7 @@ export function LiveClassroom({
         }
 
         setPresence("thinking");
-        const apiP = fetch(
+        const apiP = fetchWithTimeout(
           `/api/ai/classroom/session/${sessionIdRef.current}/beat`,
           { method: "POST" }
         ).then(async (res) => {
@@ -1072,18 +1092,40 @@ export function LiveClassroom({
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Classroom failed");
+      // A stalled/aborted request (timeout, dropped wifi) must not freeze
+      // the class forever — show a brief status and auto-resume instead of
+      // permanently stopping the loop.
+      const transient =
+        (e instanceof DOMException && e.name === "AbortError") ||
+        e instanceof TypeError;
+      if (transient && !cancelledRef.current && !ended) {
+        setError(
+          lang === "ar"
+            ? "انقطع الاتصال، جارٍ إعادة المحاولة…"
+            : lang === "tr"
+              ? "Bağlantı kesildi, yeniden deneniyor…"
+              : "Connection hiccup — reconnecting…"
+        );
+        window.setTimeout(() => {
+          if (!cancelledRef.current && !ended) {
+            setError(null);
+            void runLoop();
+          }
+        }, 2000);
+      } else {
+        setError(e instanceof Error ? e.message : "Classroom failed");
+      }
     } finally {
       loopActiveRef.current = false;
     }
-  }, [ended, playBeat, runStudentCheck, speakBridge, waitForStudentWindow]);
+  }, [ended, lang, playBeat, runStudentCheck, speakBridge, waitForStudentWindow]);
 
   useEffect(() => {
     cancelledRef.current = false;
     void (async () => {
       setPresence("thinking");
       try {
-        const res = await fetch("/api/ai/classroom/session", {
+        const res = await fetchWithTimeout("/api/ai/classroom/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { AiProviderService } from "../ai-provider.service";
-import { StudentMemoryService } from "../student-memory.service";
+import { StudentMemoryService, type MaterialEvaluation } from "../student-memory.service";
 import { resolveTeacherVoice } from "../voice-accent";
 import { sanitizeClassroomPlainText } from "../ai-teacher-prompt";
 import type { ChatMessage } from "../types";
@@ -147,10 +147,14 @@ function parseBeat(raw: string): ClassroomBeat | null {
   }
 }
 
+/** Minimum consecutive teaching beats on an idea before a check is allowed. */
+const MIN_EXPLAIN_BEATS = 2;
+
 function finalizeBeat(
   beat: ClassroomBeat,
   state: ClassroomSessionState,
-  language: string
+  language: string,
+  mode: "open" | "next" | "react" | "silence" = "next"
 ): ClassroomBeat {
   const rtl =
     language.toLowerCase().startsWith("ar") ||
@@ -232,13 +236,23 @@ function finalizeBeat(
     rtl,
     cursorY: state.boardCursorY || 160,
   });
-  const ask =
+  let ask =
     beat.askStudent ||
     (speak.length && /[?؟]$/.test(speak[speak.length - 1] || "")
       ? speak[speak.length - 1]
       : null);
+  // Don't let the teacher quiz the student until the current idea has been
+  // taught deeply enough (definition + a real-life example, across a few
+  // beats) — a fresh check on an idea introduced just now feels rushed.
+  // Re-asking a still-pending question (silence/wrong-answer flows) is
+  // always allowed since that isn't a NEW check.
+  const introducingNewCheck =
+    ask && !state.awaitingCorrectAnswer && (mode === "next" || mode === "react");
+  if (introducingNewCheck && (state.explainBeats || 0) < MIN_EXPLAIN_BEATS) {
+    ask = null;
+  }
   // Ensure check questions are spoken aloud.
-  if (ask && !speak.some((s) => s.includes(ask.slice(0, 12)))) {
+  if (ask && !speak.some((s) => s.includes(ask!.slice(0, 12)))) {
     speak.push(ask);
   }
   return {
@@ -343,10 +357,58 @@ function fallbackBeat(
   };
 }
 
+/** Deterministic evaluation text used when the AI call is unavailable/fails. */
+function fallbackEvaluationText(
+  language: string,
+  understanding: number
+): {
+  summary: string;
+  strengths: string[];
+  weaknesses: string[];
+  recommendation: string;
+} {
+  const ar =
+    language.toLowerCase().startsWith("ar") || language.toLowerCase().startsWith("ku");
+  const tr = language.toLowerCase().startsWith("tr");
+  const pct = Math.round(clamp01(understanding) * 100);
+  const good = pct >= 70;
+  return {
+    summary: ar
+      ? `أداؤك في هذه المادة ${good ? "جيد جداً" : "بحاجة إلى مزيد من التدريب"}. نسبة استيعابك التقديرية ${pct}%.`
+      : tr
+        ? `Bu materyaldeki performansın ${good ? "oldukça iyi" : "daha fazla pratiğe ihtiyaç duyuyor"}. Tahmini anlama oranın %${pct}.`
+        : `Your performance in this material is ${good ? "quite strong" : "still developing"}. Estimated understanding is ${pct}%.`,
+    strengths: good
+      ? [
+          ar
+            ? "فهم جيد للأفكار الأساسية"
+            : tr
+              ? "Ana fikirleri iyi anlama"
+              : "Good grasp of the core ideas",
+        ]
+      : [],
+    weaknesses: !good
+      ? [
+          ar
+            ? "يحتاج مراجعة إضافية للمفاهيم الأساسية"
+            : tr
+              ? "Temel kavramların tekrarına ihtiyacı var"
+              : "Needs extra review of the core concepts",
+        ]
+      : [],
+    recommendation: ar
+      ? "استمر بالتدريب مع المعلم الذكي على نفس المادة."
+      : tr
+        ? "Aynı materyalle AI öğretmenle pratik yapmaya devam et."
+        : "Keep practicing this material with the AI teacher.",
+  };
+}
+
 function mergeState(
   state: ClassroomSessionState,
   beat: ClassroomBeat,
-  studentTranscript?: string
+  studentTranscript?: string,
+  mode: "open" | "next" | "react" | "silence" = "next"
 ): ClassroomSessionState {
   const next: ClassroomSessionState = {
     ...emptyClassroomState(state.materialExcerpt),
@@ -355,6 +417,19 @@ function mergeState(
   const patch = beat.memoryPatch || {};
   if (patch.currentLessonName) next.currentLessonName = String(patch.currentLessonName);
   if (patch.currentTopic) next.currentTopic = String(patch.currentTopic);
+  // Explanation-depth tracking: a fresh check resets it, a new topic resets
+  // it, repeating a pending question (silence) leaves it untouched, and any
+  // other teaching beat that didn't ask deepens it by one.
+  const topicChanged = Boolean(
+    patch.currentTopic && patch.currentTopic !== state.currentTopic
+  );
+  if (mode === "silence") {
+    next.explainBeats = state.explainBeats || 0;
+  } else if (topicChanged || beat.askStudent) {
+    next.explainBeats = 0;
+  } else {
+    next.explainBeats = (state.explainBeats || 0) + 1;
+  }
   if (beat.lessonName) next.currentLessonName = beat.lessonName;
   if (patch.emotionalState) next.emotionalState = patch.emotionalState as ClassroomEmotion;
   else next.emotionalState = beat.emotion;
@@ -624,7 +699,7 @@ export class ClassroomSessionService {
       resumeLessonName,
     });
 
-    const nextState = mergeState(state, beat);
+    const nextState = mergeState(state, beat, undefined, "open");
     await prisma.aiClassroomSession.update({
       where: { id: row.id },
       data: {
@@ -637,6 +712,12 @@ export class ClassroomSessionService {
       void StudentMemoryService.saveMaterialProgress(input.userId, materialsKey, {
         lessonName: nextState.currentLessonName,
         lessonIndex: curriculumOutline.indexOf(nextState.currentLessonName || ""),
+        materialNames,
+        curriculumOutline,
+        understanding: nextState.understanding,
+        confidence: nextState.confidence,
+        learningSpeed: nextState.learningSpeed,
+        mistakes: nextState.mistakes,
       });
     }
 
@@ -671,7 +752,7 @@ export class ClassroomSessionService {
       mode: "next",
     });
 
-    const nextState = mergeState(state, beat);
+    const nextState = mergeState(state, beat, undefined, "next");
     const beatIndex = row.beatIndex + 1;
     const ended = Boolean(beat.sessionComplete) || beatIndex > 150;
     await prisma.aiClassroomSession.update({
@@ -689,7 +770,16 @@ export class ClassroomSessionService {
       void StudentMemoryService.saveMaterialProgress(input.userId, materialsKey, {
         lessonName: nextState.currentLessonName,
         lessonIndex: curriculumOutline.indexOf(nextState.currentLessonName),
+        materialNames: row.materialNames,
+        curriculumOutline,
+        understanding: nextState.understanding,
+        confidence: nextState.confidence,
+        learningSpeed: nextState.learningSpeed,
+        mistakes: nextState.mistakes,
       });
+    }
+    if (ended) {
+      void this.finalizeSessionMemory(input.userId, row, nextState);
     }
 
     const voice = resolveTeacherVoice({
@@ -766,7 +856,12 @@ export class ClassroomSessionService {
       studentTranscript: silence ? undefined : transcript,
     });
 
-    const nextState = mergeState(state, beat, silence ? undefined : transcript);
+    const nextState = mergeState(
+      state,
+      beat,
+      silence ? undefined : transcript,
+      silence ? "silence" : "react"
+    );
     if (silence) {
       nextState.pendingAttempts = (nextState.pendingAttempts || 0) + 1;
       nextState.awaitingCorrectAnswer = true;
@@ -794,6 +889,12 @@ export class ClassroomSessionService {
       void StudentMemoryService.saveMaterialProgress(input.userId, materialsKey, {
         lessonName: nextState.currentLessonName,
         lessonIndex: curriculumOutline.indexOf(nextState.currentLessonName),
+        materialNames: row.materialNames,
+        curriculumOutline,
+        understanding: nextState.understanding,
+        confidence: nextState.confidence,
+        learningSpeed: nextState.learningSpeed,
+        mistakes: nextState.mistakes,
       });
     }
 
@@ -824,15 +925,41 @@ export class ClassroomSessionService {
       data: { status: "ENDED", endedAt: new Date() },
     });
 
-    // Write light long-term memory signals
+    await this.finalizeSessionMemory(input.userId, row, state);
+
+    return {
+      ok: true,
+      summary:
+        state.spokenHistory.slice(-3).join(" ") ||
+        "Classroom session completed.",
+      lessonName: state.currentLessonName,
+    };
+  }
+
+  /**
+   * Writes light long-term memory signals (completed lessons, style, pace)
+   * and refreshes the AI teacher's written evaluation for this material —
+   * called whenever a session ends, whether the student closes the
+   * classroom or the AI naturally completes the material.
+   */
+  private static async finalizeSessionMemory(
+    userId: string,
+    row: {
+      documentIds: string[];
+      materialNames: string[];
+      curriculumOutline: unknown;
+      locale: string;
+    },
+    state: ClassroomSessionState
+  ) {
     try {
-      const mem = await StudentMemoryService.getOrCreate(input.userId);
+      const mem = await StudentMemoryService.getOrCreate(userId);
       const completed = [...(mem.completedLessons || [])];
       if (state.currentLessonName && !completed.includes(state.currentLessonName)) {
         completed.unshift(state.currentLessonName);
       }
       await prisma.studentAiMemory.update({
-        where: { userId: input.userId },
+        where: { userId },
         data: {
           completedLessons: completed.slice(0, 40),
           preferredStyle: state.teachingStyle || mem.preferredStyle,
@@ -843,13 +970,143 @@ export class ClassroomSessionService {
       /* ignore memory writeback failures */
     }
 
+    const materialsKey = StudentMemoryService.materialsKey(row.documentIds);
+    if (!materialsKey) return;
+    // A session that never produced a single teaching beat has nothing to
+    // evaluate yet — avoid a misleading "0% understanding" report card.
+    if (!state.currentLessonName && !state.spokenHistory.length) return;
+
+    try {
+      const curriculumOutline = asStringArray(row.curriculumOutline);
+      const evaluation = await this.generateEvaluation({
+        userId,
+        language: row.locale,
+        materialNames: row.materialNames || [],
+        curriculumOutline,
+        state,
+      });
+      await StudentMemoryService.saveMaterialEvaluation(userId, materialsKey, evaluation);
+    } catch {
+      /* evaluation is best-effort; progress tracking already succeeded */
+    }
+  }
+
+  /** Ask the AI teacher for a short, honest written evaluation of the
+   *  student's performance on this material so far. Falls back to a
+   *  deterministic evaluation if the AI call fails. */
+  private static async generateEvaluation(input: {
+    userId: string;
+    language: string;
+    materialNames: string[];
+    curriculumOutline: string[];
+    state: ClassroomSessionState;
+  }): Promise<MaterialEvaluation> {
+    const { state, curriculumOutline } = input;
+    const scorePercent = Math.round(clamp01(state.understanding) * 100);
+    const lessonIdx = state.currentLessonName
+      ? curriculumOutline.indexOf(state.currentLessonName)
+      : -1;
+    const lessonsCompleted = Math.max(0, lessonIdx);
+    const totalLessons = curriculumOutline.length || Math.max(lessonsCompleted + 1, 1);
+
+    const fallback = fallbackEvaluationText(input.language, state.understanding);
+    let summary = fallback.summary;
+    let strengths = fallback.strengths;
+    let weaknesses = fallback.weaknesses;
+    let recommendation = fallback.recommendation;
+
+    const system = [
+      "You are an experienced, warm classroom teacher writing a short private evaluation note for ONE student about ONE study material, right after a live tutoring session.",
+      'Return ONLY valid JSON (no markdown): {"summary":"...","strengths":["..."],"weaknesses":["..."],"recommendation":"..."}',
+      "summary: 2-3 warm, honest sentences written directly to the student, in their language.",
+      "strengths: 1-3 short phrases describing what they did well. Empty array if genuinely none yet.",
+      "weaknesses: 0-3 short phrases describing what still needs practice.",
+      "recommendation: ONE short, actionable next step.",
+      `Write everything in this language/locale: ${input.language}.`,
+    ].join("\n");
+
+    const userContent = [
+      input.materialNames.length ? `Material: ${input.materialNames.join(", ")}` : "",
+      curriculumOutline.length
+        ? `Progress: lesson ${lessonsCompleted + 1} of ${totalLessons} ("${
+            state.currentLessonName || curriculumOutline[0]
+          }")`
+        : "",
+      `Understanding score: ${scorePercent}%`,
+      `Confidence score: ${Math.round(clamp01(state.confidence) * 100)}%`,
+      `Learning pace: ${state.learningSpeed}`,
+      state.mistakes.length
+        ? `Mistakes noticed during the session: ${state.mistakes.slice(-6).join("; ")}`
+        : "No notable mistakes this session.",
+      state.spokenHistory.length
+        ? `Recent teaching context: ${state.spokenHistory.slice(-4).join(" ")}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    try {
+      const result = await AiProviderService.chat(
+        "TEACHING_ASSISTANT",
+        [
+          { role: "system", content: system },
+          { role: "user", content: userContent },
+        ],
+        input.userId,
+        { temperature: 0.4 }
+      );
+      const jsonText = extractJsonObject(result.text);
+      if (jsonText) {
+        const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+        const s = sanitizeClassroomPlainText(parsed.summary, 400);
+        if (s) summary = s;
+        if (Array.isArray(parsed.strengths)) {
+          const arr = parsed.strengths
+            .map((x) => sanitizeClassroomPlainText(x, 80))
+            .filter(Boolean) as string[];
+          if (arr.length) strengths = arr.slice(0, 3);
+        }
+        if (Array.isArray(parsed.weaknesses)) {
+          weaknesses = (
+            parsed.weaknesses
+              .map((x) => sanitizeClassroomPlainText(x, 80))
+              .filter(Boolean) as string[]
+          ).slice(0, 3);
+        }
+        const rec = sanitizeClassroomPlainText(parsed.recommendation, 160);
+        if (rec) recommendation = rec;
+      }
+    } catch {
+      /* keep deterministic fallback */
+    }
+
     return {
-      ok: true,
-      summary:
-        state.spokenHistory.slice(-3).join(" ") ||
-        "Classroom session completed.",
-      lessonName: state.currentLessonName,
+      scorePercent,
+      summary,
+      strengths,
+      weaknesses,
+      recommendation,
+      lessonsCompleted: lessonsCompleted + 1,
+      totalLessons,
+      generatedAt: new Date().toISOString(),
     };
+  }
+
+  /** All per-material evaluations for the student's "My Evaluations" view. */
+  static async listEvaluations(userId: string) {
+    const entries = await StudentMemoryService.listMaterialEvaluations(userId);
+    return entries.map((e) => ({
+      materialsKey: e.materialsKey,
+      materialNames: e.materialNames || [],
+      lessonName: e.lessonName || null,
+      lessonIndex: e.lessonIndex,
+      totalLessons:
+        e.evaluation?.totalLessons ?? (e.curriculumOutline || []).length ?? 0,
+      understanding: typeof e.understanding === "number" ? e.understanding : null,
+      confidence: typeof e.confidence === "number" ? e.confidence : null,
+      updatedAt: e.updatedAt,
+      evaluation: e.evaluation || null,
+    }));
   }
 
   private static async requireLiveSession(userId: string, sessionId: string) {
@@ -928,7 +1185,7 @@ export class ClassroomSessionService {
           fallbackMode,
           input.state.currentLessonName || input.curriculumOutline[0] || null
         );
-      return finalizeBeat(parsed, input.state, input.language);
+      return finalizeBeat(parsed, input.state, input.language, input.mode);
     } catch {
       return finalizeBeat(
         fallbackBeat(
@@ -937,7 +1194,8 @@ export class ClassroomSessionService {
           input.state.currentLessonName || input.curriculumOutline[0] || null
         ),
         input.state,
-        input.language
+        input.language,
+        input.mode
       );
     }
   }

@@ -20,6 +20,7 @@ export default async function StudentLayout({
       nav={[
         { href: base, label: t.nav.home },
         { href: `${base}/ai`, label: t.nav.aiAssistant },
+        { href: `${base}/ai/evaluations`, label: t.nav.evaluations },
         { href: `${base}/courses`, label: t.nav.courses },
         { href: `${base}/store`, label: t.nav.store },
         { href: `${base}/subscriptions`, label: t.nav.subscriptions },

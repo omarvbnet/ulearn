@@ -25,6 +25,7 @@
     "support": "الدعم",
     "store": "متجر الدورات",
     "aiAssistant": "المساعد الذكي",
+    "evaluations": "تقييماتي",
     "myCourses": "دوراتي",
     "courseReview": "مراجعة الدورات",
     "courseGroups": "مجموعات الدورات",
@@ -256,6 +257,25 @@
     "highestScores": "أعلى الدرجات",
     "mostActive": "الأكثر نشاطاً",
     "noRankings": "لا توجد تصنيفات بعد"
+  },
+  "evaluations": {
+    "title": "تقييماتي",
+    "description": "شاهد كيف يقيّم معلمك الذكي تقدّمك في كل مادة.",
+    "empty": "لا توجد تقييمات بعد — ابدأ جلسة فصل مباشر مع المعلم الذكي للحصول على أول تقييم لك.",
+    "loadError": "تعذّر تحميل تقييماتك",
+    "understanding": "نسبة الاستيعاب",
+    "confidence": "الثقة",
+    "progress": "الدرس {current} من {total}",
+    "strengths": "نقاط القوة",
+    "weaknesses": "بحاجة إلى تدريب",
+    "recommendation": "نصيحة المعلم",
+    "updatedAt": "آخر دراسة {date}",
+    "continueLesson": "متابعة هذه المادة",
+    "pendingEvaluation": "سيظهر تقييمك المكتوب بعد انتهاء هذه الجلسة.",
+    "gradeExcellent": "ممتاز",
+    "gradeGood": "جيد",
+    "gradeFair": "مقبول",
+    "gradeNeedsWork": "بحاجة لتحسين"
   },
   "dashboard": {
     "totalUsers": "إجمالي المستخدمين",

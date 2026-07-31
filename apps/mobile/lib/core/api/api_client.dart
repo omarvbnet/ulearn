@@ -17,6 +17,16 @@ class ApiClient {
     defaultValue: 'https://ulearn.usmart-iot.com',
   );
 
+  /// Regular JSON requests must never hang forever — a stalled connection
+  /// (weak signal, dropped socket, backend hiccup) used to freeze the whole
+  /// AI classroom because nothing timed out and the loop just waited.
+  static const Duration _requestTimeout = Duration(seconds: 30);
+
+  Never _throwTimeout() => throw ApiException(
+        'Request timed out. Please check your connection and try again.',
+        408,
+      );
+
   final _storage = const FlutterSecureStorage();
   String? _token;
 
@@ -76,11 +86,13 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl$path'),
-      headers: _headers,
-      body: jsonEncode(body),
-    );
+    final res = await http
+        .post(
+          Uri.parse('$baseUrl$path'),
+          headers: _headers,
+          body: jsonEncode(body),
+        )
+        .timeout(_requestTimeout, onTimeout: _throwTimeout);
     final data = _decodeBody(res.body, res.statusCode);
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);
@@ -89,7 +101,9 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> get(String path) async {
-    final res = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
+    final res = await http
+        .get(Uri.parse('$baseUrl$path'), headers: _headers)
+        .timeout(_requestTimeout, onTimeout: _throwTimeout);
     final data = _decodeBody(res.body, res.statusCode);
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);
@@ -98,11 +112,13 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> patch(String path, Map<String, dynamic> body) async {
-    final res = await http.patch(
-      Uri.parse('$baseUrl$path'),
-      headers: _headers,
-      body: jsonEncode(body),
-    );
+    final res = await http
+        .patch(
+          Uri.parse('$baseUrl$path'),
+          headers: _headers,
+          body: jsonEncode(body),
+        )
+        .timeout(_requestTimeout, onTimeout: _throwTimeout);
     final data = _decodeBody(res.body, res.statusCode);
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);
@@ -111,11 +127,13 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> delete(String path, [Map<String, dynamic>? body]) async {
-    final res = await http.delete(
-      Uri.parse('$baseUrl$path'),
-      headers: _headers,
-      body: body != null ? jsonEncode(body) : null,
-    );
+    final res = await http
+        .delete(
+          Uri.parse('$baseUrl$path'),
+          headers: _headers,
+          body: body != null ? jsonEncode(body) : null,
+        )
+        .timeout(_requestTimeout, onTimeout: _throwTimeout);
     final data = _decodeBody(res.body, res.statusCode);
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);

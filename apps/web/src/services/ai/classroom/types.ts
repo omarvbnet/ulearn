@@ -36,6 +36,10 @@ export type ClassroomSessionState = {
   pendingQuestion: string | null;
   pendingAnswerHint: string | null;
   pendingAttempts: number;
+  /** Consecutive teaching beats spent explaining the CURRENT idea without
+   *  asking a check question yet. Resets when a check is asked or the topic
+   *  changes — gates check questions until the idea has been taught deeply. */
+  explainBeats: number;
 };
 
 export type ClassroomBeat = {
@@ -101,5 +105,6 @@ export function emptyClassroomState(
     pendingQuestion: null,
     pendingAnswerHint: null,
     pendingAttempts: 0,
+    explainBeats: 0,
   };
 }

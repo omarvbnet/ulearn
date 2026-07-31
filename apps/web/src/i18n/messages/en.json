@@ -25,6 +25,7 @@
     "support": "Support",
     "store": "Course Store",
     "aiAssistant": "AI Tutor",
+    "evaluations": "My Evaluations",
     "myCourses": "My Courses",
     "courseReview": "Course Review",
     "courseGroups": "Course Groups",
@@ -256,6 +257,25 @@
     "highestScores": "Highest Scores",
     "mostActive": "Most Active",
     "noRankings": "No rankings yet"
+  },
+  "evaluations": {
+    "title": "My Evaluations",
+    "description": "See how your AI teacher is grading your progress on each material.",
+    "empty": "No evaluations yet — start a classroom session with the AI teacher to get your first evaluation.",
+    "loadError": "Failed to load your evaluations",
+    "understanding": "Understanding",
+    "confidence": "Confidence",
+    "progress": "Lesson {current} of {total}",
+    "strengths": "Strengths",
+    "weaknesses": "Needs practice",
+    "recommendation": "Teacher's advice",
+    "updatedAt": "Last studied {date}",
+    "continueLesson": "Continue this material",
+    "pendingEvaluation": "Your written evaluation will appear after this session ends.",
+    "gradeExcellent": "Excellent",
+    "gradeGood": "Good",
+    "gradeFair": "Fair",
+    "gradeNeedsWork": "Needs work"
   },
   "dashboard": {
     "totalUsers": "Total Users",

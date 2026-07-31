@@ -10,10 +10,34 @@ type ExamResultEntry = {
   at: string;
 };
 
-type MaterialProgressEntry = {
+export type MaterialEvaluation = {
+  /** Overall mastery 0-100, derived from the live classroom understanding score. */
+  scorePercent: number;
+  /** Short teacher-written paragraph summarizing performance on this material. */
+  summary: string;
+  strengths: string[];
+  weaknesses: string[];
+  recommendation: string;
+  lessonsCompleted: number;
+  totalLessons: number;
+  generatedAt: string;
+};
+
+export type MaterialProgressEntry = {
   lessonName: string;
   lessonIndex: number | null;
   updatedAt: string;
+  materialNames?: string[];
+  curriculumOutline?: string[];
+  understanding?: number;
+  confidence?: number;
+  learningSpeed?: string;
+  mistakes?: string[];
+  evaluation?: MaterialEvaluation | null;
+};
+
+export type MaterialEvaluationSummary = MaterialProgressEntry & {
+  materialsKey: string;
 };
 
 export class StudentMemoryService {
@@ -161,7 +185,16 @@ export class StudentMemoryService {
   static async saveMaterialProgress(
     userId: string,
     materialsKey: string,
-    progress: { lessonName?: string | null; lessonIndex?: number | null }
+    progress: {
+      lessonName?: string | null;
+      lessonIndex?: number | null;
+      materialNames?: string[];
+      curriculumOutline?: string[];
+      understanding?: number;
+      confidence?: number;
+      learningSpeed?: string;
+      mistakes?: string[];
+    }
   ) {
     if (!materialsKey || !progress.lessonName) return;
     try {
@@ -171,10 +204,28 @@ export class StudentMemoryService {
           ? { ...(mem.materialProgress as Record<string, unknown>) }
           : {}
       ) as Record<string, MaterialProgressEntry>;
+      const prev = map[materialsKey];
       map[materialsKey] = {
+        ...prev,
         lessonName: progress.lessonName,
         lessonIndex: progress.lessonIndex ?? null,
         updatedAt: new Date().toISOString(),
+        materialNames: progress.materialNames?.length
+          ? progress.materialNames
+          : prev?.materialNames,
+        curriculumOutline: progress.curriculumOutline?.length
+          ? progress.curriculumOutline
+          : prev?.curriculumOutline,
+        understanding:
+          typeof progress.understanding === "number"
+            ? progress.understanding
+            : prev?.understanding,
+        confidence:
+          typeof progress.confidence === "number"
+            ? progress.confidence
+            : prev?.confidence,
+        learningSpeed: progress.learningSpeed || prev?.learningSpeed,
+        mistakes: progress.mistakes?.length ? progress.mistakes.slice(-8) : prev?.mistakes,
       };
       await prisma.studentAiMemory.update({
         where: { userId },
@@ -183,5 +234,58 @@ export class StudentMemoryService {
     } catch {
       /* ignore progress writeback failures */
     }
+  }
+
+  /** Persist (or refresh) the AI teacher's written evaluation for a material. */
+  static async saveMaterialEvaluation(
+    userId: string,
+    materialsKey: string,
+    evaluation: MaterialEvaluation
+  ) {
+    if (!materialsKey) return;
+    try {
+      const mem = await this.getOrCreate(userId);
+      const map = (
+        mem.materialProgress && typeof mem.materialProgress === "object"
+          ? { ...(mem.materialProgress as Record<string, unknown>) }
+          : {}
+      ) as Record<string, MaterialProgressEntry>;
+      const prev = map[materialsKey];
+      map[materialsKey] = {
+        lessonName: prev?.lessonName || "",
+        lessonIndex: prev?.lessonIndex ?? null,
+        updatedAt: new Date().toISOString(),
+        materialNames: prev?.materialNames,
+        curriculumOutline: prev?.curriculumOutline,
+        understanding: prev?.understanding,
+        confidence: prev?.confidence,
+        learningSpeed: prev?.learningSpeed,
+        mistakes: prev?.mistakes,
+        evaluation,
+      };
+      await prisma.studentAiMemory.update({
+        where: { userId },
+        data: { materialProgress: map as unknown as Prisma.InputJsonValue },
+      });
+    } catch {
+      /* ignore evaluation writeback failures */
+    }
+  }
+
+  /** All per-material progress/evaluation entries for a student, newest first. */
+  static async listMaterialEvaluations(
+    userId: string
+  ): Promise<MaterialEvaluationSummary[]> {
+    const mem = await this.getOrCreate(userId);
+    const map =
+      mem.materialProgress && typeof mem.materialProgress === "object"
+        ? (mem.materialProgress as Record<string, MaterialProgressEntry>)
+        : {};
+    return Object.entries(map)
+      .map(([materialsKey, entry]) => ({ materialsKey, ...entry }))
+      .sort(
+        (a, b) =>
+          new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+      );
   }
 }

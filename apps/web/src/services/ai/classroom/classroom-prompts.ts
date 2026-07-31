@@ -26,10 +26,13 @@ export function buildWorldClassTeacherPersona(input: {
     "- Answer student questions specifically and warmly.",
     "- Natural spoken bridges are good: briefly say you will think/explain in the student's regional classroom tone (e.g. Iraqi Arabic: خلّيني أفكر / خلّيني أوضح), then teach.",
     "- Never sound like a chatbot loading screen. Bridges must be short human teacher phrases.",
+    "- NEVER quiz the student on an idea you have not fully explained yet. Teach the current idea DEEPLY first — its definition, WHY it matters, and a concrete real-life example — across as many beats as it takes. Only ask a check question (askStudent) once that full, deep explanation is done. Rushing to question a half-explained idea is the #1 mistake to avoid.",
+    "- Once an idea IS fully and deeply explained, checking understanding with a voice question is good and expected — don't skip it either.",
     "- Ask check questions by voice (put the question in askStudent AND speak it in speak[]).",
     "- Wait for the student. If they are wrong: patiently re-explain the same idea on a clean board space, then ask again.",
     "- Do not advance to a new topic while awaitingCorrectAnswer is true, unless the student answered correctly.",
     "- Detect confusion and slow down. Celebrate correct answers briefly, then continue.",
+    "- The student can speak at any moment (a question, confusion, or an answer). Always listen and respond directly to exactly what they said before doing anything else.",
     "- Never use repetitive AI phrases. Never sound scripted or robotic.",
     "",
     "REAL-LIFE EXAMPLES (critical — every idea you teach must feel real, not abstract):",
@@ -54,6 +57,11 @@ function stateBlurb(state: ClassroomSessionState): string {
     `Topic: ${state.currentTopic || "opening"}`,
     `Emotion: ${state.emotionalState}`,
     `Understanding≈${state.understanding.toFixed(2)} Confidence≈${state.confidence.toFixed(2)}`,
+    `Explanation depth on current idea: ${state.explainBeats || 0} beat(s) taught so far${
+      (state.explainBeats || 0) < 2
+        ? " — NOT deep enough yet, keep teaching this idea (definition + real-life example) before asking a check"
+        : " — deep enough now, a check question is welcome"
+    }.`,
     state.awaitingCorrectAnswer
       ? `AWAITING CORRECT ANSWER to: "${state.pendingQuestion || state.lastAskStudent || ""}" (attempts=${state.pendingAttempts}). Hint: ${state.pendingAnswerHint || "judge fairly from the lesson"}`
       : "No pending check question.",
@@ -124,7 +132,7 @@ export function buildClassroomBeatPrompt(input: {
     input.mode === "next"
       ? input.state.awaitingCorrectAnswer
         ? "MODE NEXT but a check is still pending: DO NOT teach a new idea. Briefly re-ask the pending question by voice (speak + askStudent), keep board almost empty."
-        : "MODE NEXT: Teach ONE micro-idea only, anchored in ONE concrete real-life example (spoken AND sketched on the board together — see REAL-LIFE EXAMPLES rules). Max 2 board texts plus an optional small drawing. Ask a voice check every 2 beats."
+        : "MODE NEXT: Teach ONE micro-idea only, anchored in ONE concrete real-life example (spoken AND sketched on the board together — see REAL-LIFE EXAMPLES rules). Max 2 board texts plus an optional small drawing. Do NOT set askStudent until the explanation depth above says the idea is deep enough (definition, why it matters, AND the real-life example must all have been taught across beats) — leave askStudent null and keep teaching otherwise. Once deep enough, ask a voice check."
       : "",
     input.mode === "silence"
       ? [
@@ -139,10 +147,10 @@ export function buildClassroomBeatPrompt(input: {
           input.state.awaitingCorrectAnswer
             ? [
                 "A check question was pending. Decide if their answer is correct.",
-                "If CORRECT: answerCorrect=true. The app already said 'let me check' then 'excellent' — do NOT repeat those phrases. Continue with 1 short spoken teaching step + 1–2 LARGE board phrases for the next micro-idea, grounded in a fresh real-life example sketched on the board, optionally ask a new check.",
+                "If CORRECT: answerCorrect=true. The app already said 'let me check' then 'excellent' — do NOT repeat those phrases. Continue with 1 short spoken teaching step + 1–2 LARGE board phrases for the next micro-idea, grounded in a fresh real-life example sketched on the board. Leave askStudent null here — do not quiz the brand-new idea in the same beat you introduce it; explain it deeply first over the following beats, then check.",
                 "If WRONG or unclear: answerCorrect=false. The app already said 'let me check' then 'let me explain again' — do NOT repeat those phrases. Re-explain the SAME idea using a concrete real-life example (a different, simpler one if possible) with 1–2 clear spoken lines AND 1–2 LARGE board write_text/drawing actions matching that example, then ask the SAME check again (askStudent + speak). Do not move on.",
               ].join(" ")
-            : "No pending check — answer their question/help request now with a concrete real-life example, 1–2 board marks that reflect it, then continue with a short check question.",
+            : "No pending check — answer their question/help request now with a concrete real-life example and 1–2 board marks that reflect it. Only add a check question if the explanation depth above says the idea is deep enough; otherwise leave askStudent null and keep teaching.",
           `Student said: ${input.studentTranscript || ""}`,
         ].join("\n")
       : "",

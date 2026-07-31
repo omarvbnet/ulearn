@@ -821,6 +821,26 @@
       "answerFailed": "Could not post your answer",
       "reply": "Reply"
     },
+    "evaluations": {
+      "title": "Değerlendirmelerim",
+      "description": "YZ öğretmeninin her materyaldeki ilerlemeni nasıl değerlendirdiğini gör.",
+      "empty": "Henüz değerlendirme yok",
+      "emptyHint": "İlk değerlendirmeni almak için YZ öğretmenle bir canlı ders başlat.",
+      "loadError": "Değerlendirmelerin yüklenemedi",
+      "understanding": "Anlama oranı",
+      "confidence": "Özgüven",
+      "progress": "{total} dersten {current}.",
+      "strengths": "Güçlü yönler",
+      "weaknesses": "Pratik gereken konular",
+      "recommendation": "Öğretmen tavsiyesi",
+      "updatedAt": "Son çalışma {date}",
+      "continueLesson": "Bu materyale devam et",
+      "pendingEvaluation": "Yazılı değerlendirmen bu ders sona erdikten sonra görünecek.",
+      "gradeExcellent": "Mükemmel",
+      "gradeGood": "İyi",
+      "gradeFair": "Orta",
+      "gradeNeedsWork": "Geliştirilmeli"
+    },
     "report": {
       "submitted": "Şikayet gönderildi. Ekibimiz inceleyecek.",
       "noReports": "Henüz şikayet yok",

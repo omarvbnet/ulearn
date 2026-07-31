@@ -10,6 +10,7 @@ import 'package:ulearn/core/video/media_cache_budget.dart';
 import 'package:ulearn/core/widgets/animations.dart';
 import 'package:ulearn/core/widgets/cached_image.dart';
 import 'package:ulearn/features/ai/ai_with_ulearn_entry.dart';
+import 'package:ulearn/features/evaluations/my_evaluations_screen.dart';
 import 'package:ulearn/features/profile/completed_courses_screen.dart';
 import 'package:ulearn/features/profile/favorites_screen.dart';
 import 'package:ulearn/features/profile/appearance_screen.dart';
@@ -459,6 +460,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
         if (user.role == 'STUDENT') ...[
+          const SizedBox(height: 16),
+          StaggeredItem(
+            index: 4,
+            child: Card(
+              child: ListTile(
+                leading: const Icon(Icons.assessment_outlined, color: Colors.tealAccent),
+                title: Text(l10n.t('mobile.evaluations.title')),
+                subtitle: Text(
+                  l10n.t('mobile.evaluations.description'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: AppTheme.muted, fontSize: 12),
+                ),
+                trailing: Icon(Icons.chevron_right, color: AppTheme.muted),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const MyEvaluationsScreen()),
+                ),
+              ),
+            ),
+          ),
           const SizedBox(height: 16),
           StaggeredItem(
             index: 4,
