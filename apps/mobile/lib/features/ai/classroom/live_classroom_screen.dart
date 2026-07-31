@@ -34,6 +34,10 @@ enum _Presence { thinking, speaking, listening, waiting, idle }
 class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
   static const _boardW = 1920.0;
   static const _boardH = 1080.0;
+  // Classroom session/beat/turn calls generate a fresh lesson beat with the
+  // LLM and can legitimately take longer than a plain CRUD request — the
+  // default 30s API timeout was surfacing "Request timed out" mid-lesson.
+  static const _llmTimeout = Duration(seconds: 55);
 
   final _audio = AudioPlayer();
   final _speechStt = stt.SpeechToText();
@@ -182,6 +186,36 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     super.dispose();
   }
 
+  bool _isTransientError(Object e) {
+    return e is SocketException ||
+        e is TimeoutException ||
+        (e is ApiException && (e.statusCode == 408 || e.statusCode == 0));
+  }
+
+  /// POST with one automatic retry (short backoff) on a transient failure —
+  /// a single dropped socket or slow LLM response must not strand the
+  /// student on a dead-end error when a second attempt would likely succeed.
+  Future<Map<String, dynamic>> _postWithRetry(
+    String path,
+    Map<String, dynamic> body, {
+    Duration? timeout,
+    int maxAttempts = 2,
+  }) async {
+    final api = _api;
+    if (api == null) throw ApiException('Not connected', 0);
+    Object? lastError;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await api.post(path, body, timeout: timeout);
+      } catch (e) {
+        lastError = e;
+        if (!_isTransientError(e) || attempt == maxAttempts) rethrow;
+        await Future<void>.delayed(Duration(seconds: attempt * 2));
+      }
+    }
+    throw lastError ?? ApiException('Request failed', 0);
+  }
+
   Future<void> _startSession() async {
     if (!mounted) return;
     setState(() {
@@ -193,11 +227,15 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       _api = api;
       final locale = context.localeCode.toLowerCase();
       _selectedLanguage = locale;
-      final data = await api.post('/api/ai/classroom/session', {
-        'language': locale,
-        'question': widget.question,
-        'documentIds': widget.documentIds,
-      });
+      final data = await _postWithRetry(
+        '/api/ai/classroom/session',
+        {
+          'language': locale,
+          'question': widget.question,
+          'documentIds': widget.documentIds,
+        },
+        timeout: _llmTimeout,
+      );
       if (!mounted || _cancelled) return;
       if (data['needsMaterialSelection'] == true) {
         setState(() {
@@ -285,15 +323,18 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     _turnStarted = true;
     if (mounted) setState(() => _presence = _Presence.speaking);
     try {
-      final api = _api;
-      if (api == null) return;
-      final apiFuture = api.post(
+      if (_api == null) return;
+      final apiFuture = _postWithRetry(
         '/api/ai/classroom/session/$_sessionId/turn',
         {'noAnswer': true},
+        timeout: _llmTimeout,
       );
       await _speakBridge('think');
       final data = await apiFuture;
       if (!mounted || _cancelled) return;
+      // A prior transient error banner must not linger once the classroom
+      // is clearly working again.
+      if (_error != null) setState(() => _error = null);
       final beat = data['beat'];
       if (beat is Map) {
         await _playBeat(Map<String, dynamic>.from(beat));
@@ -367,13 +408,16 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         }
 
         if (mounted) setState(() => _presence = _Presence.thinking);
-        final api = _api;
-        if (api == null) break;
-        final apiFuture =
-            api.post('/api/ai/classroom/session/$_sessionId/beat', {});
+        if (_api == null) break;
+        final apiFuture = _postWithRetry(
+          '/api/ai/classroom/session/$_sessionId/beat',
+          {},
+          timeout: _llmTimeout,
+        );
         await _speakBridge('think');
         final data = await apiFuture;
         if (!mounted || _cancelled) break;
+        if (_error != null) setState(() => _error = null);
         final session = data['session'];
         if (session is Map) {
           final state = session['state'];
@@ -559,18 +603,19 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     }
     await Future<void>.delayed(const Duration(milliseconds: 100));
     try {
-      final api = _api;
-      if (api == null) return;
+      if (_api == null) return;
       final wasCheck = _awaitingCheck;
       _awaitingCheck = false;
       final kind = wasCheck ? 'check' : 'explain';
-      final apiFuture = api.post(
+      final apiFuture = _postWithRetry(
         '/api/ai/classroom/session/$_sessionId/turn',
         {'transcript': q},
+        timeout: _llmTimeout,
       );
       await _speakBridge(kind);
       final data = await apiFuture;
       if (!mounted || _cancelled) return;
+      if (_error != null) setState(() => _error = null);
       final beat = data['beat'];
       if (beat is Map) {
         final map = Map<String, dynamic>.from(beat);
@@ -1105,13 +1150,46 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
               if (_error != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Text(
-                    _error!,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Color(0xFFFCA5A5),
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
+                  child: GestureDetector(
+                    // The session-start call can fail outright (no loop ever
+                    // starts to self-heal) — let the student tap the banner
+                    // to try again instead of being stuck on a dead screen.
+                    onTap: _sessionId == null && !_cancelled
+                        ? () {
+                            setState(() => _error = null);
+                            _startSession();
+                          }
+                        : null,
+                    child: Column(
+                      children: [
+                        Text(
+                          _error!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Color(0xFFFCA5A5),
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                          ),
+                        ),
+                        if (_sessionId == null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              _lang == 'ar'
+                                  ? 'اضغط لإعادة المحاولة'
+                                  : _lang == 'tr'
+                                      ? 'Tekrar denemek için dokunun'
+                                      : 'Tap to retry',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Color(0xFFFCA5A5),
+                                fontWeight: FontWeight.w600,
+                                fontSize: 11,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 ),

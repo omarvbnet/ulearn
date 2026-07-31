@@ -815,11 +815,13 @@ export class ClassroomSessionService {
     });
     materialNames = docs.map((d) => d.fileName).filter(Boolean);
 
-    for (const docId of allowed) {
-      const chapters = await AiExamService.listDocumentChapters(
-        input.userId,
-        docId
-      );
+    // Independent per-document lookups — run them concurrently instead of
+    // one-by-one so selecting several materials doesn't multiply session
+    // start latency (this alone can add seconds per extra document).
+    const chaptersByDoc = await Promise.all(
+      allowed.map((docId) => AiExamService.listDocumentChapters(input.userId, docId))
+    );
+    for (const chapters of chaptersByDoc) {
       for (const c of chapters) {
         if (!c.title || c.title === "__all__") continue;
         if (!curriculumOutline.includes(c.title)) curriculumOutline.push(c.title);

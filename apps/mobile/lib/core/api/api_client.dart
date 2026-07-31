@@ -85,14 +85,21 @@ class ApiClient {
     );
   }
 
-  Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body) async {
+  /// [timeout] overrides the default 30s ceiling — LLM-backed endpoints
+  /// (classroom session start/beat/turn) can legitimately take longer than
+  /// a plain CRUD call and pass a longer budget explicitly.
+  Future<Map<String, dynamic>> post(
+    String path,
+    Map<String, dynamic> body, {
+    Duration? timeout,
+  }) async {
     final res = await http
         .post(
           Uri.parse('$baseUrl$path'),
           headers: _headers,
           body: jsonEncode(body),
         )
-        .timeout(_requestTimeout, onTimeout: _throwTimeout);
+        .timeout(timeout ?? _requestTimeout, onTimeout: _throwTimeout);
     final data = _decodeBody(res.body, res.statusCode);
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);

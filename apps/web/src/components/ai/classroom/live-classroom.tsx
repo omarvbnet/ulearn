@@ -396,6 +396,48 @@ function fetchWithTimeout(
   );
 }
 
+/** Classroom session/beat/turn calls generate a fresh lesson beat with the
+ * LLM and can legitimately take longer than a plain CRUD request — the
+ * default 30s ceiling was surfacing "Request timed out" mid-lesson. */
+const LLM_TIMEOUT_MS = 55000;
+
+function isTransientFetchError(e: unknown): boolean {
+  return (e instanceof DOMException && e.name === "AbortError") || e instanceof TypeError;
+}
+
+/** POST + JSON parse with one automatic retry (short backoff) on a transient
+ * failure — a single dropped socket or slow LLM response must not strand
+ * the student on a dead-end error when a second attempt would likely succeed. */
+async function postJsonWithRetry(
+  input: string,
+  body: unknown,
+  timeoutMs = LLM_TIMEOUT_MS,
+  maxAttempts = 2
+): Promise<Record<string, unknown>> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetchWithTimeout(
+        input,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        timeoutMs
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Request failed");
+      return data;
+    } catch (e) {
+      lastError = e;
+      if (!isTransientFetchError(e) || attempt === maxAttempts) throw e;
+      await new Promise((r) => setTimeout(r, attempt * 2000));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Request failed");
+}
+
 let activeCloudAudio: HTMLAudioElement | null = null;
 
 async function speakCloud(
@@ -1037,29 +1079,21 @@ export function LiveClassroom({
       // Consumed for this turn — the next beat will re-arm it if another
       // check question is asked (e.g. re-asking after a wrong answer).
       awaitingCheckRef.current = false;
-      const apiP = fetchWithTimeout(
+      const apiP = postJsonWithRetry(
         `/api/ai/classroom/session/${sessionIdRef.current}/turn`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            opts?.noAnswer ? { noAnswer: true } : { transcript: q }
-          ),
-        }
-      ).then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Turn failed");
-        return data;
-      });
+        opts?.noAnswer ? { noAnswer: true } : { transcript: q }
+      );
 
       try {
         await speakBridge(kind);
         const data = await apiP;
+        setError(null);
         if (data.session) {
-          if (data.session.countryCode) {
-            countryCodeRef.current = data.session.countryCode;
+          const session = data.session as ClassroomSession;
+          if (session.countryCode) {
+            countryCodeRef.current = session.countryCode;
           }
-          setSession(data.session);
+          setSession(session);
         }
         const beat = data.beat as ClassroomBeat;
         // After "let me check": praise if correct, re-explain bridge if wrong.
@@ -1272,25 +1306,23 @@ export function LiveClassroom({
         }
 
         setPresence("thinking");
-        const apiP = fetchWithTimeout(
+        const apiP = postJsonWithRetry(
           `/api/ai/classroom/session/${sessionIdRef.current}/beat`,
-          { method: "POST" }
-        ).then(async (res) => {
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || "Beat failed");
-          return data;
-        });
+          {}
+        );
         await speakBridge("think");
         const data = await apiP;
-        if (data.session) {
-          if (data.session.countryCode) {
-            countryCodeRef.current = data.session.countryCode;
+        setError(null);
+        const session = data.session as ClassroomSession | undefined;
+        if (session) {
+          if (session.countryCode) {
+            countryCodeRef.current = session.countryCode;
           }
-          setSession(data.session);
+          setSession(session);
         }
         const beat = data.beat as ClassroomBeat;
         await playBeat(beat);
-        if (beat.sessionComplete || data.session?.status === "ENDED") {
+        if (beat.sessionComplete || session?.status === "ENDED") {
           setEnded(true);
           break;
         }
@@ -1324,35 +1356,34 @@ export function LiveClassroom({
     }
   }, [ended, lang, playBeat, runStudentCheck, speakBridge, waitForStudentWindow]);
 
+  const startSession = useCallback(async () => {
+    setError(null);
+    setPresence("thinking");
+    try {
+      const data = await postJsonWithRetry("/api/ai/classroom/session", {
+        language: locale,
+        question,
+        documentIds,
+      });
+      if (data.needsMaterialSelection) {
+        setError("Select materials first");
+        return;
+      }
+      const session = data.session as ClassroomSession;
+      sessionIdRef.current = session.id;
+      countryCodeRef.current = session.countryCode || null;
+      setSession(session);
+      await playBeat(data.beat as ClassroomBeat);
+      void runLoop();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locale, question, documentIds, playBeat]);
+
   useEffect(() => {
     cancelledRef.current = false;
-    void (async () => {
-      setPresence("thinking");
-      try {
-        const res = await fetchWithTimeout("/api/ai/classroom/session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            language: locale,
-            question,
-            documentIds,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Failed to start classroom");
-        if (data.needsMaterialSelection) {
-          setError("Select materials first");
-          return;
-        }
-        sessionIdRef.current = data.session.id;
-        countryCodeRef.current = data.session.countryCode || null;
-        setSession(data.session);
-        await playBeat(data.beat as ClassroomBeat);
-        void runLoop();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to start");
-      }
-    })();
+    void startSession();
     return () => {
       cancelledRef.current = true;
       stopListen();
@@ -1547,9 +1578,27 @@ export function LiveClassroom({
       </div>
 
       {error ? (
-        <p className="px-5 pb-3 text-center text-xs font-semibold text-rose-300">
+        <button
+          type="button"
+          onClick={!sessionIdRef.current ? () => void startSession() : undefined}
+          className={cn(
+            "w-full bg-transparent px-5 pb-3 text-center text-xs font-semibold text-rose-300",
+            !sessionIdRef.current
+              ? "cursor-pointer underline decoration-rose-300/60"
+              : "cursor-default"
+          )}
+        >
           {error}
-        </p>
+          {!sessionIdRef.current ? (
+            <span className="mt-1 block text-[11px] font-semibold">
+              {lang === "ar"
+                ? "اضغط لإعادة المحاولة"
+                : lang === "tr"
+                  ? "Tekrar denemek için dokunun"
+                  : "Tap to retry"}
+            </span>
+          ) : null}
+        </button>
       ) : null}
       {ended ? (
         <p className="px-5 pb-4 text-center text-sm font-semibold text-emerald-200">
