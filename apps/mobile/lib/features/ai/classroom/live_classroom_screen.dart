@@ -76,6 +76,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
   // student's reply is always bridged with "let me check" first.
   bool _awaitingCheck = false;
   String? _countryCode;
+  String? _provinceName;
   String? _accent;
   var _bridgeVariant = 0;
   String _finalBuffer = '';
@@ -255,6 +256,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       _sessionId = id;
       _speechLocale = sessionMap?['speechLocale']?.toString();
       _countryCode = sessionMap?['countryCode']?.toString();
+      _provinceName = sessionMap?['provinceName']?.toString();
       _accent = sessionMap?['accent']?.toString();
       final names = sessionMap?['materialNames'];
       final state = sessionMap?['state'];
@@ -538,10 +540,23 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
         !lines.any((l) => l.contains(ask.substring(0, math.min(10, ask.length))))) {
       lines.add(ask);
     }
-    for (final line in lines) {
+    // Pipeline TTS: start fetching line N+1's audio bytes as soon as line N
+    // begins its (mic-settle + playback) sequence instead of only starting
+    // that network call after line N finishes — removes the fetch-latency
+    // gap between spoken sentences within a beat. The delicate audio-session
+    // stop/settle/play sequencing below is left completely untouched; only
+    // the network round trip is overlapped.
+    Future<File?>? nextAudio =
+        lines.isNotEmpty ? _fetchTtsFile(lines[0], pace: pace, emotion: emotion) : null;
+    for (var i = 0; i < lines.length; i++) {
       if (_cancelled) break;
+      final line = lines[i];
       if (mounted) setState(() => _caption = line);
-      await _speakCloud(line, pace: pace, emotion: emotion);
+      final preloaded = await nextAudio;
+      nextAudio = i + 1 < lines.length
+          ? _fetchTtsFile(lines[i + 1], pace: pace, emotion: emotion)
+          : null;
+      await _speakCloud(line, pace: pace, emotion: emotion, preloaded: preloaded);
       await Future<void>.delayed(const Duration(milliseconds: 220));
     }
     _voiceBusy = false;
@@ -642,6 +657,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     String text, {
     String pace = 'normal',
     String emotion = 'calm',
+    File? preloaded,
   }) async {
     if (!mounted) return;
     await _stopListeningQuietly();
@@ -655,7 +671,12 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       setState(() => _driveTeacherWave(active: true));
     });
     try {
-      var ok = await _speakCloudOnce(text, pace: pace, emotion: emotion);
+      var ok = await _speakCloudOnce(
+        text,
+        pace: pace,
+        emotion: emotion,
+        preloaded: preloaded,
+      );
       if (!ok && mounted && !_cancelled) {
         // One retry — a single failed TTS request must not silence the class.
         await Future<void>.delayed(const Duration(milliseconds: 500));
@@ -673,18 +694,18 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     }
   }
 
-  Future<bool> _speakCloudOnce(
+  /// Fetches synthesized speech bytes and writes them to a temp file WITHOUT
+  /// touching the shared audio player — lets the caller prefetch line N+1's
+  /// audio while line N is still mic-settling/playing so there is no network
+  /// round trip sitting between two spoken sentences of the same beat.
+  Future<File?> _fetchTtsFile(
     String text, {
     String pace = 'normal',
     String emotion = 'calm',
   }) async {
-    File? tmp;
     try {
-      try {
-        await _audio.stop();
-      } catch (_) {}
       final api = _api;
-      if (api == null) return false;
+      if (api == null) return null;
       final payload = <String, dynamic>{
         'text': text,
         'language': _selectedLanguage ?? _lang,
@@ -694,8 +715,10 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       if (_countryCode != null && _countryCode!.isNotEmpty) {
         payload['country'] = _countryCode;
       }
+      if (_provinceName != null && _provinceName!.isNotEmpty) {
+        payload['province'] = _provinceName;
+      }
       final data = await api.post('/api/ai/tts', payload);
-      if (!mounted) return false;
       final nested = data['data'];
       final nestedMap =
           nested is Map ? Map<String, dynamic>.from(nested) : null;
@@ -708,14 +731,35 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
           (data['dataBase64'] ?? nestedMap?['dataBase64'])?.toString();
       final mime = (data['mimeType'] ?? nestedMap?['mimeType'])?.toString() ??
           'audio/mpeg';
-      if (b64 == null || b64.isEmpty) return false;
+      if (b64 == null || b64.isEmpty) return null;
       final bytes = Uint8List.fromList(base64Decode(b64));
       final dir = await getTemporaryDirectory();
       final ext = mime.contains('wav') ? 'wav' : 'mp3';
-      tmp = File(
+      final tmp = File(
         '${dir.path}/ulearn_live_tts_${DateTime.now().microsecondsSinceEpoch}.$ext',
       );
       await tmp.writeAsBytes(bytes, flush: true);
+      return tmp;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> _speakCloudOnce(
+    String text, {
+    String pace = 'normal',
+    String emotion = 'calm',
+    File? preloaded,
+  }) async {
+    File? tmp = preloaded;
+    try {
+      try {
+        await _audio.stop();
+      } catch (_) {}
+      if (tmp == null) {
+        tmp = await _fetchTtsFile(text, pace: pace, emotion: emotion);
+        if (tmp == null) return false;
+      }
       if (!mounted) return false;
       await _audio.setVolume(1.0);
       await _audio.setFilePath(tmp.path);

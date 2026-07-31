@@ -10,6 +10,10 @@ const schema = z.object({
   language: z.string().max(16).optional(),
   /** Optional ISO country override; otherwise loaded from the user profile */
   country: z.string().max(8).optional(),
+  /** Optional province/region override (e.g. sub-dialect accent tuning) —
+   * passing this from the client (already resolved once at session start)
+   * lets this hot-path route skip the profile DB lookup entirely. */
+  province: z.string().max(120).optional(),
   voice: z.string().max(40).optional(),
   pace: z.enum(["slow", "normal", "brisk"]).optional(),
   /** Detected/chosen emotional state for this line — shapes vocal delivery */
@@ -30,16 +34,24 @@ export async function POST(request: Request) {
   const text = parsed.data.text.trim();
   if (!text) return error("Empty text", 422, "VALIDATION");
 
-  const profile = await prisma.user.findUnique({
-    where: { id: auth.session.userId },
-    select: {
-      locale: true,
-      country: { select: { code: true } },
-      province: { select: { nameEn: true } },
-    },
-  });
+  // This endpoint fires once per spoken sentence — often several times per
+  // second across a live lesson — so skip the profile round trip entirely
+  // whenever the caller already supplied everything needed (the classroom
+  // client resolves language/country/province once at session start and
+  // passes them on every call).
+  const needsProfileLookup = !parsed.data.language || !parsed.data.country;
+  const profile = needsProfileLookup
+    ? await prisma.user.findUnique({
+        where: { id: auth.session.userId },
+        select: {
+          locale: true,
+          country: { select: { code: true } },
+          province: { select: { nameEn: true } },
+        },
+      })
+    : null;
 
-  const provinceName = profile?.province?.nameEn || null;
+  const provinceName = parsed.data.province || profile?.province?.nameEn || null;
   // Country always drives the regional accent, regardless of language.
   const countryCode =
     parsed.data.country || profile?.country?.code || null;

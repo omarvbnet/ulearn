@@ -27,6 +27,22 @@ function toConfig(p: AiProvider, apiKey: string): ProviderConfig {
   };
 }
 
+/** Provider/module-assignment lookup runs on EVERY single chat + TTS call
+ * (every live-classroom beat does at least one of each) but the underlying
+ * data — which provider is enabled/default/assigned to a module — only ever
+ * changes when an admin edits AI provider settings, which is rare. Caching
+ * the resolved chain for a few seconds turns 2-3 DB round trips per beat
+ * into zero for the overwhelming majority of requests. */
+const PROVIDER_CACHE_TTL_MS = 20_000;
+const providerChainCache = new Map<
+  string,
+  { at: number; primary: AiProvider | null; fallbacks: AiProvider[] }
+>();
+
+function invalidateProviderCache() {
+  providerChainCache.clear();
+}
+
 export class AiProviderService {
   static async list() {
     const providers = await prisma.aiProvider.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] });
@@ -55,6 +71,7 @@ export class AiProviderService {
     if (input.isDefault) {
       await prisma.aiProvider.updateMany({ data: { isDefault: false } });
     }
+    invalidateProviderCache();
     return prisma.aiProvider.create({
       data: {
         name: input.name,
@@ -106,11 +123,13 @@ export class AiProviderService {
       data.apiKeyEncrypted = encryptSecret(input.apiKey);
       delete data.apiKey;
     }
+    invalidateProviderCache();
     return prisma.aiProvider.update({ where: { id }, data });
   }
 
   static async remove(id: string) {
     await prisma.aiProvider.delete({ where: { id } });
+    invalidateProviderCache();
   }
 
   static async setModuleAssignment(moduleKey: AiModuleKey, providerId: string) {
@@ -138,6 +157,7 @@ export class AiProviderService {
         `${provider.type} (${provider.name}) cannot run chat. Use a chat provider or jina-deepsearch-v1 for AI Creative text/PPT.`
       );
     }
+    invalidateProviderCache();
     return prisma.aiModuleAssignment.upsert({
       where: { moduleKey },
       create: { moduleKey, providerId },
@@ -213,16 +233,31 @@ export class AiProviderService {
     return fallbackDefault;
   }
 
-  static async withFallback<T>(
-    moduleKey: AiModuleKey | undefined,
-    run: (provider: AiProvider, config: ProviderConfig) => Promise<T>,
-    opts?: { preferTypes?: string[]; skipTypes?: string[] }
-  ): Promise<{ result: T; provider: AiProvider }> {
+  /** Cached (~20s) primary+fallback provider chain for a module — see
+   * providerChainCache comment above for why this matters on the hot path. */
+  private static async resolveProviderChain(
+    moduleKey: AiModuleKey | undefined
+  ): Promise<{ primary: AiProvider | null; fallbacks: AiProvider[] }> {
+    const cacheKey = moduleKey || "__default__";
+    const cached = providerChainCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < PROVIDER_CACHE_TTL_MS) {
+      return { primary: cached.primary, fallbacks: cached.fallbacks };
+    }
     const primary = await this.resolveProvider(moduleKey);
     const fallbacks = await prisma.aiProvider.findMany({
       where: { status: "ENABLED", ...(primary ? { id: { not: primary.id } } : {}) },
       orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
     });
+    providerChainCache.set(cacheKey, { at: Date.now(), primary, fallbacks });
+    return { primary, fallbacks };
+  }
+
+  static async withFallback<T>(
+    moduleKey: AiModuleKey | undefined,
+    run: (provider: AiProvider, config: ProviderConfig) => Promise<T>,
+    opts?: { preferTypes?: string[]; skipTypes?: string[] }
+  ): Promise<{ result: T; provider: AiProvider }> {
+    const { primary, fallbacks } = await this.resolveProviderChain(moduleKey);
     let chain = primary ? [primary, ...fallbacks] : fallbacks;
     if (moduleKey === "EMBEDDING") {
       // Prefer embed-capable providers; never call DeepSeek/Kimi/Claude for vectors.
@@ -339,14 +374,18 @@ export class AiProviderService {
         return { result, provider };
       } catch (e) {
         lastError = e;
-        await prisma.aiUsageLog.create({
-          data: {
-            providerId: provider.id,
-            moduleKey: moduleKey ?? null,
-            success: false,
-            errorMessage: e instanceof Error ? e.message : "Provider failed",
-          },
-        });
+        // Don't let a slow failure-log write delay trying the next
+        // provider in the fallback chain.
+        void prisma.aiUsageLog
+          .create({
+            data: {
+              providerId: provider.id,
+              moduleKey: moduleKey ?? null,
+              success: false,
+              errorMessage: e instanceof Error ? e.message : "Provider failed",
+            },
+          })
+          .catch(() => {});
       }
     }
     if (moduleKey === "EMBEDDING" && !triedEmbedCapable) {
@@ -413,18 +452,85 @@ export class AiProviderService {
             skipTypes: overrides?.skipTypes,
           }
     );
-    await prisma.aiUsageLog.create({
-      data: {
-        providerId: provider.id,
-        userId,
-        moduleKey: moduleKey ?? null,
-        success: true,
-        tokensIn: result.tokensIn,
-        tokensOut: result.tokensOut,
-        latencyMs: Date.now() - started,
-        costEstimate: estimateCost(provider.type, result.tokensIn, result.tokensOut),
+    // Usage logging is pure analytics — it must never delay the response
+    // that a student is waiting on. Fire-and-forget it.
+    void prisma.aiUsageLog
+      .create({
+        data: {
+          providerId: provider.id,
+          userId,
+          moduleKey: moduleKey ?? null,
+          success: true,
+          tokensIn: result.tokensIn,
+          tokensOut: result.tokensOut,
+          latencyMs: Date.now() - started,
+          costEstimate: estimateCost(provider.type, result.tokensIn, result.tokensOut),
+        },
+      })
+      .catch(() => {});
+    return { ...result, providerId: provider.id, providerType: provider.type, providerName: provider.name };
+  }
+
+  /**
+   * Streamed chat — identical semantics/fallback chain to `chat()`, but
+   * invokes `onDelta` as text arrives so callers (e.g. the live classroom)
+   * can react before the model finishes its full turn. Providers without a
+   * `chatStream` adapter gracefully degrade to one non-streamed call whose
+   * full text is delivered through `onDelta` exactly once — callers never
+   * need a separate code path for "provider doesn't support streaming".
+   */
+  static async chatStream(
+    moduleKey: AiModuleKey | undefined,
+    messages: ChatMessage[],
+    userId: string | undefined,
+    overrides: {
+      maxTokens?: number;
+      maxTokensExact?: number;
+      temperature?: number;
+      preferTypes?: string[];
+      skipTypes?: string[];
+    } | undefined,
+    onDelta: (deltaText: string, fullText: string) => boolean | void
+  ) {
+    const started = Date.now();
+    const { result, provider } = await this.withFallback(
+      moduleKey,
+      async (p, config) => {
+        const adapter = getAdapter(p.type);
+        const next: ProviderConfig = {
+          ...config,
+          ...(overrides?.maxTokens != null
+            ? { maxTokens: Math.max(config.maxTokens, overrides.maxTokens) }
+            : {}),
+          ...(overrides?.maxTokensExact != null
+            ? { maxTokens: Math.max(64, overrides.maxTokensExact) }
+            : {}),
+          ...(overrides?.temperature != null ? { temperature: overrides.temperature } : {}),
+        };
+        if (adapter.chatStream) {
+          return adapter.chatStream(next, messages, onDelta);
+        }
+        // Graceful degradation — no streaming support on this provider.
+        const full = await adapter.chat(next, messages);
+        onDelta(full.text, full.text);
+        return full;
       },
-    });
+      { preferTypes: overrides?.preferTypes, skipTypes: overrides?.skipTypes }
+    );
+    void prisma.aiUsageLog
+      .create({
+        data: {
+          providerId: provider.id,
+          userId,
+          moduleKey: moduleKey ?? null,
+          success: true,
+          tokensIn: result.tokensIn,
+          tokensOut: result.tokensOut,
+          latencyMs: Date.now() - started,
+          costEstimate: estimateCost(provider.type, result.tokensIn, result.tokensOut),
+        },
+      })
+      .catch(() => {});
     return { ...result, providerId: provider.id, providerType: provider.type, providerName: provider.name };
   }
 
@@ -434,17 +540,19 @@ export class AiProviderService {
       const adapter = getAdapter(p.type);
       return adapter.embed(config, text);
     });
-    await prisma.aiUsageLog.create({
-      data: {
-        providerId: provider.id,
-        userId,
-        moduleKey: "EMBEDDING",
-        success: true,
-        tokensIn: result.tokensIn,
-        latencyMs: Date.now() - started,
-        costEstimate: estimateCost(provider.type, result.tokensIn, 0) * 0.1,
-      },
-    });
+    void prisma.aiUsageLog
+      .create({
+        data: {
+          providerId: provider.id,
+          userId,
+          moduleKey: "EMBEDDING",
+          success: true,
+          tokensIn: result.tokensIn,
+          latencyMs: Date.now() - started,
+          costEstimate: estimateCost(provider.type, result.tokensIn, 0) * 0.1,
+        },
+      })
+      .catch(() => {});
     return result.embedding;
   }
 
@@ -460,17 +568,19 @@ export class AiProviderService {
         return adapter.generateImage(config, input);
       }
     );
-    await prisma.aiUsageLog.create({
-      data: {
-        providerId: provider.id,
-        userId,
-        moduleKey: "AI_CREATIVE_IMAGE",
-        success: true,
-        tokensIn: result.tokensIn ?? 0,
-        latencyMs: Date.now() - started,
-        costEstimate: 0.08,
-      },
-    });
+    void prisma.aiUsageLog
+      .create({
+        data: {
+          providerId: provider.id,
+          userId,
+          moduleKey: "AI_CREATIVE_IMAGE",
+          success: true,
+          tokensIn: result.tokensIn ?? 0,
+          latencyMs: Date.now() - started,
+          costEstimate: 0.08,
+        },
+      })
+      .catch(() => {});
     return { ...result, providerId: provider.id };
   }
 
@@ -487,17 +597,19 @@ export class AiProviderService {
         return adapter.synthesizeSpeech(config, input);
       }
     );
-    await prisma.aiUsageLog.create({
-      data: {
-        providerId: provider.id,
-        userId,
-        moduleKey: "VOICE_TTS",
-        success: true,
-        tokensIn: Math.ceil((input.text?.length || 0) / 4),
-        latencyMs: Date.now() - started,
-        costEstimate: 0.015,
-      },
-    });
+    void prisma.aiUsageLog
+      .create({
+        data: {
+          providerId: provider.id,
+          userId,
+          moduleKey: "VOICE_TTS",
+          success: true,
+          tokensIn: Math.ceil((input.text?.length || 0) / 4),
+          latencyMs: Date.now() - started,
+          costEstimate: 0.015,
+        },
+      })
+      .catch(() => {});
     return { ...result, providerId: provider.id };
   }
 }

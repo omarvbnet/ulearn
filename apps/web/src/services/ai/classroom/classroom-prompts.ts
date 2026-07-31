@@ -1,5 +1,5 @@
 import { accentInstruction } from "../voice-accent";
-import type { ClassroomSessionState } from "./types";
+import type { ClassroomLessonStage, ClassroomSessionState } from "./types";
 
 export function buildWorldClassTeacherPersona(input: {
   language?: string | null;
@@ -91,6 +91,47 @@ export function buildWorldClassTeacherPersona(input: {
   ].join("\n");
 }
 
+/** Per-stage instructions for the lesson-flow state machine. Every lesson
+ *  (one curriculum item) walks through these in this exact order — the AI
+ *  is told which single stage it is in right now and exactly what it may
+ *  and may not do, so "ask understanding too early" / "quiz before
+ *  teaching" / "homework before explaining" become structurally impossible
+ *  instead of just discouraged. See advanceLessonStage in
+ *  classroom-session.service.ts for the code-side enforcement — this text
+ *  is the model-facing half of the same rule. */
+function lessonStageDirective(state: ClassroomSessionState): string {
+  const stage: ClassroomLessonStage = state.lessonStage || "greeting";
+  const quizLeft = Math.max(0, 2 - (state.quizProgress || 0));
+  const lines: Record<ClassroomLessonStage, string> = {
+    greeting:
+      "GREETING — say one warm hello, nothing else. Do NOT explain content, do NOT ask a check question or quiz, do NOT give homework, do NOT mention the lesson title yet.",
+    objective:
+      "OBJECTIVE — in one short sentence, tell the student exactly what they will learn in this lesson (write the lesson title on the board too). Do NOT start explaining the content itself yet, do NOT ask a check question, do NOT give homework.",
+    explain: [
+      "EXPLAIN — teach the lesson's core idea(s) on the whiteboard, one micro-idea per beat, across as many beats as the content genuinely needs.",
+      `You MUST teach at least one full concrete illustrated real-life example (spoken AND drawn together) before this stage can end — ${state.hasGivenExample ? "already given ✓, safe to move on once the core idea itself is also fully covered" : "NOT given yet, this is a hard requirement"}.`,
+      "Do NOT ask a formal check question yet, do NOT quiz, do NOT give homework, do NOT move to a new curriculum lesson.",
+      "Set the top-level stageComplete=true ONLY once the idea and its real-life example have both been fully and deeply taught — otherwise stageComplete=false and keep teaching.",
+    ].join(" "),
+    guided_practice:
+      "GUIDED PRACTICE — walk the student through ONE practice scenario together as a guide, step by step, narrating your own thinking (e.g. 'let's try this together: ...'). This is practice WITH them, not a test — do not fail or correct them harshly here. Do NOT ask a formal check question, do NOT quiz, do NOT give homework. Set stageComplete=true after this one walkthrough.",
+    check_understanding:
+      "CHECK UNDERSTANDING — NOW, and only now, ask exactly ONE clear check question by voice (askStudent) to verify real understanding of what was just taught. If they answer correctly: praise briefly and set stageComplete=true, answerCorrect=true. If wrong or unclear: gently correct the specific misconception, re-explain that exact point (fresh angle or simpler example), and ask again — set answerCorrect=false and stageComplete=false; never advance until they get it right.",
+    mini_quiz: `MINI QUIZ — this is a real short quiz now (not a teaching check): ask ${quizLeft > 0 ? "one" : "no more"} quiz question${quizLeft === 1 ? "" : "s"} by voice (askStudent), a little harder than the check question, to confirm mastery. Correct any mistake kindly, then continue. You need at least 2 resolved quiz rounds total before this stage ends (${state.quizProgress || 0} resolved so far). Set stageComplete=true once done.`,
+    summary:
+      "SUMMARY — briefly recap the 1-2 key points of this lesson in your own words. No new content, no questions, no quiz. Set stageComplete=true after the recap.",
+    homework:
+      "HOMEWORK (optional) — if a short self-practice task genuinely fits this lesson, set the top-level \"homework\" field to that one task (spoken briefly too); otherwise leave homework null and just say a quick encouraging line. Set stageComplete=true either way.",
+    recommend_next:
+      "RECOMMEND NEXT — congratulate the student on finishing this lesson by name, then say the name of the NEXT lesson in the curriculum (Curriculum FIRST→LAST below) you are moving to now. This is the ONLY stage allowed to set the top-level lessonName field to advance the curriculum — never do it in any other stage. If this was the LAST lesson in the curriculum outline, instead congratulate them on completing the whole material and set the top-level sessionComplete=true (leave lessonName null).",
+  };
+  return [
+    `CURRENT LESSON STAGE: ${stage.toUpperCase()} — ${state.stageBeats || 0} beat(s) spent here so far.`,
+    lines[stage],
+    "ABSOLUTE RULE — lesson stages happen in exactly this order and can never be skipped, reordered, or reversed: greeting → objective → explain → guided practice → check understanding → mini quiz → summary → homework (optional) → recommend next lesson. Only do what THIS CURRENT stage allows above; everything belonging to a later stage (asking 'what did you understand', quizzing, assigning homework, moving to a new lesson) is forbidden until its turn arrives, no matter how the conversation feels.",
+  ].join("\n");
+}
+
 function stateBlurb(state: ClassroomSessionState): string {
   const hasStarted = state.spokenHistory.length > 0;
   return [
@@ -160,7 +201,7 @@ export function buildClassroomBeatPrompt(input: {
     buildWorldClassTeacherPersona(input),
     "",
     "OUTPUT: Return ONLY valid JSON (no markdown). Be fast and direct — no chain-of-thought, no extra prose, go straight to the JSON:",
-    '{"speak":["..."],"board":[{"time":0,"action":"write_text","parameters":{"text":"...","color":"blue"}}],"askStudent":null,"waitForStudentMs":5000,"emotion":"calm","pace":"normal","lessonName":null,"answerCorrect":null,"teachingStrategy":"example","sessionComplete":false,"memoryPatch":{"currentTopic":"...","pendingAnswerHint":null}}',
+    '{"speak":["..."],"board":[{"time":0,"action":"write_text","parameters":{"text":"...","color":"blue"}}],"askStudent":null,"waitForStudentMs":5000,"emotion":"calm","pace":"normal","lessonName":null,"answerCorrect":null,"teachingStrategy":"example","stageComplete":false,"homework":null,"sessionComplete":false,"memoryPatch":{"currentTopic":"...","pendingAnswerHint":null}}',
     "",
     "speak: 1–2 short natural spoken lines. If asking a check, the question MUST be spoken here. When teaching a new idea, weave in a concrete real-life example (see REAL-LIFE EXAMPLES rules above). Never a greeting/lesson intro except the very first beat of the whole lesson.",
     "board: when teaching/explaining with a real-life example, include 1–3 draw_circle/draw_rectangle/draw_arrow/draw_line actions that sketch it (one shape per counted item — see REAL-LIFE EXAMPLES rules), plus at most 1 short write_text/underline/circle_highlight/point_at for the label or emphasis. Never send an example beat with text only and no drawing.",
@@ -169,7 +210,9 @@ export function buildClassroomBeatPrompt(input: {
     "answerCorrect: true/false/null — required in MODE REACT when a check was pending.",
     "emotion: pick honestly from calm/encouraging/curious/patient/energetic/frustrated/confused based on what you are detecting from the student, not just what you're saying — this directly changes how your voice sounds.",
     "teachingStrategy: REQUIRED every beat — one of example/story/comparison/challenge_question/socratic_question/recap (see VARY YOUR TEACHING MOVE above). Must differ from the last one shown in SESSION MEMORY.",
-    "lessonName: leave null unless you are moving to a genuinely NEW lesson in the curriculum right now (advancing past the current one) — never repeat the current lesson's name here again.",
+    "stageComplete: REQUIRED every beat — true only if you just fully satisfied everything the CURRENT LESSON STAGE below requires (see that section), false otherwise. This is a signal, not a guarantee — be honest, the system double-checks it.",
+    "homework: null unless the CURRENT LESSON STAGE below is exactly HOMEWORK — never set it in any other stage.",
+    "lessonName: leave null unless the CURRENT LESSON STAGE below is exactly RECOMMEND NEXT — that is the ONLY stage allowed to advance to a genuinely NEW lesson in the curriculum. Never set it otherwise, and never repeat the current lesson's name here.",
     "memoryPatch.currentTopic: REQUIRED every beat — short 2–6 word label of the exact micro-idea being taught right now (see NEVER REPEAT rules above).",
     "memoryPatch.pendingAnswerHint: short expected answer idea when you ask a check.",
     "",
@@ -181,12 +224,19 @@ export function buildClassroomBeatPrompt(input: {
     outline ? `Curriculum FIRST→LAST:\n${outline}` : "",
     "SESSION MEMORY:",
     stateBlurb(input.state),
-    input.state.materialExcerpt
+    "",
+    lessonStageDirective(input.state),
+    input.state.materialExcerpt &&
+    (input.mode === "open" ||
+      input.state.lessonStage === "explain" ||
+      input.state.lessonStage === "guided_practice")
       ? // Full excerpt only for MODE OPEN (planning the whole lesson from
         // scratch); later beats already have the outline + recent history in
         // context, so a shorter slice keeps every call's prompt — and thus
         // response latency — smaller without losing what's needed to teach
-        // the next micro-step.
+        // the next micro-step. Stages that aren't actively teaching new
+        // source content (check/quiz/summary/homework/recommend_next) skip
+        // the excerpt entirely — pure token-optimization latency win.
         `Curriculum excerpt:\n${input.state.materialExcerpt.slice(
           0,
           input.mode === "open" ? 3500 : 1800
@@ -195,18 +245,18 @@ export function buildClassroomBeatPrompt(input: {
     "",
     input.mode === "open"
       ? input.resumeLessonName
-        ? `MODE OPEN: Warm welcome BACK — you remember this student like a teacher who has taught them for years. Continue exactly from "${input.resumeLessonName}" — do NOT restart from lesson 1 and do NOT re-teach earlier lessons already completed (see 'Already completed' in SESSION MEMORY). Briefly remind them where they left off in one warm sentence, optionally referencing something they already mastered, write this lesson's title on the board, ask one easy check question by voice.`
-        : "MODE OPEN: Warm greeting, announce lesson 1, write one title on the board, ask one easy check question by voice."
+        ? `MODE OPEN (covers the GREETING and OBJECTIVE stages in this one beat): Warm welcome BACK — you remember this student like a teacher who has taught them for years. Continue exactly from "${input.resumeLessonName}" — do NOT restart from lesson 1 and do NOT re-teach earlier lessons already completed (see 'Already completed' in SESSION MEMORY). Briefly remind them where they left off in one warm sentence, optionally referencing something they already mastered, write this lesson's title on the board, and state today's objective in one short sentence. Do NOT ask a check question or quiz yet — teaching comes first.`
+        : "MODE OPEN (covers the GREETING and OBJECTIVE stages in this one beat): Warm greeting, announce lesson 1, write one title on the board, and state today's objective in one short sentence. Do NOT ask a check question or quiz yet — teaching comes first."
       : "",
     input.mode === "next"
       ? input.state.awaitingCorrectAnswer
-        ? "MODE NEXT but a check is still pending: DO NOT teach a new idea. Briefly re-ask the pending question by voice (speak + askStudent), keep board almost empty."
-        : "MODE NEXT: Teach ONE micro-idea only, anchored in ONE concrete real-life example (spoken AND sketched on the board together — see REAL-LIFE EXAMPLES rules). Max 2 board texts plus an optional small drawing. Do NOT set askStudent until the explanation depth above says the idea is deep enough (definition, why it matters, AND the real-life example must all have been taught across beats) — leave askStudent null and keep teaching otherwise. Once deep enough, ask a voice check."
+        ? "MODE NEXT but a check/quiz is still pending: DO NOT teach a new idea. Briefly re-ask the pending question by voice (speak + askStudent), keep board almost empty."
+        : "MODE NEXT: Follow the CURRENT LESSON STAGE instructions below exactly — that section tells you precisely what is and is not allowed this beat. Keep board actions minimal and purposeful (see BOARD CLEANLINESS)."
       : "",
     input.mode === "silence"
       ? [
           "MODE SILENCE: The student did not answer in time.",
-          "Repeat the pending check question clearly by voice (speak + askStudent). Encourage gently. Do not advance.",
+          "Repeat the pending check/quiz question clearly by voice (speak + askStudent). Encourage gently. Do not advance to a new stage.",
           `Pending question: ${input.state.pendingQuestion || input.state.lastAskStudent || ""}`,
         ].join("\n")
       : "",
@@ -215,11 +265,11 @@ export function buildClassroomBeatPrompt(input: {
           "MODE REACT: Student just spoke. Respond immediately like a human teacher.",
           input.state.awaitingCorrectAnswer
             ? [
-                "A check question was pending. Decide if their answer is correct.",
-                "If CORRECT: answerCorrect=true. The app already said 'let me check' then 'excellent' — do NOT repeat those phrases. Continue with 1 short spoken teaching step + 1–2 LARGE board phrases for the next micro-idea, grounded in a fresh real-life example sketched on the board. Leave askStudent null here — do not quiz the brand-new idea in the same beat you introduce it; explain it deeply first over the following beats, then check.",
-                "If WRONG or unclear: answerCorrect=false. The app already said 'let me check' then 'let me explain again' — do NOT repeat those phrases. Re-explain the SAME idea using a concrete real-life example (a different, simpler one if possible) with 1–2 clear spoken lines AND 1–2 LARGE board write_text/drawing actions matching that example, then ask the SAME check again (askStudent + speak). Do not move on.",
+                "A check/quiz question was pending. Decide if their answer is correct.",
+                "If CORRECT: answerCorrect=true. The app already said 'let me check' then 'excellent' — do NOT repeat those phrases. Follow the CURRENT LESSON STAGE instructions below for stageComplete and what (if anything) comes next — do not jump ahead to teaching a brand-new idea or a new stage yourself.",
+                "If WRONG or unclear: answerCorrect=false, stageComplete=false. The app already said 'let me check' then 'let me explain again' — do NOT repeat those phrases. Re-explain the SAME idea using a concrete real-life example (a different, simpler one if possible) with 1–2 clear spoken lines AND 1–2 LARGE board write_text/drawing actions matching that example, then ask the SAME check/quiz again (askStudent + speak). Do not move on.",
               ].join(" ")
-            : "No pending check — first judge what kind of thing they said. A genuine curiosity tangent or side comment (not related to the current check): engage warmly and briefly (1 short line), like a real teacher enjoying the question, then bridge back to the lesson in the SAME beat — do not just answer and immediately resume the script as if nothing happened, and do not let the tangent replace teaching for more than this one beat. A content question or confusion about what you're teaching: answer it now with a concrete real-life example and 1–2 board marks that reflect it. Either way, only add a check question if the explanation depth above says the idea is deep enough; otherwise leave askStudent null and keep teaching.",
+            : "No pending check — first judge what kind of thing they said. A genuine curiosity tangent or side comment: engage warmly and briefly (1 short line), like a real teacher enjoying the question, then bridge back to the lesson in the SAME beat — do not just answer and immediately resume the script as if nothing happened, and do not let the tangent replace teaching for more than this one beat. A content question or confusion about what you're teaching: answer it now with a concrete real-life example and 1–2 board marks that reflect it. Either way, respect the CURRENT LESSON STAGE below — never ask a formal check question or quiz, and never give homework, unless that section says this is the stage for it.",
           `Student said: ${input.studentTranscript || ""}`,
         ].join("\n")
       : "",

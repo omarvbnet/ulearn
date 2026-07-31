@@ -12,11 +12,13 @@ import type { ChatMessage } from "../types";
 import { normalizeBoardActions } from "./board-layout";
 import { buildClassroomBeatPrompt } from "./classroom-prompts";
 import { SubjectAssessmentService } from "@/services/assessment/subject-assessment.service";
+import { ClassroomPerfTimer } from "./perf-monitor";
 import {
   emptyClassroomState,
   type ClassroomBeat,
   type ClassroomBoardAction,
   type ClassroomEmotion,
+  type ClassroomLessonStage,
   type ClassroomPace,
   type ClassroomSessionPublic,
   type ClassroomSessionState,
@@ -33,6 +35,45 @@ function extractJsonObject(raw: string): string | null {
   const start = t.indexOf("{");
   const end = t.lastIndexOf("}");
   if (start >= 0 && end > start) return t.slice(start, end + 1);
+  return null;
+}
+
+/**
+ * Scans a (possibly still-growing) chunk of streamed text for the first
+ * complete, brace-balanced top-level JSON object — string/escape aware so
+ * braces inside spoken text or board action parameters never confuse the
+ * depth count. Used to cut a classroom beat's generation short the instant
+ * the model has produced a complete, parseable beat instead of always
+ * waiting for it to hit its own stop token (which often trails a little
+ * past the point the JSON is actually finished).
+ */
+function findBalancedJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
   return null;
 }
 
@@ -132,6 +173,7 @@ function parseBeat(raw: string): ClassroomBeat | null {
           ? false
           : null;
     const teachingStrategy = String(o.teachingStrategy || "").trim();
+    const homework = o.homework ? sanitizeClassroomPlainText(o.homework, 200) : null;
 
     return {
       speak: speak.slice(0, 2),
@@ -168,6 +210,8 @@ function parseBeat(raw: string): ClassroomBeat | null {
       ].includes(teachingStrategy)
         ? (teachingStrategy as ClassroomBeat["teachingStrategy"])
         : null,
+      stageComplete: Boolean(o.stageComplete),
+      homework: homework || null,
       memoryPatch:
         o.memoryPatch && typeof o.memoryPatch === "object"
           ? (o.memoryPatch as Partial<ClassroomSessionState>)
@@ -180,6 +224,50 @@ function parseBeat(raw: string): ClassroomBeat | null {
 
 /** Minimum consecutive teaching beats on an idea before a check is allowed. */
 const MIN_EXPLAIN_BEATS = 2;
+
+/** Ordered lesson-flow state machine — see ClassroomLessonStage. One full
+ *  pass teaches exactly one curriculum lesson; recommend_next loops back to
+ *  "objective" (never "greeting", which only ever happens once per session). */
+const LESSON_STAGE_ORDER: ClassroomLessonStage[] = [
+  "greeting",
+  "objective",
+  "explain",
+  "guided_practice",
+  "check_understanding",
+  "mini_quiz",
+  "summary",
+  "homework",
+  "recommend_next",
+];
+
+/** "What did you understand?" and equivalents are only legitimate once the
+ *  explain/practice stages are actually done — a hard textual safety net on
+ *  top of the stage-gated askStudent check below, since the model can phrase
+ *  a premature understanding probe as a plain spoken line instead of a
+ *  formal askStudent. */
+const PREMATURE_UNDERSTANDING_PATTERNS: RegExp[] = [
+  /what (do|did) you understand/i,
+  /do you understand (it|this|that)? ?now/i,
+  /ماذا فهمت/,
+  /شو فهمت/,
+  /شنو فهمت/,
+  /هل فهمت/,
+  /ne anladın/i,
+  /anladın mı/i,
+];
+
+function stripPrematureUnderstandingCheck(
+  speak: string[],
+  stage: ClassroomLessonStage
+): string[] {
+  if (stage === "check_understanding" || stage === "mini_quiz" || !speak.length) {
+    return speak;
+  }
+  const filtered = speak.filter(
+    (line) => !PREMATURE_UNDERSTANDING_PATTERNS.some((re) => re.test(line))
+  );
+  return filtered.length ? filtered : speak;
+}
 
 /**
  * Safety net against the model looping back to the lesson intro: drops any
@@ -221,12 +309,14 @@ function finalizeBeat(
     language.toLowerCase().startsWith("ku");
   const ar = rtl;
   const tr = language.toLowerCase().startsWith("tr");
+  const stage: ClassroomLessonStage = state.lessonStage || "greeting";
 
   let speak = stripRepeatedIntro(
     [...(beat.speak || [])].filter(Boolean),
     state,
     mode
   );
+  speak = stripPrematureUnderstandingCheck(speak, stage);
   let board = [...(beat.board || [])];
 
   const pickVariant = <T,>(arr: T[]): T =>
@@ -316,21 +406,42 @@ function finalizeBeat(
   // taught deeply enough (definition + a real-life example, across a few
   // beats) — a fresh check on an idea introduced just now feels rushed.
   // Re-asking a still-pending question (silence/wrong-answer flows) is
-  // always allowed since that isn't a NEW check.
+  // always allowed since that isn't a NEW check. ABSOLUTE RULE: a NEW check
+  // is ONLY ever legitimate in the check_understanding/mini_quiz stages —
+  // never during greeting/objective/explain/guided_practice/summary/
+  // homework/recommend_next, no matter what the model outputs. The explain-
+  // depth counter only matters for the FIRST formal check (check_understanding)
+  // — mini_quiz is reached only after that check already passed, so it needs
+  // no extra depth gate of its own (explainBeats resets every time a
+  // question is asked, so reapplying it there would wrongly block quiz Q2/Q3).
   const introducingNewCheck =
     ask && !state.awaitingCorrectAnswer && (mode === "next" || mode === "react");
-  if (introducingNewCheck && (state.explainBeats || 0) < MIN_EXPLAIN_BEATS) {
+  const stageAllowsCheck = stage === "check_understanding" || stage === "mini_quiz";
+  const notDeepEnoughYet =
+    stage === "check_understanding" && (state.explainBeats || 0) < MIN_EXPLAIN_BEATS;
+  if (introducingNewCheck && (notDeepEnoughYet || !stageAllowsCheck)) {
     ask = null;
   }
   // Ensure check questions are spoken aloud.
   if (ask && !speak.some((s) => s.includes(ask!.slice(0, 12)))) {
     speak.push(ask);
   }
+  // Homework may only ever leave this function when the lesson-flow state
+  // machine is actually in the homework stage — strip it everywhere else
+  // regardless of what the model produced.
+  const homework = stage === "homework" ? beat.homework || null : null;
+  // Curriculum can only advance to a genuinely new lesson from the
+  // recommend_next stage (or the very first MODE OPEN beat of the whole
+  // session) — this is what stops the AI from randomly jumping topics.
+  const lessonName =
+    mode === "open" || stage === "recommend_next" ? beat.lessonName || null : null;
   return {
     ...beat,
     speak: speak.slice(0, 3),
     board: layout.actions,
     askStudent: ask,
+    homework,
+    lessonName,
     waitForStudentMs: ask
       ? Math.max(5000, beat.waitForStudentMs || 5500)
       : beat.waitForStudentMs || 0,
@@ -506,6 +617,118 @@ function fallbackEvaluationText(
   };
 }
 
+/** Deterministically advances the lesson-flow state machine one step at a
+ *  time. beat.stageComplete is only ever a SIGNAL — every transition also
+ *  requires concrete, code-verified evidence (an example was actually
+ *  taught, an answer was actually correct, N quiz rounds actually
+ *  resolved), so the AI can never talk its way past a stage it hasn't
+ *  really finished. A per-stage beat-count safety valve prevents an
+ *  honest-mistake stall (model forgets stageComplete) from freezing the
+ *  lesson forever, EXCEPT for check_understanding, which must keep
+ *  re-explaining and re-asking for as long as the student keeps missing it
+ *  — that persistence is intentional, not a bug. */
+function advanceLessonStage(
+  state: ClassroomSessionState,
+  beat: ClassroomBeat,
+  mode: "open" | "next" | "react" | "silence"
+): Pick<
+  ClassroomSessionState,
+  "lessonStage" | "stageBeats" | "hasGivenExample" | "quizProgress" | "homeworkGiven"
+> {
+  const stage: ClassroomLessonStage = state.lessonStage || "greeting";
+  const stageBeats = (state.stageBeats || 0) + 1;
+  let hasGivenExample = Boolean(state.hasGivenExample);
+  let quizProgress = state.quizProgress || 0;
+  let homeworkGiven = Boolean(state.homeworkGiven);
+
+  if (
+    stage === "explain" &&
+    (beat.teachingStrategy === "example" ||
+      beat.board.some((b) => /^draw_/.test(String(b.action || ""))))
+  ) {
+    hasGivenExample = true;
+  }
+  if (
+    stage === "mini_quiz" &&
+    mode === "react" &&
+    (beat.answerCorrect === true || beat.answerCorrect === false)
+  ) {
+    quizProgress += 1;
+  }
+  if (stage === "homework" && beat.homework) {
+    homeworkGiven = true;
+  }
+
+  // The very first beat of the whole session (MODE OPEN) covers BOTH
+  // greeting and objective at once — jump straight into teaching content.
+  if (mode === "open") {
+    return {
+      lessonStage: "explain",
+      stageBeats: 0,
+      hasGivenExample: false,
+      quizProgress: 0,
+      homeworkGiven: false,
+    };
+  }
+
+  const claimsComplete = Boolean(beat.stageComplete);
+  let shouldAdvance: boolean;
+  switch (stage) {
+    case "greeting":
+    case "objective":
+    case "summary":
+    case "homework":
+    case "recommend_next":
+      // Single-beat stages — always move on immediately.
+      shouldAdvance = true;
+      break;
+    case "explain":
+      shouldAdvance =
+        (claimsComplete && hasGivenExample && stageBeats >= MIN_EXPLAIN_BEATS) ||
+        stageBeats >= 10;
+      break;
+    case "guided_practice":
+      shouldAdvance = (claimsComplete && stageBeats >= 1) || stageBeats >= 3;
+      break;
+    case "check_understanding":
+      // Only a genuinely CORRECT resolved answer ends the check — a wrong
+      // answer must stay here and keep re-explaining/re-asking, exactly
+      // the "correct misconceptions" loop the student needs.
+      shouldAdvance = mode === "react" && beat.answerCorrect === true;
+      break;
+    case "mini_quiz":
+      shouldAdvance = quizProgress >= 2 || stageBeats >= 6;
+      break;
+    default:
+      shouldAdvance = true;
+  }
+
+  if (!shouldAdvance) {
+    return { lessonStage: stage, stageBeats, hasGivenExample, quizProgress, homeworkGiven };
+  }
+
+  if (stage === "recommend_next") {
+    // Loop into the next curriculum lesson — "greeting" only ever happens
+    // once for the whole session, so a new lesson starts at "objective".
+    return {
+      lessonStage: "objective",
+      stageBeats: 0,
+      hasGivenExample: false,
+      quizProgress: 0,
+      homeworkGiven: false,
+    };
+  }
+  const idx = LESSON_STAGE_ORDER.indexOf(stage);
+  const nextStage = LESSON_STAGE_ORDER[idx + 1] || "explain";
+  return {
+    lessonStage: nextStage,
+    stageBeats: 0,
+    hasGivenExample,
+    quizProgress,
+    homeworkGiven,
+  };
+}
+
 function mergeState(
   state: ClassroomSessionState,
   beat: ClassroomBeat,
@@ -630,6 +853,7 @@ function mergeState(
       -16
     );
   }
+  Object.assign(next, advanceLessonStage(state, beat, mode));
   return next;
 }
 
@@ -733,28 +957,39 @@ export class ClassroomSessionService {
     question?: string | null;
     conversationId?: string | null;
   }) {
-    await (
-      await import("../creative/entitlement.service")
-    ).AiCreativeEntitlementService.assertCanRun(input.userId);
-
-    const profile = await prisma.user.findUnique({
-      where: { id: input.userId },
-      select: {
-        fullLegalName: true,
-        locale: true,
-        role: true,
-        country: { select: { code: true, nameEn: true } },
-        province: { select: { nameEn: true, nameAr: true, nameTr: true } },
-        studentProfile: {
-          select: {
-            grade: true,
-            educationalStage: {
-              select: { nameEn: true, nameAr: true, nameTr: true },
+    const perf = new ClassroomPerfTimer("session.start");
+    // Independent lookups (billing entitlement, profile, long-term memory)
+    // hit different tables with no data dependency on each other — run them
+    // concurrently instead of one after another to shave real latency off
+    // every session start.
+    const [, profile, memory] = await Promise.all([
+      (async () => {
+        const { AiCreativeEntitlementService } = await import(
+          "../creative/entitlement.service"
+        );
+        return AiCreativeEntitlementService.assertCanRun(input.userId);
+      })(),
+      prisma.user.findUnique({
+        where: { id: input.userId },
+        select: {
+          fullLegalName: true,
+          locale: true,
+          role: true,
+          country: { select: { code: true, nameEn: true } },
+          province: { select: { nameEn: true, nameAr: true, nameTr: true } },
+          studentProfile: {
+            select: {
+              grade: true,
+              educationalStage: {
+                select: { nameEn: true, nameAr: true, nameTr: true },
+              },
             },
           },
         },
-      },
-    });
+      }),
+      StudentMemoryService.getOrCreate(input.userId),
+    ]);
+    perf.mark("profileAndMemory");
 
     // The language the student explicitly selected to start this classroom
     // (e.g. the site's current UI locale) always wins over their stored
@@ -772,7 +1007,6 @@ export class ClassroomSessionService {
       provinceName,
     });
 
-    const memory = await StudentMemoryService.getOrCreate(input.userId);
     const studentBlurb = [
       profile?.fullLegalName ? `Student: ${profile.fullLegalName}` : null,
       profile?.studentProfile?.educationalStage?.nameEn
@@ -809,31 +1043,32 @@ export class ClassroomSessionService {
       documentIds
     );
     documentIds = allowed;
-    const docs = await prisma.kbDocument.findMany({
-      where: { id: { in: allowed }, deletedAt: null },
-      select: { id: true, fileName: true },
-    });
-    materialNames = docs.map((d) => d.fileName).filter(Boolean);
+    perf.mark("assertDocuments");
 
-    // Independent per-document lookups — run them concurrently instead of
-    // one-by-one so selecting several materials doesn't multiply session
-    // start latency (this alone can add seconds per extra document).
-    const chaptersByDoc = await Promise.all(
-      allowed.map((docId) => AiExamService.listDocumentChapters(input.userId, docId))
-    );
+    // These three only depend on `allowed`, not on each other — loading the
+    // full material text (usually the slowest of the three) no longer has
+    // to wait for the doc-name lookup and chapter listing to finish first.
+    const [docs, chaptersByDoc, material] = await Promise.all([
+      prisma.kbDocument.findMany({
+        where: { id: { in: allowed }, deletedAt: null },
+        select: { id: true, fileName: true },
+      }),
+      Promise.all(allowed.map((docId) => AiExamService.listDocumentChapters(input.userId, docId))),
+      ExamGeneratorService.loadMaterialForDocuments({
+        userId: input.userId,
+        documentIds: allowed,
+        chapterHeading: "__all__",
+        question: input.question || undefined,
+      }),
+    ]);
+    perf.mark("loadMaterial");
+    materialNames = docs.map((d) => d.fileName).filter(Boolean);
     for (const chapters of chaptersByDoc) {
       for (const c of chapters) {
         if (!c.title || c.title === "__all__") continue;
         if (!curriculumOutline.includes(c.title)) curriculumOutline.push(c.title);
       }
     }
-
-    const material = await ExamGeneratorService.loadMaterialForDocuments({
-      userId: input.userId,
-      documentIds: allowed,
-      chapterHeading: "__all__",
-      question: input.question || undefined,
-    });
     materialExcerpt = (material?.text?.trim() || "").slice(0, 6500);
 
     const state = emptyClassroomState(materialExcerpt);
@@ -845,38 +1080,49 @@ export class ClassroomSessionService {
     let completedLessonsForMaterial: string[] = [];
     let conceptMastery: ConceptMasteryMap = {};
     if (materialsKey) {
-      conceptMastery = await StudentMemoryService.getConceptMastery(
-        input.userId,
-        materialsKey
-      );
-    }
-    if (!restart && materialsKey) {
-      const progress = await StudentMemoryService.getMaterialProgress(
-        input.userId,
-        materialsKey
-      );
-      completedLessonsForMaterial = progress?.completedLessons || [];
-      // Structured learning path: continue from the first curriculum lesson
-      // NOT yet completed, never a random jump. Fall back to the last known
-      // in-progress lesson (e.g. the whole outline is done — reinforcement
-      // territory) when every lesson has already been completed.
-      const nextUncompleted = curriculumOutline.find(
-        (l) => !completedLessonsForMaterial.includes(l)
-      );
-      const candidate = nextUncompleted || progress?.lessonName || null;
-      if (
-        candidate &&
-        curriculumOutline.includes(candidate) &&
-        candidate !== curriculumOutline[0]
-      ) {
-        state.currentLessonName = candidate;
-        resumeLessonName = candidate;
+      // Independent long-term-memory reads — no need to serialize them.
+      const [mastery, progress] = await Promise.all([
+        StudentMemoryService.getConceptMastery(input.userId, materialsKey),
+        restart
+          ? Promise.resolve(null)
+          : StudentMemoryService.getMaterialProgress(input.userId, materialsKey),
+      ]);
+      conceptMastery = mastery;
+      if (!restart && progress) {
+        completedLessonsForMaterial = progress.completedLessons || [];
+        // Structured learning path: continue from the first curriculum lesson
+        // NOT yet completed, never a random jump. Fall back to the last known
+        // in-progress lesson (e.g. the whole outline is done — reinforcement
+        // territory) when every lesson has already been completed.
+        const nextUncompleted = curriculumOutline.find(
+          (l) => !completedLessonsForMaterial.includes(l)
+        );
+        const candidate = nextUncompleted || progress.lessonName || null;
+        if (
+          candidate &&
+          curriculumOutline.includes(candidate) &&
+          candidate !== curriculumOutline[0]
+        ) {
+          state.currentLessonName = candidate;
+          resumeLessonName = candidate;
+        }
       }
     }
+    perf.mark("longTermMemory");
     state.materialCompletedLessons = completedLessonsForMaterial;
     const { mastered: masteredTopics, weak: weakTopics } = masteryLists(conceptMastery);
     state.masteredTopics = masteredTopics;
     state.weakTopics = weakTopics;
+    // Cache the slow-changing part of long-term memory once, here, so every
+    // later beat/turn in THIS session skips the StudentAiMemory round trip
+    // entirely (materialCompletedLessons/masteredTopics/weakTopics above are
+    // already tracked live in `state` and need no re-fetch either).
+    state.studentPreferenceBlurb = [
+      StudentMemoryService.toPromptBlurb(memory),
+      memory.preferredLanguage ? `Usually taught in: ${memory.preferredLanguage}` : "",
+    ]
+      .filter(Boolean)
+      .join("; ");
 
     const memoryBlurb = [
       StudentMemoryService.toPromptBlurb(memory),
@@ -891,37 +1137,44 @@ export class ClassroomSessionService {
       .filter(Boolean)
       .join("; ");
     void StudentMemoryService.savePreferredLanguage(input.userId, language);
+    perf.mark("prepareState");
 
-    const row = await prisma.aiClassroomSession.create({
-      data: {
+    // The row insert and the first LLM beat are independent — the beat only
+    // needs `state`/language/etc, not the row's id — so run the DB write and
+    // the (usually much slower) DeepSeek call at the same time instead of
+    // making the model wait behind a database round trip.
+    const [row, beat] = await Promise.all([
+      prisma.aiClassroomSession.create({
+        data: {
+          userId: input.userId,
+          conversationId: input.conversationId || null,
+          documentIds,
+          status: "LIVE",
+          locale: language.slice(0, 8),
+          countryCode,
+          provinceName,
+          materialNames,
+          curriculumOutline: curriculumOutline as Prisma.InputJsonValue,
+          state: state as unknown as Prisma.InputJsonValue,
+          beatIndex: 0,
+        },
+      }),
+      this.generateBeat({
         userId: input.userId,
-        conversationId: input.conversationId || null,
-        documentIds,
-        status: "LIVE",
-        locale: language.slice(0, 8),
+        language,
         countryCode,
         provinceName,
         materialNames,
-        curriculumOutline: curriculumOutline as Prisma.InputJsonValue,
-        state: state as unknown as Prisma.InputJsonValue,
-        beatIndex: 0,
-      },
-    });
-
-    const beat = await this.generateBeat({
-      userId: input.userId,
-      language,
-      countryCode,
-      provinceName,
-      materialNames,
-      curriculumOutline,
-      studentBlurb,
-      memoryBlurb,
-      state,
-      mode: "open",
-      question: input.question || undefined,
-      resumeLessonName,
-    });
+        curriculumOutline,
+        studentBlurb,
+        memoryBlurb,
+        state,
+        mode: "open",
+        question: input.question || undefined,
+        resumeLessonName,
+      }),
+    ]);
+    perf.mark("createRowAndLlm");
 
     const nextState = mergeState(state, beat, undefined, "open");
     applyLongTermMemory(input.userId, materialsKey, state, beat, nextState);
@@ -945,6 +1198,8 @@ export class ClassroomSessionService {
         mistakes: nextState.mistakes,
       });
     }
+    perf.mark("persist");
+    perf.finish({ sessionId: row.id, docs: documentIds.length });
 
     return {
       needsMaterialSelection: false as const,
@@ -958,25 +1213,18 @@ export class ClassroomSessionService {
   }
 
   static async nextBeat(input: { userId: string; sessionId: string }) {
+    const perf = new ClassroomPerfTimer("beat");
     const row = await this.requireLiveSession(input.userId, input.sessionId);
+    perf.mark("loadSession");
     const state = row.state as unknown as ClassroomSessionState;
     const curriculumOutline = asStringArray(row.curriculumOutline);
-    const memory = await StudentMemoryService.getOrCreate(input.userId);
     const materialsKey = StudentMemoryService.materialsKey(row.documentIds);
-    // Mastered/weak/completed lists live inside `state` itself (loaded once
-    // at session open and carried forward beat to beat) so this never needs
-    // an extra round trip to stay fast.
-    const memoryBlurb = [
-      StudentMemoryService.toPromptBlurb(memory),
-      StudentMemoryService.classroomMemoryBlurb({
-        preferredLanguage: memory.preferredLanguage,
-        preferredStyle: memory.preferredStyle,
-        learningSpeed: memory.learningSpeed,
-        completedLessons: state.materialCompletedLessons || [],
-      }),
-    ]
-      .filter(Boolean)
-      .join("; ");
+    // No StudentAiMemory round trip here — the static preference blurb was
+    // cached on `state` once at session open, and the mastered/weak/
+    // completed lists live inside `state` itself too, carried forward beat
+    // to beat. This is what keeps every beat's latency down to just the LLM
+    // call instead of an extra DB read on top of it.
+    const memoryBlurb = state.studentPreferenceBlurb || "";
 
     const beat = await this.generateBeat({
       userId: input.userId,
@@ -990,6 +1238,7 @@ export class ClassroomSessionService {
       state,
       mode: "next",
     });
+    perf.mark("llm");
 
     const nextState = mergeState(state, beat, undefined, "next");
     applyLongTermMemory(input.userId, materialsKey, state, beat, nextState);
@@ -1004,6 +1253,8 @@ export class ClassroomSessionService {
         endedAt: ended ? new Date() : null,
       },
     });
+    perf.mark("persist");
+    perf.finish({ sessionId: input.sessionId, stage: nextState.lessonStage });
 
     if (materialsKey && nextState.currentLessonName) {
       void StudentMemoryService.saveMaterialProgress(input.userId, materialsKey, {
@@ -1053,6 +1304,7 @@ export class ClassroomSessionService {
       confusion?: number;
     };
   }) {
+    const perf = new ClassroomPerfTimer("turn");
     const silence = Boolean(input.noAnswer);
     const transcript =
       sanitizeClassroomPlainText(input.transcript || "", 280) ||
@@ -1060,6 +1312,7 @@ export class ClassroomSessionService {
     if (!silence && !transcript) throw new Error("Empty transcript");
 
     const row = await this.requireLiveSession(input.userId, input.sessionId);
+    perf.mark("loadSession");
     const state = {
       ...emptyClassroomState(""),
       ...(row.state as unknown as ClassroomSessionState),
@@ -1079,18 +1332,8 @@ export class ClassroomSessionService {
     }
 
     const curriculumOutline = asStringArray(row.curriculumOutline);
-    const memory = await StudentMemoryService.getOrCreate(input.userId);
-    const memoryBlurb = [
-      StudentMemoryService.toPromptBlurb(memory),
-      StudentMemoryService.classroomMemoryBlurb({
-        preferredLanguage: memory.preferredLanguage,
-        preferredStyle: memory.preferredStyle,
-        learningSpeed: memory.learningSpeed,
-        completedLessons: state.materialCompletedLessons || [],
-      }),
-    ]
-      .filter(Boolean)
-      .join("; ");
+    // Cached at session open — see nextBeat() for why this avoids a DB read.
+    const memoryBlurb = state.studentPreferenceBlurb || "";
 
     const beat = await this.generateBeat({
       userId: input.userId,
@@ -1105,6 +1348,7 @@ export class ClassroomSessionService {
       mode: silence ? "silence" : "react",
       studentTranscript: silence ? undefined : transcript,
     });
+    perf.mark("llm");
 
     const nextState = mergeState(
       state,
@@ -1130,6 +1374,12 @@ export class ClassroomSessionService {
         beatIndex,
         status: "LIVE",
       },
+    });
+    perf.mark("persist");
+    perf.finish({
+      sessionId: input.sessionId,
+      mode: silence ? "silence" : "react",
+      stage: nextState.lessonStage,
     });
 
     if (!silence && transcript) {
@@ -1436,20 +1686,60 @@ export class ClassroomSessionService {
     // than a slightly slower real response. Keep a real but generous ceiling.
     const maxTokensExact = input.mode === "open" ? 1000 : 900;
 
-    const runOnce = (tokenCap: number) =>
-      AiProviderService.chat("TEACHING_ASSISTANT", messages, input.userId, {
-        temperature,
-        maxTokensExact: tokenCap,
-      });
+    // CRITICAL ARCHITECTURE RULE: never block the classroom waiting on a
+    // slow/stuck model. Every attempt streams (falling back gracefully to a
+    // single non-streamed call when the resolved provider doesn't support
+    // streaming — see AiProviderService.chatStream), is cut short the
+    // instant a complete JSON beat appears in the stream (skips whatever
+    // trailing tokens the model would otherwise still emit before its own
+    // stop token), and is bounded by a hard deadline so a stalled provider
+    // degrades to the graceful fallback beat below instead of freezing the
+    // lesson for tens of seconds.
+    const runOnce = async (tokenCap: number, deadlineMs: number): Promise<string | null> => {
+      const cutoff = { timedOut: false, captured: null as string | null };
+      const timer = setTimeout(() => {
+        cutoff.timedOut = true;
+      }, deadlineMs);
+      try {
+        const result = await AiProviderService.chatStream(
+          "TEACHING_ASSISTANT",
+          messages,
+          input.userId,
+          { temperature, maxTokensExact: tokenCap },
+          (_delta, fullText) => {
+            if (cutoff.timedOut) return true;
+            const obj = findBalancedJsonObject(fullText);
+            if (obj) {
+              cutoff.captured = obj;
+              return true;
+            }
+            return false;
+          }
+        );
+        return cutoff.captured || result.text;
+      } catch {
+        return cutoff.captured;
+      } finally {
+        clearTimeout(timer);
+      }
+    };
 
     try {
-      let result = await runOnce(maxTokensExact);
-      let parsed = parseBeat(result.text);
+      // Deadlines here are a safety net, not the expected case — real beats
+      // (1-2 short sentences + a few board actions) normally finish in a
+      // couple of seconds and early-stop the instant the JSON closes, well
+      // under these ceilings. They exist so a genuinely stuck/overloaded
+      // provider degrades to a graceful fallback beat in ~12-27s instead of
+      // silently riding all the way to the client's 55s timeout and
+      // surfacing a hard "Request timed out" error.
+      let text = await runOnce(maxTokensExact, 12000);
+      let parsed = text ? parseBeat(text) : null;
       if (!parsed) {
-        // Likely truncated output — retry once with a much bigger ceiling
-        // before falling back to a generic line.
-        result = await runOnce(maxTokensExact * 2);
-        parsed = parseBeat(result.text);
+        // Likely truncated output (or the deadline fired) — retry once with
+        // a much bigger ceiling and a slightly longer deadline before
+        // gracefully falling back to a generic line.
+        text = await runOnce(maxTokensExact * 2, 15000);
+        parsed = text ? parseBeat(text) : null;
       }
       const beat =
         parsed ||

@@ -235,6 +235,116 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
     };
   }
 
+  /**
+   * Streamed variant of chat() using OpenAI-compatible SSE (`stream: true`).
+   * Used by the live classroom so voice/board work can react to output the
+   * instant a complete JSON beat is present in the stream, instead of always
+   * waiting for the model to hit its own stop token (which can trail on for
+   * a noticeable moment after the meaningful content is already done).
+   */
+  async chatStream(
+    config: ProviderConfig,
+    messages: ChatMessage[],
+    onDelta: (deltaText: string, fullText: string) => boolean | void
+  ): Promise<ChatResult> {
+    const url = `${this.base(config)}/chat/completions`;
+    const mapped = messages.map((m) => {
+      const images = (m.parts || []).filter((p) => p.type === "image");
+      if (!images.length) return { role: m.role, content: m.content };
+      return {
+        role: m.role,
+        content: [
+          ...(m.content?.trim() ? [{ type: "text" as const, text: m.content }] : []),
+          ...images.map((img) => ({
+            type: "image_url" as const,
+            image_url: {
+              url: `data:${img.mimeType};base64,${img.dataBase64.replace(/^data:[^;]+;base64,/, "")}`,
+            },
+          })),
+        ],
+      };
+    });
+    const body: Record<string, unknown> = {
+      model: config.model || defaultChatModel(this.type),
+      messages: mapped,
+      temperature: config.temperature,
+      max_tokens: config.maxTokens,
+      stream: true,
+    };
+    if (config.topP != null) body.top_p = config.topP;
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), config.timeoutMs);
+    let full = "";
+    let tokensIn = 0;
+    let tokensOut = 0;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      if (!res.ok || !res.body) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(
+          `${this.type} chat stream failed (${res.status})${errText ? `: ${errText.slice(0, 200)}` : ""}`
+        );
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let stopped = false;
+      while (!stopped) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, nl).trim();
+          buffer = buffer.slice(nl + 1);
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (payload === "[DONE]") {
+            stopped = true;
+            break;
+          }
+          try {
+            const json = JSON.parse(payload) as {
+              choices?: { delta?: { content?: string } }[];
+              usage?: { prompt_tokens?: number; completion_tokens?: number };
+            };
+            const delta = json.choices?.[0]?.delta?.content || "";
+            if (delta) {
+              full += delta;
+              if (onDelta(delta, full)) {
+                stopped = true;
+                break;
+              }
+            }
+            if (json.usage) {
+              tokensIn = json.usage.prompt_tokens ?? tokensIn;
+              tokensOut = json.usage.completion_tokens ?? tokensOut;
+            }
+          } catch {
+            /* ignore a malformed/partial SSE fragment — next chunk usually completes it */
+          }
+        }
+      }
+      try {
+        await reader.cancel();
+      } catch {
+        /* ignore */
+      }
+      return { text: full, tokensIn, tokensOut: tokensOut || Math.ceil(full.length / 4) };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async embed(config: ProviderConfig, text: string): Promise<EmbeddingResult> {
     if (!providerSupportsEmbeddings(this.type)) {
       throw new Error(

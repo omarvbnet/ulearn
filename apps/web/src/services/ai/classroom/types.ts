@@ -27,6 +27,23 @@ export type ClassroomTeachingStrategy =
   | "socratic_question"
   | "recap";
 
+/** Deterministic lesson-flow state machine (see LESSON STAGE DIRECTIVE in
+ *  classroom-prompts). Scoped to ONE curriculum lesson at a time — a full
+ *  pass through every stage teaches exactly one lesson, then recommend_next
+ *  loops back to "objective" for the next lesson. The AI is NEVER allowed
+ *  to skip, reorder, or self-report its way past a stage; every transition
+ *  is verified with concrete evidence in advanceLessonStage. */
+export type ClassroomLessonStage =
+  | "greeting"
+  | "objective"
+  | "explain"
+  | "guided_practice"
+  | "check_understanding"
+  | "mini_quiz"
+  | "summary"
+  | "homework"
+  | "recommend_next";
+
 export type ClassroomBoardAction = {
   time?: number;
   action: string;
@@ -80,6 +97,30 @@ export type ClassroomSessionState = {
   materialCompletedLessons: string[];
   masteredTopics: string[];
   weakTopics: string[];
+  /** Static student-preference blurb (weak/strong subjects, preferred style,
+   *  learning pace, preferred language) computed ONCE from StudentAiMemory
+   *  when the session opens and cached here for the rest of the session —
+   *  this data barely changes mid-session, so every later beat/turn reuses
+   *  it instead of re-querying the database every single beat. */
+  studentPreferenceBlurb: string;
+  /** Where the lesson-flow state machine currently is — see
+   *  ClassroomLessonStage. Advanced deterministically, never trusted from
+   *  the model's self-report alone. */
+  lessonStage: ClassroomLessonStage;
+  /** Beats spent in the CURRENT lessonStage — resets to 0 on every
+   *  transition. Used both as a minimum-depth gate and a stall safety net. */
+  stageBeats: number;
+  /** Whether a concrete illustrated real-life example has actually been
+   *  taught during the CURRENT lesson's explain stage — a hard requirement
+   *  before advancing to guided practice, verified from the beat itself
+   *  (teachingStrategy or an actual drawing), not the model's word alone. */
+  hasGivenExample: boolean;
+  /** Resolved mini-quiz rounds (asked AND answered, right or wrong so far)
+   *  during the CURRENT lesson's mini_quiz stage — needs >=2 before summary. */
+  quizProgress: number;
+  /** Whether homework was actually assigned (not just visited) for the
+   *  CURRENT lesson — informational only; assigning homework stays optional. */
+  homeworkGiven: boolean;
 };
 
 export type ClassroomBeat = {
@@ -95,6 +136,13 @@ export type ClassroomBeat = {
   answerCorrect?: boolean | null;
   /** The pedagogical move used this beat (example/story/comparison/…). */
   teachingStrategy?: ClassroomTeachingStrategy | null;
+  /** The model's own claim that everything the CURRENT lessonStage requires
+   *  is done and it's ready to advance — a signal only, never trusted
+   *  blindly (see advanceLessonStage in classroom-session.service). */
+  stageComplete?: boolean;
+  /** Optional homework task text. Only ever honored when lessonStage is
+   *  "homework" — stripped everywhere else regardless of what the model sends. */
+  homework?: string | null;
   memoryPatch?: Partial<ClassroomSessionState>;
 };
 
@@ -155,5 +203,11 @@ export function emptyClassroomState(
     materialCompletedLessons: [],
     masteredTopics: [],
     weakTopics: [],
+    studentPreferenceBlurb: "",
+    lessonStage: "greeting",
+    stageBeats: 0,
+    hasGivenExample: false,
+    quizProgress: 0,
+    homeworkGiven: false,
   };
 }

@@ -440,36 +440,20 @@ async function postJsonWithRetry(
 
 let activeCloudAudio: HTMLAudioElement | null = null;
 
-async function speakCloud(
+/** Fetches synthesized speech for one line and returns a playable blob URL
+ * WITHOUT playing it — this is the piece that lets the caller start
+ * fetching line N+1's audio while line N is still speaking, so there is no
+ * "fetch gap" of dead air between spoken sentences (VOICE PIPELINE: speech
+ * generation should feel like a continuous stream, not fetch→play→fetch→play). */
+async function fetchTtsAudioUrl(
   text: string,
   language: string,
   pace: string,
   country?: string | null,
-  emotion?: string | null
-): Promise<boolean> {
-  const ok = await speakCloudOnce(text, language, pace, country, emotion);
-  if (ok) return true;
-  // One retry — a single failed TTS request must not silence the teacher.
-  await new Promise((r) => setTimeout(r, 450));
-  return speakCloudOnce(text, language, pace, country, emotion);
-}
-
-async function speakCloudOnce(
-  text: string,
-  language: string,
-  pace: string,
-  country?: string | null,
-  emotion?: string | null
-): Promise<boolean> {
+  emotion?: string | null,
+  province?: string | null
+): Promise<string | null> {
   try {
-    if (activeCloudAudio) {
-      try {
-        activeCloudAudio.pause();
-      } catch {
-        /* ignore */
-      }
-      activeCloudAudio = null;
-    }
     const res = await fetchWithTimeout("/api/ai/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -479,33 +463,65 @@ async function speakCloudOnce(
         pace,
         ...(country ? { country } : {}),
         ...(emotion ? { emotion } : {}),
+        // Passing province (resolved once at session start) lets the TTS
+        // route skip its per-call profile DB lookup — see route comment.
+        ...(province ? { province } : {}),
       }),
     });
-    if (!res.ok) return false;
+    if (!res.ok) return null;
     const data = await res.json();
     const b64 = data.dataBase64 || data.data?.dataBase64;
     const mime = data.mimeType || data.data?.mimeType || "audio/mpeg";
-    if (!b64) return false;
-    const url = URL.createObjectURL(base64ToBlob(b64, mime));
-    await new Promise<void>((resolve) => {
-      const audio = new Audio(url);
-      activeCloudAudio = audio;
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        if (activeCloudAudio === audio) activeCloudAudio = null;
-        resolve();
-      };
-      audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        if (activeCloudAudio === audio) activeCloudAudio = null;
-        resolve();
-      };
-      void audio.play().catch(() => resolve());
-    });
-    return true;
+    if (!b64) return null;
+    return URL.createObjectURL(base64ToBlob(b64, mime));
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Plays an already-fetched blob URL and resolves once playback ends. */
+function playAudioUrl(url: string): Promise<void> {
+  if (activeCloudAudio) {
+    try {
+      activeCloudAudio.pause();
+    } catch {
+      /* ignore */
+    }
+    activeCloudAudio = null;
+  }
+  return new Promise<void>((resolve) => {
+    const audio = new Audio(url);
+    activeCloudAudio = audio;
+    const done = () => {
+      URL.revokeObjectURL(url);
+      if (activeCloudAudio === audio) activeCloudAudio = null;
+      resolve();
+    };
+    audio.onended = done;
+    audio.onerror = done;
+    void audio.play().catch(done);
+  });
+}
+
+async function speakCloud(
+  text: string,
+  language: string,
+  pace: string,
+  country?: string | null,
+  emotion?: string | null,
+  province?: string | null
+): Promise<boolean> {
+  const url = await fetchTtsAudioUrl(text, language, pace, country, emotion, province);
+  if (url) {
+    await playAudioUrl(url);
+    return true;
+  }
+  // One retry — a single failed TTS request must not silence the teacher.
+  await new Promise((r) => setTimeout(r, 450));
+  const retryUrl = await fetchTtsAudioUrl(text, language, pace, country, emotion, province);
+  if (!retryUrl) return false;
+  await playAudioUrl(retryUrl);
+  return true;
 }
 
 function stopCloudAudio() {
@@ -866,6 +882,7 @@ export function LiveClassroom({
   const handlingTurnRef = useRef(false);
   const sessionIdRef = useRef<string | null>(null);
   const countryCodeRef = useRef<string | null>(null);
+  const provinceNameRef = useRef<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const fatalSpeechErrorRef = useRef(false);
   const loopActiveRef = useRef(false);
@@ -909,7 +926,8 @@ export function LiveClassroom({
         locale,
         "normal",
         session?.countryCode ?? countryCodeRef.current,
-        bridgeKindToEmotion(kind)
+        bridgeKindToEmotion(kind),
+        session?.provinceName ?? provinceNameRef.current
       );
       window.clearInterval(wave);
       voiceBusyRef.current = false;
@@ -999,8 +1017,25 @@ export function LiveClassroom({
       if (ask && !lines.some((l) => l.includes(ask.slice(0, 10)))) {
         lines.push(ask);
       }
-      for (const line of lines) {
+      // Pipeline TTS: kick off the fetch for line N+1 as soon as line N
+      // starts playing instead of waiting for it to finish first — this
+      // removes the "dead air" fetch gap between sentences so the teacher's
+      // voice feels like one continuous stream instead of fetch→play→fetch.
+      const pace = beat.pace || "normal";
+      const emotion = beat.emotion || "calm";
+      let nextAudio: Promise<string | null> | null = lines.length
+        ? fetchTtsAudioUrl(
+            lines[0],
+            locale,
+            pace,
+            countryCodeRef.current,
+            emotion,
+            provinceNameRef.current
+          )
+        : null;
+      for (let i = 0; i < lines.length; i++) {
         if (cancelledRef.current) break;
+        const line = lines[i];
         setCaption(line);
         const wave = window.setInterval(() => {
           const t = Date.now() / 100;
@@ -1008,13 +1043,34 @@ export function LiveClassroom({
             prev.map((_, i) => 0.12 + (Math.sin(t + i * 0.45) * 0.5 + 0.5) * 0.75)
           );
         }, 50);
-        await speakCloud(
-          line,
-          locale,
-          beat.pace || "normal",
-          countryCodeRef.current,
-          beat.emotion || "calm"
-        );
+        const url = await nextAudio;
+        // Start fetching the line after next while this one plays.
+        nextAudio =
+          i + 1 < lines.length
+            ? fetchTtsAudioUrl(
+                lines[i + 1],
+                locale,
+                pace,
+                countryCodeRef.current,
+                emotion,
+                provinceNameRef.current
+              )
+            : null;
+        if (url) {
+          await playAudioUrl(url);
+        } else {
+          // Fetch failed — one retry so a single dropped TTS call doesn't
+          // silence the teacher mid-beat.
+          const retryUrl = await fetchTtsAudioUrl(
+            line,
+            locale,
+            pace,
+            countryCodeRef.current,
+            emotion,
+            provinceNameRef.current
+          );
+          if (retryUrl) await playAudioUrl(retryUrl);
+        }
         window.clearInterval(wave);
         await new Promise((r) => setTimeout(r, 280));
       }
@@ -1093,6 +1149,7 @@ export function LiveClassroom({
           if (session.countryCode) {
             countryCodeRef.current = session.countryCode;
           }
+          provinceNameRef.current = session.provinceName ?? provinceNameRef.current;
           setSession(session);
         }
         const beat = data.beat as ClassroomBeat;
@@ -1265,7 +1322,14 @@ export function LiveClassroom({
         setPresence("speaking");
         setCaption(question);
         voiceBusyRef.current = true;
-        await speakCloud(question, locale, "slow", countryCodeRef.current, "patient");
+        await speakCloud(
+          question,
+          locale,
+          "slow",
+          countryCodeRef.current,
+          "patient",
+          provinceNameRef.current
+        );
         voiceBusyRef.current = false;
         await new Promise((r) => setTimeout(r, 350));
       }
@@ -1318,6 +1382,7 @@ export function LiveClassroom({
           if (session.countryCode) {
             countryCodeRef.current = session.countryCode;
           }
+          provinceNameRef.current = session.provinceName ?? provinceNameRef.current;
           setSession(session);
         }
         const beat = data.beat as ClassroomBeat;
@@ -1372,6 +1437,7 @@ export function LiveClassroom({
       const session = data.session as ClassroomSession;
       sessionIdRef.current = session.id;
       countryCodeRef.current = session.countryCode || null;
+      provinceNameRef.current = session.provinceName || null;
       setSession(session);
       await playBeat(data.beat as ClassroomBeat);
       void runLoop();

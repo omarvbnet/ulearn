@@ -77,6 +77,20 @@ export type ProviderConfig = {
 export interface AiProviderAdapter {
   readonly type: string;
   chat(config: ProviderConfig, messages: ChatMessage[]): Promise<ChatResult>;
+  /**
+   * Optional: streamed chat completion. `onDelta` is invoked with each new
+   * text chunk and the full accumulated text so far; returning `true` from
+   * `onDelta` tells the adapter to stop reading and return immediately
+   * (used to cut off generation the instant a caller already has everything
+   * it needs, instead of waiting for the model's own stop token). Adapters
+   * that don't implement this are used exactly as before — callers must
+   * gracefully fall back to plain `chat()` when this is undefined.
+   */
+  chatStream?(
+    config: ProviderConfig,
+    messages: ChatMessage[],
+    onDelta: (deltaText: string, fullText: string) => boolean | void
+  ): Promise<ChatResult>;
   embed(config: ProviderConfig, text: string): Promise<EmbeddingResult>;
   testConnection(config: ProviderConfig): Promise<{ ok: boolean; message: string }>;
   /** Optional: raster image generation / editing (e.g. FLUX.1 Kontext). */
