@@ -1282,6 +1282,7 @@ export function LiveClassroom({
       let finalBeat: ClassroomBeat | null = null;
       let firstSpeak = true;
       let bridgeAbort = false;
+      let boardAppliedLive = false;
 
       const drainSpeak = async () => {
         if (drainRunning) return;
@@ -1387,6 +1388,7 @@ export function LiveClassroom({
                   : "Drawing on the board…"
             );
           }
+          boardAppliedLive = true;
           applyBoardLive(actions);
         },
         onSpeak: (ev) => {
@@ -1428,6 +1430,15 @@ export function LiveClassroom({
         else if (completed.answerCorrect === false) await speakBridge("reexplain");
       }
 
+      // Board often arrives only in the complete event (or JSON fallback) —
+      // never drop it. Previously leftover speak replayed with board:[] and
+      // students saw a blank board while the teacher only asked questions.
+      const completedBoard = Array.isArray(completed.board) ? completed.board : [];
+      if (!boardAppliedLive && completedBoard.length) {
+        applyBoardLive(completedBoard);
+        boardAppliedLive = true;
+      }
+
       // Speak any lines that somehow weren't streamed as partials.
       const leftover = (completed.speak || [])
         .map((s: string, i: number) => ({ text: cleanText(s) || s, i }))
@@ -1437,7 +1448,7 @@ export function LiveClassroom({
         await playBeat({
           ...completed,
           speak: leftover.map((x: { text: string }) => x.text),
-          board: [], // already applied live
+          board: boardAppliedLive ? [] : completedBoard,
         });
       } else if (
         ask &&
@@ -1446,7 +1457,11 @@ export function LiveClassroom({
         )
       ) {
         // Check question wasn't in speak[] — voice it now.
-        await playBeat({ ...completed, speak: [ask], board: [] });
+        await playBeat({
+          ...completed,
+          speak: [ask],
+          board: boardAppliedLive ? [] : completedBoard,
+        });
       } else {
         if (ask) {
           lastAskWaitRef.current = Math.max(

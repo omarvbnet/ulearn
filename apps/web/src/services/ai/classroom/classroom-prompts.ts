@@ -229,9 +229,9 @@ export function buildClassroomBeatPrompt(input: {
     '{"speak":["..."],"board":[{"time":0,"action":"write_text","parameters":{"text":"...","color":"blue"}}],"askStudent":null,"waitForStudentMs":5000,"emotion":"calm","pace":"normal","lessonName":null,"answerCorrect":null,"teachingStrategy":"example","stageComplete":false,"homework":null,"sessionComplete":false,"memoryPatch":{"currentTopic":"...","currentWhiteboardStep":null,"currentExample":null,"currentPractice":null,"currentQuiz":null,"currentSummary":null,"pendingAnswerHint":null}}',
     "",
     "speak: 1–2 short natural spoken lines. If asking a check, the question MUST be spoken here. When teaching a new idea, weave in a concrete real-life example (see REAL-LIFE EXAMPLES rules above). Never a greeting/lesson intro except the very first beat of the whole lesson.",
-    "board: when teaching/explaining with a real-life example, include 1–3 draw_circle/draw_rectangle/draw_arrow/draw_line actions that sketch it (one shape per counted item — see REAL-LIFE EXAMPLES rules), plus at most 1 short write_text/underline/circle_highlight/point_at for the label or emphasis. Never send an example beat with text only and no drawing.",
+    "board: REQUIRED in OBJECTIVE / EXPLAIN / GUIDED PRACTICE — never leave the board empty while teaching. When teaching with a real-life example, include 1–3 draw_circle/draw_rectangle/draw_arrow/draw_line actions that sketch it (one shape per counted item — see REAL-LIFE EXAMPLES rules), plus at most 1 short write_text/underline/circle_highlight/point_at for the label or emphasis. Never send an example beat with text only and no drawing.",
     "BOARD TEXT SIZE: keep phrases VERY short (max ~5 words). The system renders LARGE readable chalk (size ~52–60). Prefer short titles students can read from a phone.",
-    "askStudent: the exact check question to wait for (or null). When set, waitForStudentMs must be 5000–8000.",
+    "askStudent: null in EVERY stage except CHECK UNDERSTANDING and MINI QUIZ. In those two stages only, set the exact check/quiz question to wait for. When set, waitForStudentMs must be 5000–8000. Never ask 'are you ready?', 'what did you understand?', or any other question outside those stages — teach and write on the board instead.",
     "answerCorrect: true/false/null — required in MODE REACT when a check was pending.",
     "emotion: pick honestly from calm/encouraging/curious/patient/energetic/frustrated/confused based on what you are detecting from the student, not just what you're saying — this directly changes how your voice sounds.",
     "teachingStrategy: REQUIRED every beat — one of example/story/comparison/challenge_question/socratic_question/recap (see VARY YOUR TEACHING MOVE above). Must differ from the last one shown in SESSION MEMORY.",
@@ -275,16 +275,21 @@ export function buildClassroomBeatPrompt(input: {
         : "MODE OPEN (covers the GREETING and OBJECTIVE stages in this one beat): Warm greeting, announce lesson 1, write one title on the board, and state today's objective in one short sentence. Do NOT ask a check question or quiz yet — teaching comes first."
       : "",
     input.mode === "next"
-      ? input.state.awaitingCorrectAnswer
+      ? input.state.awaitingCorrectAnswer &&
+        (input.state.lessonStage === "check_understanding" ||
+          input.state.lessonStage === "mini_quiz")
         ? "MODE NEXT but a check/quiz is still pending: DO NOT teach a new idea. Briefly re-ask the pending question by voice (speak + askStudent), keep board almost empty."
-        : "MODE NEXT: Follow the CURRENT LESSON STAGE instructions below exactly — that section tells you precisely what is and is not allowed this beat. Keep board actions minimal and purposeful (see BOARD CLEANLINESS)."
+        : "MODE NEXT: Follow the CURRENT LESSON STAGE instructions below exactly — teach/explain with speak + board ink. askStudent MUST be null unless CURRENT LESSON STAGE is CHECK UNDERSTANDING or MINI QUIZ. Keep board actions minimal and purposeful (see BOARD CLEANLINESS)."
       : "",
     input.mode === "silence"
-      ? [
-          "MODE SILENCE: The student did not answer in time.",
-          "Repeat the pending check/quiz question clearly by voice (speak + askStudent). Encourage gently. Do not advance to a new stage.",
-          `Pending question: ${input.state.pendingQuestion || input.state.lastAskStudent || ""}`,
-        ].join("\n")
+      ? input.state.lessonStage === "check_understanding" ||
+        input.state.lessonStage === "mini_quiz"
+        ? [
+            "MODE SILENCE: The student did not answer in time.",
+            "Repeat the pending check/quiz question clearly by voice (speak + askStudent). Encourage gently. Do not advance to a new stage.",
+            `Pending question: ${input.state.pendingQuestion || input.state.lastAskStudent || ""}`,
+          ].join("\n")
+        : "MODE SILENCE during teaching: the student did not speak — that is fine. Continue teaching the CURRENT LESSON STAGE with speak + board. askStudent MUST be null."
       : "",
     input.mode === "react"
       ? [

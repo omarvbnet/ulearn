@@ -214,12 +214,21 @@ const LESSON_STAGE_ORDER: ClassroomLessonStage[] = [
 const PREMATURE_UNDERSTANDING_PATTERNS: RegExp[] = [
   /what (do|did) you understand/i,
   /do you understand (it|this|that)? ?now/i,
+  /are you ready/i,
+  /ready to (start|begin|learn)/i,
+  /does that (make sense|feel clear)/i,
+  /any questions\b/i,
   /ماذا فهمت/,
   /شو فهمت/,
   /شنو فهمت/,
   /هل فهمت/,
+  /هل أنت جاهز/,
+  /جاهز\s*[؟?]/,
+  /واضح\s*(لك)?\s*[؟?]/,
   /ne anladın/i,
   /anladın mı/i,
+  /hazır mısın/i,
+  /anlaştı mı/i,
 ];
 
 function stripPrematureUnderstandingCheck(
@@ -359,39 +368,83 @@ function finalizeBeat(
     }
   }
 
-  const layout = normalizeBoardActions(board, {
-    rtl,
-    cursorY: state.boardCursorY || 160,
-  });
   let ask =
     beat.askStudent ||
     (speak.length && /[?؟]$/.test(speak[speak.length - 1] || "")
       ? speak[speak.length - 1]
       : null);
-  // Don't let the teacher quiz the student until the current idea has been
-  // taught deeply enough (definition + a real-life example, across a few
-  // beats) — a fresh check on an idea introduced just now feels rushed.
-  // Re-asking a still-pending question (silence/wrong-answer flows) is
-  // always allowed since that isn't a NEW check. ABSOLUTE RULE: a NEW check
-  // is ONLY ever legitimate in the check_understanding/mini_quiz stages —
-  // never during greeting/objective/explain/guided_practice/summary/
-  // homework/recommend_next, no matter what the model outputs. The explain-
-  // depth counter only matters for the FIRST formal check (check_understanding)
-  // — mini_quiz is reached only after that check already passed, so it needs
-  // no extra depth gate of its own (explainBeats resets every time a
-  // question is asked, so reapplying it there would wrongly block quiz Q2/Q3).
-  const introducingNewCheck =
-    ask && !state.awaitingCorrectAnswer && (mode === "next" || mode === "react");
+  // ABSOLUTE RULE: checks/quizzes are ONLY allowed in check_understanding /
+  // mini_quiz. MODE OPEN, explain, practice, summary, etc. must NEVER leave
+  // an askStudent hanging — a single premature "Are you ready?" / "What did
+  // you understand?" used to set awaitingCorrectAnswer and trap the whole
+  // session in question-only mode with an empty board.
   const stageAllowsCheck = stage === "check_understanding" || stage === "mini_quiz";
   const notDeepEnoughYet =
     stage === "check_understanding" && (state.explainBeats || 0) < MIN_EXPLAIN_BEATS;
-  if (introducingNewCheck && (notDeepEnoughYet || !stageAllowsCheck)) {
+  // Strip asks outside check/quiz stages (and always on MODE OPEN). Inside
+  // check_understanding, the depth gate only blocks a brand-new check — a
+  // still-pending re-ask after a wrong/silent answer must stay alive.
+  if (!stageAllowsCheck || mode === "open") {
+    ask = null;
+  } else if (notDeepEnoughYet && !state.awaitingCorrectAnswer) {
     ask = null;
   }
   // Ensure check questions are spoken aloud.
   if (ask && !speak.some((s) => s.includes(ask!.slice(0, 12)))) {
     speak.push(ask);
   }
+  // If the model only produced a forbidden question, replace with a real
+  // teaching line so the student never hears a blank/question-only beat
+  // during explain/practice.
+  if (
+    !speak.length &&
+    !ask &&
+    (mode === "open" ||
+      stage === "explain" ||
+      stage === "guided_practice" ||
+      stage === "objective")
+  ) {
+    const topic =
+      sanitizeClassroomPlainText(state.currentTopic || state.currentLessonName, 40) ||
+      (ar ? "الفكرة" : tr ? "fikir" : "this idea");
+    speak = [
+      ar
+        ? `دعنا نشرح ${topic} على السبورة بوضوح.`
+        : tr
+          ? `${topic} konusunu tahtada net şekilde anlatalım.`
+          : `Let’s explain ${topic} clearly on the board.`,
+    ];
+  }
+  // During teaching stages, always put something readable on the board if
+  // the model forgot — an empty board + spoken question is exactly the
+  // broken experience students reported.
+  const hasBoardInk = board.some((b) =>
+    /write_text|draw_|underline|circle_highlight|point_at/i.test(String(b.action || ""))
+  );
+  if (
+    !hasBoardInk &&
+    (mode === "open" ||
+      stage === "explain" ||
+      stage === "guided_practice" ||
+      stage === "objective")
+  ) {
+    const title =
+      sanitizeClassroomPlainText(beat.lessonName || state.currentLessonName, 28) ||
+      sanitizeClassroomPlainText(state.currentTopic, 28) ||
+      (ar ? "درس اليوم" : tr ? "Bugünün dersi" : "Today's lesson");
+    board = [
+      {
+        time: 0,
+        action: "write_text",
+        parameters: { text: title, color: "blue", size: 58 },
+      },
+      ...board,
+    ];
+  }
+  const layout = normalizeBoardActions(board, {
+    rtl,
+    cursorY: state.boardCursorY || 160,
+  });
   // Homework may only ever leave this function when the lesson-flow state
   // machine is actually in the homework stage — strip it everywhere else
   // regardless of what the model produced.
@@ -459,13 +512,32 @@ function fallbackBeat(
   language: string,
   mode: "open" | "next" | "react",
   lessonName?: string | null,
-  variant = 0
+  variant = 0,
+  stage?: ClassroomLessonStage | null
 ): ClassroomBeat {
   const ar = language === "ar" || language === "ku";
   const tr = language === "tr";
   const key: "ar" | "tr" | "en" = ar ? "ar" : tr ? "tr" : "en";
   const i = Math.abs(variant) % 3;
-  if (mode === "react") {
+  const title =
+    (lessonName || "").trim() || (ar ? "درس اليوم" : tr ? "Bugünün dersi" : "Today's lesson");
+  const boardTitle = {
+    time: 0,
+    action: "write_text",
+    parameters: {
+      text: title.slice(0, 28),
+      x: ar ? 1780 : 120,
+      y: 120,
+      size: 58,
+      color: "blue",
+      align: ar ? "right" : "left",
+    },
+  };
+  // Only fall back to a spoken check when we are genuinely in a check/quiz
+  // stage — otherwise a generic "are you ready?" used to freeze the lesson.
+  const stageAllowsAsk =
+    stage === "check_understanding" || stage === "mini_quiz";
+  if (mode === "react" && stageAllowsAsk) {
     return {
       speak: [FALLBACK_REACT_LINES[key][i]!],
       board: [
@@ -490,6 +562,47 @@ function fallbackBeat(
       lessonName: lessonName || null,
     };
   }
+  if (mode === "react") {
+    // Student spoke during teaching — explain on the board, do NOT quiz.
+    return {
+      speak: [
+        ar
+          ? "فكرة ممتازة. دعنا نوضحها على السبورة ثم نكمل الشرح."
+          : tr
+            ? "Güzel nokta. Tahtada açıklayalım, sonra anlatmaya devam edelim."
+            : "Good point. Let’s clarify it on the board, then keep explaining.",
+      ],
+      board: [boardTitle],
+      askStudent: null,
+      waitForStudentMs: 0,
+      emotion: "encouraging",
+      pace: "normal",
+      teachingStrategy: "example",
+      lessonName: null,
+      stageComplete: false,
+    };
+  }
+  if (mode === "next") {
+    return {
+      speak: [
+        ar
+          ? `لنشرح ${title} على السبورة خطوة بخطوة.`
+          : tr
+            ? `${title} konusunu tahtada adım adım anlatalım.`
+            : `Let’s explain ${title} on the board, step by step.`,
+      ],
+      board: [boardTitle],
+      askStudent: null,
+      waitForStudentMs: 0,
+      emotion: "calm",
+      pace: "normal",
+      teachingStrategy: "example",
+      lessonName: null,
+      stageComplete: false,
+      memoryPatch: { currentTopic: title.slice(0, 40) },
+    };
+  }
+  // MODE OPEN — welcome + objective on the board. Never ask a question here.
   return {
     speak: [
       ar
@@ -497,42 +610,21 @@ function fallbackBeat(
         : tr
           ? "Merhaba. Dersimize sakin ve net bir şekilde başlayalım."
           : "Welcome. Let’s begin our lesson together — clear and calm.",
-      lessonName
-        ? ar
-          ? `موضوعنا الآن: ${lessonName}`
-          : tr
-            ? `Bugünkü konumuz: ${lessonName}`
-            : `Our focus now: ${lessonName}`
-        : ar
-          ? "سأشرح على السبورة خطوة بخطوة."
-          : tr
-            ? "Tahtada adım adım anlatacağım."
-            : "I’ll explain step by step on the board.",
-    ].filter(Boolean) as string[],
-    board: [
-      {
-        time: 0,
-        action: "write_text",
-        parameters: {
-          text: lessonName || (ar ? "درس اليوم" : tr ? "Bugünün dersi" : "Today"),
-          x: ar ? 1780 : 120,
-          y: 120,
-          size: 58,
-          color: "blue",
-          align: ar ? "right" : "left",
-        },
-      },
+      ar
+        ? `موضوعنا الآن: ${title}`
+        : tr
+          ? `Bugünkü konumuz: ${title}`
+          : `Our focus now: ${title}`,
     ],
-    askStudent: ar
-      ? "هل أنت مستعد؟"
-      : tr
-        ? "Hazır mısın?"
-        : "Are you ready?",
-    waitForStudentMs: 4500,
+    board: [boardTitle],
+    askStudent: null,
+    waitForStudentMs: 0,
     emotion: "encouraging",
     pace: "normal",
     teachingStrategy: "example",
     lessonName: lessonName || null,
+    stageComplete: true,
+    memoryPatch: { currentTopic: title.slice(0, 40) },
   };
 }
 
@@ -967,6 +1059,16 @@ function mergeState(
     );
   }
   Object.assign(next, advanceLessonStage(state, beat, mode));
+  // Drop stale pending checks when we are not in a check/quiz stage — this
+  // recovers sessions that previously got stuck asking unknown questions
+  // forever after a premature askStudent from MODE OPEN / explain.
+  const liveStage = next.lessonStage || "greeting";
+  if (liveStage !== "check_understanding" && liveStage !== "mini_quiz") {
+    next.awaitingCorrectAnswer = false;
+    next.pendingQuestion = null;
+    next.pendingAnswerHint = null;
+    next.pendingAttempts = 0;
+  }
   return next;
 }
 
@@ -1585,7 +1687,14 @@ export class ClassroomSessionService {
     );
     const materialsKey = StudentMemoryService.materialsKey(row.documentIds);
     applyLongTermMemory(input.userId, materialsKey, state, beat, nextState);
-    if (silence) {
+    // Silence only re-arms a pending check inside check/quiz stages. Outside
+    // those stages a "no answer" timeout must not invent a question and trap
+    // the lesson in re-ask loops with an empty board.
+    const silenceStage = nextState.lessonStage || state.lessonStage || "greeting";
+    if (
+      silence &&
+      (silenceStage === "check_understanding" || silenceStage === "mini_quiz")
+    ) {
       nextState.pendingAttempts = (nextState.pendingAttempts || 0) + 1;
       nextState.awaitingCorrectAnswer = true;
       if (!nextState.pendingQuestion) {
@@ -1986,12 +2095,21 @@ export class ClassroomSessionService {
             if (input.onPartial) {
               if (progressive.emotion) lastEmotion = progressive.emotion;
               if (progressive.pace) lastPace = progressive.pace;
+              const stageAllowsLiveAsk =
+                input.state.lessonStage === "check_understanding" ||
+                input.state.lessonStage === "mini_quiz";
               while (emittedSpeak < progressive.speak.length) {
                 const text = sanitizeClassroomPlainText(
                   progressive.speak[emittedSpeak],
                   220
                 );
-                if (text) {
+                // Don't stream premature quiz/ready probes during teaching —
+                // finalizeBeat will replace them with real teaching lines.
+                const premature =
+                  !stageAllowsLiveAsk &&
+                  !!text &&
+                  PREMATURE_UNDERSTANDING_PATTERNS.some((re) => re.test(text));
+                if (text && !premature) {
                   input.onPartial({
                     speak: { index: emittedSpeak, text },
                     emotion: lastEmotion,
@@ -2053,7 +2171,8 @@ export class ClassroomSessionService {
           input.language,
           fallbackMode,
           input.state.currentLessonName || input.curriculumOutline[0] || null,
-          Date.now()
+          Date.now(),
+          input.state.lessonStage
         );
       return finalizeBeat(beat, input.state, input.language, input.mode);
     } catch {
@@ -2062,7 +2181,8 @@ export class ClassroomSessionService {
           input.language,
           fallbackMode,
           input.state.currentLessonName || input.curriculumOutline[0] || null,
-          Date.now()
+          Date.now(),
+          input.state.lessonStage
         ),
         input.state,
         input.language,

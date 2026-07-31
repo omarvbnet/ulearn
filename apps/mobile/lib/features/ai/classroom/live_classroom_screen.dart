@@ -504,6 +504,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     Map<String, dynamic>? finalBeat;
     var firstSpeak = true;
     var bridgeAbort = false;
+    var boardAppliedLive = false;
 
     Future<File?>? nextPreload;
     Future<void> drainSpeak() async {
@@ -600,6 +601,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
                           : 'Drawing on the board…';
                 });
               }
+              boardAppliedLive = true;
               _applyBoardLive(actions);
             }
             break;
@@ -701,6 +703,14 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       }
     }
 
+    final completedBoard = completed['board'] is List
+        ? List<dynamic>.from(completed['board'] as List)
+        : <dynamic>[];
+    if (!boardAppliedLive && completedBoard.isNotEmpty) {
+      _applyBoardLive(completedBoard);
+      boardAppliedLive = true;
+    }
+
     final speakRaw = completed['speak'];
     final leftover = <String>[];
     if (speakRaw is List) {
@@ -714,7 +724,7 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       await _playBeat({
         ...completed,
         'speak': leftover,
-        'board': <dynamic>[],
+        'board': boardAppliedLive ? <dynamic>[] : completedBoard,
       });
     } else {
       final ask = completed['askStudent']?.toString().trim();
