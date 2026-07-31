@@ -549,13 +549,9 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
       _board.reset();
       _board.theme = pkg.manifest.theme;
 
-      // PDF underlay is optional — do not block lesson startup on PDF preload.
+      // PDF underlay is optional — never block strokes/audio on Android PdfRenderer.
       for (final pdf in pkg.pdfs) {
-        unawaited(
-          _pdfCache
-              .preload(pdf, localFilePath: localPdfs[pdf.assetId])
-              .catchError((_) {}),
-        );
+        await _pdfCache.preload(pdf, localFilePath: localPdfs[pdf.assetId]);
       }
 
       await _audioPosSub?.cancel();
@@ -625,7 +621,6 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
         await _seekTo(widget.initialPositionSec * 1000);
       } else {
         _applyUntil(0);
-      _board.normalizeCurrentPageForDisplay();
       }
       await _refreshPdfUnderlay();
       _progressTimer = Timer.periodic(const Duration(seconds: 5), (_) => _emitProgress());
@@ -795,7 +790,6 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     if (clamped < _playheadMs) {
       // Large rewind (seek) — rebuild. Tiny backward noise is ignored by callers.
       _applyUntil(clamped);
-    _board.normalizeCurrentPageForDisplay();
     } else {
       _applyForward(clamped);
     }
@@ -836,7 +830,6 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     if (_pkg != null) _board.theme = _pkg!.manifest.theme;
     _eventIndex = 0;
     _applyForward(ms);
-    _board.normalizeCurrentPageForDisplay();
   }
 
   void _applyForward(int ms) {
@@ -857,7 +850,6 @@ class _WhiteboardPlayerScreenState extends State<WhiteboardPlayerScreen> {
     _armDisplayClock(clamped);
     _playheadMs = clamped;
     _applyUntil(clamped);
-    _board.normalizeCurrentPageForDisplay();
     _boardPaint.value++;
     await _refreshPdfUnderlay();
     if (mounted) setState(() {});

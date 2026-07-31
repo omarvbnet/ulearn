@@ -1,8 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import type { AiModuleKey, AiProvider, AiProviderType } from "@prisma/client";
 import { decryptSecret, encryptSecret } from "./crypto";
-import { defaultBaseUrlForType, getAdapter, jinaDefaultBaseUrl, normalizeOpenAiCompatibleBase, providerSupportsChat, providerSupportsEmbeddings, providerSupportsImageGeneration, providerSupportsSpeech } from "./adapters";
-import type { ChatMessage, ImageGenerationInput, ProviderConfig, SpeechSynthesisInput } from "./types";
+import { defaultBaseUrlForType, getAdapter, jinaDefaultBaseUrl, normalizeOpenAiCompatibleBase, providerSupportsChat, providerSupportsEmbeddings, providerSupportsImageGeneration } from "./adapters";
+import type { ChatMessage, ImageGenerationInput, ProviderConfig } from "./types";
 
 function toConfig(p: AiProvider, apiKey: string): ProviderConfig {
   const openAiCompat =
@@ -25,22 +25,6 @@ function toConfig(p: AiProvider, apiKey: string): ProviderConfig {
     topP: p.topP,
     streaming: p.streaming,
   };
-}
-
-/** Provider/module-assignment lookup runs on EVERY single chat + TTS call
- * (every live-classroom beat does at least one of each) but the underlying
- * data — which provider is enabled/default/assigned to a module — only ever
- * changes when an admin edits AI provider settings, which is rare. Caching
- * the resolved chain for a few seconds turns 2-3 DB round trips per beat
- * into zero for the overwhelming majority of requests. */
-const PROVIDER_CACHE_TTL_MS = 20_000;
-const providerChainCache = new Map<
-  string,
-  { at: number; primary: AiProvider | null; fallbacks: AiProvider[] }
->();
-
-function invalidateProviderCache() {
-  providerChainCache.clear();
 }
 
 export class AiProviderService {
@@ -71,7 +55,6 @@ export class AiProviderService {
     if (input.isDefault) {
       await prisma.aiProvider.updateMany({ data: { isDefault: false } });
     }
-    invalidateProviderCache();
     return prisma.aiProvider.create({
       data: {
         name: input.name,
@@ -123,13 +106,11 @@ export class AiProviderService {
       data.apiKeyEncrypted = encryptSecret(input.apiKey);
       delete data.apiKey;
     }
-    invalidateProviderCache();
     return prisma.aiProvider.update({ where: { id }, data });
   }
 
   static async remove(id: string) {
     await prisma.aiProvider.delete({ where: { id } });
-    invalidateProviderCache();
   }
 
   static async setModuleAssignment(moduleKey: AiModuleKey, providerId: string) {
@@ -146,18 +127,11 @@ export class AiProviderService {
           `${provider.type} (${provider.name}) cannot generate images. Assign AI_CREATIVE_IMAGE to FLUX.1 Kontext Max (Black Forest Labs).`
         );
       }
-    } else if (moduleKey === "VOICE_TTS") {
-      if (!providerSupportsSpeech(provider.type)) {
-        throw new Error(
-          `${provider.type} (${provider.name}) cannot run TTS. Assign VOICE_TTS to Fish Audio (s2.1-pro-free), ElevenLabs, or OpenAI (tts-1-hd / gpt-4o-mini-tts).`
-        );
-      }
     } else if (moduleKey !== "EMBEDDING" && !providerSupportsChat(provider.type, provider.model)) {
       throw new Error(
         `${provider.type} (${provider.name}) cannot run chat. Use a chat provider or jina-deepsearch-v1 for AI Creative text/PPT.`
       );
     }
-    invalidateProviderCache();
     return prisma.aiModuleAssignment.upsert({
       where: { moduleKey },
       create: { moduleKey, providerId },
@@ -233,31 +207,16 @@ export class AiProviderService {
     return fallbackDefault;
   }
 
-  /** Cached (~20s) primary+fallback provider chain for a module — see
-   * providerChainCache comment above for why this matters on the hot path. */
-  private static async resolveProviderChain(
-    moduleKey: AiModuleKey | undefined
-  ): Promise<{ primary: AiProvider | null; fallbacks: AiProvider[] }> {
-    const cacheKey = moduleKey || "__default__";
-    const cached = providerChainCache.get(cacheKey);
-    if (cached && Date.now() - cached.at < PROVIDER_CACHE_TTL_MS) {
-      return { primary: cached.primary, fallbacks: cached.fallbacks };
-    }
-    const primary = await this.resolveProvider(moduleKey);
-    const fallbacks = await prisma.aiProvider.findMany({
-      where: { status: "ENABLED", ...(primary ? { id: { not: primary.id } } : {}) },
-      orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
-    });
-    providerChainCache.set(cacheKey, { at: Date.now(), primary, fallbacks });
-    return { primary, fallbacks };
-  }
-
   static async withFallback<T>(
     moduleKey: AiModuleKey | undefined,
     run: (provider: AiProvider, config: ProviderConfig) => Promise<T>,
     opts?: { preferTypes?: string[]; skipTypes?: string[] }
   ): Promise<{ result: T; provider: AiProvider }> {
-    const { primary, fallbacks } = await this.resolveProviderChain(moduleKey);
+    const primary = await this.resolveProvider(moduleKey);
+    const fallbacks = await prisma.aiProvider.findMany({
+      where: { status: "ENABLED", ...(primary ? { id: { not: primary.id } } : {}) },
+      orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
+    });
     let chain = primary ? [primary, ...fallbacks] : fallbacks;
     if (moduleKey === "EMBEDDING") {
       // Prefer embed-capable providers; never call DeepSeek/Kimi/Claude for vectors.
@@ -265,7 +224,7 @@ export class AiProviderService {
         preferTypes: opts?.preferTypes?.length
           ? opts.preferTypes
           : ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE", "JINA"],
-        skipTypes: [...(opts?.skipTypes || []), "DEEPSEEK", "KIMI", "ANTHROPIC", "FLUX", "ELEVENLABS", "FISH_AUDIO"],
+        skipTypes: [...(opts?.skipTypes || []), "DEEPSEEK", "KIMI", "ANTHROPIC", "FLUX"],
       };
       opts = embedOpts;
     } else if (moduleKey === "AI_CREATIVE_IMAGE") {
@@ -280,23 +239,6 @@ export class AiProviderService {
           "GEMINI",
           "OPENAI",
           "OPENAI_COMPATIBLE",
-          "ELEVENLABS",
-          "FISH_AUDIO",
-        ],
-      };
-    } else if (moduleKey === "VOICE_TTS") {
-      opts = {
-        preferTypes: opts?.preferTypes?.length
-          ? opts.preferTypes
-          : ["FISH_AUDIO", "ELEVENLABS", "OPENAI", "OPENAI_COMPATIBLE"],
-        skipTypes: [
-          ...(opts?.skipTypes || []),
-          "FLUX",
-          "JINA",
-          "ANTHROPIC",
-          "DEEPSEEK",
-          "KIMI",
-          "GEMINI",
         ],
       };
     } else if (moduleKey === "AI_CREATIVE") {
@@ -309,15 +251,13 @@ export class AiProviderService {
           ...(opts?.skipTypes || []),
           "FLUX",
           "JINA",
-          "ELEVENLABS",
-          "FISH_AUDIO",
         ],
       };
     } else if (moduleKey) {
-      // Chat modules: never use FLUX (image-only) or voice-only TTS providers.
+      // Chat modules: never use FLUX (image-only).
       opts = {
         ...opts,
-        skipTypes: [...(opts?.skipTypes || []), "FLUX", "ELEVENLABS", "FISH_AUDIO"],
+        skipTypes: [...(opts?.skipTypes || []), "FLUX"],
       };
     }
     if (opts?.preferTypes?.length) {
@@ -344,18 +284,7 @@ export class AiProviderService {
         );
         continue;
       }
-      if (moduleKey === "VOICE_TTS" && !providerSupportsSpeech(provider.type)) {
-        lastError = new Error(
-          `${provider.type} (${provider.name}) cannot run TTS. Assign VOICE_TTS to Fish Audio, ElevenLabs, or OpenAI.`
-        );
-        continue;
-      }
-      if (
-        moduleKey !== "EMBEDDING" &&
-        moduleKey !== "AI_CREATIVE_IMAGE" &&
-        moduleKey !== "VOICE_TTS" &&
-        !providerSupportsChat(provider.type, provider.model)
-      ) {
+      if (moduleKey !== "EMBEDDING" && moduleKey !== "AI_CREATIVE_IMAGE" && !providerSupportsChat(provider.type, provider.model)) {
         lastError = new Error(
           `${provider.type} (${provider.name}) is embedding-only. Use jina-deepsearch-v1 for chat / AI Creative.`
         );
@@ -374,18 +303,14 @@ export class AiProviderService {
         return { result, provider };
       } catch (e) {
         lastError = e;
-        // Don't let a slow failure-log write delay trying the next
-        // provider in the fallback chain.
-        void prisma.aiUsageLog
-          .create({
-            data: {
-              providerId: provider.id,
-              moduleKey: moduleKey ?? null,
-              success: false,
-              errorMessage: e instanceof Error ? e.message : "Provider failed",
-            },
-          })
-          .catch(() => {});
+        await prisma.aiUsageLog.create({
+          data: {
+            providerId: provider.id,
+            moduleKey: moduleKey ?? null,
+            success: false,
+            errorMessage: e instanceof Error ? e.message : "Provider failed",
+          },
+        });
       }
     }
     if (moduleKey === "EMBEDDING" && !triedEmbedCapable) {
@@ -410,11 +335,6 @@ export class AiProviderService {
     userId?: string,
     overrides?: {
       maxTokens?: number;
-      /** Exact token ceiling regardless of the provider's configured default —
-       * use for latency-sensitive callers (e.g. live classroom beats) whose
-       * output is always tiny, where the admin-configured default would be
-       * needlessly high and let slower models ramble/think longer than needed. */
-      maxTokensExact?: number;
       temperature?: number;
       preferTypes?: string[];
       skipTypes?: string[];
@@ -433,9 +353,6 @@ export class AiProviderService {
           ...(overrides?.maxTokens != null
             ? { maxTokens: Math.max(config.maxTokens, overrides.maxTokens) }
             : {}),
-          ...(overrides?.maxTokensExact != null
-            ? { maxTokens: Math.max(64, overrides.maxTokensExact) }
-            : {}),
           ...(overrides?.temperature != null
             ? { temperature: overrides.temperature }
             : {}),
@@ -452,85 +369,18 @@ export class AiProviderService {
             skipTypes: overrides?.skipTypes,
           }
     );
-    // Usage logging is pure analytics — it must never delay the response
-    // that a student is waiting on. Fire-and-forget it.
-    void prisma.aiUsageLog
-      .create({
-        data: {
-          providerId: provider.id,
-          userId,
-          moduleKey: moduleKey ?? null,
-          success: true,
-          tokensIn: result.tokensIn,
-          tokensOut: result.tokensOut,
-          latencyMs: Date.now() - started,
-          costEstimate: estimateCost(provider.type, result.tokensIn, result.tokensOut),
-        },
-      })
-      .catch(() => {});
-    return { ...result, providerId: provider.id, providerType: provider.type, providerName: provider.name };
-  }
-
-  /**
-   * Streamed chat — identical semantics/fallback chain to `chat()`, but
-   * invokes `onDelta` as text arrives so callers (e.g. the live classroom)
-   * can react before the model finishes its full turn. Providers without a
-   * `chatStream` adapter gracefully degrade to one non-streamed call whose
-   * full text is delivered through `onDelta` exactly once — callers never
-   * need a separate code path for "provider doesn't support streaming".
-   */
-  static async chatStream(
-    moduleKey: AiModuleKey | undefined,
-    messages: ChatMessage[],
-    userId: string | undefined,
-    overrides: {
-      maxTokens?: number;
-      maxTokensExact?: number;
-      temperature?: number;
-      preferTypes?: string[];
-      skipTypes?: string[];
-    } | undefined,
-    onDelta: (deltaText: string, fullText: string) => boolean | void
-  ) {
-    const started = Date.now();
-    const { result, provider } = await this.withFallback(
-      moduleKey,
-      async (p, config) => {
-        const adapter = getAdapter(p.type);
-        const next: ProviderConfig = {
-          ...config,
-          ...(overrides?.maxTokens != null
-            ? { maxTokens: Math.max(config.maxTokens, overrides.maxTokens) }
-            : {}),
-          ...(overrides?.maxTokensExact != null
-            ? { maxTokens: Math.max(64, overrides.maxTokensExact) }
-            : {}),
-          ...(overrides?.temperature != null ? { temperature: overrides.temperature } : {}),
-        };
-        if (adapter.chatStream) {
-          return adapter.chatStream(next, messages, onDelta);
-        }
-        // Graceful degradation — no streaming support on this provider.
-        const full = await adapter.chat(next, messages);
-        onDelta(full.text, full.text);
-        return full;
+    await prisma.aiUsageLog.create({
+      data: {
+        providerId: provider.id,
+        userId,
+        moduleKey: moduleKey ?? null,
+        success: true,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+        latencyMs: Date.now() - started,
+        costEstimate: estimateCost(provider.type, result.tokensIn, result.tokensOut),
       },
-      { preferTypes: overrides?.preferTypes, skipTypes: overrides?.skipTypes }
-    );
-    void prisma.aiUsageLog
-      .create({
-        data: {
-          providerId: provider.id,
-          userId,
-          moduleKey: moduleKey ?? null,
-          success: true,
-          tokensIn: result.tokensIn,
-          tokensOut: result.tokensOut,
-          latencyMs: Date.now() - started,
-          costEstimate: estimateCost(provider.type, result.tokensIn, result.tokensOut),
-        },
-      })
-      .catch(() => {});
+    });
     return { ...result, providerId: provider.id, providerType: provider.type, providerName: provider.name };
   }
 
@@ -540,19 +390,17 @@ export class AiProviderService {
       const adapter = getAdapter(p.type);
       return adapter.embed(config, text);
     });
-    void prisma.aiUsageLog
-      .create({
-        data: {
-          providerId: provider.id,
-          userId,
-          moduleKey: "EMBEDDING",
-          success: true,
-          tokensIn: result.tokensIn,
-          latencyMs: Date.now() - started,
-          costEstimate: estimateCost(provider.type, result.tokensIn, 0) * 0.1,
-        },
-      })
-      .catch(() => {});
+    await prisma.aiUsageLog.create({
+      data: {
+        providerId: provider.id,
+        userId,
+        moduleKey: "EMBEDDING",
+        success: true,
+        tokensIn: result.tokensIn,
+        latencyMs: Date.now() - started,
+        costEstimate: estimateCost(provider.type, result.tokensIn, 0) * 0.1,
+      },
+    });
     return result.embedding;
   }
 
@@ -568,48 +416,17 @@ export class AiProviderService {
         return adapter.generateImage(config, input);
       }
     );
-    void prisma.aiUsageLog
-      .create({
-        data: {
-          providerId: provider.id,
-          userId,
-          moduleKey: "AI_CREATIVE_IMAGE",
-          success: true,
-          tokensIn: result.tokensIn ?? 0,
-          latencyMs: Date.now() - started,
-          costEstimate: 0.08,
-        },
-      })
-      .catch(() => {});
-    return { ...result, providerId: provider.id };
-  }
-
-  /** Cloud TTS for AI Teacher classroom (ar / tr / en). */
-  static async synthesizeSpeech(input: SpeechSynthesisInput, userId?: string) {
-    const started = Date.now();
-    const { result, provider } = await this.withFallback(
-      "VOICE_TTS",
-      async (p, config) => {
-        const adapter = getAdapter(p.type);
-        if (!adapter.synthesizeSpeech) {
-          throw new Error(`${p.type} does not support speech synthesis`);
-        }
-        return adapter.synthesizeSpeech(config, input);
-      }
-    );
-    void prisma.aiUsageLog
-      .create({
-        data: {
-          providerId: provider.id,
-          userId,
-          moduleKey: "VOICE_TTS",
-          success: true,
-          tokensIn: Math.ceil((input.text?.length || 0) / 4),
-          latencyMs: Date.now() - started,
-          costEstimate: 0.015,
-        },
-      })
-      .catch(() => {});
+    await prisma.aiUsageLog.create({
+      data: {
+        providerId: provider.id,
+        userId,
+        moduleKey: "AI_CREATIVE_IMAGE",
+        success: true,
+        tokensIn: result.tokensIn ?? 0,
+        latencyMs: Date.now() - started,
+        costEstimate: 0.08,
+      },
+    });
     return { ...result, providerId: provider.id };
   }
 }
@@ -625,8 +442,6 @@ function estimateCost(type: string, tokensIn: number, tokensOut: number): number
     DEEPSEEK: { in: 0.00000014, out: 0.00000028 },
     JINA: { in: 0.00000002, out: 0 },
     FLUX: { in: 0.00008, out: 0 },
-    ELEVENLABS: { in: 0.00003, out: 0 },
-    FISH_AUDIO: { in: 0, out: 0 },
   };
   const r = rates[type] || rates.GEMINI;
   return tokensIn * r.in + tokensOut * r.out;

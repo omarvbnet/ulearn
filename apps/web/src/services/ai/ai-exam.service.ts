@@ -2,12 +2,6 @@ import { prisma } from "@/lib/prisma";
 import { AiProviderService } from "./ai-provider.service";
 import { StudentMemoryService } from "./student-memory.service";
 import { languageInstruction } from "./types";
-import { SubjectAssessmentService } from "@/services/assessment/subject-assessment.service";
-import {
-  isCoverOrMetaLine,
-  isWeakLessonTitle,
-  topicTitleFromChunkText,
-} from "./material-topic";
 import type { Prisma } from "@prisma/client";
 
 export type AiExamQuestion = {
@@ -31,8 +25,6 @@ export function stripCorrectKeys(questions: AiExamQuestion[]) {
     ...(q.imageBase64 ? { imageBase64: q.imageBase64 } : {}),
   }));
 }
-
-export { topicTitleFromChunkText } from "./material-topic";
 
 export class AiExamService {
   static async createAttempt(input: {
@@ -254,7 +246,6 @@ export class AiExamService {
         chunkFrom: number;
         chunkTo: number;
         pageStart: number | null;
-        pageEnd: number | null;
       }>;
     }
 
@@ -275,7 +266,6 @@ export class AiExamService {
       chunkFrom: number;
       chunkTo: number;
       pageStart: number | null;
-      pageEnd: number | null;
     };
 
     const headings: Array<{
@@ -300,7 +290,6 @@ export class AiExamService {
         }
       }
       if (!heading || heading.length < 3 || heading.length > 140) continue;
-      if (isCoverOrMetaLine(heading, [doc.fileName])) continue;
       const key = heading.toLowerCase().replace(/\s+/g, " ");
       if (seen.has(key)) continue;
       if (/^(introduction|intro|محتويات|contents)$/i.test(heading)) continue;
@@ -320,7 +309,6 @@ export class AiExamService {
           chunkFrom: 0,
           chunkTo: Math.max(0, chunks.at(-1)?.chunkIndex ?? 0),
           pageStart: chunks[0]?.pageNumber ?? null,
-          pageEnd: chunks.at(-1)?.pageNumber ?? null,
         },
       ];
     }
@@ -330,167 +318,44 @@ export class AiExamService {
       for (let i = 0; i < headings.length; i++) {
         const h = headings[i]!;
         const next = headings[i + 1];
-        const chunkTo = next
-          ? next.chunkIndex - 1
-          : (chunks.at(-1)?.chunkIndex ?? h.chunkIndex);
-        const section = chunks.filter(
-          (c) => c.chunkIndex >= h.chunkIndex && c.chunkIndex <= chunkTo
-        );
-        const pages = section
-          .map((c) => c.pageNumber)
-          .filter((p): p is number => typeof p === "number");
         out.push({
           id: h.title,
           title: h.title,
           chunkFrom: h.chunkIndex,
-          chunkTo,
-          pageStart: h.page ?? pages[0] ?? null,
-          pageEnd: pages.at(-1) ?? h.page ?? null,
+          chunkTo: next
+            ? next.chunkIndex - 1
+            : (chunks.at(-1)?.chunkIndex ?? h.chunkIndex),
+          pageStart: h.page,
         });
       }
       return out.slice(0, 40);
     }
 
-    // No clear headings — split into lesson windows named from SUBJECT TEXT
-    // (never cover teacher names / filenames / "Pages 1–3").
-    const materialNames = [doc.fileName];
     const pageCount = doc.pageCount || 0;
-    const numbered = chunks.filter((c) => c.pageNumber != null);
-    // Skip page 1 for window starts when it is a cover (common in school PDFs).
-    const page1Text = chunks
-      .filter((c) => c.pageNumber === 1)
-      .map((c) => c.text || "")
-      .join("\n");
-    const page1IsCover =
-      page1Text.length > 0 &&
-      isWeakLessonTitle(
-        topicTitleFromChunkText([page1Text], 1, materialNames),
-        materialNames
-      );
-    const contentPageStart = page1IsCover && pageCount >= 4 ? 2 : 1;
-
-    if (pageCount >= 4 && numbered.length >= 2) {
-      const usablePages = Math.max(1, pageCount - contentPageStart + 1);
-      const window = Math.max(3, Math.ceil(usablePages / 6));
+    if (pageCount >= 4) {
+      const window = Math.max(3, Math.ceil(pageCount / 6));
       const out: Outline[] = [];
-      let lessonNo = 1;
-      for (
-        let start = contentPageStart;
-        start <= pageCount;
-        start += window
-      ) {
+      for (let start = 1; start <= pageCount; start += window) {
         const end = Math.min(pageCount, start + window - 1);
-        const inRange = chunks.filter(
-          (c) =>
-            c.pageNumber != null &&
-            c.pageNumber >= start &&
-            c.pageNumber <= end
-        );
-        // Prefer content pages; if empty, fall back but still title from body.
-        const pool =
-          inRange.length > 0
-            ? inRange
-            : chunks.filter(
-                (c) => c.pageNumber == null || c.pageNumber >= contentPageStart
-              );
-        const titlePool = pool.length ? pool : chunks;
-        let title = topicTitleFromChunkText(
-          titlePool.map((c) => c.text || ""),
-          lessonNo,
-          materialNames
-        );
-        if (isWeakLessonTitle(title, materialNames)) {
-          title = `الوحدة ${lessonNo}`;
-        }
-        const base = title;
-        let n = 2;
-        while (out.some((o) => o.title.toLowerCase() === title.toLowerCase())) {
-          title = `${base} · ${n}`;
-          n += 1;
-        }
+        const title = `Pages ${start}–${end}`;
         out.push({
           id: title,
           title,
-          chunkFrom: titlePool[0]?.chunkIndex ?? 0,
-          chunkTo:
-            titlePool.at(-1)?.chunkIndex ?? chunks.at(-1)?.chunkIndex ?? 0,
+          chunkFrom: 0,
+          chunkTo: chunks.at(-1)?.chunkIndex ?? 0,
           pageStart: start,
-          pageEnd: end,
         });
-        lessonNo += 1;
       }
       return out.slice(0, 12);
     }
 
-    if (chunks.length >= 8) {
-      // Skip the first chunk when it is cover/meta so lesson 1 is real content.
-      const startIdx =
-        chunks[0] &&
-        isWeakLessonTitle(
-          topicTitleFromChunkText([chunks[0].text || ""], 1, materialNames),
-          materialNames
-        )
-          ? 1
-          : 0;
-      const body = chunks.slice(startIdx);
-      const window = Math.max(4, Math.ceil(body.length / 6));
-      const out: Outline[] = [];
-      let lessonNo = 1;
-      for (let i = 0; i < body.length; i += window) {
-        const slice = body.slice(i, i + window);
-        let title = topicTitleFromChunkText(
-          slice.map((c) => c.text || ""),
-          lessonNo,
-          materialNames
-        );
-        if (isWeakLessonTitle(title, materialNames)) {
-          title = `الوحدة ${lessonNo}`;
-        }
-        const base = title;
-        let n = 2;
-        while (out.some((o) => o.title.toLowerCase() === title.toLowerCase())) {
-          title = `${base} · ${n}`;
-          n += 1;
-        }
-        const pages = slice
-          .map((c) => c.pageNumber)
-          .filter((p): p is number => typeof p === "number");
-        out.push({
-          id: title,
-          title,
-          chunkFrom: slice[0]!.chunkIndex,
-          chunkTo: slice.at(-1)!.chunkIndex,
-          pageStart: pages[0] ?? null,
-          pageEnd: pages.at(-1) ?? null,
-        });
-        lessonNo += 1;
-      }
-      return out.slice(0, 12);
-    }
-
-    const bodyChunks = chunks.filter(
-      (c, idx) =>
-        idx > 0 ||
-        !isWeakLessonTitle(
-          topicTitleFromChunkText([c.text || ""], 1, materialNames),
-          materialNames
-        )
-    );
-    const pool = bodyChunks.length ? bodyChunks : chunks;
-    let topic = topicTitleFromChunkText(
-      pool.slice(0, 10).map((c) => c.text || ""),
-      1,
-      materialNames
-    );
-    if (isWeakLessonTitle(topic, materialNames)) topic = "الوحدة 1";
     return [
       {
-        id: topic,
-        title: topic,
-        chunkFrom: pool[0]?.chunkIndex ?? 0,
-        chunkTo: pool.at(-1)?.chunkIndex ?? chunks.at(-1)?.chunkIndex ?? 0,
-        pageStart: pool[0]?.pageNumber ?? null,
-        pageEnd: pool.at(-1)?.pageNumber ?? null,
+        id: "__all__",
+        title: doc.fileName,
+        chunkFrom: 0,
+        chunkTo: chunks.at(-1)?.chunkIndex ?? 0,
+        pageStart: chunks[0]?.pageNumber ?? null,
       },
     ];
   }
@@ -586,10 +451,6 @@ export class AiExamService {
       documentIds: attempt.documentIds,
       weakQuestionHints: review.filter((r) => !r.isCorrect).map((r) => r.text.slice(0, 80)),
     });
-
-    void SubjectAssessmentService.recomputeFromDocuments(input.userId, attempt.documentIds).catch(
-      () => {}
-    );
 
     if (attempt.conversationId) {
       await prisma.aiMessage.create({

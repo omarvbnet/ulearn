@@ -284,7 +284,6 @@ class AuthProvider extends ChangeNotifier {
     await _api.setToken(null);
     await _clearCachedUser();
     user = null;
-    await _locale?.resetExplicit();
     notifyListeners();
   }
 

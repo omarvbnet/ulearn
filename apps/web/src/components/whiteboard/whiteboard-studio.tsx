@@ -161,7 +161,6 @@ export default function WhiteboardStudio({
       boardRef.current.reset();
       boardRef.current.theme = theme;
       boardRef.current.applyEvents(engineRef.current.eventsUpTo(clamped));
-      boardRef.current.normalizeCurrentPageForDisplay();
       setPageIds(boardRef.current.pages.map((p) => p.id));
       setCurrentPageId(boardRef.current.currentPageId ?? "page_0");
       const audio = audioPreviewRef.current;
@@ -190,7 +189,6 @@ export default function WhiteboardStudio({
         boardRef.current.reset();
         boardRef.current.theme = parsed.manifest.theme;
         boardRef.current.applyEvents(parsed.events);
-        boardRef.current.normalizeCurrentPageForDisplay();
         pdfsRef.current = (parsed.assets.pdfs ?? []).map((p) => ({
           assetId: p.assetId,
           materialId: p.materialId,
@@ -207,15 +205,13 @@ export default function WhiteboardStudio({
         setColor(boardThemeColors(parseWhiteboardTheme(parsed.manifest.theme)).defaultInk);
         setDurationMs(parsed.manifest.durationMs);
         setElapsed(parsed.manifest.durationMs);
-        // Open edits at latest board state (not t=0 blank board).
-        setPlayheadMs(parsed.manifest.durationMs);
+        setPlayheadMs(0);
         setPageIds(boardRef.current.pages.map((p) => p.id));
         setCurrentPageId(boardRef.current.currentPageId ?? "page_0");
         if (initialTitle) setTitle(initialTitle);
         boardRef.current.reset();
         boardRef.current.theme = parsed.manifest.theme;
-        boardRef.current.applyEvents(engineRef.current.eventsUpTo(parsed.manifest.durationMs));
-        boardRef.current.normalizeCurrentPageForDisplay();
+        boardRef.current.applyEvents(engineRef.current.eventsUpTo(0));
         redraw();
         setLoadingEdit(false);
       } catch (e) {
@@ -241,7 +237,6 @@ export default function WhiteboardStudio({
       boardRef.current.reset();
       boardRef.current.theme = theme;
       boardRef.current.applyEvents(engineRef.current.eventsUpTo(ms));
-      boardRef.current.normalizeCurrentPageForDisplay();
       redraw();
       if (audio.ended || ms >= durationMs) setPreviewPlaying(false);
     }, 80);

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -15,7 +14,6 @@ import 'package:ulearn/core/widgets/glass.dart';
 import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/ai/ai_exam_panel.dart';
 import 'package:ulearn/features/ai/ai_message_content.dart';
-import 'package:ulearn/features/ai/classroom/live_classroom_screen.dart';
 import 'package:ulearn/features/ai/ai_upgrade.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
 
@@ -142,8 +140,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       final data = await api.get('/api/ai/conversations');
       if (!mounted) return;
       setState(() {
-        _conversations = ((data['conversations'] as List?) ?? [])
-            .cast<Map<String, dynamic>>();
+        _conversations =
+            ((data['conversations'] as List?) ?? []).cast<Map<String, dynamic>>();
       });
     } catch (_) {
       // History is optional if offline.
@@ -163,11 +161,10 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       final api = context.read<ApiClient>();
       final data = await api.get('/api/ai/conversations/$id');
       if (!mounted) return;
-      final msgs =
-          ((data['conversation']?['messages'] as List?) ??
-                  (data['messages'] as List?) ??
-                  [])
-              .cast<Map<String, dynamic>>();
+      final msgs = ((data['conversation']?['messages'] as List?) ??
+              (data['messages'] as List?) ??
+              [])
+          .cast<Map<String, dynamic>>();
       final bubbles = <_ChatBubble>[];
       for (final m in msgs) {
         final role = (m['role']?.toString() ?? 'ASSISTANT').toLowerCase();
@@ -190,9 +187,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             'review': citationsMap['review'],
           };
         } else if (practice is Map) {
-          exam = AiPracticeExamData.fromJson(
-            Map<String, dynamic>.from(practice),
-          );
+          exam = AiPracticeExamData.fromJson(Map<String, dynamic>.from(practice));
         }
         final suggestionsRaw = citationsMap?['courseSuggestions'];
         final suggestions = <Map<String, dynamic>>[];
@@ -209,24 +204,14 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             if (t.isNotEmpty) followUps.add(t);
           }
         }
-        final lessonRaw = citationsMap?['aiTeacherLesson'];
-        final aiTeacherLesson = lessonRaw is Map
-            ? Map<String, dynamic>.from(lessonRaw)
-            : null;
         final content = m['content']?.toString() ?? '';
-        final hideDump = aiTeacherLesson != null ||
-            content.contains('### Lesson (spoken)') ||
-            content.contains('### Board actions');
         bubbles.add(
           _ChatBubble(
             role: role == 'user' ? 'user' : 'assistant',
-            text: hideDump
-                ? ''
-                : AiMessageContent.stripFollowUpMarkers(content),
+            text: AiMessageContent.stripFollowUpMarkers(content),
             exam: exam != null && exam.examAttemptId.isNotEmpty ? exam : null,
             examCompleted: exam != null,
             examResult: examResult,
-            aiTeacherLesson: aiTeacherLesson,
             courseSuggestions: suggestions,
             followUps: followUps.isNotEmpty
                 ? followUps
@@ -242,11 +227,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       _scrollToEnd();
     } catch (e) {
       if (!mounted) return;
-      _toast(
-        e is ApiException
-            ? e.message
-            : context.l10n.t('mobile.ai.errorGeneric'),
-      );
+      _toast(e is ApiException ? e.message : context.l10n.t('mobile.ai.errorGeneric'));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -328,8 +309,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     ApiClient api,
     _PendingAttachment a,
   ) async {
-    final isPdf =
-        a.mimeType.contains('pdf') || a.fileName.toLowerCase().endsWith('.pdf');
+    final isPdf = a.mimeType.contains('pdf') ||
+        a.fileName.toLowerCase().endsWith('.pdf');
     final useUpload = isPdf || a.bytes.length > _maxInlineBytes;
     if (!useUpload) {
       return {
@@ -425,122 +406,13 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     }
   }
 
-  Future<void> _openLiveClassroom({
-    required List<String> documentIds,
-    String question = '',
-  }) async {
-    if (!mounted || documentIds.isEmpty) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        fullscreenDialog: true,
-        builder: (_) => LiveClassroomScreen(
-          documentIds: documentIds,
-          question: question,
-        ),
-      ),
-    );
-  }
-
-  Future<void> _sendAiTeacher() async {
-    final typed = _controller.text.trim();
-    final q = typed.isNotEmpty
-        ? typed
-        : context.l10n.t('mobile.ai.aiTeacherPrompt');
-    if (_sending) return;
-    setState(() {
-      _sending = true;
-      _messages.add(_ChatBubble(role: 'user', text: q));
-      _controller.clear();
-    });
-    _scrollToEnd();
-    try {
-      final api = context.read<ApiClient>();
-      final locale = context.read<LocaleProvider>().code.toLowerCase();
-      final data = await api.post('/api/ai/classroom/session', {
-        'question': q,
-        'language': locale,
-        if (_conversationId != null) 'conversationId': _conversationId,
-      });
-      if (!mounted) return;
-      if (data['needsUpgrade'] == true) {
-        setState(() => _aiLocked = true);
-        await _openUpgrade();
-        return;
-      }
-      if (data['needsMaterialSelection'] == true) {
-        final pendingQ = data['pendingQuestion']?.toString() ?? q;
-        final materialsRaw = data['materials'];
-        final materials = <Map<String, dynamic>>[];
-        final seenNames = <String>{};
-        if (materialsRaw is List) {
-          for (final m in materialsRaw) {
-            if (m is! Map) continue;
-            final map = Map<String, dynamic>.from(m);
-            final name = (map['fileName']?.toString() ?? '')
-                .toLowerCase()
-                .replaceAll(RegExp(r'\s+'), ' ')
-                .trim();
-            if (name.isEmpty || seenNames.contains(name)) continue;
-            seenNames.add(name);
-            materials.add(map);
-          }
-        }
-        setState(() {
-          _conversationId =
-              data['conversationId']?.toString() ?? _conversationId;
-          _messages.add(
-            _ChatBubble(
-              role: 'assistant',
-              text:
-                  data['answer']?.toString() ??
-                  context.l10n.t('mobile.ai.pickMaterialToAnswerHint'),
-              selectableMaterials: materials,
-              pendingMaterialQuestion: pendingQ,
-              pendingMode: 'ai_teacher',
-            ),
-          );
-        });
-        return;
-      }
-      // Without documentIds the session API only returns material selection.
-      setState(() {
-        _messages.add(
-          _ChatBubble(
-            role: 'assistant',
-            text: context.l10n.t('mobile.ai.pickMaterialToAnswerHint'),
-          ),
-        );
-      });
-    } catch (e) {
-      if (!mounted) return;
-      _toast(
-        e is ApiException
-            ? e.message
-            : context.l10n.t('mobile.ai.errorGeneric'),
-      );
-      setState(() {
-        _messages.add(
-          _ChatBubble(
-            role: 'assistant',
-            text: e is ApiException
-                ? e.message
-                : context.l10n.t('mobile.ai.errorGeneric'),
-          ),
-        );
-      });
-    } finally {
-      if (mounted) setState(() => _sending = false);
-    }
-  }
-
   Future<void> _send() async {
     final q = _controller.text.trim();
     if ((q.isEmpty && _pending.isEmpty) || _sending) return;
 
     final attachments = List<_PendingAttachment>.from(_pending);
-    final displayText = q.isEmpty
-        ? context.l10n.t('mobile.ai.askAboutAttachments')
-        : q;
+    final displayText =
+        q.isEmpty ? context.l10n.t('mobile.ai.askAboutAttachments') : q;
 
     setState(() {
       _sending = true;
@@ -549,10 +421,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           role: 'user',
           text: displayText,
           attachmentNames: attachments.map((a) => a.fileName).toList(),
-          previewImages: attachments
-              .where((a) => a.isImage)
-              .map((a) => a.bytes)
-              .toList(),
+          previewImages:
+              attachments.where((a) => a.isImage).map((a) => a.bytes).toList(),
         ),
       );
       _controller.clear();
@@ -587,7 +457,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       }
 
       if (data['needsMaterialSelection'] == true) {
-        final pendingQ = data['pendingQuestion']?.toString() ?? displayText;
+        final pendingQ =
+            data['pendingQuestion']?.toString() ?? displayText;
         final pendingMode =
             data['pendingMode']?.toString() ?? 'explain_observe';
         final pendingCount = (data['pendingCount'] as num?)?.toInt();
@@ -613,8 +484,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           _messages.add(
             _ChatBubble(
               role: 'assistant',
-              text:
-                  data['answer']?.toString() ??
+              text: data['answer']?.toString() ??
                   context.l10n.t('mobile.ai.pickMaterialToAnswerHint'),
               selectableMaterials: materials,
               pendingMaterialQuestion: pendingQ,
@@ -656,21 +526,14 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       if (followUps.isEmpty) {
         followUps.addAll(AiMessageContent.inferFollowUps(answer));
       }
-      final lessonRaw = data['aiTeacherLesson'];
-      final aiTeacherLesson = lessonRaw is Map
-          ? Map<String, dynamic>.from(lessonRaw)
-          : null;
-      final cleanAnswer = aiTeacherLesson != null
-          ? ''
-          : AiMessageContent.stripFollowUpMarkers(answer);
+      final cleanAnswer = AiMessageContent.stripFollowUpMarkers(answer);
 
       Uint8List? editedPreview;
       final editedMime = edited?['mimeType']?.toString();
       final editedName = edited?['fileName']?.toString();
       final editedB64 = edited?['contentBase64']?.toString();
       final editedUrl = edited?['downloadUrl']?.toString();
-      final looksImage =
-          (editedMime ?? '').toLowerCase().startsWith('image/') ||
+      final looksImage = (editedMime ?? '').toLowerCase().startsWith('image/') ||
           (editedName ?? '').toLowerCase().endsWith('.png') ||
           (editedName ?? '').toLowerCase().endsWith('.jpg') ||
           (editedName ?? '').toLowerCase().endsWith('.jpeg') ||
@@ -711,7 +574,6 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             editedImageBytes: editedPreview,
             followUps: followUps,
             courseSuggestions: suggestions,
-            aiTeacherLesson: aiTeacherLesson,
           ),
         );
       });
@@ -719,8 +581,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     } catch (e) {
       if (!mounted) return;
       final msg = e is ApiException ? e.message : e.toString();
-      final text =
-          msg.trim().isNotEmpty &&
+      final text = msg.trim().isNotEmpty &&
               msg != 'Request failed' &&
               !msg.contains('SocketException')
           ? msg
@@ -738,7 +599,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     Map<String, dynamic> data,
     String fallbackQuestion,
   ) {
-    final pendingQ = data['pendingQuestion']?.toString() ?? fallbackQuestion;
+    final pendingQ =
+        data['pendingQuestion']?.toString() ?? fallbackQuestion;
     final pendingMode = data['pendingMode']?.toString() ?? 'explain_observe';
     final pendingCount = (data['pendingCount'] as num?)?.toInt();
     final docIds = ((data['documentIds'] as List?) ?? [])
@@ -753,12 +615,12 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       }
     }
     setState(() {
-      _conversationId = data['conversationId']?.toString() ?? _conversationId;
+      _conversationId =
+          data['conversationId']?.toString() ?? _conversationId;
       _messages.add(
         _ChatBubble(
           role: 'assistant',
-          text:
-              data['answer']?.toString() ??
+          text: data['answer']?.toString() ??
               context.l10n.t('mobile.ai.pickChapterToAnswerHint'),
           selectableChapters: chapters,
           pendingMaterialQuestion: pendingQ,
@@ -787,17 +649,14 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       final locale = context.read<LocaleProvider>().code.toLowerCase();
       final unavailable = context.l10n.t('mobile.ai.unavailable');
       final isPractice = mode == 'practice_quiz';
-      final isAiTeacher = mode == 'ai_teacher';
-      final isCreative =
-          mode == 'design_ppt' ||
+      final isCreative = mode == 'design_ppt' ||
           mode == 'design_pdf' ||
           mode == 'design_docx' ||
           mode == 'image_design';
       final payload = <String, dynamic>{
         'question': question,
         'language': locale,
-        if (!isCreative && !isAiTeacher)
-          'mode': isPractice ? 'practice_quiz' : 'explain_observe',
+        if (!isCreative) 'mode': isPractice ? 'practice_quiz' : 'explain_observe',
         'documentIds': documentIds,
         if (chapterHeading != null && chapterHeading.isNotEmpty)
           'chapterHeading': chapterHeading,
@@ -807,24 +666,6 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         if (_conversationId != null) 'conversationId': _conversationId,
         ..._stagePayload(auth),
       };
-      if (isAiTeacher) {
-        setState(() {
-          _messages.add(
-            _ChatBubble(
-              role: 'assistant',
-              text: locale == 'ar'
-                  ? 'جاري فتح الفصل المباشر…'
-                  : 'Opening the live lesson…',
-            ),
-          );
-        });
-        await _openLiveClassroom(
-          documentIds: documentIds,
-          question: question,
-        );
-        return;
-      }
-
       final data = await api.post('/api/ai/chat', payload);
       if (!mounted) return;
 
@@ -839,7 +680,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         if (practice != null) {
           exam = AiPracticeExamData.fromJson({
             ...practice,
-            'examAttemptId': practice['examAttemptId'] ?? data['examAttemptId'],
+            'examAttemptId':
+                practice['examAttemptId'] ?? data['examAttemptId'],
             'timeLimitSec': practice['timeLimitSec'],
           });
         }
@@ -864,8 +706,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       final editedName = edited?['fileName']?.toString();
       final editedB64 = edited?['contentBase64']?.toString();
       final editedUrl = edited?['downloadUrl']?.toString();
-      final looksImage =
-          (editedMime ?? '').toLowerCase().startsWith('image/') ||
+      final looksImage = (editedMime ?? '').toLowerCase().startsWith('image/') ||
           (editedName ?? '').toLowerCase().endsWith('.png') ||
           (editedName ?? '').toLowerCase().endsWith('.jpg') ||
           (editedName ?? '').toLowerCase().endsWith('.jpeg') ||
@@ -895,7 +736,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       }
       final citations = (data['citations'] as List?) ?? const [];
       setState(() {
-        _conversationId = data['conversationId']?.toString() ?? _conversationId;
+        _conversationId =
+            data['conversationId']?.toString() ?? _conversationId;
         _messages.add(
           _ChatBubble(
             role: 'assistant',
@@ -1017,8 +859,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     if (docs.isEmpty) {
       try {
         final data = await api.get('/api/ai/kb-documents');
-        docs = ((data['documents'] as List?) ?? [])
-            .cast<Map<String, dynamic>>();
+        docs =
+            ((data['documents'] as List?) ?? []).cast<Map<String, dynamic>>();
       } catch (e) {
         _toast(e is ApiException ? e.message : errGeneric);
         return;
@@ -1037,8 +879,10 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      builder: (ctx) =>
-          _MaterialPickerSheet(documents: docs, explainMode: true),
+      builder: (ctx) => _MaterialPickerSheet(
+        documents: docs,
+        explainMode: true,
+      ),
     );
     if (selected == null || !mounted) return;
     final ids = ((selected['documentIds'] as List?) ?? [])
@@ -1109,11 +953,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       _scrollToEnd();
     } catch (e) {
       if (!mounted) return;
-      _toast(
-        e is ApiException
-            ? e.message
-            : context.l10n.t('mobile.ai.errorGeneric'),
-      );
+      _toast(e is ApiException ? e.message : context.l10n.t('mobile.ai.errorGeneric'));
       setState(() {
         if (bubbleIndex >= 0 && bubbleIndex < _messages.length) {
           final old = _messages[bubbleIndex];
@@ -1150,11 +990,11 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     final name = auth.user?.fullLegalName;
     final stageName = auth.user?.role == 'CERTIFICATE_USER'
         ? (auth.user?.certificateStage?.nameFor(locale) ??
-              (auth.user!.interestSubjects.isNotEmpty
-                  ? auth.user!.interestSubjects
-                        .map((s) => s.nameFor(locale))
-                        .join(', ')
-                  : null))
+            (auth.user!.interestSubjects.isNotEmpty
+                ? auth.user!.interestSubjects
+                    .map((s) => s.nameFor(locale))
+                    .join(', ')
+                : null))
         : auth.user?.stage?.nameFor(locale);
 
     return Scaffold(
@@ -1205,851 +1045,678 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       body: _entitlementLoading
           ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
           : _aiLocked
-          ? AiLockedGate(onUpgrade: _openUpgrade)
-          : Column(
-              children: [
-                if (name != null || stageName != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        gradient: LinearGradient(
-                          colors: [
-                            AppTheme.primary.withValues(alpha: 0.12),
-                            AppTheme.accent.withValues(alpha: 0.06),
-                          ],
-                        ),
-                        border: Border.all(color: AppTheme.cardBorder),
-                      ),
-                      child: Text(
-                        [
-                          if (name != null && name.isNotEmpty) name,
-                          if (stageName != null && stageName.isNotEmpty)
-                            stageName,
-                        ].join(' · '),
-                        style: TextStyle(
-                          color: AppTheme.muted,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
+              ? AiLockedGate(onUpgrade: _openUpgrade)
+              : Column(
+        children: [
+          if (name != null || stageName != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primary.withValues(alpha: 0.12),
+                      AppTheme.accent.withValues(alpha: 0.06),
+                    ],
                   ),
-                Expanded(
-                  child: _messages.isEmpty
-                      ? _EmptyState(
-                          onAsk: (prompt) {
-                            _controller.text = prompt;
-                            _send();
-                          },
-                          onExam: _startExamFlow,
-                        )
-                      : ListView.builder(
-                          controller: _scroll,
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                          itemCount: _messages.length + (_sending ? 1 : 0),
-                          itemBuilder: (context, i) {
-                            if (_sending && i == _messages.length) {
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: Row(
-                                  children: [
-                                    SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: AppTheme.accent,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Text(
-                                      l10n.t('mobile.ai.thinking'),
-                                      style: TextStyle(color: AppTheme.muted),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }
-                            final m = _messages[i];
-                            final isUser = m.role == 'user';
-                            return Align(
-                              alignment: isUser
-                                  ? Alignment.centerRight
-                                  : Alignment.centerLeft,
-                              child: Container(
-                                constraints: BoxConstraints(
-                                  maxWidth:
-                                      MediaQuery.sizeOf(context).width * 0.92,
-                                ),
-                                margin: const EdgeInsets.only(bottom: 12),
-                                child: Column(
-                                  crossAxisAlignment: isUser
-                                      ? CrossAxisAlignment.end
-                                      : CrossAxisAlignment.start,
-                                  children: [
-                                    if (m.text.isNotEmpty ||
-                                        m.previewImages.isNotEmpty ||
-                                        m.attachmentNames.isNotEmpty)
-                                      GestureDetector(
-                                        onLongPress: m.text.isEmpty
-                                            ? null
-                                            : () async {
-                                                await Clipboard.setData(
-                                                  ClipboardData(text: m.text),
-                                                );
-                                                if (mounted) {
-                                                  _toast(
-                                                    l10n.t('mobile.ai.copied'),
-                                                  );
-                                                }
-                                              },
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 14,
-                                            vertical: 11,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: isUser
-                                                ? AppTheme.accent.withValues(
-                                                    alpha: 0.18,
-                                                  )
-                                                : AppTheme.card,
-                                            borderRadius: BorderRadius.only(
-                                              topLeft: const Radius.circular(
-                                                18,
-                                              ),
-                                              topRight: const Radius.circular(
-                                                18,
-                                              ),
-                                              bottomLeft: Radius.circular(
-                                                isUser ? 18 : 6,
-                                              ),
-                                              bottomRight: Radius.circular(
-                                                isUser ? 6 : 18,
-                                              ),
-                                            ),
-                                            border: Border.all(
-                                              color: AppTheme.cardBorder,
-                                            ),
-                                          ),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              if (m
-                                                  .previewImages
-                                                  .isNotEmpty) ...[
-                                                Wrap(
-                                                  spacing: 6,
-                                                  runSpacing: 6,
-                                                  children: m.previewImages
-                                                      .map(
-                                                        (b) => ClipRRect(
-                                                          borderRadius:
-                                                              BorderRadius.circular(
-                                                                10,
-                                                              ),
-                                                          child: Image.memory(
-                                                            b,
-                                                            width: 72,
-                                                            height: 72,
-                                                            fit: BoxFit.cover,
-                                                          ),
-                                                        ),
-                                                      )
-                                                      .toList(),
-                                                ),
-                                                const SizedBox(height: 8),
-                                              ],
-                                              if (m
-                                                  .attachmentNames
-                                                  .isNotEmpty) ...[
-                                                Wrap(
-                                                  spacing: 6,
-                                                  runSpacing: 6,
-                                                  children: m.attachmentNames
-                                                      .map(
-                                                        (n) => Chip(
-                                                          visualDensity:
-                                                              VisualDensity
-                                                                  .compact,
-                                                          label: Text(
-                                                            n,
-                                                            style:
-                                                                const TextStyle(
-                                                                  fontSize: 11,
-                                                                ),
-                                                          ),
-                                                          avatar: const Icon(
-                                                            Icons.attach_file,
-                                                            size: 14,
-                                                          ),
-                                                        ),
-                                                      )
-                                                      .toList(),
-                                                ),
-                                                const SizedBox(height: 6),
-                                              ],
-                                              if (m.text.isNotEmpty)
-                                                AiMessageContent(
-                                                  text: m.text,
-                                                  isUser: isUser,
-                                                  followUps: m.followUps,
-                                                  onFollowUp: isUser
-                                                      ? null
-                                                      : (prompt) {
-                                                          _controller.text =
-                                                              prompt;
-                                                          _send();
-                                                        },
-                                                ),
-                                              if (m.aiTeacherLesson !=
-                                                  null) ...[
-                                                if (m.text.isNotEmpty)
-                                                  const SizedBox(height: 8),
-                                                FilledButton.icon(
-                                                  onPressed: () {
-                                                    final lesson =
-                                                        m.aiTeacherLesson!;
-                                                    final docs = <String>[];
-                                                    final raw =
-                                                        lesson['documentIds'];
-                                                    if (raw is List) {
-                                                      for (final d in raw) {
-                                                        final id = d.toString();
-                                                        if (id.isNotEmpty) {
-                                                          docs.add(id);
-                                                        }
-                                                      }
-                                                    }
-                                                    if (docs.isEmpty) {
-                                                      _toast(
-                                                        context.l10n.t(
-                                                          'mobile.ai.pickMaterialToAnswerHint',
-                                                        ),
-                                                      );
-                                                      return;
-                                                    }
-                                                    _openLiveClassroom(
-                                                      documentIds: docs,
-                                                      question: lesson[
-                                                                  'lesson_title']
-                                                              ?.toString() ??
-                                                          '',
-                                                    );
-                                                  },
-                                                  icon: const Icon(
-                                                    Icons.slideshow_rounded,
-                                                  ),
-                                                  label: Text(
-                                                    context.l10n.t(
-                                                      'mobile.ai.aiTeacherClassroom',
-                                                    ),
-                                                  ),
-                                                  style: FilledButton.styleFrom(
-                                                    backgroundColor:
-                                                        const Color(0xFF10B981),
-                                                    foregroundColor:
-                                                        const Color(0xFF064E3B),
-                                                  ),
-                                                ),
-                                                if (m.followUps.isNotEmpty) ...[
-                                                  const SizedBox(height: 8),
-                                                  Wrap(
-                                                    spacing: 8,
-                                                    runSpacing: 8,
-                                                    children: m.followUps.map((
-                                                      p,
-                                                    ) {
-                                                      return ActionChip(
-                                                        label: Text(
-                                                          p,
-                                                          style:
-                                                              const TextStyle(
-                                                                fontSize: 12,
-                                                              ),
-                                                        ),
-                                                        onPressed: _sending
-                                                            ? null
-                                                            : () {
-                                                                _controller
-                                                                        .text =
-                                                                    p;
-                                                                _sendAiTeacher();
-                                                              },
-                                                      );
-                                                    }).toList(),
-                                                  ),
-                                                ],
-                                              ],
-                                              if (m.editedImageBytes !=
-                                                  null) ...[
-                                                const SizedBox(height: 10),
-                                                ClipRRect(
-                                                  borderRadius:
-                                                      BorderRadius.circular(14),
-                                                  child: Image.memory(
-                                                    m.editedImageBytes!,
-                                                    fit: BoxFit.cover,
-                                                    width: double.infinity,
-                                                  ),
-                                                ),
-                                              ],
-                                              if (m.editedFileName != null) ...[
-                                                const SizedBox(height: 10),
-                                                OutlinedButton.icon(
-                                                  onPressed: () =>
-                                                      _downloadEdited(m),
-                                                  icon: Icon(
-                                                    _canSaveToPhotos(m)
-                                                        ? Icons
-                                                              .photo_library_outlined
-                                                        : Icons
-                                                              .download_rounded,
-                                                    size: 18,
-                                                  ),
-                                                  label: Text(
-                                                    _canSaveToPhotos(m)
-                                                        ? context.l10n.t(
-                                                            'mobile.ai.creative.saveToPhotos',
-                                                          )
-                                                        : context.l10n.t(
-                                                            'mobile.ai.downloadFile',
-                                                            {
-                                                              'name': m
-                                                                  .editedFileName!,
-                                                            },
-                                                          ),
-                                                  ),
-                                                ),
-                                              ],
-                                              if (m.citations.isNotEmpty) ...[
-                                                const SizedBox(height: 8),
-                                                Wrap(
-                                                  spacing: 6,
-                                                  runSpacing: 6,
-                                                  children: m.citations
-                                                      .toSet()
-                                                      .map(
-                                                        (c) => Container(
-                                                          padding:
-                                                              const EdgeInsets.symmetric(
-                                                                horizontal: 8,
-                                                                vertical: 4,
-                                                              ),
-                                                          decoration: BoxDecoration(
-                                                            color: AppTheme
-                                                                .background,
-                                                            borderRadius:
-                                                                BorderRadius.circular(
-                                                                  999,
-                                                                ),
-                                                            border: Border.all(
-                                                              color: AppTheme
-                                                                  .cardBorder,
-                                                            ),
-                                                          ),
-                                                          child: Text(
-                                                            c,
-                                                            style: TextStyle(
-                                                              fontSize: 11,
-                                                              color: AppTheme
-                                                                  .muted,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      )
-                                                      .toList(),
-                                                ),
-                                              ],
-                                              if (m
-                                                  .selectableMaterials
-                                                  .isNotEmpty) ...[
-                                                const SizedBox(height: 12),
-                                                Text(
-                                                  context.l10n.t(
-                                                    'mobile.ai.pickMaterialToAnswer',
-                                                  ),
-                                                  style: TextStyle(
-                                                    color: AppTheme.muted,
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 8),
-                                                Wrap(
-                                                  spacing: 8,
-                                                  runSpacing: 8,
-                                                  children: m.selectableMaterials.map((
-                                                    mat,
-                                                  ) {
-                                                    final id =
-                                                        mat['id']?.toString() ??
-                                                        '';
-                                                    final name =
-                                                        mat['fileName']
-                                                            ?.toString() ??
-                                                        'Material';
-                                                    return ActionChip(
-                                                      onPressed:
-                                                          id.isEmpty || _sending
-                                                          ? null
-                                                          : () {
-                                                              final q =
-                                                                  m.pendingMaterialQuestion ??
-                                                                  '';
-                                                              final mode =
-                                                                  m.pendingMode ??
-                                                                  'explain_observe';
-                                                              setState(() {
-                                                                final idx =
-                                                                    _messages
-                                                                        .indexOf(
-                                                                          m,
-                                                                        );
-                                                                if (idx >= 0) {
-                                                                  _messages[idx] = _ChatBubble(
-                                                                    role:
-                                                                        m.role,
-                                                                    text:
-                                                                        m.text,
-                                                                    citations: m
-                                                                        .citations,
-                                                                    followUps: m
-                                                                        .followUps,
-                                                                  );
-                                                                }
-                                                              });
-                                                              _continueGroundedRequest(
-                                                                question:
-                                                                    q.isNotEmpty
-                                                                    ? q
-                                                                    : name,
-                                                                mode: mode,
-                                                                documentIds: [
-                                                                  id,
-                                                                ],
-                                                                count: m
-                                                                    .pendingCount,
-                                                              );
-                                                            },
-                                                      backgroundColor: AppTheme
-                                                          .primary
-                                                          .withValues(
-                                                            alpha: 0.14,
-                                                          ),
-                                                      side: BorderSide(
-                                                        color: AppTheme.accent
-                                                            .withValues(
-                                                              alpha: 0.45,
-                                                            ),
-                                                      ),
-                                                      avatar: Icon(
-                                                        Icons.menu_book_rounded,
-                                                        size: 16,
-                                                        color: AppTheme.accent,
-                                                      ),
-                                                      label: Text(
-                                                        name,
-                                                        style: TextStyle(
-                                                          color: AppTheme
-                                                              .foreground,
-                                                          fontSize: 13,
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                        ),
-                                                      ),
-                                                    );
-                                                  }).toList(),
-                                                ),
-                                              ],
-                                              if (m
-                                                  .selectableChapters
-                                                  .isNotEmpty) ...[
-                                                const SizedBox(height: 12),
-                                                Text(
-                                                  context.l10n.t(
-                                                    'mobile.ai.pickChapterToAnswer',
-                                                  ),
-                                                  style: TextStyle(
-                                                    color: AppTheme.muted,
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 8),
-                                                Wrap(
-                                                  spacing: 8,
-                                                  runSpacing: 8,
-                                                  children: m.selectableChapters.map((
-                                                    ch,
-                                                  ) {
-                                                    final id =
-                                                        ch['id']?.toString() ??
-                                                        '';
-                                                    final title =
-                                                        ch['title']
-                                                            ?.toString() ??
-                                                        id;
-                                                    final from =
-                                                        (ch['chunkFrom']
-                                                                as num?)
-                                                            ?.toInt();
-                                                    final to =
-                                                        (ch['chunkTo'] as num?)
-                                                            ?.toInt();
-                                                    return ActionChip(
-                                                      onPressed:
-                                                          id.isEmpty ||
-                                                              _sending ||
-                                                              m
-                                                                  .pendingDocumentIds
-                                                                  .isEmpty
-                                                          ? null
-                                                          : () {
-                                                              final q =
-                                                                  m.pendingMaterialQuestion ??
-                                                                  '';
-                                                              final mode =
-                                                                  m.pendingMode ??
-                                                                  'explain_observe';
-                                                              setState(() {
-                                                                final idx =
-                                                                    _messages
-                                                                        .indexOf(
-                                                                          m,
-                                                                        );
-                                                                if (idx >= 0) {
-                                                                  _messages[idx] = _ChatBubble(
-                                                                    role:
-                                                                        m.role,
-                                                                    text:
-                                                                        m.text,
-                                                                    citations: m
-                                                                        .citations,
-                                                                    followUps: m
-                                                                        .followUps,
-                                                                  );
-                                                                }
-                                                              });
-                                                              _continueGroundedRequest(
-                                                                question:
-                                                                    q.isNotEmpty
-                                                                    ? q
-                                                                    : title,
-                                                                mode: mode,
-                                                                documentIds: m
-                                                                    .pendingDocumentIds,
-                                                                chapterHeading:
-                                                                    id,
-                                                                chunkFrom: from,
-                                                                chunkTo: to,
-                                                                count: m
-                                                                    .pendingCount,
-                                                              );
-                                                            },
-                                                      backgroundColor: AppTheme
-                                                          .accent
-                                                          .withValues(
-                                                            alpha: 0.12,
-                                                          ),
-                                                      side: BorderSide(
-                                                        color: AppTheme.primary
-                                                            .withValues(
-                                                              alpha: 0.4,
-                                                            ),
-                                                      ),
-                                                      avatar: Icon(
-                                                        Icons.list_alt_rounded,
-                                                        size: 16,
-                                                        color: AppTheme.primary,
-                                                      ),
-                                                      label: Text(
-                                                        title,
-                                                        style: TextStyle(
-                                                          color: AppTheme
-                                                              .foreground,
-                                                          fontSize: 13,
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                        ),
-                                                      ),
-                                                    );
-                                                  }).toList(),
-                                                ),
-                                              ],
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    if (m.exam != null) ...[
-                                      const SizedBox(height: 8),
-                                      AiExamPanel(
-                                        key: ValueKey(m.exam!.examAttemptId),
-                                        exam: m.exam!,
-                                        disabled: m.examCompleted,
-                                        onSubmit: (answers, elapsed, expired) =>
-                                            _submitExam(
-                                              i,
-                                              m.exam!,
-                                              answers,
-                                              elapsed,
-                                              expired,
-                                            ),
-                                      ),
-                                    ],
-                                    if (m.examResult != null) ...[
-                                      const SizedBox(height: 8),
-                                      AiExamResultPanel(result: m.examResult!),
-                                    ],
-                                    if (m.courseSuggestions.isNotEmpty) ...[
-                                      const SizedBox(height: 10),
-                                      _CourseSuggestionsStrip(
-                                        courses: m.courseSuggestions,
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                  border: Border.all(color: AppTheme.cardBorder),
                 ),
-                if (_pending.isEmpty)
-                  SizedBox(
-                    height: 40,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                      children: [
-                        ActionChip(
-                          avatar: const Icon(Icons.slideshow_rounded, size: 16),
-                          label: Text(
-                            context.l10n.t('mobile.ai.aiTeacher'),
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          onPressed: _sending
-                              ? null
-                              : () {
-                                  final q = _controller.text.trim().isNotEmpty
-                                      ? _controller.text.trim()
-                                      : context.l10n.t(
-                                          'mobile.ai.aiTeacherPrompt',
-                                        );
-                                  _controller.text = q;
-                                  _sendAiTeacher();
-                                },
-                          backgroundColor: AppTheme.primary.withValues(
-                            alpha: 0.12,
-                          ),
-                          side: BorderSide(
-                            color: AppTheme.accent.withValues(alpha: 0.45),
-                          ),
-                        ),
-                        if (_messages.isNotEmpty) ...[
-                          const SizedBox(width: 8),
-                          ActionChip(
-                            label: Text(
-                              context.l10n.t('mobile.ai.promptSummary'),
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            onPressed: () {
-                              _controller.text = context.l10n.t(
-                                'mobile.ai.promptSummary',
-                              );
-                              _send();
-                            },
-                            backgroundColor: AppTheme.card,
-                            side: BorderSide(color: AppTheme.cardBorder),
-                          ),
-                          const SizedBox(width: 8),
-                          ActionChip(
-                            label: Text(
-                              context.l10n.t('mobile.ai.promptMinistry'),
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            onPressed: () {
-                              _controller.text = context.l10n.t(
-                                'mobile.ai.promptMinistry',
-                              );
-                              _send();
-                            },
-                            backgroundColor: AppTheme.card,
-                            side: BorderSide(color: AppTheme.cardBorder),
-                          ),
-                        ],
-                      ],
-                    ),
+                child: Text(
+                  [
+                    if (name != null && name.isNotEmpty) name,
+                    if (stageName != null && stageName.isNotEmpty) stageName,
+                  ].join(' · '),
+                  style: TextStyle(
+                    color: AppTheme.muted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                   ),
-                if (_pending.isNotEmpty)
-                  _AttachmentPromptBar(
-                    hasPdf: _pending.any(
-                      (a) =>
-                          a.mimeType.contains('pdf') ||
-                          a.fileName.toLowerCase().endsWith('.pdf'),
-                    ),
-                    hasImage: _pending.any((a) => a.isImage),
-                    pdfCount: _pending
-                        .where(
-                          (a) =>
-                              a.mimeType.contains('pdf') ||
-                              a.fileName.toLowerCase().endsWith('.pdf'),
-                        )
-                        .length,
+                ),
+              ),
+            ),
+          Expanded(
+            child: _messages.isEmpty
+                ? _EmptyState(
                     onAsk: (prompt) {
                       _controller.text = prompt;
                       _send();
                     },
-                  ),
-                if (_pending.isNotEmpty)
-                  SizedBox(
-                    height: 78,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                      itemCount: _pending.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 8),
-                      itemBuilder: (context, i) {
-                        final a = _pending[i];
-                        return Stack(
-                          children: [
-                            Container(
-                              width: 70,
-                              decoration: BoxDecoration(
-                                color: AppTheme.card,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: AppTheme.cardBorder),
-                              ),
-                              clipBehavior: Clip.antiAlias,
-                              child: a.isImage
-                                  ? Image.memory(a.bytes, fit: BoxFit.cover)
-                                  : Padding(
-                                      padding: const EdgeInsets.all(8),
-                                      child: Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          const Icon(
-                                            Icons.insert_drive_file_outlined,
-                                            size: 22,
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            a.fileName,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            textAlign: TextAlign.center,
-                                            style: const TextStyle(fontSize: 9),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                            ),
-                            Positioned(
-                              top: 2,
-                              right: 2,
-                              child: InkWell(
-                                onTap: () =>
-                                    setState(() => _pending.removeAt(i)),
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.55),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  padding: const EdgeInsets.all(2),
-                                  child: const Icon(
-                                    Icons.close,
-                                    size: 14,
-                                    color: Colors.white,
-                                  ),
+                    onExam: _startExamFlow,
+                  )
+                : ListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    itemCount: _messages.length + (_sending ? 1 : 0),
+                    itemBuilder: (context, i) {
+                      if (_sending && i == _messages.length) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppTheme.accent,
                                 ),
                               ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                SafeArea(
-                  top: false,
-                  child: Container(
-                    margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                    padding: const EdgeInsets.fromLTRB(4, 6, 6, 6),
-                    decoration: BoxDecoration(
-                      color: AppTheme.card,
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: AppTheme.cardBorder),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.18),
-                          blurRadius: 18,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        IconButton(
-                          tooltip: l10n.t('mobile.ai.attachPhoto'),
-                          onPressed: _sending
-                              ? null
-                              : () => _pick(imagesOnly: true),
-                          icon: const Icon(Icons.photo_outlined),
-                        ),
-                        IconButton(
-                          tooltip: l10n.t('mobile.ai.attachFile'),
-                          onPressed: _sending
-                              ? null
-                              : () => _pick(imagesOnly: false),
-                          icon: const Icon(Icons.attach_file_rounded),
-                        ),
-                        IconButton(
-                          tooltip: l10n.t('mobile.ai.generateExam'),
-                          onPressed: _sending ? null : _startExamFlow,
-                          icon: const ULearnLogo(size: 22, glow: 0.55),
-                        ),
-                        Expanded(
-                          child: TextField(
-                            controller: _controller,
-                            minLines: 1,
-                            maxLines: 4,
-                            textInputAction: TextInputAction.send,
-                            onSubmitted: (_) => _send(),
-                            decoration: InputDecoration(
-                              hintText: l10n.t('mobile.ai.placeholder'),
-                              border: InputBorder.none,
-                              enabledBorder: InputBorder.none,
-                              focusedBorder: InputBorder.none,
-                              filled: false,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 10,
+                              const SizedBox(width: 10),
+                              Text(
+                                l10n.t('mobile.ai.thinking'),
+                                style: TextStyle(color: AppTheme.muted),
                               ),
+                            ],
+                          ),
+                        );
+                      }
+                      final m = _messages[i];
+                      final isUser = m.role == 'user';
+                      return Align(
+                        alignment: isUser
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: Container(
+                          constraints: BoxConstraints(
+                            maxWidth: MediaQuery.sizeOf(context).width * 0.92,
+                          ),
+                          margin: const EdgeInsets.only(bottom: 12),
+                          child: Column(
+                            crossAxisAlignment: isUser
+                                ? CrossAxisAlignment.end
+                                : CrossAxisAlignment.start,
+                            children: [
+                              if (m.text.isNotEmpty ||
+                                  m.previewImages.isNotEmpty ||
+                                  m.attachmentNames.isNotEmpty)
+                                GestureDetector(
+                                  onLongPress: m.text.isEmpty
+                                      ? null
+                                      : () async {
+                                          await Clipboard.setData(
+                                            ClipboardData(text: m.text),
+                                          );
+                                          if (mounted) {
+                                            _toast(l10n.t('mobile.ai.copied'));
+                                          }
+                                        },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 11,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isUser
+                                          ? AppTheme.accent
+                                              .withValues(alpha: 0.18)
+                                          : AppTheme.card,
+                                      borderRadius: BorderRadius.only(
+                                        topLeft: const Radius.circular(18),
+                                        topRight: const Radius.circular(18),
+                                        bottomLeft: Radius.circular(
+                                          isUser ? 18 : 6,
+                                        ),
+                                        bottomRight: Radius.circular(
+                                          isUser ? 6 : 18,
+                                        ),
+                                      ),
+                                      border: Border.all(
+                                        color: AppTheme.cardBorder,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        if (m.previewImages.isNotEmpty) ...[
+                                          Wrap(
+                                            spacing: 6,
+                                            runSpacing: 6,
+                                            children: m.previewImages
+                                                .map(
+                                                  (b) => ClipRRect(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            10),
+                                                    child: Image.memory(
+                                                      b,
+                                                      width: 72,
+                                                      height: 72,
+                                                      fit: BoxFit.cover,
+                                                    ),
+                                                  ),
+                                                )
+                                                .toList(),
+                                          ),
+                                          const SizedBox(height: 8),
+                                        ],
+                                        if (m.attachmentNames.isNotEmpty) ...[
+                                          Wrap(
+                                            spacing: 6,
+                                            runSpacing: 6,
+                                            children: m.attachmentNames
+                                                .map(
+                                                  (n) => Chip(
+                                                    visualDensity:
+                                                        VisualDensity.compact,
+                                                    label: Text(
+                                                      n,
+                                                      style: const TextStyle(
+                                                          fontSize: 11),
+                                                    ),
+                                                    avatar: const Icon(
+                                                      Icons.attach_file,
+                                                      size: 14,
+                                                    ),
+                                                  ),
+                                                )
+                                                .toList(),
+                                          ),
+                                          const SizedBox(height: 6),
+                                        ],
+                                        if (m.text.isNotEmpty)
+                                          AiMessageContent(
+                                            text: m.text,
+                                            isUser: isUser,
+                                            followUps: m.followUps,
+                                            onFollowUp: isUser
+                                                ? null
+                                                : (prompt) {
+                                                    _controller.text = prompt;
+                                                    _send();
+                                                  },
+                                          ),
+                                        if (m.editedImageBytes != null) ...[
+                                          const SizedBox(height: 10),
+                                          ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                            child: Image.memory(
+                                              m.editedImageBytes!,
+                                              fit: BoxFit.cover,
+                                              width: double.infinity,
+                                            ),
+                                          ),
+                                        ],
+                                        if (m.editedFileName != null) ...[
+                                          const SizedBox(height: 10),
+                                          OutlinedButton.icon(
+                                            onPressed: () => _downloadEdited(m),
+                                            icon: Icon(
+                                              _canSaveToPhotos(m)
+                                                  ? Icons.photo_library_outlined
+                                                  : Icons.download_rounded,
+                                              size: 18,
+                                            ),
+                                            label: Text(
+                                              _canSaveToPhotos(m)
+                                                  ? context.l10n.t(
+                                                      'mobile.ai.creative.saveToPhotos',
+                                                    )
+                                                  : context.l10n.t(
+                                                      'mobile.ai.downloadFile',
+                                                      {
+                                                        'name':
+                                                            m.editedFileName!
+                                                      },
+                                                    ),
+                                            ),
+                                          ),
+                                        ],
+                                        if (m.citations.isNotEmpty) ...[
+                                          const SizedBox(height: 8),
+                                          Wrap(
+                                            spacing: 6,
+                                            runSpacing: 6,
+                                            children: m.citations
+                                                .toSet()
+                                                .map(
+                                                  (c) => Container(
+                                                    padding:
+                                                        const EdgeInsets
+                                                            .symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 4,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color:
+                                                          AppTheme.background,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              999),
+                                                      border: Border.all(
+                                                        color: AppTheme
+                                                            .cardBorder,
+                                                      ),
+                                                    ),
+                                                    child: Text(
+                                                      c,
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        color: AppTheme.muted,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                )
+                                                .toList(),
+                                          ),
+                                        ],
+                                        if (m.selectableMaterials
+                                            .isNotEmpty) ...[
+                                          const SizedBox(height: 12),
+                                          Text(
+                                            context.l10n.t(
+                                              'mobile.ai.pickMaterialToAnswer',
+                                            ),
+                                            style: TextStyle(
+                                              color: AppTheme.muted,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Wrap(
+                                            spacing: 8,
+                                            runSpacing: 8,
+                                            children: m.selectableMaterials
+                                                .map((mat) {
+                                              final id =
+                                                  mat['id']?.toString() ?? '';
+                                              final name = mat['fileName']
+                                                      ?.toString() ??
+                                                  'Material';
+                                              return ActionChip(
+                                                onPressed: id.isEmpty ||
+                                                        _sending
+                                                    ? null
+                                                    : () {
+                                                        final q = m
+                                                                .pendingMaterialQuestion ??
+                                                            '';
+                                                        final mode = m
+                                                                .pendingMode ??
+                                                            'explain_observe';
+                                                        setState(() {
+                                                          final idx =
+                                                              _messages
+                                                                  .indexOf(m);
+                                                          if (idx >= 0) {
+                                                            _messages[idx] =
+                                                                _ChatBubble(
+                                                              role: m.role,
+                                                              text: m.text,
+                                                              citations:
+                                                                  m.citations,
+                                                              followUps:
+                                                                  m.followUps,
+                                                            );
+                                                          }
+                                                        });
+                                                        _continueGroundedRequest(
+                                                          question:
+                                                              q.isNotEmpty
+                                                                  ? q
+                                                                  : name,
+                                                          mode: mode,
+                                                          documentIds: [id],
+                                                          count: m.pendingCount,
+                                                        );
+                                                      },
+                                                backgroundColor: AppTheme
+                                                    .primary
+                                                    .withValues(alpha: 0.14),
+                                                side: BorderSide(
+                                                  color: AppTheme.accent
+                                                      .withValues(alpha: 0.45),
+                                                ),
+                                                avatar: Icon(
+                                                  Icons.menu_book_rounded,
+                                                  size: 16,
+                                                  color: AppTheme.accent,
+                                                ),
+                                                label: Text(
+                                                  name,
+                                                  style: TextStyle(
+                                                    color: AppTheme.foreground,
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              );
+                                            }).toList(),
+                                          ),
+                                        ],
+                                        if (m.selectableChapters
+                                            .isNotEmpty) ...[
+                                          const SizedBox(height: 12),
+                                          Text(
+                                            context.l10n.t(
+                                              'mobile.ai.pickChapterToAnswer',
+                                            ),
+                                            style: TextStyle(
+                                              color: AppTheme.muted,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Wrap(
+                                            spacing: 8,
+                                            runSpacing: 8,
+                                            children: m.selectableChapters
+                                                .map((ch) {
+                                              final id =
+                                                  ch['id']?.toString() ?? '';
+                                              final title = ch['title']
+                                                      ?.toString() ??
+                                                  id;
+                                              final from =
+                                                  (ch['chunkFrom'] as num?)
+                                                      ?.toInt();
+                                              final to = (ch['chunkTo'] as num?)
+                                                  ?.toInt();
+                                              return ActionChip(
+                                                onPressed: id.isEmpty ||
+                                                        _sending ||
+                                                        m.pendingDocumentIds
+                                                            .isEmpty
+                                                    ? null
+                                                    : () {
+                                                        final q = m
+                                                                .pendingMaterialQuestion ??
+                                                            '';
+                                                        final mode = m
+                                                                .pendingMode ??
+                                                            'explain_observe';
+                                                        setState(() {
+                                                          final idx =
+                                                              _messages
+                                                                  .indexOf(m);
+                                                          if (idx >= 0) {
+                                                            _messages[idx] =
+                                                                _ChatBubble(
+                                                              role: m.role,
+                                                              text: m.text,
+                                                              citations:
+                                                                  m.citations,
+                                                              followUps:
+                                                                  m.followUps,
+                                                            );
+                                                          }
+                                                        });
+                                                        _continueGroundedRequest(
+                                                          question:
+                                                              q.isNotEmpty
+                                                                  ? q
+                                                                  : title,
+                                                          mode: mode,
+                                                          documentIds: m
+                                                              .pendingDocumentIds,
+                                                          chapterHeading: id,
+                                                          chunkFrom: from,
+                                                          chunkTo: to,
+                                                          count: m.pendingCount,
+                                                        );
+                                                      },
+                                                backgroundColor: AppTheme
+                                                    .accent
+                                                    .withValues(alpha: 0.12),
+                                                side: BorderSide(
+                                                  color: AppTheme.primary
+                                                      .withValues(alpha: 0.4),
+                                                ),
+                                                avatar: Icon(
+                                                  Icons.list_alt_rounded,
+                                                  size: 16,
+                                                  color: AppTheme.primary,
+                                                ),
+                                                label: Text(
+                                                  title,
+                                                  style: TextStyle(
+                                                    color: AppTheme.foreground,
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              );
+                                            }).toList(),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              if (m.exam != null) ...[
+                                const SizedBox(height: 8),
+                                AiExamPanel(
+                                  key: ValueKey(m.exam!.examAttemptId),
+                                  exam: m.exam!,
+                                  disabled: m.examCompleted,
+                                  onSubmit: (answers, elapsed, expired) =>
+                                      _submitExam(
+                                    i,
+                                    m.exam!,
+                                    answers,
+                                    elapsed,
+                                    expired,
+                                  ),
+                                ),
+                              ],
+                              if (m.examResult != null) ...[
+                                const SizedBox(height: 8),
+                                AiExamResultPanel(result: m.examResult!),
+                              ],
+                              if (m.courseSuggestions.isNotEmpty) ...[
+                                const SizedBox(height: 10),
+                                _CourseSuggestionsStrip(
+                                  courses: m.courseSuggestions,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          if (_pending.isEmpty && _messages.isNotEmpty)
+            SizedBox(
+              height: 40,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                children: [
+                  ActionChip(
+                    label: Text(
+                      context.l10n.t('mobile.ai.promptSummary'),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    onPressed: () {
+                      _controller.text =
+                          context.l10n.t('mobile.ai.promptSummary');
+                      _send();
+                    },
+                    backgroundColor: AppTheme.card,
+                    side: BorderSide(color: AppTheme.cardBorder),
+                  ),
+                  const SizedBox(width: 8),
+                  ActionChip(
+                    label: Text(
+                      context.l10n.t('mobile.ai.promptMinistry'),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    onPressed: () {
+                      _controller.text =
+                          context.l10n.t('mobile.ai.promptMinistry');
+                      _send();
+                    },
+                    backgroundColor: AppTheme.card,
+                    side: BorderSide(color: AppTheme.cardBorder),
+                  ),
+                ],
+              ),
+            ),
+          if (_pending.isNotEmpty)
+            _AttachmentPromptBar(
+              hasPdf: _pending.any(
+                (a) =>
+                    a.mimeType.contains('pdf') ||
+                    a.fileName.toLowerCase().endsWith('.pdf'),
+              ),
+              hasImage: _pending.any((a) => a.isImage),
+              pdfCount: _pending
+                  .where(
+                    (a) =>
+                        a.mimeType.contains('pdf') ||
+                        a.fileName.toLowerCase().endsWith('.pdf'),
+                  )
+                  .length,
+              onAsk: (prompt) {
+                _controller.text = prompt;
+                _send();
+              },
+            ),
+          if (_pending.isNotEmpty)
+            SizedBox(
+              height: 78,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                itemCount: _pending.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (context, i) {
+                  final a = _pending[i];
+                  return Stack(
+                    children: [
+                      Container(
+                        width: 70,
+                        decoration: BoxDecoration(
+                          color: AppTheme.card,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppTheme.cardBorder),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: a.isImage
+                            ? Image.memory(a.bytes, fit: BoxFit.cover)
+                            : Padding(
+                                padding: const EdgeInsets.all(8),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(
+                                      Icons.insert_drive_file_outlined,
+                                      size: 22,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      a.fileName,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(fontSize: 9),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                      ),
+                      Positioned(
+                        top: 2,
+                        right: 2,
+                        child: InkWell(
+                          onTap: () => setState(() => _pending.removeAt(i)),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              shape: BoxShape.circle,
+                            ),
+                            padding: const EdgeInsets.all(2),
+                            child: const Icon(
+                              Icons.close,
+                              size: 14,
+                              color: Colors.white,
                             ),
                           ),
                         ),
-                        IconButton.filled(
-                          onPressed: _sending ? null : _send,
-                          style: IconButton.styleFrom(
-                            backgroundColor: AppTheme.accent,
-                            foregroundColor: Colors.black,
-                          ),
-                          icon: const Icon(Icons.arrow_upward_rounded),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          SafeArea(
+            top: false,
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              padding: const EdgeInsets.fromLTRB(4, 6, 6, 6),
+              decoration: BoxDecoration(
+                color: AppTheme.card,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: AppTheme.cardBorder),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  IconButton(
+                    tooltip: l10n.t('mobile.ai.attachPhoto'),
+                    onPressed: _sending ? null : () => _pick(imagesOnly: true),
+                    icon: const Icon(Icons.photo_outlined),
+                  ),
+                  IconButton(
+                    tooltip: l10n.t('mobile.ai.attachFile'),
+                    onPressed:
+                        _sending ? null : () => _pick(imagesOnly: false),
+                    icon: const Icon(Icons.attach_file_rounded),
+                  ),
+              IconButton(
+                    tooltip: l10n.t('mobile.ai.generateExam'),
+                    onPressed: _sending ? null : _startExamFlow,
+                    icon: const ULearnLogo(size: 22, glow: 0.55),
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      minLines: 1,
+                      maxLines: 4,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _send(),
+                      decoration: InputDecoration(
+                        hintText: l10n.t('mobile.ai.placeholder'),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        filled: false,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 10,
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                  IconButton.filled(
+                    onPressed: _sending ? null : _send,
+                    style: IconButton.styleFrom(
+                      backgroundColor: AppTheme.accent,
+                      foregroundColor: Colors.black,
+                    ),
+                    icon: const Icon(Icons.arrow_upward_rounded),
+                  ),
+                ],
+              ),
             ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2145,16 +1812,17 @@ class _EmptyState extends StatelessWidget {
               onPressed: () => onAsk(p),
               style: OutlinedButton.styleFrom(
                 alignment: Alignment.centerLeft,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 14,
-                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                 side: BorderSide(color: AppTheme.cardBorder),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
               ),
-              child: Text(p, style: TextStyle(color: AppTheme.foreground)),
+              child: Text(
+                p,
+                style: TextStyle(color: AppTheme.foreground),
+              ),
             ),
           ),
         ),
@@ -2295,16 +1963,14 @@ class _HistoryDrawer extends StatelessWidget {
                       itemBuilder: (context, i) {
                         final c = conversations[i];
                         final id = c['id']?.toString() ?? '';
-                        final title =
-                            (c['title']?.toString() ?? '').trim().isNotEmpty
+                        final title = (c['title']?.toString() ?? '').trim().isNotEmpty
                             ? c['title'].toString()
                             : l10n.t('mobile.ai.untitledChat');
                         final active = id == activeId;
                         return ListTile(
                           selected: active,
-                          selectedTileColor: AppTheme.accent.withValues(
-                            alpha: 0.12,
-                          ),
+                          selectedTileColor:
+                              AppTheme.accent.withValues(alpha: 0.12),
                           leading: Icon(
                             Icons.chat_bubble_outline,
                             color: active ? AppTheme.accent : AppTheme.muted,
@@ -2473,9 +2139,9 @@ class _MaterialPickerSheetState extends State<_MaterialPickerSheet> {
                   onPressed: _selected.isEmpty
                       ? null
                       : () => Navigator.pop(context, {
-                          'documentIds': _selected.toList(),
-                          'count': _count,
-                        }),
+                            'documentIds': _selected.toList(),
+                            'count': _count,
+                          }),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.accent,
                     foregroundColor: Colors.black,
@@ -2513,7 +2179,9 @@ class _DifficultyChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: selected ? AppTheme.accent.withValues(alpha: 0.2) : AppTheme.card,
+      color: selected
+          ? AppTheme.accent.withValues(alpha: 0.2)
+          : AppTheme.card,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
@@ -2570,7 +2238,6 @@ class _ChatBubble {
     this.examResult,
     this.courseSuggestions = const [],
     this.followUps = const [],
-    this.aiTeacherLesson,
     this.selectableMaterials = const [],
     this.selectableChapters = const [],
     this.pendingMaterialQuestion,
@@ -2594,7 +2261,6 @@ class _ChatBubble {
   final Map<String, dynamic>? examResult;
   final List<Map<String, dynamic>> courseSuggestions;
   final List<String> followUps;
-  final Map<String, dynamic>? aiTeacherLesson;
   final List<Map<String, dynamic>> selectableMaterials;
   final List<Map<String, dynamic>> selectableChapters;
   final String? pendingMaterialQuestion;
@@ -2643,8 +2309,10 @@ class _CourseSuggestionsStrip extends StatelessWidget {
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) =>
-                          CourseDetailScreen(courseId: id, summary: c),
+                      builder: (_) => CourseDetailScreen(
+                        courseId: id,
+                        summary: c,
+                      ),
                     ),
                   );
                 },

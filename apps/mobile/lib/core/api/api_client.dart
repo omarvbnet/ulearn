@@ -17,16 +17,6 @@ class ApiClient {
     defaultValue: 'https://ulearn.usmart-iot.com',
   );
 
-  /// Regular JSON requests must never hang forever — a stalled connection
-  /// (weak signal, dropped socket, backend hiccup) used to freeze the whole
-  /// AI classroom because nothing timed out and the loop just waited.
-  static const Duration _requestTimeout = Duration(seconds: 30);
-
-  Never _throwTimeout() => throw ApiException(
-        'Request timed out. Please check your connection and try again.',
-        408,
-      );
-
   final _storage = const FlutterSecureStorage();
   String? _token;
 
@@ -85,21 +75,12 @@ class ApiClient {
     );
   }
 
-  /// [timeout] overrides the default 30s ceiling — LLM-backed endpoints
-  /// (classroom session start/beat/turn) can legitimately take longer than
-  /// a plain CRUD call and pass a longer budget explicitly.
-  Future<Map<String, dynamic>> post(
-    String path,
-    Map<String, dynamic> body, {
-    Duration? timeout,
-  }) async {
-    final res = await http
-        .post(
-          Uri.parse('$baseUrl$path'),
-          headers: _headers,
-          body: jsonEncode(body),
-        )
-        .timeout(timeout ?? _requestTimeout, onTimeout: _throwTimeout);
+  Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers,
+      body: jsonEncode(body),
+    );
     final data = _decodeBody(res.body, res.statusCode);
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);
@@ -107,96 +88,8 @@ class ApiClient {
     return data;
   }
 
-  /// Stream a classroom SSE endpoint. Invokes [onEvent] for each parsed
-  /// event (`status` / `session` / `speak` / `board` / `complete` / …).
-  /// Falls back to a single synthetic `complete` event when the server
-  /// returns plain JSON (older deployments that ignore `stream: true`).
-  Future<void> postSse(
-    String path,
-    Map<String, dynamic> body, {
-    required void Function(String type, Map<String, dynamic> data) onEvent,
-    Duration? timeout,
-  }) async {
-    final req = http.Request('POST', Uri.parse('$baseUrl$path'));
-    req.headers.addAll({
-      ..._headers,
-      'Accept': 'text/event-stream',
-    });
-    final payload = Map<String, dynamic>.from(body)..['stream'] = true;
-    req.body = jsonEncode(payload);
-    final client = http.Client();
-    try {
-      final streamed = await client
-          .send(req)
-          .timeout(timeout ?? _requestTimeout, onTimeout: _throwTimeout);
-      if (streamed.statusCode >= 400) {
-        final errBody = await streamed.stream.bytesToString();
-        final data = _decodeBody(errBody, streamed.statusCode);
-        throw ApiException(
-          data['error']?.toString() ?? 'Request failed',
-          streamed.statusCode,
-        );
-      }
-      final ctype = streamed.headers['content-type'] ?? '';
-      if (!ctype.contains('text/event-stream')) {
-        final raw = await streamed.stream.bytesToString();
-        final data = _decodeBody(raw, streamed.statusCode);
-        if (data['needsMaterialSelection'] == true) {
-          onEvent('needs_materials', data);
-          return;
-        }
-        onEvent('complete', {
-          'type': 'complete',
-          'beat': data['beat'],
-          'session': data['session'],
-        });
-        return;
-      }
-      final lines = streamed.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter());
-      var eventName = 'message';
-      final dataBuf = StringBuffer();
-      await for (final line in lines.timeout(
-        timeout ?? _requestTimeout,
-        onTimeout: (sink) {
-          sink.close();
-          _throwTimeout();
-        },
-      )) {
-        if (line.isEmpty) {
-          if (dataBuf.isNotEmpty) {
-            try {
-              final decoded = jsonDecode(dataBuf.toString());
-              if (decoded is Map) {
-                final map = Map<String, dynamic>.from(decoded);
-                final type = (map['type'] ?? eventName).toString();
-                onEvent(type, map);
-              }
-            } catch (_) {
-              /* ignore malformed SSE frame */
-            }
-          }
-          eventName = 'message';
-          dataBuf.clear();
-          continue;
-        }
-        if (line.startsWith('event:')) {
-          eventName = line.substring(6).trim();
-        } else if (line.startsWith('data:')) {
-          if (dataBuf.isNotEmpty) dataBuf.write('\n');
-          dataBuf.write(line.substring(5).trim());
-        }
-      }
-    } finally {
-      client.close();
-    }
-  }
-
   Future<Map<String, dynamic>> get(String path) async {
-    final res = await http
-        .get(Uri.parse('$baseUrl$path'), headers: _headers)
-        .timeout(_requestTimeout, onTimeout: _throwTimeout);
+    final res = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
     final data = _decodeBody(res.body, res.statusCode);
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);
@@ -205,13 +98,11 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> patch(String path, Map<String, dynamic> body) async {
-    final res = await http
-        .patch(
-          Uri.parse('$baseUrl$path'),
-          headers: _headers,
-          body: jsonEncode(body),
-        )
-        .timeout(_requestTimeout, onTimeout: _throwTimeout);
+    final res = await http.patch(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers,
+      body: jsonEncode(body),
+    );
     final data = _decodeBody(res.body, res.statusCode);
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);
@@ -220,13 +111,11 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> delete(String path, [Map<String, dynamic>? body]) async {
-    final res = await http
-        .delete(
-          Uri.parse('$baseUrl$path'),
-          headers: _headers,
-          body: body != null ? jsonEncode(body) : null,
-        )
-        .timeout(_requestTimeout, onTimeout: _throwTimeout);
+    final res = await http.delete(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers,
+      body: body != null ? jsonEncode(body) : null,
+    );
     final data = _decodeBody(res.body, res.statusCode);
     if (res.statusCode >= 400) {
       throw ApiException(data['error']?.toString() ?? 'Request failed', res.statusCode);

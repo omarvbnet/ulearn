@@ -10,12 +10,6 @@ export { AiDiagnosticsService } from "./ai-diagnostics.service";
 export { ExamGeneratorService } from "./exam-generator.service";
 export { AiExamService } from "./ai-exam.service";
 export { StudentLearningContextService } from "./student-learning-context.service";
-export {
-  buildAiTeacherSystemPrompt,
-  buildAiTeacherClassroomV2Persona,
-  parseAiTeacherLesson,
-  type AiTeacherLesson,
-} from "./ai-teacher-prompt";
 export { UNAVAILABLE_ANSWER, unavailableAnswer, languageInstruction } from "./types";
 export * from "./professor";
 export * from "./creative";

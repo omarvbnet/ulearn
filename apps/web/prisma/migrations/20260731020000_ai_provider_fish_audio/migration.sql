@@ -1,2 +1,0 @@
--- AlterEnum
-ALTER TYPE "AiProviderType" ADD VALUE IF NOT EXISTS 'FISH_AUDIO';

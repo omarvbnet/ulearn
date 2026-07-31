@@ -10,16 +10,6 @@ import {
   extractFollowUps,
 } from "./tutoring-prompt";
 import {
-  buildAiTeacherFallbackLesson,
-  buildClassroomInterruptPrompt,
-  buildCompactAiTeacherPrompt,
-  normalizeAiTeacherLesson,
-  parseAiTeacherLesson,
-  parseClassroomInterrupt,
-  sanitizeClassroomPlainText,
-  type AiTeacherLesson,
-} from "./ai-teacher-prompt";
-import {
   languageInstruction,
   unavailableAnswer,
   type ChatAttachmentInput,
@@ -55,157 +45,6 @@ export class AiChatService {
     });
   }
 
-  /**
-   * Dedicated live-classroom entry (not chat).
-   * Always returns either material selection OR a structured aiTeacherLesson.
-   */
-  static async teacherClassroom(input: {
-    userId: string;
-    question?: string;
-    conversationId?: string;
-    language?: string | null;
-    stageId?: string | null;
-    subjectId?: string | null;
-    subjectIds?: string[];
-    documentIds?: string[];
-    chapterHeading?: string | null;
-    chunkFrom?: number | null;
-    chunkTo?: number | null;
-  }) {
-    return this.chat({
-      userId: input.userId,
-      question:
-        (input.question || "").trim() ||
-        "Teach this selected material as an interactive whiteboard lesson with spoken explanation",
-      conversationId: input.conversationId,
-      language: input.language,
-      stageId: input.stageId,
-      subjectId: input.subjectId,
-      subjectIds: input.subjectIds,
-      documentIds: input.documentIds,
-      chapterHeading: input.chapterHeading,
-      chunkFrom: input.chunkFrom,
-      chunkTo: input.chunkTo,
-      mode: "ai_teacher",
-      attachments: [],
-    });
-  }
-
-  /** Live classroom interrupt: spoken answer + smart board drawings for the question. */
-  static async classroomInterrupt(input: {
-    userId: string;
-    question: string;
-    language?: string | null;
-    lessonTitle?: string;
-    pausedSpeechIndex?: number;
-    spokenSoFar?: string[];
-    documentIds?: string[];
-    curriculumOutline?: string[];
-    materialNames?: string[];
-  }) {
-    const question = sanitizeClassroomPlainText(input.question, 220) || input.question.trim();
-    if (!question) {
-      throw new Error("Empty question");
-    }
-    const profile = await prisma.user.findUnique({
-      where: { id: input.userId },
-      select: {
-        locale: true,
-        country: { select: { code: true } },
-      },
-    });
-    const language = input.language || profile?.locale || "en";
-    const countryCode = profile?.country?.code ?? null;
-
-    let materialExcerpt = "";
-    let curriculumOutline = [...(input.curriculumOutline || [])];
-    let materialNames = [...(input.materialNames || [])];
-    const documentIds = (input.documentIds || []).filter(Boolean);
-
-    if (documentIds.length) {
-      try {
-        const { AiExamService } = await import("./ai-exam.service");
-        const { ExamGeneratorService } = await import("./exam-generator.service");
-        const allowed = await AiExamService.assertDocumentsAllowed(
-          input.userId,
-          documentIds
-        );
-        if (!materialNames.length) {
-          const docs = await prisma.kbDocument.findMany({
-            where: { id: { in: allowed }, deletedAt: null },
-            select: { fileName: true },
-          });
-          materialNames = docs.map((d) => d.fileName).filter(Boolean);
-        }
-        if (!curriculumOutline.length && allowed[0]) {
-          const chapters = await AiExamService.listDocumentChapters(
-            input.userId,
-            allowed[0]!
-          );
-          curriculumOutline = chapters
-            .map((c) => c.title)
-            .filter((t) => t && t !== "__all__");
-        }
-        // Prefer the chapter whose title is mentioned in the question.
-        const qLower = question.toLowerCase();
-        const matchedLesson = curriculumOutline.find((t) =>
-          qLower.includes(String(t).toLowerCase().slice(0, 24))
-        );
-        const material = await ExamGeneratorService.loadMaterialForDocuments({
-          userId: input.userId,
-          documentIds: allowed,
-          chapterHeading: matchedLesson || "__all__",
-          question,
-        });
-        materialExcerpt = (material?.text?.trim() ?? "").slice(0, 3200);
-      } catch {
-        /* answer without excerpt */
-      }
-    }
-
-    const system = buildClassroomInterruptPrompt({
-      language,
-      countryCode,
-      lessonTitle: input.lessonTitle,
-      pausedIndex: input.pausedSpeechIndex,
-      spokenSoFar: input.spokenSoFar,
-      curriculumOutline,
-      materialNames,
-      materialExcerpt,
-    });
-    const messages: ChatMessage[] = [
-      { role: "system", content: system },
-      {
-        role: "user",
-        content: `Student asked (answer + draw on board): ${question}`,
-      },
-    ];
-    const result = await AiProviderService.chat(
-      "TEACHING_ASSISTANT",
-      messages,
-      input.userId
-    );
-    const parsed =
-      parseClassroomInterrupt(result.text, language) ||
-      parseClassroomInterrupt(
-        JSON.stringify({
-          answer:
-            language === "ar" || language === "ku"
-              ? "سؤال ممتاز، هذا يدل على تفكير جيد. دعني أوضح الفكرة ببساطة على السبورة، ثم أخبرني: ماذا فهمت؟ بعد ذلك نكمل الدرس من حيث توقفنا."
-              : language === "tr"
-                ? "Harika soru, bu güzel bir düşünce. Tahtada kısaca açıklayayım; sonra senden bir fikir istiyorum. Ardından kaldığımız yerden devam edeceğiz."
-                : "Excellent question — that shows good thinking. Let me clarify this on the board, then tell me what you understood. After that we continue from where we paused.",
-          board: [],
-        }),
-        language
-      );
-
-    return {
-      answer: parsed!.answer,
-      board: parsed!.board,
-    };
-  }
-
   static async chat(input: {
     userId: string;
     question: string;
@@ -219,14 +58,8 @@ export class AiChatService {
     language?: string | null;
     lesson?: string | null;
     attachments?: ChatAttachmentInput[];
-    /** chat | practice_quiz | edit | explain_observe | from_materials | ai_teacher */
-    mode?:
-      | "chat"
-      | "practice_quiz"
-      | "edit"
-      | "explain_observe"
-      | "from_materials"
-      | "ai_teacher";
+    /** chat | practice_quiz | edit | explain_observe | from_materials */
+    mode?: "chat" | "practice_quiz" | "edit" | "explain_observe" | "from_materials";
     /** KB document ids for practice quiz / explain-observe material selection. */
     documentIds?: string[];
     /** Chapter/section title within the selected material. */
@@ -265,7 +98,6 @@ export class AiChatService {
         fullLegalName: true,
         locale: true,
         role: true,
-        country: { select: { code: true } },
         studentProfile: {
           select: {
             educationalStageId: true,
@@ -307,7 +139,6 @@ export class AiChatService {
     });
 
     const language = normalizeLang(input.language || profile?.locale);
-    const countryCode = profile?.country?.code ?? null;
     const isCert = profile?.role === "CERTIFICATE_USER";
     const interestSubjects =
       profile?.certificateProfile?.interests.map((i) => i.subject) ?? [];
@@ -420,7 +251,6 @@ export class AiChatService {
     const { AiExamService } = await import("./ai-exam.service");
 
     const practiceQuiz = input.mode === "practice_quiz";
-    const aiTeacher = input.mode === "ai_teacher";
     const explainObserve =
       input.mode === "explain_observe" ||
       (learnerCreative &&
@@ -451,9 +281,7 @@ export class AiChatService {
         input.mode === "from_materials" ||
         Boolean(question.trim()));
 
-    const pendingMode: string = aiTeacher
-      ? "ai_teacher"
-      : practiceQuiz
+    const pendingMode: string = practiceQuiz
       ? "practice_quiz"
       : creativeNeedsMaterial && creativeIntent
         ? creativeIntent
@@ -462,8 +290,7 @@ export class AiChatService {
     if (
       learnerCreative &&
       !skipMaterialGate &&
-      (aiTeacher ||
-        practiceQuiz ||
+      (practiceQuiz ||
         explainObserve ||
         wantsGroundedAnswer ||
         creativeNeedsMaterial ||
@@ -519,32 +346,6 @@ export class AiChatService {
           chapters.length <= 1 &&
           (chapters[0]?.id === "__all__" ||
             chapters[0]?.title === materialName);
-
-        if (aiTeacher) {
-          // Teach the whole selected material from first lesson → last.
-          return this.runAiTeacherLesson({
-            userId: input.userId,
-            conversationId: input.conversationId,
-            question,
-            language,
-            countryCode,
-            stageId,
-            subjectId,
-            subjectIds,
-            profile,
-            memory,
-            isCert,
-            studentName,
-            stageName,
-            interestNames,
-            grade,
-            attachments,
-            documentIds,
-            chapterHeading: "__all__",
-            chunkFrom: null,
-            chunkTo: null,
-          });
-        }
 
         if (!onlyWholeFile) {
           return {
@@ -632,29 +433,6 @@ export class AiChatService {
           });
         }
 
-        if (aiTeacher) {
-          return this.runAiTeacherLesson({
-            userId: input.userId,
-            conversationId: input.conversationId,
-            question,
-            language,
-            countryCode,
-            stageId,
-            subjectId,
-            subjectIds,
-            profile,
-            memory,
-            isCert,
-            studentName,
-            stageName,
-            interestNames,
-            grade,
-            attachments,
-            documentIds,
-            ...chapterOptsEarly,
-          });
-        }
-
         return this.runExplainObserveWithMaterials({
           userId: input.userId,
           conversationId: input.conversationId,
@@ -687,31 +465,6 @@ export class AiChatService {
           subjectIds,
           count: input.count,
           ...chapterOpts,
-        });
-      }
-
-      if (aiTeacher) {
-        return this.runAiTeacherLesson({
-          userId: input.userId,
-          conversationId: input.conversationId,
-          question,
-          language,
-          countryCode,
-          stageId,
-          subjectId,
-          subjectIds,
-          profile,
-          memory,
-          isCert,
-          studentName,
-          stageName,
-          interestNames,
-          grade,
-          attachments,
-          documentIds,
-          chapterHeading: resolvedChapter,
-          chunkFrom: input.chunkFrom,
-          chunkTo: input.chunkTo,
         });
       }
 
@@ -761,32 +514,6 @@ export class AiChatService {
         subjectId,
         subjectIds,
         ...chapterOpts,
-      });
-    }
-
-    // AI Teacher still requires material selection for learners without attachments.
-    if (aiTeacher) {
-      return this.runAiTeacherLesson({
-        userId: input.userId,
-        conversationId: input.conversationId,
-        question,
-        language,
-        countryCode,
-        stageId,
-        subjectId,
-        subjectIds,
-        profile,
-        memory,
-        isCert,
-        studentName,
-        stageName,
-        interestNames,
-        grade,
-        attachments,
-        documentIds: input.documentIds,
-        chapterHeading: input.chapterHeading || undefined,
-        chunkFrom: input.chunkFrom ?? undefined,
-        chunkTo: input.chunkTo ?? undefined,
       });
     }
 
@@ -1175,233 +902,6 @@ export class AiChatService {
       courseSuggestions: includeSuggestions
         ? learningCtx!.courseSuggestions.slice(0, 5)
         : undefined,
-    });
-  }
-
-  /**
-   * U Learn AI Teacher — fast single-call whiteboard lesson.
-   * Skips repair LLM passes / heavy context so classroom opens quickly.
-   */
-  private static async runAiTeacherLesson(input: {
-    userId: string;
-    conversationId?: string;
-    question: string;
-    language: string;
-    stageId: string | null;
-    subjectId: string | null;
-    subjectIds?: string[];
-    profile: {
-      role?: string | null;
-    } | null;
-    memory: Awaited<ReturnType<typeof StudentMemoryService.getOrCreate>>;
-    isCert: boolean;
-    studentName: string | null;
-    stageName: string | null;
-    interestNames: string[];
-    grade: string | number | null;
-    attachments: ChatAttachmentInput[];
-    documentIds?: string[];
-    chapterHeading?: string;
-    chunkFrom?: number | null;
-    chunkTo?: number | null;
-    countryCode?: string | null;
-  }) {
-    const countryCode =
-      input.countryCode ??
-      (
-        await prisma.user.findUnique({
-          where: { id: input.userId },
-          select: { country: { select: { code: true } } },
-        })
-      )?.country?.code ??
-      null;
-
-    const studentBlurb = [
-      input.studentName ? `Student: ${input.studentName}` : null,
-      countryCode ? `Country: ${countryCode}` : null,
-      input.stageName
-        ? input.isCert
-          ? `Track: ${input.stageName}`
-          : `Stage: ${input.stageName}`
-        : null,
-      input.grade != null && String(input.grade).trim()
-        ? `Grade: ${String(input.grade)}`
-        : null,
-    ]
-      .filter(Boolean)
-      .join("; ");
-
-    let materialContext = "";
-    let curriculumOutline: string[] = [];
-    let materialNames: string[] = [];
-    const selectedDocumentIds =
-      input.documentIds?.filter((id) => id && id.trim().length > 0) ?? [];
-    if (selectedDocumentIds.length > 0) {
-      try {
-        const { AiExamService } = await import("./ai-exam.service");
-        const { ExamGeneratorService } = await import("./exam-generator.service");
-        const allowed = await AiExamService.assertDocumentsAllowed(
-          input.userId,
-          selectedDocumentIds
-        );
-        const docs = await prisma.kbDocument.findMany({
-          where: { id: { in: allowed }, deletedAt: null },
-          select: { id: true, fileName: true },
-        });
-        materialNames = docs.map((d) => d.fileName).filter(Boolean);
-
-        // Build ordered lesson list from first → last across selected materials.
-        for (const docId of allowed) {
-          const chapters = await AiExamService.listDocumentChapters(
-            input.userId,
-            docId
-          );
-          for (const c of chapters) {
-            if (!c.title || c.title === "__all__") continue;
-            if (!curriculumOutline.includes(c.title)) {
-              curriculumOutline.push(c.title);
-            }
-          }
-        }
-
-        // If a specific chapter was chosen, start FROM that lesson through the end.
-        const selectedChapter = (input.chapterHeading || "").trim();
-        if (
-          selectedChapter &&
-          selectedChapter !== "__all__" &&
-          curriculumOutline.length
-        ) {
-          const idx = curriculumOutline.findIndex(
-            (t) => t.toLowerCase() === selectedChapter.toLowerCase()
-          );
-          if (idx >= 0) {
-            curriculumOutline = curriculumOutline.slice(idx);
-          }
-        }
-
-        const material = await ExamGeneratorService.loadMaterialForDocuments({
-          userId: input.userId,
-          documentIds: allowed,
-          educationalStageId: input.stageId,
-          chapterHeading:
-            selectedChapter && selectedChapter !== "__all__"
-              ? selectedChapter
-              : "__all__",
-          chunkFrom: input.chunkFrom ?? undefined,
-          chunkTo: input.chunkTo ?? undefined,
-        });
-        // Curriculum sessions need more context than a single short chapter.
-        materialContext = (material?.text?.trim() ?? "").slice(0, 6500);
-      } catch {
-        /* use topic-only below */
-      }
-    }
-
-    const processed =
-      input.attachments.length > 0
-        ? await processAttachments(input.attachments, input.userId)
-        : { textExcerpt: "", imageParts: [] as ChatContentPart[] };
-
-    const system = [
-      buildCompactAiTeacherPrompt({
-        language: input.language,
-        countryCode,
-        studentBlurb: studentBlurb || undefined,
-        curriculumOutline,
-        materialNames,
-      }),
-      curriculumOutline.length
-        ? `\nLesson path (first → last):\n${curriculumOutline
-            .map((t, i) => `${i + 1}. ${t}`)
-            .join("\n")}`
-        : "",
-      materialContext
-        ? `\nCurriculum text (use this; do not invent facts):\n${materialContext}`
-        : "",
-      processed.textExcerpt
-        ? `\nAttachment text:\n${processed.textExcerpt.slice(0, 1200)}`
-        : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    const userParts: ChatContentPart[] = [...processed.imageParts];
-    const messages: ChatMessage[] = [
-      { role: "system", content: system },
-      {
-        role: "user",
-        content: [
-          "Teach this selected material as a LIVE interactive classroom COURSE (Version 2.0). Return JSON only.",
-          `Topic: ${input.question}`,
-          curriculumOutline.length
-            ? `Teach lessons in order from "${curriculumOutline[0]}" to "${curriculumOutline[curriculumOutline.length - 1]}". Announce each lesson name.`
-            : "Teach progressively and name each lesson step.",
-          "Include goal, explanation, board, example, student discussion questions, practice vibe, summary, quiz, and a bridge to the next lesson.",
-          "Use 10–14 short speech steps. Mix teaching lines with 2+ conversational questions. Match each step with board drawings.",
-        ].join("\n"),
-        parts: userParts.length ? userParts : undefined,
-      },
-    ];
-
-    const result = await AiProviderService.chat(
-      "TEACHING_ASSISTANT",
-      messages,
-      input.userId
-    );
-    const raw = result.text.trim();
-    let lesson = parseAiTeacherLesson(raw);
-
-    // Hard fallback — teach a real topic (never meta UI instructions).
-    if (!lesson) {
-      lesson = buildAiTeacherFallbackLesson({
-        language: input.language,
-        question: input.question,
-      });
-    }
-
-    lesson = normalizeAiTeacherLesson(lesson);
-    if (!lesson.language) lesson.language = input.language;
-    lesson.documentIds = selectedDocumentIds;
-    lesson.curriculumOutline = curriculumOutline;
-    lesson.materialNames = materialNames;
-
-    void StudentMemoryService.recordQuestion(
-      input.userId,
-      input.question,
-      input.subjectId
-    );
-
-    // Keep chat history short — the live classroom player uses aiTeacherLesson JSON.
-    // Never surface the markdown dump as the student-facing lesson body.
-    const answer =
-      input.language === "ar"
-        ? `الدرس المباشر جاهز: ${lesson.lesson_title}`
-        : input.language === "tr"
-          ? `Canlı ders hazır: ${lesson.lesson_title}`
-          : input.language === "ku"
-            ? `پۆلی ڕاستەوخۆ ئامادەیە: ${lesson.lesson_title}`
-            : `Live lesson ready: ${lesson.lesson_title}`;
-    return this.persistTurn({
-      userId: input.userId,
-      conversationId: input.conversationId,
-      question: input.question,
-      answer,
-      citations: [],
-      fromCache: false,
-      attachmentNames: input.attachments.map((a) => a.fileName),
-      aiTeacherLesson: lesson,
-      followUps: [
-        input.language === "ar"
-          ? "مثال آخر أبسط من فضلك"
-          : input.language === "tr"
-            ? "Daha basit başka bir örnek isterim"
-            : "Give me another simpler example",
-        input.language === "ar"
-          ? "اشرح بمزيد من التفصيل"
-          : input.language === "tr"
-            ? "Daha ayrıntılı anlat"
-            : "Explain in more detail",
-      ],
     });
   }
 
@@ -1875,7 +1375,6 @@ export class AiChatService {
     examAttemptId?: string;
     courseSuggestions?: unknown;
     followUps?: string[];
-    aiTeacherLesson?: AiTeacherLesson;
   }) {
     let conversationId = input.conversationId;
     if (!conversationId) {
@@ -1915,9 +1414,6 @@ export class AiChatService {
         ? { courseSuggestions: input.courseSuggestions }
         : {}),
       ...(input.followUps?.length ? { followUps: input.followUps } : {}),
-      ...(input.aiTeacherLesson
-        ? { aiTeacherLesson: input.aiTeacherLesson }
-        : {}),
     };
 
     const assistant = await prisma.aiMessage.create({
@@ -1941,7 +1437,6 @@ export class AiChatService {
       practiceQuiz: input.practiceQuiz,
       examAttemptId: input.examAttemptId,
       courseSuggestions: input.courseSuggestions,
-      aiTeacherLesson: input.aiTeacherLesson,
     };
   }
 }

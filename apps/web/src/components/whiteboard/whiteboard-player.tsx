@@ -240,7 +240,6 @@ export default function WhiteboardPlayer({
         boardRef.current.apply(events[eventIndexRef.current]!);
         eventIndexRef.current++;
       }
-      boardRef.current.normalizeCurrentPageForDisplay();
     },
     [pkg]
   );
@@ -253,7 +252,6 @@ export default function WhiteboardPlayer({
       eventIndexRef.current++;
       applied = true;
     }
-    if (applied) boardRef.current.normalizeCurrentPageForDisplay();
     return applied;
   }, []);
 

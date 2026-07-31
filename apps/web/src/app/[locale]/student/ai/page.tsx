@@ -1,30 +1,10 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, PageHeader } from "@/components/ui";
-import type { AiTeacherLessonView } from "@/components/ai/ai-teacher-lesson-card";
 import { useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
-
-function looksLikeAiTeacherMarkdownDump(text: string): boolean {
-  return (
-    /###\s*Lesson\s*\(spoken\)/i.test(text) ||
-    /###\s*Board actions/i.test(text) ||
-    /###\s*Lesson\s*\(spoken\)|###\s*الملخص|Board actions/i.test(text)
-  );
-}
-
-function lessonFromCitations(
-  citations: unknown
-): AiTeacherLessonView | null {
-  if (!citations || typeof citations !== "object") return null;
-  const raw = (citations as { aiTeacherLesson?: unknown }).aiTeacherLesson;
-  if (!raw || typeof raw !== "object") return null;
-  const lesson = raw as AiTeacherLessonView;
-  if (!Array.isArray(lesson.speech) || lesson.speech.length === 0) return null;
-  return lesson;
-}
 
 type ChatMsg = {
   id: string;
@@ -33,10 +13,6 @@ type ChatMsg = {
   exam?: PracticeExam | null;
   examDone?: boolean;
   result?: ExamResult | null;
-  aiTeacherLesson?: AiTeacherLessonView | null;
-  selectableMaterials?: Array<{ id: string; fileName: string }>;
-  pendingMode?: "exam" | "explain_observe" | "ai_teacher" | string;
-  pendingQuestion?: string;
   file?: {
     fileName: string;
     mimeType?: string;
@@ -71,7 +47,6 @@ type Conv = { id: string; title?: string | null; updatedAt?: string };
 export default function StudentAiPage() {
   const t = useT();
   const { locale } = useParams<{ locale: string }>();
-  const router = useRouter();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
@@ -79,14 +54,11 @@ export default function StudentAiPage() {
   const [conversations, setConversations] = useState<Conv[]>([]);
   const [docs, setDocs] = useState<KbDoc[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerMode, setPickerMode] = useState<
-    "exam" | "explain_observe" | "ai_teacher"
-  >("exam");
+  const [pickerMode, setPickerMode] = useState<"exam" | "explain_observe">("exam");
   const [pendingExplainQuestion, setPendingExplainQuestion] = useState("");
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const [examCount, setExamCount] = useState<5 | 10 | 20>(5);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [preparingClassroom, setPreparingClassroom] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   const quickPrompts =
@@ -278,31 +250,18 @@ export default function StudentAiPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Chat failed");
       if (data.needsMaterialSelection) {
-        const materials = Array.isArray(data.materials)
-          ? (data.materials as Array<{ id: string; fileName: string }>)
-          : [];
         setMessages((m) => [
           ...m,
           {
             id: crypto.randomUUID(),
             role: "assistant",
             text: data.answer || "",
-            selectableMaterials: materials,
-            pendingMode:
-              data.pendingMode === "ai_teacher"
-                ? "ai_teacher"
-                : data.pendingMode === "practice_quiz"
-                  ? "exam"
-                  : "explain_observe",
-            pendingQuestion: String(data.pendingQuestion || q || "").trim() || q,
           },
         ]);
         setPendingExplainQuestion(
           String(data.pendingQuestion || q || "").trim() || q
         );
-        if (!materials.length) {
-          await openMaterialPicker("explain_observe");
-        }
+        await openMaterialPicker("explain_observe");
         return;
       }
       setConversationId(data.conversationId || conversationId);
@@ -312,8 +271,7 @@ export default function StudentAiPage() {
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          text: data.aiTeacherLesson ? "" : data.answer || "",
-          aiTeacherLesson: (data.aiTeacherLesson as AiTeacherLessonView) || null,
+          text: data.answer || "",
           file: edited
             ? {
                 fileName: edited.fileName,
@@ -339,159 +297,6 @@ export default function StudentAiPage() {
     }
   }
 
-  function reopenClassroomFromLesson(lesson: AiTeacherLessonView) {
-    const docs = (lesson.documentIds || []).filter(Boolean);
-    if (!docs.length) return;
-    const params = new URLSearchParams();
-    params.set("docs", docs.join(","));
-    if (lesson.lesson_title) params.set("q", lesson.lesson_title);
-    router.push(`/${locale}/student/ai/classroom?${params.toString()}`);
-  }
-
-  async function requestTeacherClassroom(opts: {
-    question: string;
-    documentIds?: string[];
-    addUserBubble?: boolean;
-  }) {
-    const q = opts.question.trim();
-    if (sending) return;
-
-    const docIds = (opts.documentIds || []).filter(Boolean);
-    if (docIds.length) {
-      if (opts.addUserBubble !== false) {
-        setMessages((m) => [
-          ...m,
-          {
-            id: crypto.randomUUID(),
-            role: "user",
-            text:
-              q ||
-              (locale === "ar"
-                ? "ابدأ الدرس المباشر على السبورة"
-                : "Start the live whiteboard lesson"),
-          },
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            text:
-              locale === "ar"
-                ? "جاري فتح الدرس المباشر…"
-                : "Opening the live lesson…",
-          },
-        ]);
-      }
-      const params = new URLSearchParams();
-      params.set("docs", docIds.join(","));
-      if (q) params.set("q", q);
-      router.push(`/${locale}/student/ai/classroom?${params.toString()}`);
-      return;
-    }
-
-    setSending(true);
-    setPreparingClassroom(true);
-    if (opts.addUserBubble !== false) {
-      setMessages((m) => [
-        ...m,
-        {
-          id: crypto.randomUUID(),
-          role: "user",
-          text:
-            q ||
-            (locale === "ar"
-              ? "ابدأ الدرس المباشر على السبورة"
-              : "Start the live whiteboard lesson"),
-        },
-      ]);
-    }
-    try {
-      const res = await fetch("/api/ai/classroom/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question:
-            q ||
-            (locale === "ar"
-              ? "ابدأ درس السبورة الصوتي من المادة المختارة"
-              : "Start an AI teacher board lesson from the selected material"),
-          language: locale,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "AI Teacher failed");
-
-      if (data.needsUpgrade) {
-        setMessages((m) => [
-          ...m,
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            text: data.answer || "Upgrade required",
-          },
-        ]);
-        return;
-      }
-
-      if (data.needsMaterialSelection) {
-        const materials = Array.isArray(data.materials)
-          ? (data.materials as Array<{ id: string; fileName: string }>)
-          : [];
-        setMessages((m) => [
-          ...m,
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            text:
-              data.answer ||
-              (locale === "ar"
-                ? "اختر المادة لفتح الدرس المباشر على السبورة"
-                : "Choose a material to open the live whiteboard lesson"),
-            selectableMaterials: materials,
-            pendingMode: "ai_teacher",
-            pendingQuestion: String(data.pendingQuestion || q || "").trim() || q,
-          },
-        ]);
-        setPendingExplainQuestion(
-          String(data.pendingQuestion || q || "").trim() || q
-        );
-        setPickerMode("ai_teacher");
-        if (!materials.length) {
-          await openMaterialPicker("ai_teacher");
-        }
-        return;
-      }
-
-      throw new Error(
-        locale === "ar"
-          ? "اختر المادة لفتح الدرس المباشر"
-          : "Choose a material to open the live lesson"
-      );
-    } catch (e) {
-      setMessages((m) => [
-        ...m,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: e instanceof Error ? e.message : "AI Teacher failed",
-        },
-      ]);
-    } finally {
-      setSending(false);
-      setPreparingClassroom(false);
-    }
-  }
-
-  async function sendAiTeacherLesson(question?: string) {
-    const q = (question ?? input).trim();
-    if (sending) return;
-    if (!q) {
-      setPendingExplainQuestion("");
-      await openMaterialPicker("ai_teacher");
-      return;
-    }
-    setInput("");
-    await requestTeacherClassroom({ question: q });
-  }
-
   async function openConversation(id: string) {
     setSending(true);
     try {
@@ -506,22 +311,16 @@ export default function StudentAiPage() {
         citations?: {
           practiceQuiz?: PracticeExam;
           review?: Array<{ text: string; isCorrect: boolean }>;
-          aiTeacherLesson?: AiTeacherLessonView;
         };
       }>;
       setMessages(
         msgs.map((m) => {
           const practice = m.citations?.practiceQuiz;
           const hasReview = Array.isArray(m.citations?.review);
-          const aiTeacherLesson = lessonFromCitations(m.citations);
-          const raw = m.content || "";
-          const hideDump =
-            Boolean(aiTeacherLesson) || looksLikeAiTeacherMarkdownDump(raw);
           return {
             id: m.id,
             role: m.role === "USER" ? "user" : "assistant",
-            text: hideDump ? "" : raw,
-            aiTeacherLesson,
+            text: m.content,
             exam: practice || null,
             examDone: Boolean(practice),
             result: hasReview
@@ -550,9 +349,7 @@ export default function StudentAiPage() {
     setInput("");
   }
 
-  async function openMaterialPicker(
-    mode: "exam" | "explain_observe" | "ai_teacher" = "exam"
-  ) {
+  async function openMaterialPicker(mode: "exam" | "explain_observe" = "exam") {
     const res = await fetch("/api/ai/kb-documents");
     const data = await res.json();
     if (!res.ok) {
@@ -591,108 +388,10 @@ export default function StudentAiPage() {
     await openMaterialPicker("exam");
   }
 
-  async function continueWithMaterial(opts: {
-    documentId: string;
-    mode?: string;
-    question?: string;
-  }) {
-    if (sending || !opts.documentId) return;
-    if (opts.mode === "ai_teacher") {
-      await requestTeacherClassroom({
-        question:
-          (opts.question || "").trim() ||
-          (locale === "ar"
-            ? "ابدأ درس السبورة الصوتي من المادة المختارة"
-            : "Start an AI teacher board lesson from the selected material"),
-        documentIds: [opts.documentId],
-      });
-      return;
-    }
-    const mode =
-      opts.mode === "exam" || opts.mode === "practice_quiz"
-        ? "practice_quiz"
-        : "explain_observe";
-    const question =
-      (opts.question || "").trim() ||
-      (locale === "ar"
-        ? "اشرح المادة وساعدني على ملاحظة الأشكال"
-        : "Explain the material and help me observe the shapes");
-
-    setSending(true);
-    setMessages((m) => [
-      ...m,
-      { id: crypto.randomUUID(), role: "user", text: question },
-    ]);
-    try {
-      const res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question,
-          language: locale,
-          mode,
-          documentIds: [opts.documentId],
-          conversationId: conversationId || undefined,
-          ...(mode === "practice_quiz" ? { count: examCount } : {}),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed");
-      setConversationId(data.conversationId || conversationId);
-      const edited = data.editedFile as ChatMsg["file"] | undefined;
-      const practice = data.practiceQuiz as PracticeExam | undefined;
-      setMessages((m) => [
-        ...m,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: data.answer || "",
-          exam: practice || null,
-          examDone: false,
-          file: edited
-            ? {
-                fileName: edited.fileName,
-                mimeType: edited.mimeType,
-                contentBase64: edited.contentBase64,
-                downloadUrl: edited.downloadUrl,
-              }
-            : null,
-        },
-      ]);
-      setPendingExplainQuestion("");
-      void loadHistory();
-    } catch (e) {
-      setMessages((m) => [
-        ...m,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: e instanceof Error ? e.message : "Failed",
-        },
-      ]);
-    } finally {
-      setSending(false);
-    }
-  }
-
   async function confirmMaterialPicker() {
     if (!selectedDocs.length) return;
     if (pickerMode === "exam") {
       await generateExam();
-      return;
-    }
-    if (pickerMode === "ai_teacher") {
-      setPickerOpen(false);
-      const question =
-        pendingExplainQuestion.trim() ||
-        (locale === "ar"
-          ? "ابدأ درس السبورة الصوتي من المادة المختارة"
-          : "Start an AI teacher board lesson from the selected material");
-      setPendingExplainQuestion("");
-      await requestTeacherClassroom({
-        question,
-        documentIds: selectedDocs,
-      });
       return;
     }
     setPickerOpen(false);
@@ -702,10 +401,6 @@ export default function StudentAiPage() {
       (locale === "ar"
         ? "اشرح المادة وساعدني على ملاحظة الأشكال"
         : "Explain the material and help me observe the shapes");
-    setMessages((m) => [
-      ...m,
-      { id: crypto.randomUUID(), role: "user", text: prompt },
-    ]);
     try {
       const res = await fetch("/api/ai/chat", {
         method: "POST",
@@ -879,22 +574,6 @@ export default function StudentAiPage() {
             <Card className="space-y-3 border-dashed">
               <p className="text-center text-muted">{t.student.aiEmpty}</p>
               <div className="flex flex-wrap justify-center gap-2">
-                <button
-                  type="button"
-                  disabled={sending}
-                  onClick={() => void sendAiTeacherLesson()}
-                  className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/25"
-                >
-                  {locale === "ar"
-                    ? "ابدأ درس المعلم AI (سبورة + صوت)"
-                    : locale === "tr"
-                      ? "AI Tahta Dersini Başlat"
-                      : locale === "ku"
-                        ? "وانەی مامۆستای AI دەستپێبکە"
-                        : "Start AI Teacher lesson (board + voice)"}
-                </button>
-              </div>
-              <div className="flex flex-wrap justify-center gap-2">
                 {quickPrompts.map((p) => (
                   <button
                     key={p}
@@ -927,58 +606,6 @@ export default function StudentAiPage() {
                     {m.text}
                   </div>
                 ) : null}
-                {m.aiTeacherLesson ? (
-                  <div className="space-y-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        reopenClassroomFromLesson(m.aiTeacherLesson!)
-                      }
-                      className="w-full rounded-2xl border border-emerald-400/40 bg-emerald-500/15 px-4 py-3 text-left hover:bg-emerald-500/25"
-                    >
-                      <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
-                        U Learn ·{" "}
-                        {locale === "ar" ? "الدرس المباشر" : "Live lesson"}
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-foreground">
-                        {m.aiTeacherLesson.lesson_title}
-                      </p>
-                      <p className="mt-1 text-xs text-emerald-100/80">
-                        {locale === "ar"
-                          ? "اضغط لبدء جلسة درس مباشرة جديدة"
-                          : "Tap to start a new live lesson session"}
-                      </p>
-                    </button>
-                  </div>
-                ) : null}
-                {m.selectableMaterials && m.selectableMaterials.length > 0 ? (
-                  <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3">
-                    <p className="mb-2 text-xs font-semibold text-emerald-200">
-                      {locale === "ar"
-                        ? "اختر المادة لبدء الدرس المباشر"
-                        : "Choose a material to start the live lesson"}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {m.selectableMaterials.map((mat) => (
-                        <button
-                          key={mat.id}
-                          type="button"
-                          disabled={sending}
-                          onClick={() =>
-                            void continueWithMaterial({
-                              documentId: mat.id,
-                              mode: m.pendingMode || "ai_teacher",
-                              question: m.pendingQuestion,
-                            })
-                          }
-                          className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-50 hover:bg-emerald-500/25 disabled:opacity-50"
-                        >
-                          {mat.fileName}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
                 {m.file ? (
                   <div className="space-y-2">
                     {(m.file.mimeType || "").startsWith("image/") ||
@@ -1008,17 +635,7 @@ export default function StudentAiPage() {
               </div>
             </div>
           ))}
-          {sending && (
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-100/90">
-              {preparingClassroom
-                ? locale === "ar"
-                  ? "جارٍ تجهيز الدرس المباشر والسبورة…"
-                  : locale === "tr"
-                    ? "Canlı ders ve tahta hazırlanıyor…"
-                    : "Preparing live lesson & board…"
-                : t.student.aiThinking}
-            </div>
-          )}
+          {sending && <p className="text-sm text-muted">{t.student.aiThinking}</p>}
           <div ref={endRef} />
         </div>
 
@@ -1026,21 +643,6 @@ export default function StudentAiPage() {
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" onClick={openExamPicker} disabled={sending}>
               {t.student.aiGenerateExam}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={sending}
-              onClick={() => void sendAiTeacherLesson()}
-              className="border-violet-500/40 text-violet-200 hover:bg-violet-500/10"
-            >
-              {locale === "ar"
-                ? "معلم السبورة AI"
-                : locale === "tr"
-                  ? "AI Tahta Öğretmeni"
-                  : locale === "ku"
-                    ? "مامۆستای تەختەی AI"
-                    : "AI Teacher (board)"}
             </Button>
             <label className="cursor-pointer rounded-lg border border-border px-3 py-2 text-sm hover:bg-white/5">
               Attach
@@ -1192,23 +794,14 @@ export default function StudentAiPage() {
               >
                 {pickerMode === "exam"
                   ? t.student.aiGenerateExam
-                  : pickerMode === "ai_teacher"
-                    ? locale === "ar"
-                      ? "ابدأ درس المعلم الصوتي"
-                      : locale === "tr"
-                        ? "Sesli tahta dersini başlat"
-                        : "Start voice board lesson"
-                    : locale === "ar"
-                      ? "شرح مع رسم الأشكال"
-                      : locale === "tr"
-                        ? "Şekillerle açıkla"
-                        : "Explain with shapes"}
+                  : locale === "ar"
+                    ? "شرح مع رسم الأشكال"
+                    : "Explain with shapes"}
               </Button>
             </div>
           </Card>
         </div>
       )}
-
     </div>
   );
 }

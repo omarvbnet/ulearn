@@ -6,11 +6,8 @@ import type {
   ImageGenerationInput,
   ImageGenerationResult,
   ProviderConfig,
-  SpeechSynthesisInput,
-  SpeechSynthesisResult,
 } from "./types";
 import { EMBEDDING_DIMS } from "./types";
-import { resolveTeacherVoice, ttsDeliveryInstruction, withFishAccentSpeech } from "./voice-accent";
 
 function truncateOrPad(vec: number[], dim = EMBEDDING_DIMS): number[] {
   if (vec.length === dim) return vec;
@@ -235,116 +232,6 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
     };
   }
 
-  /**
-   * Streamed variant of chat() using OpenAI-compatible SSE (`stream: true`).
-   * Used by the live classroom so voice/board work can react to output the
-   * instant a complete JSON beat is present in the stream, instead of always
-   * waiting for the model to hit its own stop token (which can trail on for
-   * a noticeable moment after the meaningful content is already done).
-   */
-  async chatStream(
-    config: ProviderConfig,
-    messages: ChatMessage[],
-    onDelta: (deltaText: string, fullText: string) => boolean | void
-  ): Promise<ChatResult> {
-    const url = `${this.base(config)}/chat/completions`;
-    const mapped = messages.map((m) => {
-      const images = (m.parts || []).filter((p) => p.type === "image");
-      if (!images.length) return { role: m.role, content: m.content };
-      return {
-        role: m.role,
-        content: [
-          ...(m.content?.trim() ? [{ type: "text" as const, text: m.content }] : []),
-          ...images.map((img) => ({
-            type: "image_url" as const,
-            image_url: {
-              url: `data:${img.mimeType};base64,${img.dataBase64.replace(/^data:[^;]+;base64,/, "")}`,
-            },
-          })),
-        ],
-      };
-    });
-    const body: Record<string, unknown> = {
-      model: config.model || defaultChatModel(this.type),
-      messages: mapped,
-      temperature: config.temperature,
-      max_tokens: config.maxTokens,
-      stream: true,
-    };
-    if (config.topP != null) body.top_p = config.topP;
-
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), config.timeoutMs);
-    let full = "";
-    let tokensIn = 0;
-    let tokensOut = 0;
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${config.apiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: ctrl.signal,
-      });
-      if (!res.ok || !res.body) {
-        const errText = await res.text().catch(() => "");
-        throw new Error(
-          `${this.type} chat stream failed (${res.status})${errText ? `: ${errText.slice(0, 200)}` : ""}`
-        );
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let stopped = false;
-      while (!stopped) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let nl: number;
-        while ((nl = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, nl).trim();
-          buffer = buffer.slice(nl + 1);
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (payload === "[DONE]") {
-            stopped = true;
-            break;
-          }
-          try {
-            const json = JSON.parse(payload) as {
-              choices?: { delta?: { content?: string } }[];
-              usage?: { prompt_tokens?: number; completion_tokens?: number };
-            };
-            const delta = json.choices?.[0]?.delta?.content || "";
-            if (delta) {
-              full += delta;
-              if (onDelta(delta, full)) {
-                stopped = true;
-                break;
-              }
-            }
-            if (json.usage) {
-              tokensIn = json.usage.prompt_tokens ?? tokensIn;
-              tokensOut = json.usage.completion_tokens ?? tokensOut;
-            }
-          } catch {
-            /* ignore a malformed/partial SSE fragment — next chunk usually completes it */
-          }
-        }
-      }
-      try {
-        await reader.cancel();
-      } catch {
-        /* ignore */
-      }
-      return { text: full, tokensIn, tokensOut: tokensOut || Math.ceil(full.length / 4) };
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
   async embed(config: ProviderConfig, text: string): Promise<EmbeddingResult> {
     if (!providerSupportsEmbeddings(this.type)) {
       throw new Error(
@@ -382,70 +269,6 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
     return {
       embedding: truncateOrPad(values),
       tokensIn: usage?.total_tokens ?? Math.ceil(text.length / 4),
-    };
-  }
-
-  async synthesizeSpeech(
-    config: ProviderConfig,
-    input: SpeechSynthesisInput
-  ): Promise<SpeechSynthesisResult> {
-    const text = input.text.trim().slice(0, 4000);
-    if (!text) throw new Error("Empty speech text");
-    const resolved = resolveTeacherVoice({
-      language: input.language,
-      countryCode: input.countryCode,
-      provinceName: input.provinceName,
-      // OpenAI voice names are short (alloy/nova/…). Ignore Fish/Eleven hex ids here.
-      voiceOverride:
-        input.voice && input.voice.length < 16 ? input.voice : null,
-    });
-    const voice = resolved.openaiVoice;
-    const speed =
-      input.pace === "slow" ? 0.88 : input.pace === "brisk" ? 1.04 : 0.95;
-    const model = /tts|speech|gpt-4o-mini-tts/i.test(config.model)
-      ? config.model
-      : "tts-1-hd";
-    const url = `${this.base(config)}/audio/speech`;
-    const body: Record<string, unknown> = {
-      model,
-      input: text,
-      voice,
-      response_format: "mp3",
-      speed,
-    };
-    if (/gpt-4o-mini-tts/i.test(model)) {
-      body.instructions = ttsDeliveryInstruction(
-        input.language,
-        input.countryCode,
-        input.provinceName,
-        input.pace,
-        input.emotion
-      );
-    }
-    const res = await fetchJson(
-      url,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${config.apiKey}`,
-        },
-        body: JSON.stringify(body),
-      },
-      Math.max(config.timeoutMs || 30000, 60000)
-    );
-    if (!res.ok) {
-      const raw = await res.text().catch(() => "");
-      throw new Error(
-        `${this.type} TTS failed (${res.status}) at ${url}${raw ? `: ${raw.slice(0, 200)}` : ""}`
-      );
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
-    const words = text.split(/\s+/).filter(Boolean).length;
-    return {
-      mimeType: "audio/mpeg",
-      dataBase64: buf.toString("base64"),
-      durationMs: Math.max(1500, Math.min(45000, words * 380)),
     };
   }
 
@@ -808,265 +631,6 @@ export class AnthropicAdapter implements AiProviderAdapter {
   }
 }
 
-function normalizeElevenLabsBase(baseUrl?: string | null): string {
-  const raw = (baseUrl || "https://api.elevenlabs.io").replace(/\/$/, "");
-  return raw.replace(/\/v1$/i, "");
-}
-
-function elevenLabsModelId(model?: string | null): string {
-  const m = (model || "").trim();
-  if (/^eleven[_-]/i.test(m)) return m;
-  return "eleven_multilingual_v2";
-}
-
-function normalizeFishAudioBase(baseUrl?: string | null): string {
-  const raw = (baseUrl || "https://api.fish.audio").replace(/\/$/, "");
-  return raw.replace(/\/v1$/i, "");
-}
-
-function fishAudioModelId(model?: string | null): string {
-  const m = (model || "").trim().toLowerCase();
-  if (
-    m === "s2.1-pro-free" ||
-    m === "s2.1-pro" ||
-    m === "s2-pro" ||
-    m === "s1"
-  ) {
-    return m;
-  }
-  // Prefer the free developer tier (Fish Audio S2.1 Pro free API).
-  return "s2.1-pro-free";
-}
-
-export class FishAudioAdapter implements AiProviderAdapter {
-  readonly type = "FISH_AUDIO";
-
-  async chat(_config: ProviderConfig, _messages: ChatMessage[]): Promise<ChatResult> {
-    throw new Error(
-      "Fish Audio is voice-only. Assign FISH_AUDIO to VOICE_TTS for AI Teacher classroom speech."
-    );
-  }
-
-  async embed(_config: ProviderConfig, _text: string): Promise<EmbeddingResult> {
-    throw new Error("Fish Audio does not provide embeddings — use Gemini, OpenAI, or Jina.");
-  }
-
-  async synthesizeSpeech(
-    config: ProviderConfig,
-    input: SpeechSynthesisInput
-  ): Promise<SpeechSynthesisResult> {
-    const text = input.text.trim().slice(0, 4000);
-    if (!text) throw new Error("Empty speech text");
-    const resolved = resolveTeacherVoice({
-      language: input.language,
-      countryCode: input.countryCode,
-      provinceName: input.provinceName,
-      // Only honor explicit Fish/hex voice overrides — never OpenAI names like "nova".
-      voiceOverride:
-        input.voice && /^[a-f0-9]{24,}$/i.test(input.voice)
-          ? input.voice
-          : config.apiVersion && /^[a-f0-9]{24,}$/i.test(config.apiVersion)
-            ? config.apiVersion
-            : null,
-    });
-    const modelId = fishAudioModelId(config.model);
-    const base = normalizeFishAudioBase(config.baseUrl);
-    const url = `${base}/v1/tts`;
-    const pace = input.pace || "normal";
-    const speed =
-      pace === "slow" ? 0.88 : pace === "brisk" ? 1.08 : 1.0;
-    // Country accent + emotion must reach the voice engine — Fish S2 follows [bracket] cues.
-    const spoken = withFishAccentSpeech(
-      text,
-      input.language,
-      input.countryCode,
-      input.provinceName,
-      pace,
-      input.emotion
-    );
-
-    const body: Record<string, unknown> = {
-      text: spoken,
-      reference_id: resolved.fishAudioVoiceId,
-      format: "mp3",
-      mp3_bitrate: 128,
-      // Live classroom needs low first-audio latency (~90ms TTFA on S2.1 Pro).
-      latency: "balanced",
-      normalize: true,
-      prosody: {
-        speed,
-        volume: 0,
-        normalize_loudness: true,
-      },
-    };
-
-    const res = await fetchJson(
-      url,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          "Content-Type": "application/json",
-          model: modelId,
-        },
-        body: JSON.stringify(body),
-      },
-      Math.max(config.timeoutMs || 30000, 60000)
-    );
-    if (!res.ok) {
-      const raw = await res.text().catch(() => "");
-      throw new Error(
-        `Fish Audio TTS failed (${res.status}) at ${url}${raw ? `: ${raw.slice(0, 220)}` : ""}`
-      );
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
-    const words = text.split(/\s+/).filter(Boolean).length;
-    return {
-      mimeType: "audio/mpeg",
-      dataBase64: buf.toString("base64"),
-      durationMs: Math.max(1500, Math.min(45000, words * 380)),
-    };
-  }
-
-  async testConnection(config: ProviderConfig) {
-    try {
-      await this.synthesizeSpeech(config, {
-        text: "OK",
-        language: "en",
-        countryCode: "US",
-      });
-      return { ok: true, message: "Fish Audio TTS connection OK" };
-    } catch (e) {
-      return {
-        ok: false,
-        message: e instanceof Error ? e.message : "Fish Audio test failed",
-      };
-    }
-  }
-}
-
-export class ElevenLabsAdapter implements AiProviderAdapter {
-  readonly type = "ELEVENLABS";
-
-  async chat(_config: ProviderConfig, _messages: ChatMessage[]): Promise<ChatResult> {
-    throw new Error(
-      "ElevenLabs is voice-only. Assign ELEVENLABS to VOICE_TTS for AI Teacher classroom speech."
-    );
-  }
-
-  async embed(_config: ProviderConfig, _text: string): Promise<EmbeddingResult> {
-    throw new Error("ElevenLabs does not provide embeddings — use Gemini, OpenAI, or Jina.");
-  }
-
-  async synthesizeSpeech(
-    config: ProviderConfig,
-    input: SpeechSynthesisInput
-  ): Promise<SpeechSynthesisResult> {
-    const text = input.text.trim().slice(0, 4000);
-    if (!text) throw new Error("Empty speech text");
-    const resolved = resolveTeacherVoice({
-      language: input.language,
-      countryCode: input.countryCode,
-      provinceName: input.provinceName,
-      // Only treat long provider voice ids as overrides (not OpenAI names like "nova").
-      voiceOverride:
-        input.voice && input.voice.length >= 16
-          ? input.voice
-          : config.apiVersion && config.apiVersion.length >= 16
-            ? config.apiVersion
-            : null,
-    });
-    // Admin model field can still force a custom ElevenLabs voice id.
-    const modelField = (config.model || "").trim();
-    const voiceId =
-      modelField && !/^eleven[_-]/i.test(modelField) && modelField.length >= 16
-        ? modelField
-        : resolved.elevenLabsVoiceId;
-    const modelId = elevenLabsModelId(config.model);
-    const base = normalizeElevenLabsBase(config.baseUrl);
-    const url = `${base}/v1/text-to-speech/${encodeURIComponent(voiceId)}`;
-    const pace = input.pace || "normal";
-    const baseSettings =
-      pace === "slow"
-        ? { stability: 0.58, similarity_boost: 0.82, style: 0.08 }
-        : pace === "brisk"
-          ? { stability: 0.38, similarity_boost: 0.78, style: 0.32 }
-          : { stability: 0.48, similarity_boost: 0.85, style: 0.22 };
-    // Emotion nudges stability/style on top of the pace baseline so
-    // "frustrated" and "energetic" don't sound identical at the same speed —
-    // emotion used to be chosen by the model but never reach the voice engine.
-    const emotionDelta: Record<string, { stability: number; style: number }> = {
-      encouraging: { stability: -0.04, style: 0.08 },
-      curious: { stability: -0.06, style: 0.1 },
-      energetic: { stability: -0.1, style: 0.15 },
-      patient: { stability: 0.12, style: -0.08 },
-      frustrated: { stability: 0.16, style: -0.12 },
-      confused: { stability: 0.1, style: -0.06 },
-    };
-    const delta = emotionDelta[(input.emotion || "").toLowerCase()] || {
-      stability: 0,
-      style: 0,
-    };
-    const voice_settings = {
-      stability: Math.max(0.1, Math.min(0.9, baseSettings.stability + delta.stability)),
-      similarity_boost: baseSettings.similarity_boost,
-      style: Math.max(0, Math.min(0.9, baseSettings.style + delta.style)),
-      use_speaker_boost: true,
-    };
-
-    const body: Record<string, unknown> = {
-      text,
-      model_id: modelId,
-      voice_settings,
-      // Always pin language so regional Arabic/Turkish/English accents stay on-target.
-      language_code: resolved.elevenLanguageCode,
-    };
-
-    const res = await fetchJson(
-      url,
-      {
-        method: "POST",
-        headers: {
-          Accept: "audio/mpeg",
-          "Content-Type": "application/json",
-          "xi-api-key": config.apiKey,
-        },
-        body: JSON.stringify(body),
-      },
-      Math.max(config.timeoutMs || 30000, 60000)
-    );
-    if (!res.ok) {
-      const raw = await res.text().catch(() => "");
-      throw new Error(
-        `ElevenLabs TTS failed (${res.status}) at ${url}${raw ? `: ${raw.slice(0, 220)}` : ""}`
-      );
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
-    const words = text.split(/\s+/).filter(Boolean).length;
-    return {
-      mimeType: "audio/mpeg",
-      dataBase64: buf.toString("base64"),
-      durationMs: Math.max(1500, Math.min(45000, words * 380)),
-    };
-  }
-
-  async testConnection(config: ProviderConfig) {
-    try {
-      await this.synthesizeSpeech(config, {
-        text: "OK",
-        language: "en",
-        countryCode: "US",
-      });
-      return { ok: true, message: "ElevenLabs TTS connection OK" };
-    } catch (e) {
-      return {
-        ok: false,
-        message: e instanceof Error ? e.message : "ElevenLabs test failed",
-      };
-    }
-  }
-}
-
 export function getAdapter(type: string): AiProviderAdapter {
   switch (type) {
     case "GEMINI":
@@ -1083,10 +647,6 @@ export function getAdapter(type: string): AiProviderAdapter {
       return new JinaAdapter();
     case "FLUX":
       return new FluxAdapter();
-    case "ELEVENLABS":
-      return new ElevenLabsAdapter();
-    case "FISH_AUDIO":
-      return new FishAudioAdapter();
     case "ANTHROPIC":
       return new AnthropicAdapter();
     default:
@@ -1112,10 +672,6 @@ export function defaultBaseUrlForType(type: string): string | null {
       return "https://api.jina.ai/v1";
     case "FLUX":
       return "https://api.bfl.ai";
-    case "ELEVENLABS":
-      return "https://api.elevenlabs.io";
-    case "FISH_AUDIO":
-      return "https://api.fish.audio";
     default:
       return null;
   }
@@ -1140,13 +696,13 @@ export function jinaDefaultBaseUrl(model: string): string {
 /** True when this provider can run the EMBEDDING module. */
 export function providerSupportsEmbeddings(type: string, model?: string): boolean {
   if (type === "JINA") return isJinaEmbeddingModel(model || "jina-embeddings-v4");
-  if (type === "FLUX" || type === "ELEVENLABS" || type === "FISH_AUDIO") return false;
+  if (type === "FLUX") return false;
   return type === "GEMINI" || type === "OPENAI" || type === "OPENAI_COMPATIBLE";
 }
 
 /** True when this provider can run chat / completion modules. */
 export function providerSupportsChat(type: string, model?: string): boolean {
-  if (type === "FLUX" || type === "ELEVENLABS" || type === "FISH_AUDIO") return false;
+  if (type === "FLUX") return false;
   if (type === "JINA") return isJinaDeepSearchModel(model || "");
   return true;
 }
@@ -1154,16 +710,6 @@ export function providerSupportsChat(type: string, model?: string): boolean {
 /** True when this provider can run AI_CREATIVE_IMAGE (raster generate/edit). */
 export function providerSupportsImageGeneration(type: string): boolean {
   return type === "FLUX";
-}
-
-/** True when this provider can run VOICE_TTS (Fish Audio, ElevenLabs, or OpenAI speech). */
-export function providerSupportsSpeech(type: string): boolean {
-  return (
-    type === "OPENAI" ||
-    type === "OPENAI_COMPATIBLE" ||
-    type === "ELEVENLABS" ||
-    type === "FISH_AUDIO"
-  );
 }
 
 function defaultChatModel(type: string): string {

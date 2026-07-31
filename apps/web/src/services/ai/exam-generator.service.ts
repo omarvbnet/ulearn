@@ -702,8 +702,6 @@ export class ExamGeneratorService {
     chunkTo?: number | null;
     pageFrom?: number | null;
     pageTo?: number | null;
-    /** When true, return chunks in document order (classroom teaching). */
-    ordered?: boolean;
   }) {
     const citations: Array<{ documentName: string; page: number | null }> = [];
     const parts: string[] = [];
@@ -737,31 +735,7 @@ export class ExamGeneratorService {
 
       let scoped = chunks;
       const chapter = (input.chapterHeading || "").trim();
-      // Prefer explicit page/chunk bounds (classroom lessons) over title match.
-      if (
-        input.pageFrom != null &&
-        input.pageTo != null &&
-        input.pageTo >= input.pageFrom
-      ) {
-        scoped = chunks.filter(
-          (c) =>
-            c.pageNumber != null &&
-            c.pageNumber >= input.pageFrom! &&
-            c.pageNumber <= input.pageTo!
-        );
-        if (!scoped.length) scoped = chunks;
-      } else if (
-        input.chunkFrom != null &&
-        input.chunkTo != null &&
-        input.chunkTo >= input.chunkFrom
-      ) {
-        scoped = chunks.filter(
-          (c) =>
-            c.chunkIndex >= input.chunkFrom! &&
-            c.chunkIndex <= input.chunkTo!
-        );
-        if (!scoped.length) scoped = chunks;
-      } else if (chapter && chapter !== "__all__") {
+      if (chapter && chapter !== "__all__") {
         const pageMatch = chapter.match(/^Pages?\s+(\d+)\s*[–-]\s*(\d+)/i);
         if (pageMatch) {
           const from = Number(pageMatch[1]);
@@ -771,6 +745,16 @@ export class ExamGeneratorService {
               c.pageNumber != null &&
               c.pageNumber >= from &&
               c.pageNumber <= to
+          );
+        } else if (
+          input.chunkFrom != null &&
+          input.chunkTo != null &&
+          input.chunkTo >= input.chunkFrom
+        ) {
+          scoped = chunks.filter(
+            (c) =>
+              c.chunkIndex >= input.chunkFrom! &&
+              c.chunkIndex <= input.chunkTo!
           );
         } else {
           // Match heading: exact metadata.heading or text starting with heading
@@ -809,25 +793,11 @@ export class ExamGeneratorService {
         if (!scoped.length) scoped = chunks;
       }
 
-      // Contiguous ordered body for a scoped lesson/chapter — never shuffle
-      // teaching material (shuffled samples made the AI wander and cite pages).
-      const preferOrdered =
-        Boolean(input.ordered) ||
-        (chapter && chapter !== "__all__") ||
-        (input.pageFrom != null && input.pageTo != null) ||
-        (input.chunkFrom != null && input.chunkTo != null);
-      if (preferOrdered && scoped.length) {
+      // Prefer contiguous chapter body over random sample when chapter is set
+      if (chapter && chapter !== "__all__" && scoped.length) {
         const ordered = scoped.slice(0, 80);
-        const label =
-          chapter && chapter !== "__all__" && !/^pages?\s+\d+/i.test(chapter)
-            ? chapter
-            : null;
         for (const c of ordered) {
-          parts.push(
-            label
-              ? `[${c.document.fileName} · ${label}]\n${c.text}`
-              : `[${c.document.fileName}]\n${c.text}`
-          );
+          parts.push(`[${c.document.fileName} · ${chapter}]\n${c.text}`);
           citations.push({
             documentName: c.document.fileName,
             page: c.pageNumber,
@@ -922,9 +892,6 @@ export class ExamGeneratorService {
     chapterHeading?: string | null;
     chunkFrom?: number | null;
     chunkTo?: number | null;
-    pageFrom?: number | null;
-    pageTo?: number | null;
-    ordered?: boolean;
   }) {
     return this.loadMaterialText({
       userId: input.userId,
@@ -935,9 +902,6 @@ export class ExamGeneratorService {
       chapterHeading: input.chapterHeading,
       chunkFrom: input.chunkFrom,
       chunkTo: input.chunkTo,
-      pageFrom: input.pageFrom,
-      pageTo: input.pageTo,
-      ordered: input.ordered,
       allowRagFallback: false,
     });
   }

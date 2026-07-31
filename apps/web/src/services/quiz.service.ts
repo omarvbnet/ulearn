@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/prisma";
 import { NotificationService } from "@/services/notification.service";
-import { SubjectAssessmentService } from "@/services/assessment/subject-assessment.service";
 import type { Prisma } from "@prisma/client";
 
 function shuffle<T>(arr: T[]): T[] {
@@ -155,8 +154,6 @@ export class QuizService {
       score,
       maxScore,
     }).catch(() => {});
-
-    void SubjectAssessmentService.recomputeFromQuiz(params.userId, params.quizId).catch(() => {});
 
     return { success: true as const, attempt };
   }

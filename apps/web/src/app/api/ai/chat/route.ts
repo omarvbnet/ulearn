@@ -24,16 +24,7 @@ const schema = z.object({
   courseId: z.string().optional(),
   language: z.string().max(16).optional(),
   lesson: z.string().optional(),
-  mode: z
-    .enum([
-      "chat",
-      "practice_quiz",
-      "edit",
-      "explain_observe",
-      "from_materials",
-      "ai_teacher",
-    ])
-    .optional(),
+  mode: z.enum(["chat", "practice_quiz", "edit", "explain_observe", "from_materials"]).optional(),
   documentIds: z.array(z.string()).max(20).optional(),
   /** Chapter/section within the selected material */
   chapterHeading: z.string().max(200).nullable().optional(),
@@ -54,13 +45,11 @@ export async function POST(request: Request) {
   const { question, attachments, ...rest } = parsed.data;
   const isPractice = rest.mode === "practice_quiz";
   const isExplainObserve = rest.mode === "explain_observe";
-  const isAiTeacher = rest.mode === "ai_teacher";
   if (
     !question.trim() &&
     !(attachments && attachments.length) &&
     !(isPractice && rest.documentIds?.length) &&
-    !(isExplainObserve && rest.documentIds?.length) &&
-    !(isAiTeacher && rest.documentIds?.length)
+    !(isExplainObserve && rest.documentIds?.length)
   ) {
     return error("question or attachments required", 422, "VALIDATION");
   }
@@ -74,8 +63,6 @@ export async function POST(request: Request) {
           ? "Generate a practice exam from my selected materials"
           : isExplainObserve
             ? "Explain and help me observe the selected material with shapes"
-            : isAiTeacher
-              ? "Teach this selected material as an interactive whiteboard lesson with spoken explanation"
             : ""),
       attachments,
       ...rest,
