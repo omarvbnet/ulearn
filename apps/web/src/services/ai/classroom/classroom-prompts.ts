@@ -80,6 +80,12 @@ export function buildWorldClassTeacherPersona(input: {
     "- Do NOT invent dense formula dumps. One idea per beat.",
     "- Coordinates will be auto-normalized by the system — still keep board actions minimal and purposeful.",
     "",
+    "LESSON STATE MEMORY (critical — the persistent object in SESSION MEMORY is the only place you learn where you are):",
+    "- The system maintains an explicit lesson state: Current Topic, Current Lesson, Current Teaching Stage, Current Whiteboard Step, Current Example, Current Practice, Current Quiz, Current Summary.",
+    "- Do NOT infer the current state from chat history alone. Read LESSON STATE MEMORY every beat and continue from those exact fields.",
+    "- After every completed stage/beat, update the matching memoryPatch fields so the state stays accurate for the next beat.",
+    "- Every response MUST continue from this state. NEVER generate content that belongs to another teaching stage (e.g. no quiz while still in explain, no summary while still in practice).",
+    "",
     "LONG-TERM STUDENT MEMORY (critical — you have taught this exact student before; see SESSION MEMORY for the concrete lists):",
     "- Teaching never starts from zero. Before you say anything, know what this student has already completed, mastered, and struggled with on THIS material.",
     "- NEVER re-teach, re-explain from scratch, or restart a lesson already marked completed or a concept already marked mastered below — that is a serious mistake, it wastes the student's time and feels like the teacher forgot them. Move forward from their current level instead.",
@@ -129,12 +135,32 @@ function lessonStageDirective(state: ClassroomSessionState): string {
     `CURRENT LESSON STAGE: ${stage.toUpperCase()} — ${state.stageBeats || 0} beat(s) spent here so far.`,
     lines[stage],
     "ABSOLUTE RULE — lesson stages happen in exactly this order and can never be skipped, reordered, or reversed: greeting → objective → explain → guided practice → check understanding → mini quiz → summary → homework (optional) → recommend next lesson. Only do what THIS CURRENT stage allows above; everything belonging to a later stage (asking 'what did you understand', quizzing, assigning homework, moving to a new lesson) is forbidden until its turn arrives, no matter how the conversation feels.",
+    "NEVER generate content that belongs to another stage. Continue ONLY from the LESSON STATE MEMORY block below — do not invent a new topic, example, practice, quiz, or summary that contradicts what is already recorded there.",
+  ].join("\n");
+}
+
+/** Explicit persistent lesson-state object shown to the model every beat —
+ *  the single source of truth; never "infer where we are" from chat history. */
+function lessonStateMemoryBlurb(state: ClassroomSessionState): string {
+  const stage = state.lessonStage || "greeting";
+  return [
+    "LESSON STATE MEMORY (authoritative — continue from HERE, do not re-infer):",
+    `- Current Lesson: ${state.currentLessonName || "(not set yet)"}`,
+    `- Current Topic: ${state.currentTopic || "(not set yet — set memoryPatch.currentTopic this beat)"}`,
+    `- Current Teaching Stage: ${stage}`,
+    `- Current Whiteboard Step: ${state.currentWhiteboardStep || "(none yet)"}`,
+    `- Current Example: ${state.currentExample || (state.hasGivenExample ? "(given, label missing)" : "(not given yet)")}`,
+    `- Current Practice: ${state.currentPractice || "(none yet)"}`,
+    `- Current Quiz: ${state.currentQuiz || "(none yet)"}`,
+    `- Current Summary: ${state.currentSummary || "(none yet)"}`,
+    "After this beat, update memoryPatch for any of the above that you just advanced (currentTopic always; currentWhiteboardStep when you draw/write; currentExample when you give the real-life example; currentPractice in guided practice; currentQuiz when you ask a check/quiz; currentSummary in summary). The system also records them from your speak/board/askStudent — keep them consistent.",
   ].join("\n");
 }
 
 function stateBlurb(state: ClassroomSessionState): string {
   const hasStarted = state.spokenHistory.length > 0;
   return [
+    lessonStateMemoryBlurb(state),
     state.materialCompletedLessons?.length
       ? `Already completed for this material (do NOT re-teach): ${state.materialCompletedLessons.slice(-10).join(", ")}`
       : "",
@@ -144,10 +170,9 @@ function stateBlurb(state: ClassroomSessionState): string {
     state.weakTopics?.length
       ? `Weak concepts (weakened significantly — brief natural review welcome if relevant now): ${state.weakTopics.slice(-8).join(", ")}`
       : "",
-    `Current lesson: ${state.currentLessonName || "starting"}`,
     hasStarted
-      ? `Topic: ${state.currentTopic || "NOT SET YET — you forgot to set memoryPatch.currentTopic last beat, set it now and do not restate the lesson intro"}`
-      : `Topic: ${state.currentTopic || "opening (this is the very first beat of the lesson)"}`,
+      ? ""
+      : "This is the very first beat of the lesson — set Current Topic as you open.",
     `Emotion: ${state.emotionalState}`,
     `Understanding≈${state.understanding.toFixed(2)} Confidence≈${state.confidence.toFixed(2)} Attention≈${(state.attention ?? 0.7).toFixed(2)}`,
     `challengeLevel=${state.challengeLevel || "standard"} (consecutiveCorrect=${state.consecutiveCorrect || 0}, consecutiveWrong=${state.consecutiveWrong || 0}) — teach to this level, see TEACH LIKE THE STUDENT'S ACTUAL STATE above.`,
@@ -201,7 +226,7 @@ export function buildClassroomBeatPrompt(input: {
     buildWorldClassTeacherPersona(input),
     "",
     "OUTPUT: Return ONLY valid JSON (no markdown). Be fast and direct — no chain-of-thought, no extra prose, go straight to the JSON:",
-    '{"speak":["..."],"board":[{"time":0,"action":"write_text","parameters":{"text":"...","color":"blue"}}],"askStudent":null,"waitForStudentMs":5000,"emotion":"calm","pace":"normal","lessonName":null,"answerCorrect":null,"teachingStrategy":"example","stageComplete":false,"homework":null,"sessionComplete":false,"memoryPatch":{"currentTopic":"...","pendingAnswerHint":null}}',
+    '{"speak":["..."],"board":[{"time":0,"action":"write_text","parameters":{"text":"...","color":"blue"}}],"askStudent":null,"waitForStudentMs":5000,"emotion":"calm","pace":"normal","lessonName":null,"answerCorrect":null,"teachingStrategy":"example","stageComplete":false,"homework":null,"sessionComplete":false,"memoryPatch":{"currentTopic":"...","currentWhiteboardStep":null,"currentExample":null,"currentPractice":null,"currentQuiz":null,"currentSummary":null,"pendingAnswerHint":null}}',
     "",
     "speak: 1–2 short natural spoken lines. If asking a check, the question MUST be spoken here. When teaching a new idea, weave in a concrete real-life example (see REAL-LIFE EXAMPLES rules above). Never a greeting/lesson intro except the very first beat of the whole lesson.",
     "board: when teaching/explaining with a real-life example, include 1–3 draw_circle/draw_rectangle/draw_arrow/draw_line actions that sketch it (one shape per counted item — see REAL-LIFE EXAMPLES rules), plus at most 1 short write_text/underline/circle_highlight/point_at for the label or emphasis. Never send an example beat with text only and no drawing.",
@@ -214,6 +239,7 @@ export function buildClassroomBeatPrompt(input: {
     "homework: null unless the CURRENT LESSON STAGE below is exactly HOMEWORK — never set it in any other stage.",
     "lessonName: leave null unless the CURRENT LESSON STAGE below is exactly RECOMMEND NEXT — that is the ONLY stage allowed to advance to a genuinely NEW lesson in the curriculum. Never set it otherwise, and never repeat the current lesson's name here.",
     "memoryPatch.currentTopic: REQUIRED every beat — short 2–6 word label of the exact micro-idea being taught right now (see NEVER REPEAT rules above).",
+    "memoryPatch.currentWhiteboardStep / currentExample / currentPractice / currentQuiz / currentSummary: update the matching field whenever THIS beat advances that part of the LESSON STATE MEMORY (only the fields that belong to the CURRENT stage — leave the others null).",
     "memoryPatch.pendingAnswerHint: short expected answer idea when you ask a check.",
     "",
     input.studentBlurb ? `Learner: ${input.studentBlurb}` : "",

@@ -1,12 +1,18 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { ClassroomSessionService } from "@/services/ai/classroom/classroom-session.service";
+import { classroomSseResponse } from "@/services/ai/classroom/sse";
 import { z } from "zod";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const schema = z.object({
   question: z.string().max(4000).optional().default(""),
   language: z.string().max(16).optional(),
   conversationId: z.string().optional(),
   documentIds: z.array(z.string().min(1)).max(20).optional(),
+  /** When true, return text/event-stream with progressive speak/board events. */
+  stream: z.boolean().optional().default(false),
 });
 
 /** Start a live AI Teacher classroom session (beat-by-beat). */
@@ -17,10 +23,31 @@ export async function POST(request: Request) {
   const parsed = schema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
+  const { stream, ...data } = parsed.data;
+
+  if (stream) {
+    return classroomSseResponse(async (emit) => {
+      try {
+        await ClassroomSessionService.startSession({
+          userId: auth.session.userId,
+          ...data,
+          onEvent: emit,
+        });
+      } catch (e) {
+        const err = e as Error & { code?: string };
+        if (err.code === "AI_CREATIVE_ENTITLEMENT") {
+          emit({ type: "error", message: err.message || "Upgrade required" });
+          return;
+        }
+        throw e;
+      }
+    });
+  }
+
   try {
     const result = await ClassroomSessionService.startSession({
       userId: auth.session.userId,
-      ...parsed.data,
+      ...data,
     });
     return json(result);
   } catch (e) {

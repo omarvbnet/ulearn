@@ -438,6 +438,138 @@ async function postJsonWithRetry(
   throw lastError instanceof Error ? lastError : new Error("Request failed");
 }
 
+type ClassroomSseHandlers = {
+  onStatus?: (presence: string, message?: string) => void;
+  onSession?: (session: ClassroomSession) => void;
+  onSpeak?: (ev: {
+    index: number;
+    text: string;
+    emotion?: string | null;
+    pace?: string | null;
+  }) => void;
+  onBoard?: (actions: BoardAction[]) => void;
+  onComplete?: (beat: ClassroomBeat, session: ClassroomSession) => void;
+  onNeedsMaterials?: () => void;
+  onError?: (message: string) => void;
+};
+
+/**
+ * Consume a classroom SSE stream. Partial speak/board events arrive BEFORE
+ * the complete beat — that is the architectural fix for "first visible
+ * response within 1s": the UI no longer waits for the full JSON beat.
+ */
+async function consumeClassroomSse(
+  url: string,
+  body: unknown,
+  handlers: ClassroomSseHandlers,
+  timeoutMs = LLM_TIMEOUT_MS
+): Promise<{ beat: ClassroomBeat | null; session: ClassroomSession | null }> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  let beat: ClassroomBeat | null = null;
+  let session: ClassroomSession | null = null;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify({ ...(body as object), stream: true }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(
+        (errBody as { error?: string }).error || `Request failed (${res.status})`
+      );
+    }
+    // Older servers that ignore `stream:true` still return JSON — fall back.
+    const ctype = res.headers.get("content-type") || "";
+    if (!ctype.includes("text/event-stream") || !res.body) {
+      const data = (await res.json()) as Record<string, unknown>;
+      if (data.needsMaterialSelection) {
+        handlers.onNeedsMaterials?.();
+        return { beat: null, session: null };
+      }
+      session = (data.session as ClassroomSession) || null;
+      beat = (data.beat as ClassroomBeat) || null;
+      if (session) handlers.onSession?.(session);
+      if (beat && session) handlers.onComplete?.(beat, session);
+      return { beat, session };
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let eventName = "message";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let sep: number;
+      while ((sep = buffer.indexOf("\n\n")) >= 0) {
+        const chunk = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        let dataLine = "";
+        for (const line of chunk.split("\n")) {
+          if (line.startsWith("event:")) eventName = line.slice(6).trim();
+          else if (line.startsWith("data:")) dataLine += line.slice(5).trim();
+        }
+        if (!dataLine) continue;
+        let payload: Record<string, unknown>;
+        try {
+          payload = JSON.parse(dataLine) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        const type = (payload.type as string) || eventName;
+        switch (type) {
+          case "status":
+            handlers.onStatus?.(
+              String(payload.presence || "thinking"),
+              payload.message ? String(payload.message) : undefined
+            );
+            break;
+          case "session":
+            session = payload.session as ClassroomSession;
+            if (session) handlers.onSession?.(session);
+            break;
+          case "speak":
+            handlers.onSpeak?.({
+              index: Number(payload.index) || 0,
+              text: String(payload.text || ""),
+              emotion: (payload.emotion as string) || null,
+              pace: (payload.pace as string) || null,
+            });
+            break;
+          case "board":
+            if (Array.isArray(payload.actions)) {
+              handlers.onBoard?.(payload.actions as BoardAction[]);
+            }
+            break;
+          case "complete":
+            beat = payload.beat as ClassroomBeat;
+            session = (payload.session as ClassroomSession) || session;
+            if (beat && session) handlers.onComplete?.(beat, session);
+            break;
+          case "needs_materials":
+            handlers.onNeedsMaterials?.();
+            break;
+          case "error":
+            handlers.onError?.(String(payload.message || "Stream failed"));
+            throw new Error(String(payload.message || "Stream failed"));
+          default:
+            break;
+        }
+        eventName = "message";
+      }
+    }
+    return { beat, session };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 let activeCloudAudio: HTMLAudioElement | null = null;
 
 /** Fetches synthesized speech for one line and returns a playable blob URL
@@ -1104,6 +1236,249 @@ export function LiveClassroom({
     [locale, rtl, stopListen]
   );
 
+  /** Apply board cues the instant they stream in — never wait for full beat. */
+  const applyBoardLive = useCallback(
+    (actions: BoardAction[]) => {
+      if (!actions?.length || cancelledRef.current) return;
+      setBoard((prev) => {
+        const next = applyActions(
+          prev,
+          actions,
+          rtl,
+          boardCursorRef.current,
+          diagramCursorRef.current
+        );
+        boardCursorRef.current = next.cursorY;
+        diagramCursorRef.current = next.diagramCursorY;
+        return next.items;
+      });
+    },
+    [rtl]
+  );
+
+  /**
+   * End-to-end streamed beat: status → progressive speak/board → complete.
+   * First sentence starts TTS as soon as the server emits it — this is the
+   * fix for the prior architecture that only streamed on the server and still
+   * made the UI wait for a full JSON response.
+   */
+  const consumeAndPlayStream = useCallback(
+    async (
+      url: string,
+      body: unknown,
+      opts?: { bridgeKind?: ClassroomBridgeKind; wasCheck?: boolean }
+    ): Promise<ClassroomBeat | null> => {
+      stopListen();
+      setPresence("thinking");
+      const spoken = new Set<number>();
+      const speakQueue: {
+        index: number;
+        text: string;
+        emotion: string;
+        pace: string;
+      }[] = [];
+      let drainRunning = false;
+      let streamDone = false;
+      let finalBeat: ClassroomBeat | null = null;
+      let firstSpeak = true;
+      let bridgeAbort = false;
+
+      const drainSpeak = async () => {
+        if (drainRunning) return;
+        drainRunning = true;
+        voiceBusyRef.current = true;
+        try {
+          while (!cancelledRef.current) {
+            const next = speakQueue.shift();
+            if (!next) {
+              if (streamDone) break;
+              await new Promise((r) => setTimeout(r, 40));
+              continue;
+            }
+            if (spoken.has(next.index)) continue;
+            spoken.add(next.index);
+            setPresence("speaking");
+            setCaption(next.text);
+            const wave = window.setInterval(() => {
+              const t = Date.now() / 100;
+              setHz((prev) =>
+                prev.map(
+                  (_, i) => 0.12 + (Math.sin(t + i * 0.45) * 0.5 + 0.5) * 0.75
+                )
+              );
+            }, 50);
+            // Prefetch the next queued line while this one plays.
+            const peek = speakQueue.find((s) => !spoken.has(s.index));
+            const nextAudioP = peek
+              ? fetchTtsAudioUrl(
+                  peek.text,
+                  locale,
+                  peek.pace,
+                  countryCodeRef.current,
+                  peek.emotion,
+                  provinceNameRef.current
+                )
+              : null;
+            const urlAudio = await fetchTtsAudioUrl(
+              next.text,
+              locale,
+              next.pace,
+              countryCodeRef.current,
+              next.emotion,
+              provinceNameRef.current
+            );
+            if (urlAudio) await playAudioUrl(urlAudio);
+            else {
+              const retry = await fetchTtsAudioUrl(
+                next.text,
+                locale,
+                next.pace,
+                countryCodeRef.current,
+                next.emotion,
+                provinceNameRef.current
+              );
+              if (retry) await playAudioUrl(retry);
+            }
+            void nextAudioP;
+            window.clearInterval(wave);
+            await new Promise((r) => setTimeout(r, 180));
+          }
+        } finally {
+          drainRunning = false;
+          voiceBusyRef.current = false;
+        }
+      };
+
+      // Optional short bridge — do NOT block the stream on it. First speak
+      // event cancels the bridge so the real teaching line wins immediately.
+      if (opts?.bridgeKind) {
+        void (async () => {
+          try {
+            if (bridgeAbort || cancelledRef.current) return;
+            await speakBridge(opts.bridgeKind!);
+          } catch {
+            /* ignore */
+          }
+        })();
+      }
+
+      const bindSession = (s: ClassroomSession) => {
+        sessionIdRef.current = s.id;
+        if (s.countryCode) countryCodeRef.current = s.countryCode;
+        provinceNameRef.current = s.provinceName ?? provinceNameRef.current;
+        setSession(s);
+      };
+
+      await consumeClassroomSse(url, body, {
+        onStatus: (presence, message) => {
+          if (cancelledRef.current || voiceBusyRef.current) return;
+          setPresence(presence as Presence);
+          if (message) setCaption(message);
+        },
+        onSession: bindSession,
+        onBoard: (actions) => {
+          setPresence((p) => (p === "speaking" ? p : "thinking"));
+          if (!voiceBusyRef.current) {
+            setCaption(
+              lang === "ar"
+                ? "جارٍ الرسم على السبورة…"
+                : lang === "tr"
+                  ? "Tahta hazırlanıyor…"
+                  : "Drawing on the board…"
+            );
+          }
+          applyBoardLive(actions);
+        },
+        onSpeak: (ev) => {
+          const text = cleanText(ev.text) || ev.text;
+          if (!text) return;
+          if (firstSpeak) {
+            firstSpeak = false;
+            bridgeAbort = true;
+            stopCloudAudio();
+          }
+          speakQueue.push({
+            index: ev.index,
+            text,
+            emotion: ev.emotion || "calm",
+            pace: ev.pace || "normal",
+          });
+          void drainSpeak();
+        },
+        onComplete: (beat, s) => {
+          finalBeat = beat;
+          bindSession(s);
+        },
+        onNeedsMaterials: () => {
+          setError("Select materials first");
+        },
+        onError: (message) => setError(message),
+      });
+
+      streamDone = true;
+      await drainSpeak();
+
+      const completed = finalBeat as ClassroomBeat | null;
+      if (!completed) return null;
+      setError(null);
+
+      // After a check: praise / re-explain once we know the verdict (complete).
+      if (opts?.wasCheck) {
+        if (completed.answerCorrect === true) await speakBridge("excellent");
+        else if (completed.answerCorrect === false) await speakBridge("reexplain");
+      }
+
+      // Speak any lines that somehow weren't streamed as partials.
+      const leftover = (completed.speak || [])
+        .map((s: string, i: number) => ({ text: cleanText(s) || s, i }))
+        .filter((x: { text: string; i: number }) => x.text && !spoken.has(x.i));
+      const ask = cleanText(completed.askStudent) || completed.askStudent || "";
+      if (leftover.length) {
+        await playBeat({
+          ...completed,
+          speak: leftover.map((x: { text: string }) => x.text),
+          board: [], // already applied live
+        });
+      } else if (
+        ask &&
+        !(completed.speak || []).some((l) =>
+          (cleanText(l) || l || "").includes(ask.slice(0, Math.min(10, ask.length)))
+        )
+      ) {
+        // Check question wasn't in speak[] — voice it now.
+        await playBeat({ ...completed, speak: [ask], board: [] });
+      } else {
+        if (ask) {
+          lastAskWaitRef.current = Math.max(
+            5000,
+            Math.min(8000, completed.waitForStudentMs || 5500)
+          );
+          pendingAskRef.current = ask;
+          awaitingCheckRef.current = true;
+          setCaption(ask);
+        } else {
+          lastAskWaitRef.current = 0;
+          pendingAskRef.current = null;
+          awaitingCheckRef.current = false;
+        }
+        if (completed.lessonName) {
+          const lessonName = completed.lessonName;
+          setSession((s) =>
+            s
+              ? {
+                  ...s,
+                  state: { ...s.state, currentLessonName: lessonName },
+                }
+              : s
+          );
+        }
+        if (completed.sessionComplete) setEnded(true);
+      }
+      return completed;
+    },
+    [applyBoardLive, lang, locale, playBeat, speakBridge, stopListen]
+  );
+
   const submitTurn = useCallback(
     async (transcript: string, opts?: { noAnswer?: boolean }) => {
       if (!sessionIdRef.current || handlingTurnRef.current) return;
@@ -1134,41 +1509,22 @@ export function LiveClassroom({
           : "explain";
       // Consumed for this turn — the next beat will re-arm it if another
       // check question is asked (e.g. re-asking after a wrong answer).
+      const wasCheck = kind === "check";
       awaitingCheckRef.current = false;
-      const apiP = postJsonWithRetry(
-        `/api/ai/classroom/session/${sessionIdRef.current}/turn`,
-        opts?.noAnswer ? { noAnswer: true } : { transcript: q }
-      );
 
       try {
-        await speakBridge(kind);
-        const data = await apiP;
-        setError(null);
-        if (data.session) {
-          const session = data.session as ClassroomSession;
-          if (session.countryCode) {
-            countryCodeRef.current = session.countryCode;
-          }
-          provinceNameRef.current = session.provinceName ?? provinceNameRef.current;
-          setSession(session);
-        }
-        const beat = data.beat as ClassroomBeat;
-        // After "let me check": praise if correct, re-explain bridge if wrong.
-        if (kind === "check") {
-          if (beat?.answerCorrect === true) {
-            await speakBridge("excellent");
-          } else if (beat?.answerCorrect === false) {
-            await speakBridge("reexplain");
-          }
-        }
-        await playBeat(beat);
+        await consumeAndPlayStream(
+          `/api/ai/classroom/session/${sessionIdRef.current}/turn`,
+          opts?.noAnswer ? { noAnswer: true } : { transcript: q },
+          { bridgeKind: kind, wasCheck }
+        );
       } catch (e) {
         setError(e instanceof Error ? e.message : "Turn failed");
       } finally {
         handlingTurnRef.current = false;
       }
     },
-    [playBeat, speakBridge, stopListen]
+    [consumeAndPlayStream, stopListen]
   );
 
   const startListen = useCallback(() => {
@@ -1370,24 +1726,19 @@ export function LiveClassroom({
         }
 
         setPresence("thinking");
-        const apiP = postJsonWithRetry(
-          `/api/ai/classroom/session/${sessionIdRef.current}/beat`,
-          {}
+        setCaption(
+          lang === "ar"
+            ? "المعلم يفكر…"
+            : lang === "tr"
+              ? "Öğretmen düşünüyor…"
+              : "Teacher is thinking…"
         );
-        await speakBridge("think");
-        const data = await apiP;
-        setError(null);
-        const session = data.session as ClassroomSession | undefined;
-        if (session) {
-          if (session.countryCode) {
-            countryCodeRef.current = session.countryCode;
-          }
-          provinceNameRef.current = session.provinceName ?? provinceNameRef.current;
-          setSession(session);
-        }
-        const beat = data.beat as ClassroomBeat;
-        await playBeat(beat);
-        if (beat.sessionComplete || session?.status === "ENDED") {
+        const beat = await consumeAndPlayStream(
+          `/api/ai/classroom/session/${sessionIdRef.current}/beat`,
+          {},
+          { bridgeKind: "think" }
+        );
+        if (beat?.sessionComplete) {
           setEnded(true);
           break;
         }
@@ -1419,33 +1770,34 @@ export function LiveClassroom({
     } finally {
       loopActiveRef.current = false;
     }
-  }, [ended, lang, playBeat, runStudentCheck, speakBridge, waitForStudentWindow]);
+  }, [consumeAndPlayStream, ended, lang, runStudentCheck, waitForStudentWindow]);
 
   const startSession = useCallback(async () => {
     setError(null);
     setPresence("thinking");
+    setCaption(
+      lang === "ar"
+        ? "جارٍ تجهيز الفصل…"
+        : lang === "tr"
+          ? "Sınıf hazırlanıyor…"
+          : "Preparing classroom…"
+    );
     try {
-      const data = await postJsonWithRetry("/api/ai/classroom/session", {
+      const beat = await consumeAndPlayStream("/api/ai/classroom/session", {
         language: locale,
         question,
         documentIds,
       });
-      if (data.needsMaterialSelection) {
-        setError("Select materials first");
+      if (!sessionIdRef.current && !beat) {
+        // needsMaterials already set error via handler
         return;
       }
-      const session = data.session as ClassroomSession;
-      sessionIdRef.current = session.id;
-      countryCodeRef.current = session.countryCode || null;
-      provinceNameRef.current = session.provinceName || null;
-      setSession(session);
-      await playBeat(data.beat as ClassroomBeat);
       void runLoop();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale, question, documentIds, playBeat]);
+  }, [locale, question, documentIds, consumeAndPlayStream, lang]);
 
   useEffect(() => {
     cancelledRef.current = false;

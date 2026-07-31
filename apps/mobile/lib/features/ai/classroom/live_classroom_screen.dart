@@ -222,62 +222,27 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     setState(() {
       _presence = _Presence.thinking;
       _error = null;
+      _caption = _lang == 'ar'
+          ? 'جارٍ تجهيز الفصل…'
+          : _lang == 'tr'
+              ? 'Sınıf hazırlanıyor…'
+              : 'Preparing classroom…';
     });
     try {
       final api = context.read<ApiClient>();
       _api = api;
       final locale = context.localeCode.toLowerCase();
       _selectedLanguage = locale;
-      final data = await _postWithRetry(
+      await _consumeAndPlayStream(
         '/api/ai/classroom/session',
         {
           'language': locale,
           'question': widget.question,
           'documentIds': widget.documentIds,
         },
-        timeout: _llmTimeout,
       );
       if (!mounted || _cancelled) return;
-      if (data['needsMaterialSelection'] == true) {
-        setState(() {
-          _error = _lang == 'ar'
-              ? 'اختر المادة أولاً'
-              : 'Select materials first';
-        });
-        return;
-      }
-      final session = data['session'];
-      final sessionMap =
-          session is Map ? Map<String, dynamic>.from(session) : null;
-      final id = sessionMap?['id']?.toString();
-      if (id == null || id.isEmpty) {
-        throw Exception('Missing session');
-      }
-      _sessionId = id;
-      _speechLocale = sessionMap?['speechLocale']?.toString();
-      _countryCode = sessionMap?['countryCode']?.toString();
-      _provinceName = sessionMap?['provinceName']?.toString();
-      _accent = sessionMap?['accent']?.toString();
-      final names = sessionMap?['materialNames'];
-      final state = sessionMap?['state'];
-      final lessonName = state is Map
-          ? state['currentLessonName']?.toString()
-          : null;
-      setState(() {
-        _title = (lessonName != null && lessonName.isNotEmpty)
-            ? lessonName
-            : (names is List && names.isNotEmpty
-                ? names.first.toString()
-                : (_lang == 'ar'
-                    ? 'الفصل المباشر'
-                    : _lang == 'tr'
-                        ? 'Canlı sınıf'
-                        : 'Live classroom'));
-      });
-      final beat = data['beat'];
-      if (beat is Map) {
-        await _playBeat(Map<String, dynamic>.from(beat));
-      }
+      if (_sessionId == null) return;
       unawaited(_runLoop());
     } catch (e) {
       if (!mounted) return;
@@ -326,21 +291,11 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     if (mounted) setState(() => _presence = _Presence.speaking);
     try {
       if (_api == null) return;
-      final apiFuture = _postWithRetry(
+      await _consumeAndPlayStream(
         '/api/ai/classroom/session/$_sessionId/turn',
         {'noAnswer': true},
-        timeout: _llmTimeout,
+        bridgeKind: 'think',
       );
-      await _speakBridge('think');
-      final data = await apiFuture;
-      if (!mounted || _cancelled) return;
-      // A prior transient error banner must not linger once the classroom
-      // is clearly working again.
-      if (_error != null) setState(() => _error = null);
-      final beat = data['beat'];
-      if (beat is Map) {
-        await _playBeat(Map<String, dynamic>.from(beat));
-      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -409,33 +364,24 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
           continue;
         }
 
-        if (mounted) setState(() => _presence = _Presence.thinking);
+        if (mounted) {
+          setState(() {
+            _presence = _Presence.thinking;
+            _caption = _lang == 'ar'
+                ? 'المعلم يفكر…'
+                : _lang == 'tr'
+                    ? 'Öğretmen düşünüyor…'
+                    : 'Teacher is thinking…';
+          });
+        }
         if (_api == null) break;
-        final apiFuture = _postWithRetry(
+        final beat = await _consumeAndPlayStream(
           '/api/ai/classroom/session/$_sessionId/beat',
           {},
-          timeout: _llmTimeout,
+          bridgeKind: 'think',
         );
-        await _speakBridge('think');
-        final data = await apiFuture;
         if (!mounted || _cancelled) break;
-        if (_error != null) setState(() => _error = null);
-        final session = data['session'];
-        if (session is Map) {
-          final state = session['state'];
-          final lessonName = state is Map
-              ? state['currentLessonName']?.toString()
-              : null;
-          if (lessonName != null && lessonName.isNotEmpty) {
-            setState(() => _title = lessonName);
-          }
-        }
-        final beatRaw = data['beat'];
-        if (beatRaw is! Map) continue;
-        final beat = Map<String, dynamic>.from(beatRaw);
-        await _playBeat(beat);
-        final status = session is Map ? session['status']?.toString() : null;
-        if (beat['sessionComplete'] == true || status == 'ENDED') {
+        if (beat != null && beat['sessionComplete'] == true) {
           if (mounted) setState(() => _ended = true);
           break;
         }
@@ -470,6 +416,329 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
     } finally {
       _loopActive = false;
     }
+  }
+
+  void _bindSession(Map<String, dynamic> sessionMap) {
+    final id = sessionMap['id']?.toString();
+    if (id != null && id.isNotEmpty) _sessionId = id;
+    final speechLocale = sessionMap['speechLocale']?.toString();
+    if (speechLocale != null && speechLocale.isNotEmpty) {
+      _speechLocale = speechLocale;
+    }
+    final country = sessionMap['countryCode']?.toString();
+    if (country != null && country.isNotEmpty) _countryCode = country;
+    final province = sessionMap['provinceName']?.toString();
+    if (province != null && province.isNotEmpty) _provinceName = province;
+    final accent = sessionMap['accent']?.toString();
+    if (accent != null && accent.isNotEmpty) _accent = accent;
+    final names = sessionMap['materialNames'];
+    final state = sessionMap['state'];
+    final lessonName =
+        state is Map ? state['currentLessonName']?.toString() : null;
+    if (!mounted) return;
+    setState(() {
+      if (lessonName != null && lessonName.isNotEmpty) {
+        _title = lessonName;
+      } else if (names is List && names.isNotEmpty && _title == 'Classroom') {
+        _title = names.first.toString();
+      }
+    });
+  }
+
+  void _applyBoardLive(List board) {
+    if (_cancelled || !mounted || board.isEmpty) return;
+    var penAt = DateTime.now().millisecondsSinceEpoch.toDouble();
+    var shapeSlot = 0;
+    for (var i = 0; i < board.length; i++) {
+      final row = board[i];
+      if (row is! Map) continue;
+      final cue = Map<String, dynamic>.from(row);
+      final action =
+          (cue['action']?.toString() ?? '').toLowerCase().replaceAll(' ', '_');
+      if (action == 'clear_board' || action == 'open_new_board') {
+        _items.clear();
+        _boardCursorY = 160;
+        _diagramCursorY = 220;
+        shapeSlot = 0;
+        penAt = DateTime.now().millisecondsSinceEpoch.toDouble();
+        continue;
+      }
+      final before = _items.length;
+      shapeSlot = _applyCue(
+        _items,
+        cue,
+        i,
+        penAt,
+        _rtl,
+        () => _boardCursorY,
+        (y) => _boardCursorY = y,
+        () => _diagramCursorY,
+        (y) => _diagramCursorY = y,
+        shapeSlot,
+      );
+      if (_items.length > before) {
+        penAt += _items.last.writeMs + 160;
+      }
+    }
+    if (shapeSlot > 0) _diagramCursorY += 60;
+    if (mounted) setState(() {});
+  }
+
+  /// End-to-end streamed beat: status → progressive speak/board → complete.
+  /// First sentence starts TTS as soon as the server emits it.
+  Future<Map<String, dynamic>?> _consumeAndPlayStream(
+    String path,
+    Map<String, dynamic> body, {
+    String? bridgeKind,
+    bool wasCheck = false,
+  }) async {
+    final api = _api;
+    if (api == null) throw ApiException('Not connected', 0);
+    await _stopListeningQuietly();
+    if (mounted) setState(() => _presence = _Presence.thinking);
+
+    final spoken = <int>{};
+    final speakQueue = <Map<String, dynamic>>[];
+    var drainRunning = false;
+    var streamDone = false;
+    Map<String, dynamic>? finalBeat;
+    var firstSpeak = true;
+    var bridgeAbort = false;
+
+    Future<File?>? nextPreload;
+    Future<void> drainSpeak() async {
+      if (drainRunning) return;
+      drainRunning = true;
+      _voiceBusy = true;
+      try {
+        while (!_cancelled) {
+          if (speakQueue.isEmpty) {
+            if (streamDone) break;
+            await Future<void>.delayed(const Duration(milliseconds: 40));
+            continue;
+          }
+          final next = speakQueue.removeAt(0);
+          final index = (next['index'] as num?)?.toInt() ?? 0;
+          if (spoken.contains(index)) continue;
+          spoken.add(index);
+          final text = next['text']?.toString() ?? '';
+          if (text.isEmpty) continue;
+          final pace = next['pace']?.toString() ?? 'normal';
+          final emotion = next['emotion']?.toString() ?? 'calm';
+          if (mounted) {
+            setState(() {
+              _presence = _Presence.speaking;
+              _caption = text;
+            });
+          }
+          final preloaded =
+              nextPreload != null ? await nextPreload : null;
+          nextPreload = speakQueue.isNotEmpty
+              ? _fetchTtsFile(
+                  speakQueue.first['text']?.toString() ?? '',
+                  pace: speakQueue.first['pace']?.toString() ?? 'normal',
+                  emotion:
+                      speakQueue.first['emotion']?.toString() ?? 'calm',
+                )
+              : null;
+          await _speakCloud(
+            text,
+            pace: pace,
+            emotion: emotion,
+            preloaded: preloaded,
+          );
+          await Future<void>.delayed(const Duration(milliseconds: 180));
+        }
+      } finally {
+        drainRunning = false;
+        _voiceBusy = false;
+      }
+    }
+
+    if (bridgeKind != null) {
+      unawaited((() async {
+        try {
+          if (bridgeAbort || _cancelled) return;
+          await _speakBridge(bridgeKind);
+        } catch (_) {}
+      })());
+    }
+
+    try {
+      await api.postSse(
+        path,
+        body,
+        timeout: _llmTimeout,
+        onEvent: (type, data) {
+          if (_cancelled) return;
+          switch (type) {
+          case 'status':
+            if (_voiceBusy) return;
+            final message = data['message']?.toString();
+            if (mounted) {
+              setState(() {
+                _presence = _Presence.thinking;
+                if (message != null && message.isNotEmpty) _caption = message;
+              });
+            }
+            break;
+          case 'session':
+            final session = data['session'];
+            if (session is Map) {
+              _bindSession(Map<String, dynamic>.from(session));
+            }
+            break;
+          case 'board':
+            final actions = data['actions'];
+            if (actions is List) {
+              if (!_voiceBusy && mounted) {
+                setState(() {
+                  _caption = _lang == 'ar'
+                      ? 'جارٍ الرسم على السبورة…'
+                      : _lang == 'tr'
+                          ? 'Tahta hazırlanıyor…'
+                          : 'Drawing on the board…';
+                });
+              }
+              _applyBoardLive(actions);
+            }
+            break;
+          case 'speak':
+            final text = _cleanText(data['text']) ?? data['text']?.toString() ?? '';
+            if (text.isEmpty) return;
+            if (firstSpeak) {
+              firstSpeak = false;
+              bridgeAbort = true;
+              try {
+                _audio.stop();
+              } catch (_) {}
+            }
+            speakQueue.add({
+              'index': (data['index'] as num?)?.toInt() ?? spoken.length,
+              'text': text,
+              'emotion': data['emotion']?.toString() ?? 'calm',
+              'pace': data['pace']?.toString() ?? 'normal',
+            });
+            unawaited(drainSpeak());
+            break;
+          case 'complete':
+            final beat = data['beat'];
+            if (beat is Map) {
+              finalBeat = Map<String, dynamic>.from(beat);
+            }
+            final session = data['session'];
+            if (session is Map) {
+              _bindSession(Map<String, dynamic>.from(session));
+            }
+            break;
+          case 'needs_materials':
+            if (mounted) {
+              setState(() {
+                _error = _lang == 'ar'
+                    ? 'اختر المادة أولاً'
+                    : 'Select materials first';
+              });
+            }
+            break;
+          case 'error':
+            throw ApiException(
+              data['message']?.toString() ?? 'Stream failed',
+              500,
+            );
+          }
+        },
+      );
+    } catch (e) {
+      // Proxies / older builds that break SSE — fall back to the
+      // full-JSON path so the classroom still teaches instead of dying.
+      if (finalBeat == null && spoken.isEmpty) {
+        final data = await _postWithRetry(path, body, timeout: _llmTimeout);
+        if (data['needsMaterialSelection'] == true) {
+          if (mounted) {
+            setState(() {
+              _error = _lang == 'ar'
+                  ? 'اختر المادة أولاً'
+                  : 'Select materials first';
+            });
+          }
+          return null;
+        }
+        final session = data['session'];
+        if (session is Map) {
+          _bindSession(Map<String, dynamic>.from(session));
+        }
+        final beat = data['beat'];
+        if (beat is Map) {
+          final map = Map<String, dynamic>.from(beat);
+          if (wasCheck) {
+            if (map['answerCorrect'] == true) {
+              await _speakBridge('excellent');
+            } else if (map['answerCorrect'] == false) {
+              await _speakBridge('reexplain');
+            }
+          }
+          await _playBeat(map);
+          return map;
+        }
+        return null;
+      }
+      rethrow;
+    }
+
+    streamDone = true;
+    await drainSpeak();
+    if (!mounted || _cancelled) return finalBeat;
+    if (_error != null) setState(() => _error = null);
+
+    final completed = finalBeat;
+    if (completed == null) return null;
+
+    if (wasCheck) {
+      if (completed['answerCorrect'] == true) {
+        await _speakBridge('excellent');
+      } else if (completed['answerCorrect'] == false) {
+        await _speakBridge('reexplain');
+      }
+    }
+
+    final speakRaw = completed['speak'];
+    final leftover = <String>[];
+    if (speakRaw is List) {
+      for (var i = 0; i < speakRaw.length; i++) {
+        if (spoken.contains(i)) continue;
+        final t = _cleanText(speakRaw[i]);
+        if (t != null && t.isNotEmpty) leftover.add(t);
+      }
+    }
+    if (leftover.isNotEmpty) {
+      await _playBeat({
+        ...completed,
+        'speak': leftover,
+        'board': <dynamic>[],
+      });
+    } else {
+      final ask = completed['askStudent']?.toString().trim();
+      if (ask != null && ask.isNotEmpty) {
+        _askWaitMs =
+            ((completed['waitForStudentMs'] as num?)?.toInt() ?? 5500)
+                .clamp(5000, 8000);
+        _pendingAsk = ask;
+        _awaitingCheck = true;
+        if (mounted) setState(() => _caption = _cleanText(ask) ?? ask);
+      } else {
+        _askWaitMs = 0;
+        _pendingAsk = null;
+        _awaitingCheck = false;
+      }
+      final lessonName = completed['lessonName']?.toString();
+      if (lessonName != null && lessonName.isNotEmpty && mounted) {
+        setState(() => _title = lessonName);
+      }
+      if (completed['sessionComplete'] == true && mounted) {
+        setState(() => _ended = true);
+      }
+    }
+    return completed;
   }
 
   Future<void> _playBeat(Map<String, dynamic> beat) async {
@@ -622,27 +891,12 @@ class _LiveClassroomScreenState extends State<LiveClassroomScreen> {
       final wasCheck = _awaitingCheck;
       _awaitingCheck = false;
       final kind = wasCheck ? 'check' : 'explain';
-      final apiFuture = _postWithRetry(
+      await _consumeAndPlayStream(
         '/api/ai/classroom/session/$_sessionId/turn',
         {'transcript': q},
-        timeout: _llmTimeout,
+        bridgeKind: kind,
+        wasCheck: wasCheck,
       );
-      await _speakBridge(kind);
-      final data = await apiFuture;
-      if (!mounted || _cancelled) return;
-      if (_error != null) setState(() => _error = null);
-      final beat = data['beat'];
-      if (beat is Map) {
-        final map = Map<String, dynamic>.from(beat);
-        if (wasCheck) {
-          if (map['answerCorrect'] == true) {
-            await _speakBridge('excellent');
-          } else if (map['answerCorrect'] == false) {
-            await _speakBridge('reexplain');
-          }
-        }
-        await _playBeat(map);
-      }
     } catch (e) {
       if (!mounted) return;
       setState(() {

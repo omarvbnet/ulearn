@@ -1,10 +1,15 @@
 import { error, json, requireAuth } from "@/lib/api";
 import { ClassroomSessionService } from "@/services/ai/classroom/classroom-session.service";
+import { classroomSseResponse } from "@/services/ai/classroom/sse";
 import { z } from "zod";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const schema = z.object({
   transcript: z.string().max(1000).optional().default(""),
   noAnswer: z.boolean().optional(),
+  stream: z.boolean().optional().default(false),
   signals: z
     .object({
       frustration: z.number().min(0).max(1).optional(),
@@ -27,13 +32,28 @@ export async function POST(
   const parsed = schema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
+  const { stream, ...data } = parsed.data;
+
+  if (stream) {
+    return classroomSseResponse(async (emit) => {
+      await ClassroomSessionService.studentTurn({
+        userId: auth.session.userId,
+        sessionId: id,
+        transcript: data.transcript,
+        noAnswer: data.noAnswer,
+        signals: data.signals,
+        onEvent: emit,
+      });
+    });
+  }
+
   try {
     const result = await ClassroomSessionService.studentTurn({
       userId: auth.session.userId,
       sessionId: id,
-      transcript: parsed.data.transcript,
-      noAnswer: parsed.data.noAnswer,
-      signals: parsed.data.signals,
+      transcript: data.transcript,
+      noAnswer: data.noAnswer,
+      signals: data.signals,
     });
     return json(result);
   } catch (e) {

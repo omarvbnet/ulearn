@@ -14,6 +14,11 @@ import { buildClassroomBeatPrompt } from "./classroom-prompts";
 import { SubjectAssessmentService } from "@/services/assessment/subject-assessment.service";
 import { ClassroomPerfTimer } from "./perf-monitor";
 import {
+  extractProgressiveBeatFields,
+  findBalancedJsonObject,
+  type ClassroomStreamEvent,
+} from "./progressive-beat";
+import {
   emptyClassroomState,
   type ClassroomBeat,
   type ClassroomBoardAction,
@@ -35,45 +40,6 @@ function extractJsonObject(raw: string): string | null {
   const start = t.indexOf("{");
   const end = t.lastIndexOf("}");
   if (start >= 0 && end > start) return t.slice(start, end + 1);
-  return null;
-}
-
-/**
- * Scans a (possibly still-growing) chunk of streamed text for the first
- * complete, brace-balanced top-level JSON object — string/escape aware so
- * braces inside spoken text or board action parameters never confuse the
- * depth count. Used to cut a classroom beat's generation short the instant
- * the model has produced a complete, parseable beat instead of always
- * waiting for it to hit its own stop token (which often trails a little
- * past the point the JSON is actually finished).
- */
-function findBalancedJsonObject(text: string): string | null {
-  const start = text.indexOf("{");
-  if (start === -1) return null;
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (escape) {
-      escape = false;
-      continue;
-    }
-    if (ch === "\\") {
-      escape = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) continue;
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) return text.slice(start, i + 1);
-    }
-  }
   return null;
 }
 
@@ -627,24 +593,153 @@ function fallbackEvaluationText(
  *  lesson forever, EXCEPT for check_understanding, which must keep
  *  re-explaining and re-asking for as long as the student keeps missing it
  *  — that persistence is intentional, not a bug. */
+type LessonStageAdvance = Pick<
+  ClassroomSessionState,
+  | "lessonStage"
+  | "stageBeats"
+  | "hasGivenExample"
+  | "quizProgress"
+  | "homeworkGiven"
+  | "currentWhiteboardStep"
+  | "currentExample"
+  | "currentPractice"
+  | "currentQuiz"
+  | "currentSummary"
+>;
+
+/** Fresh lesson-state memory when starting a new curriculum lesson. */
+function freshLessonArtifacts(): Pick<
+  ClassroomSessionState,
+  | "hasGivenExample"
+  | "quizProgress"
+  | "homeworkGiven"
+  | "currentWhiteboardStep"
+  | "currentExample"
+  | "currentPractice"
+  | "currentQuiz"
+  | "currentSummary"
+> {
+  return {
+    hasGivenExample: false,
+    quizProgress: 0,
+    homeworkGiven: false,
+    currentWhiteboardStep: null,
+    currentExample: null,
+    currentPractice: null,
+    currentQuiz: null,
+    currentSummary: null,
+  };
+}
+
+/**
+ * Persist the active lesson-state artifacts from concrete beat evidence —
+ * board text, spoken example, practice prompt, quiz question, summary —
+ * never from chat-history inference alone. Called after every beat so the
+ * next response always continues from an explicit, up-to-date state object.
+ */
+function updateLessonStateMemory(
+  state: ClassroomSessionState,
+  beat: ClassroomBeat,
+  stage: ClassroomLessonStage
+): Pick<
+  ClassroomSessionState,
+  | "currentWhiteboardStep"
+  | "currentExample"
+  | "currentPractice"
+  | "currentQuiz"
+  | "currentSummary"
+> {
+  const patch = beat.memoryPatch || {};
+  const boardNote =
+    beat.board
+      .map((b) => sanitizeClassroomPlainText(b.parameters?.text, 48))
+      .filter(Boolean)
+      .slice(-1)[0] || null;
+  const speakNote =
+    sanitizeClassroomPlainText(beat.speak?.[beat.speak.length - 1], 80) || null;
+  const askNote =
+    sanitizeClassroomPlainText(beat.askStudent, 80) || null;
+
+  let currentWhiteboardStep =
+    sanitizeClassroomPlainText(patch.currentWhiteboardStep, 80) ||
+    boardNote ||
+    state.currentWhiteboardStep ||
+    null;
+  let currentExample =
+    sanitizeClassroomPlainText(patch.currentExample, 100) ||
+    state.currentExample ||
+    null;
+  let currentPractice =
+    sanitizeClassroomPlainText(patch.currentPractice, 100) ||
+    state.currentPractice ||
+    null;
+  let currentQuiz =
+    sanitizeClassroomPlainText(patch.currentQuiz, 100) ||
+    state.currentQuiz ||
+    null;
+  let currentSummary =
+    sanitizeClassroomPlainText(patch.currentSummary, 160) ||
+    state.currentSummary ||
+    null;
+
+  // Stage-bound writes only — never let a later-stage artifact appear early.
+  if (stage === "explain" || stage === "objective" || stage === "greeting") {
+    if (
+      beat.teachingStrategy === "example" ||
+      beat.board.some((b) => /^draw_/.test(String(b.action || "")))
+    ) {
+      currentExample =
+        sanitizeClassroomPlainText(patch.currentExample, 100) ||
+        boardNote ||
+        speakNote ||
+        currentExample;
+    }
+    if (boardNote) currentWhiteboardStep = boardNote;
+  } else if (stage === "guided_practice") {
+    currentPractice =
+      sanitizeClassroomPlainText(patch.currentPractice, 100) ||
+      askNote ||
+      speakNote ||
+      currentPractice;
+    if (boardNote) currentWhiteboardStep = boardNote;
+  } else if (stage === "check_understanding" || stage === "mini_quiz") {
+    currentQuiz =
+      sanitizeClassroomPlainText(patch.currentQuiz, 100) ||
+      askNote ||
+      currentQuiz;
+  } else if (stage === "summary") {
+    currentSummary =
+      sanitizeClassroomPlainText(patch.currentSummary, 160) ||
+      (beat.speak || []).map((s) => sanitizeClassroomPlainText(s, 80)).filter(Boolean).join(" ") ||
+      currentSummary;
+  }
+
+  return {
+    currentWhiteboardStep,
+    currentExample,
+    currentPractice,
+    currentQuiz,
+    currentSummary,
+  };
+}
+
 function advanceLessonStage(
   state: ClassroomSessionState,
   beat: ClassroomBeat,
   mode: "open" | "next" | "react" | "silence"
-): Pick<
-  ClassroomSessionState,
-  "lessonStage" | "stageBeats" | "hasGivenExample" | "quizProgress" | "homeworkGiven"
-> {
+): LessonStageAdvance {
   const stage: ClassroomLessonStage = state.lessonStage || "greeting";
   const stageBeats = (state.stageBeats || 0) + 1;
   let hasGivenExample = Boolean(state.hasGivenExample);
   let quizProgress = state.quizProgress || 0;
   let homeworkGiven = Boolean(state.homeworkGiven);
+  const artifacts = updateLessonStateMemory(state, beat, stage);
 
   if (
     stage === "explain" &&
     (beat.teachingStrategy === "example" ||
-      beat.board.some((b) => /^draw_/.test(String(b.action || ""))))
+      beat.board.some((b) => /^draw_/.test(String(b.action || ""))) ||
+      Boolean(artifacts.currentExample))
   ) {
     hasGivenExample = true;
   }
@@ -665,9 +760,9 @@ function advanceLessonStage(
     return {
       lessonStage: "explain",
       stageBeats: 0,
-      hasGivenExample: false,
-      quizProgress: 0,
-      homeworkGiven: false,
+      ...freshLessonArtifacts(),
+      // Keep any whiteboard title / topic written during the open beat.
+      currentWhiteboardStep: artifacts.currentWhiteboardStep,
     };
   }
 
@@ -704,28 +799,46 @@ function advanceLessonStage(
   }
 
   if (!shouldAdvance) {
-    return { lessonStage: stage, stageBeats, hasGivenExample, quizProgress, homeworkGiven };
+    return {
+      lessonStage: stage,
+      stageBeats,
+      hasGivenExample,
+      quizProgress,
+      homeworkGiven,
+      ...artifacts,
+    };
   }
 
   if (stage === "recommend_next") {
     // Loop into the next curriculum lesson — "greeting" only ever happens
     // once for the whole session, so a new lesson starts at "objective".
+    // Wipe stage artifacts so the next lesson cannot inherit the previous
+    // example/quiz/summary as if they were still current.
     return {
       lessonStage: "objective",
       stageBeats: 0,
-      hasGivenExample: false,
-      quizProgress: 0,
-      homeworkGiven: false,
+      ...freshLessonArtifacts(),
     };
   }
   const idx = LESSON_STAGE_ORDER.indexOf(stage);
   const nextStage = LESSON_STAGE_ORDER[idx + 1] || "explain";
+  // Keep completed artifacts (example/practice/quiz/summary) as history the
+  // prompt can reference, but clear the whiteboard step when leaving explain
+  // so the next stage starts a clean visual beat unless it draws again.
   return {
     lessonStage: nextStage,
     stageBeats: 0,
     hasGivenExample,
     quizProgress,
     homeworkGiven,
+    currentWhiteboardStep:
+      nextStage === "explain" || nextStage === "guided_practice"
+        ? artifacts.currentWhiteboardStep
+        : null,
+    currentExample: artifacts.currentExample,
+    currentPractice: artifacts.currentPractice,
+    currentQuiz: artifacts.currentQuiz,
+    currentSummary: artifacts.currentSummary,
   };
 }
 
@@ -945,6 +1058,12 @@ function toPublic(
       lastAskStudent: state.lastAskStudent ?? null,
       awaitingCorrectAnswer: Boolean(state.awaitingCorrectAnswer),
       pendingQuestion: state.pendingQuestion ?? null,
+      lessonStage: state.lessonStage || "greeting",
+      currentWhiteboardStep: state.currentWhiteboardStep ?? null,
+      currentExample: state.currentExample ?? null,
+      currentPractice: state.currentPractice ?? null,
+      currentQuiz: state.currentQuiz ?? null,
+      currentSummary: state.currentSummary ?? null,
     },
   };
 }
@@ -956,8 +1075,16 @@ export class ClassroomSessionService {
     language?: string | null;
     question?: string | null;
     conversationId?: string | null;
+    /** When set, emits progressive SSE events as soon as speak/board are ready. */
+    onEvent?: (event: ClassroomStreamEvent) => void;
   }) {
+    const emit = input.onEvent;
     const perf = new ClassroomPerfTimer("session.start");
+    emit?.({
+      type: "status",
+      presence: "thinking",
+      message: "Preparing classroom…",
+    });
     // Independent lookups (billing entitlement, profile, long-term memory)
     // hit different tables with no data dependency on each other — run them
     // concurrently instead of one after another to shave real latency off
@@ -1029,6 +1156,11 @@ export class ClassroomSessionService {
     if (!documentIds.length) {
       const { AiExamService } = await import("../ai-exam.service");
       const materials = await AiExamService.listKbDocumentsForUser(input.userId);
+      emit?.({
+        type: "needs_materials",
+        materials,
+        pendingQuestion: input.question || "",
+      });
       return {
         needsMaterialSelection: true as const,
         materials,
@@ -1138,12 +1270,18 @@ export class ClassroomSessionService {
       .join("; ");
     void StudentMemoryService.savePreferredLanguage(input.userId, language);
     perf.mark("prepareState");
+    emit?.({
+      type: "status",
+      presence: "thinking",
+      message: "Generating explanation…",
+    });
 
-    // The row insert and the first LLM beat are independent — the beat only
-    // needs `state`/language/etc, not the row's id — so run the DB write and
-    // the (usually much slower) DeepSeek call at the same time instead of
-    // making the model wait behind a database round trip.
-    const [row, beat] = await Promise.all([
+    // Create the session row FIRST so the client can bind a sessionId (and
+    // start listening for speak/board) before the LLM finishes — then stream
+    // the opening beat with progressive partials. When no onEvent is wired
+    // (non-streaming callers), we still overlap the row insert with the LLM
+    // call via Promise.all below for the same wall-clock win as before.
+    const createRow = () =>
       prisma.aiClassroomSession.create({
         data: {
           userId: input.userId,
@@ -1158,7 +1296,9 @@ export class ClassroomSessionService {
           state: state as unknown as Prisma.InputJsonValue,
           beatIndex: 0,
         },
-      }),
+      });
+
+    const generateOpen = (onPartial?: Parameters<typeof this.generateBeat>[0]["onPartial"]) =>
       this.generateBeat({
         userId: input.userId,
         language,
@@ -1172,8 +1312,38 @@ export class ClassroomSessionService {
         mode: "open",
         question: input.question || undefined,
         resumeLessonName,
-      }),
-    ]);
+        onPartial,
+      });
+
+    let row: Awaited<ReturnType<typeof createRow>>;
+    let beat: ClassroomBeat;
+    if (emit) {
+      row = await createRow();
+      emit({
+        type: "session",
+        session: toPublic(
+          { ...row, beatIndex: 0, state },
+          voice.speechLocale,
+          voice.accent
+        ),
+      });
+      beat = await generateOpen((partial) => {
+        if (partial.speak) {
+          emit({
+            type: "speak",
+            index: partial.speak.index,
+            text: partial.speak.text,
+            emotion: partial.emotion,
+            pace: partial.pace,
+          });
+        }
+        if (partial.board?.length) {
+          emit({ type: "board", actions: partial.board });
+        }
+      });
+    } else {
+      [row, beat] = await Promise.all([createRow(), generateOpen()]);
+    }
     perf.mark("createRowAndLlm");
 
     const nextState = mergeState(state, beat, undefined, "open");
@@ -1201,19 +1371,32 @@ export class ClassroomSessionService {
     perf.mark("persist");
     perf.finish({ sessionId: row.id, docs: documentIds.length });
 
+    const publicSession = toPublic(
+      { ...row, beatIndex: 1, state: nextState },
+      voice.speechLocale,
+      voice.accent
+    );
+    emit?.({ type: "complete", beat, session: publicSession });
+
     return {
       needsMaterialSelection: false as const,
-      session: toPublic(
-        { ...row, beatIndex: 1, state: nextState },
-        voice.speechLocale,
-        voice.accent
-      ),
+      session: publicSession,
       beat,
     };
   }
 
-  static async nextBeat(input: { userId: string; sessionId: string }) {
+  static async nextBeat(input: {
+    userId: string;
+    sessionId: string;
+    onEvent?: (event: ClassroomStreamEvent) => void;
+  }) {
+    const emit = input.onEvent;
     const perf = new ClassroomPerfTimer("beat");
+    emit?.({
+      type: "status",
+      presence: "thinking",
+      message: "Preparing next step…",
+    });
     const row = await this.requireLiveSession(input.userId, input.sessionId);
     perf.mark("loadSession");
     const state = row.state as unknown as ClassroomSessionState;
@@ -1237,6 +1420,22 @@ export class ClassroomSessionService {
       memoryBlurb,
       state,
       mode: "next",
+      onPartial: emit
+        ? (partial) => {
+            if (partial.speak) {
+              emit({
+                type: "speak",
+                index: partial.speak.index,
+                text: partial.speak.text,
+                emotion: partial.emotion,
+                pace: partial.pace,
+              });
+            }
+            if (partial.board?.length) {
+              emit({ type: "board", actions: partial.board });
+            }
+          }
+        : undefined,
     });
     perf.mark("llm");
 
@@ -1278,17 +1477,20 @@ export class ClassroomSessionService {
       provinceName: row.provinceName,
     });
 
+    const publicSession = toPublic(
+      {
+        ...row,
+        beatIndex,
+        state: nextState,
+        status: ended ? "ENDED" : "LIVE",
+      },
+      voice.speechLocale,
+      voice.accent
+    );
+    emit?.({ type: "complete", beat, session: publicSession });
+
     return {
-      session: toPublic(
-        {
-          ...row,
-          beatIndex,
-          state: nextState,
-          status: ended ? "ENDED" : "LIVE",
-        },
-        voice.speechLocale,
-        voice.accent
-      ),
+      session: publicSession,
       beat,
     };
   }
@@ -1303,9 +1505,18 @@ export class ClassroomSessionService {
       confidence?: number;
       confusion?: number;
     };
+    onEvent?: (event: ClassroomStreamEvent) => void;
   }) {
+    const emit = input.onEvent;
     const perf = new ClassroomPerfTimer("turn");
     const silence = Boolean(input.noAnswer);
+    emit?.({
+      type: "status",
+      presence: "thinking",
+      message: silence
+        ? "Waiting for your answer…"
+        : "Analyzing your answer…",
+    });
     const transcript =
       sanitizeClassroomPlainText(input.transcript || "", 280) ||
       (input.transcript || "").trim();
@@ -1347,6 +1558,22 @@ export class ClassroomSessionService {
       state,
       mode: silence ? "silence" : "react",
       studentTranscript: silence ? undefined : transcript,
+      onPartial: emit
+        ? (partial) => {
+            if (partial.speak) {
+              emit({
+                type: "speak",
+                index: partial.speak.index,
+                text: partial.speak.text,
+                emotion: partial.emotion,
+                pace: partial.pace,
+              });
+            }
+            if (partial.board?.length) {
+              emit({ type: "board", actions: partial.board });
+            }
+          }
+        : undefined,
     });
     perf.mark("llm");
 
@@ -1405,12 +1632,15 @@ export class ClassroomSessionService {
       provinceName: row.provinceName,
     });
 
+    const publicSession = toPublic(
+      { ...row, beatIndex, state: nextState, status: "LIVE" },
+      voice.speechLocale,
+      voice.accent
+    );
+    emit?.({ type: "complete", beat, session: publicSession });
+
     return {
-      session: toPublic(
-        { ...row, beatIndex, state: nextState, status: "LIVE" },
-        voice.speechLocale,
-        voice.accent
-      ),
+      session: publicSession,
       beat,
     };
   }
@@ -1626,6 +1856,35 @@ export class ClassroomSessionService {
     return row;
   }
 
+  /**
+   * Map raw board cue objects from a still-streaming JSON fragment into the
+   * same shape finalizeBeat/normalizeBoardActions expect — so the client can
+   * start drawing the instant each cue finishes in the stream.
+   */
+  private static mapBoardRaw(boardRaw: Record<string, unknown>[]): ClassroomBoardAction[] {
+    return boardRaw
+      .map((r, i) => {
+        const action = String(r.action || "")
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, "_");
+        if (!action) return null;
+        const parameters =
+          r.parameters && typeof r.parameters === "object" && !Array.isArray(r.parameters)
+            ? { ...(r.parameters as Record<string, unknown>) }
+            : {};
+        if ("text" in parameters) {
+          parameters.text = sanitizeClassroomPlainText(parameters.text, 40);
+        }
+        return {
+          time: Math.max(0, Number(r.time) || i * 350),
+          action,
+          parameters,
+        };
+      })
+      .filter(Boolean) as ClassroomBoardAction[];
+  }
+
   private static async generateBeat(input: {
     userId: string;
     language: string;
@@ -1640,6 +1899,17 @@ export class ClassroomSessionService {
     studentTranscript?: string;
     question?: string;
     resumeLessonName?: string | null;
+    /**
+     * Fired as soon as a complete speak line or board cue appears in the
+     * still-growing model stream — this is what makes the classroom feel
+     * live instead of waiting for the whole JSON beat to finish.
+     */
+    onPartial?: (partial: {
+      speak?: { index: number; text: string };
+      board?: ClassroomBoardAction[];
+      emotion?: string | null;
+      pace?: string | null;
+    }) => void;
   }): Promise<ClassroomBeat> {
     const system = buildClassroomBeatPrompt({
       language: input.language,
@@ -1697,6 +1967,10 @@ export class ClassroomSessionService {
     // lesson for tens of seconds.
     const runOnce = async (tokenCap: number, deadlineMs: number): Promise<string | null> => {
       const cutoff = { timedOut: false, captured: null as string | null };
+      let emittedSpeak = 0;
+      let emittedBoard = 0;
+      let lastEmotion: string | null = null;
+      let lastPace: string | null = null;
       const timer = setTimeout(() => {
         cutoff.timedOut = true;
       }, deadlineMs);
@@ -1708,7 +1982,39 @@ export class ClassroomSessionService {
           { temperature, maxTokensExact: tokenCap },
           (_delta, fullText) => {
             if (cutoff.timedOut) return true;
-            const obj = findBalancedJsonObject(fullText);
+            const progressive = extractProgressiveBeatFields(fullText);
+            if (input.onPartial) {
+              if (progressive.emotion) lastEmotion = progressive.emotion;
+              if (progressive.pace) lastPace = progressive.pace;
+              while (emittedSpeak < progressive.speak.length) {
+                const text = sanitizeClassroomPlainText(
+                  progressive.speak[emittedSpeak],
+                  220
+                );
+                if (text) {
+                  input.onPartial({
+                    speak: { index: emittedSpeak, text },
+                    emotion: lastEmotion,
+                    pace: lastPace,
+                  });
+                }
+                emittedSpeak++;
+              }
+              if (progressive.boardRaw.length > emittedBoard) {
+                const mapped = this.mapBoardRaw(
+                  progressive.boardRaw.slice(emittedBoard)
+                );
+                emittedBoard = progressive.boardRaw.length;
+                if (mapped.length) {
+                  input.onPartial({
+                    board: mapped,
+                    emotion: lastEmotion,
+                    pace: lastPace,
+                  });
+                }
+              }
+            }
+            const obj = progressive.completeJson || findBalancedJsonObject(fullText);
             if (obj) {
               cutoff.captured = obj;
               return true;

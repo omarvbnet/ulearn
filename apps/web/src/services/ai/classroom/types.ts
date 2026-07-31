@@ -121,6 +121,18 @@ export type ClassroomSessionState = {
   /** Whether homework was actually assigned (not just visited) for the
    *  CURRENT lesson — informational only; assigning homework stays optional. */
   homeworkGiven: boolean;
+  /**
+   * PERSISTENT LESSON STATE MEMORY — the single source of truth for where
+   * the teacher is inside the current lesson. Updated from concrete beat
+   * evidence after every stage/beat (never inferred from chat history).
+   * Every response MUST continue from these fields; content belonging to
+   * another stage is forbidden.
+   */
+  currentWhiteboardStep: string | null;
+  currentExample: string | null;
+  currentPractice: string | null;
+  currentQuiz: string | null;
+  currentSummary: string | null;
 };
 
 export type ClassroomBeat = {
@@ -168,6 +180,12 @@ export type ClassroomSessionPublic = {
     | "lastAskStudent"
     | "awaitingCorrectAnswer"
     | "pendingQuestion"
+    | "lessonStage"
+    | "currentWhiteboardStep"
+    | "currentExample"
+    | "currentPractice"
+    | "currentQuiz"
+    | "currentSummary"
   >;
 };
 
@@ -209,5 +227,10 @@ export function emptyClassroomState(
     hasGivenExample: false,
     quizProgress: 0,
     homeworkGiven: false,
+    currentWhiteboardStep: null,
+    currentExample: null,
+    currentPractice: null,
+    currentQuiz: null,
+    currentSummary: null,
   };
 }
