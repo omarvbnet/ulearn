@@ -3,6 +3,10 @@
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, PageHeader } from "@/components/ui";
+import {
+  BoardFigure,
+  type BoardFigureSpec,
+} from "@/components/whiteboard/board-figure";
 import { useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +23,17 @@ type ChatMsg = {
     contentBase64?: string;
     downloadUrl?: string;
   } | null;
+  /** Whiteboard drawings painted by the AI (ubrd-figure specs). */
+  boards?: BoardFigureSpec[] | null;
 };
+
+function parseBoardFigures(raw: unknown): BoardFigureSpec[] | null {
+  if (!Array.isArray(raw)) return null;
+  const boards = raw.filter(
+    (b): b is BoardFigureSpec => Boolean(b) && typeof b === "object"
+  );
+  return boards.length ? boards : null;
+}
 
 type PracticeExam = {
   examAttemptId: string;
@@ -44,6 +58,45 @@ type ExamResult = {
 type KbDoc = { id: string; fileName: string };
 type Conv = { id: string; title?: string | null; updatedAt?: string };
 
+/** Consume a `data: {json}` SSE chat stream; resolves with the `done` payload. */
+async function readChatStream(
+  body: ReadableStream<Uint8Array>,
+  onToken: (text: string) => void
+): Promise<Record<string, unknown>> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let done: Record<string, unknown> | null = null;
+  for (;;) {
+    const { done: end, value } = await reader.read();
+    if (end) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const payload = trimmed.slice(5).trim();
+      if (!payload) continue;
+      let evt: Record<string, unknown>;
+      try {
+        evt = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+      if (evt.type === "token" && typeof evt.text === "string") {
+        onToken(evt.text);
+      } else if (evt.type === "done") {
+        done = evt;
+      } else if (evt.type === "error") {
+        throw new Error(String(evt.message || "Chat failed"));
+      }
+    }
+  }
+  if (!done) throw new Error("Chat failed");
+  return done;
+}
+
 export default function StudentAiPage() {
   const t = useT();
   const { locale } = useParams<{ locale: string }>();
@@ -59,6 +112,8 @@ export default function StudentAiPage() {
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const [examCount, setExamCount] = useState<5 | 10 | 20>(5);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  /** True once the assistant starts streaming text (hides the Thinking row). */
+  const [streamStarted, setStreamStarted] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   const quickPrompts =
@@ -232,6 +287,26 @@ export default function StudentAiPage() {
         text: q || (files.length ? `Attached: ${files.map((f) => f.name).join(", ")}` : ""),
       },
     ]);
+    // Live draft bubble that fills token-by-token while the model writes.
+    const draftId = crypto.randomUUID();
+    let draftAdded = false;
+    const appendDraft = (text: string) => {
+      setStreamStarted(true);
+      if (!draftAdded) {
+        draftAdded = true;
+        setMessages((m) => [...m, { id: draftId, role: "assistant", text }]);
+      } else {
+        setMessages((m) =>
+          m.map((msg) =>
+            msg.id === draftId ? { ...msg, text: msg.text + text } : msg
+          )
+        );
+      }
+    };
+    const removeDraft = () => {
+      if (draftAdded) setMessages((m) => m.filter((msg) => msg.id !== draftId));
+    };
+
     try {
       const attachments =
         files.length > 0
@@ -245,17 +320,27 @@ export default function StudentAiPage() {
           language: locale,
           conversationId: conversationId || undefined,
           attachments,
+          stream: true,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Chat failed");
+
+      let data: Record<string, unknown>;
+      const contentType = res.headers.get("content-type") || "";
+      if (res.ok && contentType.includes("text/event-stream") && res.body) {
+        data = await readChatStream(res.body, appendDraft);
+      } else {
+        data = await res.json();
+        if (!res.ok) throw new Error(String(data.error || "Chat failed"));
+      }
+
       if (data.needsMaterialSelection) {
+        removeDraft();
         setMessages((m) => [
           ...m,
           {
             id: crypto.randomUUID(),
             role: "assistant",
-            text: data.answer || "",
+            text: String(data.answer || ""),
           },
         ]);
         setPendingExplainQuestion(
@@ -264,26 +349,31 @@ export default function StudentAiPage() {
         await openMaterialPicker("explain_observe");
         return;
       }
-      setConversationId(data.conversationId || conversationId);
+      setConversationId(String(data.conversationId || conversationId || "") || null);
       const edited = data.editedFile as ChatMsg["file"] | undefined;
-      setMessages((m) => [
-        ...m,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: data.answer || "",
-          file: edited
-            ? {
-                fileName: edited.fileName,
-                mimeType: edited.mimeType,
-                contentBase64: edited.contentBase64,
-                downloadUrl: edited.downloadUrl,
-              }
-            : null,
-        },
-      ]);
+      const finalMsg: ChatMsg = {
+        id: draftId,
+        role: "assistant",
+        // The done payload carries the cleaned answer (follow-up markers removed).
+        text: String(data.answer || ""),
+        file: edited
+          ? {
+              fileName: edited.fileName,
+              mimeType: edited.mimeType,
+              contentBase64: edited.contentBase64,
+              downloadUrl: edited.downloadUrl,
+            }
+          : null,
+        boards: parseBoardFigures(data.boardFigures),
+      };
+      setMessages((m) =>
+        draftAdded
+          ? m.map((msg) => (msg.id === draftId ? finalMsg : msg))
+          : [...m, finalMsg]
+      );
       void loadHistory();
     } catch (e) {
+      removeDraft();
       setMessages((m) => [
         ...m,
         {
@@ -294,6 +384,7 @@ export default function StudentAiPage() {
       ]);
     } finally {
       setSending(false);
+      setStreamStarted(false);
     }
   }
 
@@ -311,6 +402,7 @@ export default function StudentAiPage() {
         citations?: {
           practiceQuiz?: PracticeExam;
           review?: Array<{ text: string; isCorrect: boolean }>;
+          boardFigures?: unknown;
         };
       }>;
       setMessages(
@@ -321,6 +413,7 @@ export default function StudentAiPage() {
             id: m.id,
             role: m.role === "USER" ? "user" : "assistant",
             text: m.content,
+            boards: parseBoardFigures(m.citations?.boardFigures),
             exam: practice || null,
             examDone: Boolean(practice),
             result: hasReview
@@ -401,6 +494,23 @@ export default function StudentAiPage() {
       (locale === "ar"
         ? "اشرح المادة وساعدني على ملاحظة الأشكال"
         : "Explain the material and help me observe the shapes");
+
+    const draftId = crypto.randomUUID();
+    let draftAdded = false;
+    const appendDraft = (text: string) => {
+      setStreamStarted(true);
+      if (!draftAdded) {
+        draftAdded = true;
+        setMessages((m) => [...m, { id: draftId, role: "assistant", text }]);
+      } else {
+        setMessages((m) =>
+          m.map((msg) =>
+            msg.id === draftId ? { ...msg, text: msg.text + text } : msg
+          )
+        );
+      }
+    };
+
     try {
       const res = await fetch("/api/ai/chat", {
         method: "POST",
@@ -411,31 +521,42 @@ export default function StudentAiPage() {
           mode: "explain_observe",
           documentIds: selectedDocs,
           conversationId: conversationId || undefined,
+          stream: true,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed");
-      setConversationId(data.conversationId || conversationId);
+      let data: Record<string, unknown>;
+      const contentType = res.headers.get("content-type") || "";
+      if (res.ok && contentType.includes("text/event-stream") && res.body) {
+        data = await readChatStream(res.body, appendDraft);
+      } else {
+        data = await res.json();
+        if (!res.ok) throw new Error(String(data.error || "Failed"));
+      }
+      setConversationId(String(data.conversationId || conversationId || "") || null);
       const edited = data.editedFile as ChatMsg["file"] | undefined;
-      setMessages((m) => [
-        ...m,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: data.answer || "",
-          file: edited
-            ? {
-                fileName: edited.fileName,
-                mimeType: edited.mimeType,
-                contentBase64: edited.contentBase64,
-                downloadUrl: edited.downloadUrl,
-              }
-            : null,
-        },
-      ]);
+      const finalMsg: ChatMsg = {
+        id: draftId,
+        role: "assistant",
+        text: String(data.answer || ""),
+        file: edited
+          ? {
+              fileName: edited.fileName,
+              mimeType: edited.mimeType,
+              contentBase64: edited.contentBase64,
+              downloadUrl: edited.downloadUrl,
+            }
+          : null,
+        boards: parseBoardFigures(data.boardFigures),
+      };
+      setMessages((m) =>
+        draftAdded
+          ? m.map((msg) => (msg.id === draftId ? finalMsg : msg))
+          : [...m, finalMsg]
+      );
       setPendingExplainQuestion("");
       void loadHistory();
     } catch (e) {
+      if (draftAdded) setMessages((m) => m.filter((msg) => msg.id !== draftId));
       setMessages((m) => [
         ...m,
         {
@@ -446,6 +567,7 @@ export default function StudentAiPage() {
       ]);
     } finally {
       setSending(false);
+      setStreamStarted(false);
     }
   }
 
@@ -606,6 +728,13 @@ export default function StudentAiPage() {
                     {m.text}
                   </div>
                 ) : null}
+                {m.boards?.length ? (
+                  <div className="space-y-3">
+                    {m.boards.map((board, bi) => (
+                      <BoardFigure key={`${m.id}-board-${bi}`} spec={board} />
+                    ))}
+                  </div>
+                ) : null}
                 {m.file ? (
                   <div className="space-y-2">
                     {(m.file.mimeType || "").startsWith("image/") ||
@@ -635,7 +764,9 @@ export default function StudentAiPage() {
               </div>
             </div>
           ))}
-          {sending && <p className="text-sm text-muted">{t.student.aiThinking}</p>}
+          {sending && !streamStarted && (
+            <p className="text-sm text-muted">{t.student.aiThinking}</p>
+          )}
           <div ref={endRef} />
         </div>
 

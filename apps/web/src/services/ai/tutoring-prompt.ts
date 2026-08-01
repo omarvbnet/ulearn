@@ -95,3 +95,62 @@ export function extractFollowUps(raw: string): {
   const cleanText = raw.replace(re, "").trim();
   return { cleanText, followUps };
 }
+
+/** Machine marker blocks that must never reach the live token stream. */
+const STREAM_MARKERS: Record<string, string> = {
+  "[[FLUX]]": "[[/FLUX]]",
+  "[[BOARD]]": "[[/BOARD]]",
+  "[[FOLLOW_UPS]]": "[[/FOLLOW_UPS]]",
+};
+
+/**
+ * Wraps a token callback so machine blocks ([[FLUX]]…, [[FOLLOW_UPS]]…) are
+ * suppressed while streaming, even when markers are split across deltas.
+ * The final cleaned answer still comes from extractFollowUps/extractFluxFigurePrompts.
+ */
+export function createMarkerStreamFilter(
+  onToken: (text: string) => void
+): (delta: string) => void {
+  let buf = "";
+  let suppressUntil: string | null = null;
+
+  return (delta: string) => {
+    buf += delta;
+    let out = "";
+    for (;;) {
+      if (suppressUntil) {
+        const end = buf.indexOf(suppressUntil);
+        if (end === -1) {
+          // Keep a tail in case the closing marker is split across deltas.
+          buf = buf.slice(Math.max(0, buf.length - suppressUntil.length + 1));
+          break;
+        }
+        buf = buf.slice(end + suppressUntil.length);
+        suppressUntil = null;
+        continue;
+      }
+      const open = buf.indexOf("[[");
+      if (open === -1) {
+        // Hold back a trailing "[" that may start a marker in the next delta.
+        const hold = buf.endsWith("[") ? 1 : 0;
+        out += hold ? buf.slice(0, -1) : buf;
+        buf = hold ? "[" : "";
+        break;
+      }
+      out += buf.slice(0, open);
+      buf = buf.slice(open);
+      const opener = Object.keys(STREAM_MARKERS).find((k) => buf.startsWith(k));
+      if (opener) {
+        suppressUntil = STREAM_MARKERS[opener]!;
+        buf = buf.slice(opener.length);
+        continue;
+      }
+      if (Object.keys(STREAM_MARKERS).some((k) => k.startsWith(buf))) {
+        break; // possibly an incomplete opener — wait for the next delta
+      }
+      out += buf.slice(0, 2);
+      buf = buf.slice(2);
+    }
+    if (out) onToken(out);
+  };
+}

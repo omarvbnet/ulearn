@@ -173,9 +173,8 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
     return normalizeOpenAiCompatibleBase(this.type, config.baseUrl);
   }
 
-  async chat(config: ProviderConfig, messages: ChatMessage[]): Promise<ChatResult> {
-    const url = `${this.base(config)}/chat/completions`;
-    const mapped = messages.map((m) => {
+  private mapMessages(messages: ChatMessage[]) {
+    return messages.map((m) => {
       const images = (m.parts || []).filter((p) => p.type === "image");
       if (!images.length) {
         return { role: m.role, content: m.content };
@@ -195,13 +194,22 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
         ],
       };
     });
+  }
+
+  private requestBody(config: ProviderConfig, messages: ChatMessage[]) {
     const body: Record<string, unknown> = {
       model: config.model || defaultChatModel(this.type),
-      messages: mapped,
+      messages: this.mapMessages(messages),
       temperature: config.temperature,
       max_tokens: config.maxTokens,
     };
     if (config.topP != null) body.top_p = config.topP;
+    return body;
+  }
+
+  async chat(config: ProviderConfig, messages: ChatMessage[]): Promise<ChatResult> {
+    const url = `${this.base(config)}/chat/completions`;
+    const body = this.requestBody(config, messages);
 
     const res = await fetchJson(
       url,
@@ -230,6 +238,99 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
       tokensIn: usage?.prompt_tokens ?? 0,
       tokensOut: usage?.completion_tokens ?? 0,
     };
+  }
+
+  /** Real token streaming via OpenAI-compatible `stream: true` SSE deltas. */
+  async chatStream(
+    config: ProviderConfig,
+    messages: ChatMessage[],
+    onDelta: (text: string) => void
+  ): Promise<ChatResult> {
+    const url = `${this.base(config)}/chat/completions`;
+    const body = { ...this.requestBody(config, messages), stream: true };
+
+    const ctrl = new AbortController();
+    // Idle timeout: abort only if the provider stops sending for timeoutMs.
+    let idleTimer = setTimeout(() => ctrl.abort(), config.timeoutMs);
+    const bumpIdle = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => ctrl.abort(), config.timeoutMs);
+    };
+
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.apiKey}`,
+          Accept: "text/event-stream",
+        },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        const raw = await res.text().catch(() => "");
+        let detail = raw.slice(0, 200);
+        try {
+          const parsed = JSON.parse(raw) as { error?: { message?: string } };
+          detail = parsed.error?.message || detail;
+        } catch {
+          /* keep raw slice */
+        }
+        throw new Error(
+          `${this.type} chat stream failed (${res.status}) at ${url}${detail ? `: ${detail}` : ""}`
+        );
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let full = "";
+      let tokensIn = 0;
+      let tokensOut = 0;
+
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bumpIdle();
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const payload = trimmed.slice(5).trim();
+          if (!payload || payload === "[DONE]") continue;
+          try {
+            const chunk = JSON.parse(payload) as {
+              choices?: { delta?: { content?: string } }[];
+              usage?: { prompt_tokens?: number; completion_tokens?: number };
+            };
+            const delta = chunk.choices?.[0]?.delta?.content;
+            if (delta) {
+              full += delta;
+              onDelta(delta);
+            }
+            if (chunk.usage) {
+              tokensIn = chunk.usage.prompt_tokens ?? tokensIn;
+              tokensOut = chunk.usage.completion_tokens ?? tokensOut;
+            }
+          } catch {
+            /* ignore malformed keep-alive lines */
+          }
+        }
+      }
+
+      return {
+        text: full,
+        tokensIn,
+        // Providers often omit usage on streams — estimate for cost logging.
+        tokensOut: tokensOut || Math.ceil(full.length / 4),
+      };
+    } finally {
+      clearTimeout(idleTimer);
+    }
   }
 
   async embed(config: ProviderConfig, text: string): Promise<EmbeddingResult> {

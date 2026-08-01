@@ -7,6 +7,7 @@ import { StudentLearningContextService } from "./student-learning-context.servic
 import { extractTextFromBuffer } from "./text-extract";
 import {
   buildTutoringMethodPrompt,
+  createMarkerStreamFilter,
   extractFollowUps,
 } from "./tutoring-prompt";
 import {
@@ -68,6 +69,12 @@ export class AiChatService {
     chunkTo?: number | null;
     /** Practice exam size: 5 | 10 | 20 */
     count?: 5 | 10 | 20;
+    /**
+     * Real-time token callback. When set, the main tutoring answer streams
+     * through it as it is generated (raw text; the resolved result carries
+     * the final cleaned answer that callers should display).
+     */
+    onToken?: (text: string) => void;
   }) {
     const attachments = (input.attachments || []).slice(0, MAX_ATTACHMENTS);
     for (const a of attachments) {
@@ -442,6 +449,7 @@ export class AiChatService {
           stageId,
           subjectId,
           subjectIds,
+          onToken: input.onToken,
           ...chapterOptsEarly,
         });
       }
@@ -513,6 +521,7 @@ export class AiChatService {
         stageId,
         subjectId,
         subjectIds,
+        onToken: input.onToken,
         ...chapterOpts,
       });
     }
@@ -810,7 +819,14 @@ export class AiChatService {
       });
     }
 
-    const result = await AiProviderService.chat("TEACHING_ASSISTANT", messages, input.userId);
+    const result = input.onToken
+      ? await AiProviderService.chatStream(
+          "TEACHING_ASSISTANT",
+          messages,
+          input.userId,
+          createMarkerStreamFilter(input.onToken)
+        )
+      : await AiProviderService.chat("TEACHING_ASSISTANT", messages, input.userId);
     let answer = result.text.trim();
     if (!answer) {
       answer = embedFailed
@@ -1185,7 +1201,7 @@ export class AiChatService {
     });
   }
 
-  /** Answer from selected KB materials with optional FLUX educational paintings. */
+  /** Answer from selected KB materials with board drawings painted by the model. */
   private static async runExplainObserveWithMaterials(input: {
     userId: string;
     conversationId?: string;
@@ -1198,11 +1214,14 @@ export class AiChatService {
     stageId?: string | null;
     subjectId?: string | null;
     subjectIds?: string[];
+    onToken?: (text: string) => void;
   }) {
     const { AiExamService } = await import("./ai-exam.service");
     const { ExamGeneratorService } = await import("./exam-generator.service");
-    const { AiCreativeService } = await import("./creative");
     const { extractFluxFigurePrompts } = await import("./creative/figure-prompts");
+    const { boardFigureInstruction, extractBoardFigures } = await import(
+      "./board-figures"
+    );
 
     const documentIds = await AiExamService.assertDocumentsAllowed(
       input.userId,
@@ -1231,62 +1250,49 @@ export class AiChatService {
       "If the answer is not in the selected material, say it is not available in that chapter.",
       "Teach clearly: answer the question, explain concepts step by step, use analogies grounded in the text.",
       "Cite the material by file name when helpful.",
-      "When the topic benefits from a diagram/shape/infographic, add 1–3 figure blocks:",
-      "[[FLUX]]",
-      "Detailed English shape-only paint brief (geometry, colors, layout — NO Arabic letters).",
-      "LABELS: short Arabic labels separated by | (burned with professional fonts after)",
-      "[[/FLUX]]",
-      "FLUX briefs must illustrate ONLY concepts present in the selected chapter.",
+      boardFigureInstruction(),
+      "Board drawings must illustrate ONLY concepts present in the selected chapter.",
     ].join("\n");
 
-    const chat = await AiProviderService.chat(
-      "TEACHING_ASSISTANT",
-      [
-        { role: "system", content: system },
-        {
-          role: "user",
-          content: [
-            `Student request:\n${input.question}`,
-            input.chapterHeading
-              ? `\nSelected chapter: ${input.chapterHeading}`
-              : "",
-            `\nSelected material text:\n${material.text.slice(0, 14000)}`,
-          ]
-            .filter(Boolean)
-            .join("\n"),
-        },
-      ],
-      input.userId,
-      { maxTokens: 3500 }
-    );
+    const groundedMessages: ChatMessage[] = [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content: [
+          `Student request:\n${input.question}`,
+          input.chapterHeading
+            ? `\nSelected chapter: ${input.chapterHeading}`
+            : "",
+          `\nSelected material text:\n${material.text.slice(0, 14000)}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      },
+    ];
+    const chat = input.onToken
+      ? await AiProviderService.chatStream(
+          "TEACHING_ASSISTANT",
+          groundedMessages,
+          input.userId,
+          createMarkerStreamFilter(input.onToken),
+          { maxTokens: 3500 }
+        )
+      : await AiProviderService.chat(
+          "TEACHING_ASSISTANT",
+          groundedMessages,
+          input.userId,
+          { maxTokens: 3500 }
+        );
 
     const raw = (chat.text || "").trim();
-    const { cleanMarkdown, figures: figureSpecs, prompts } =
-      extractFluxFigurePrompts(raw);
-    const withoutFlux = cleanMarkdown || raw;
+    // DeepSeek paints straight onto the board — extract its [[BOARD]] drawings.
+    const { cleanMarkdown: withoutBoards, figures: boardFigures } =
+      extractBoardFigures(raw);
+    // Safety: strip any legacy [[FLUX]] blocks so they never reach the UI.
+    const { cleanMarkdown } = extractFluxFigurePrompts(withoutBoards);
+    const withoutFlux = cleanMarkdown || withoutBoards;
     const { cleanText, followUps } = extractFollowUps(withoutFlux);
-    let answer = cleanText;
-    let editedFile:
-      | {
-          fileName: string;
-          mimeType: string;
-          contentBase64: string;
-          downloadUrl?: string;
-          jobId?: string;
-        }
-      | undefined;
-
-    const paintBriefs =
-      figureSpecs.length > 0
-        ? figureSpecs
-        : prompts.length
-          ? prompts.map((p) => ({ prompt: p, labels: [] as string[] }))
-          : [
-              {
-                prompt: `Educational illustration that matches this exact lesson explanation (same subject, same concepts). Paint the key idea visually.`,
-                labels: [] as string[],
-              },
-            ];
+    const answer = cleanText;
 
     // One unique citation chip per document name (not per chunk).
     const citationSeen = new Set<string>();
@@ -1296,50 +1302,6 @@ export class AiChatService {
       citationSeen.add(key);
       return true;
     });
-
-    for (const spec of paintBriefs.slice(0, 2)) {
-      try {
-        const img = await AiCreativeService.image(input.userId, {
-          mode: "design",
-          prompt: [
-            spec.prompt,
-            spec.labels.length
-              ? `LABELS: ${spec.labels.join(" | ")}`
-              : "",
-            // Keep FLUX aligned with the same DeepSeek explanation the student reads.
-            `DeepSeek explanation to illustrate (match the same subject and steps):\n${answer.slice(0, 1200)}`,
-            material.text
-              ? `Curriculum source excerpt:\n${material.text.slice(0, 500)}`
-              : "",
-          ]
-            .filter(Boolean)
-            .join("\n"),
-          language: input.language,
-        });
-        // Keep the first successful painting as the chat attachment preview.
-        if (!editedFile) {
-          editedFile = {
-            fileName: img.fileName || "observation.png",
-            mimeType: img.mimeType || "image/png",
-            contentBase64: img.dataBase64 || "",
-            downloadUrl: img.downloadUrl,
-            jobId: img.jobId,
-          };
-          if (input.language.startsWith("ar")) {
-            answer +=
-              "\n\nرسمت الأشكال وفق شرح المادة — انظر الصورة المرفقة.";
-          } else {
-            answer +=
-              "\n\nI painted a figure that matches this explanation — see the attached image.";
-          }
-        }
-      } catch (e) {
-        console.warn(
-          "[ai/chat] observe FLUX paint failed",
-          e instanceof Error ? e.message : e
-        );
-      }
-    }
 
     return this.persistTurn({
       userId: input.userId,
@@ -1352,7 +1314,7 @@ export class AiChatService {
       followUps,
       fromCache: false,
       attachmentNames: [],
-      editedFile,
+      boardFigures: boardFigures.length ? boardFigures : undefined,
     });
   }
 
@@ -1375,6 +1337,8 @@ export class AiChatService {
     examAttemptId?: string;
     courseSuggestions?: unknown;
     followUps?: string[];
+    /** Whiteboard drawings painted by the model (ubrd-figure specs). */
+    boardFigures?: unknown;
   }) {
     let conversationId = input.conversationId;
     if (!conversationId) {
@@ -1414,6 +1378,7 @@ export class AiChatService {
         ? { courseSuggestions: input.courseSuggestions }
         : {}),
       ...(input.followUps?.length ? { followUps: input.followUps } : {}),
+      ...(input.boardFigures ? { boardFigures: input.boardFigures } : {}),
     };
 
     const assistant = await prisma.aiMessage.create({
@@ -1437,6 +1402,7 @@ export class AiChatService {
       practiceQuiz: input.practiceQuiz,
       examAttemptId: input.examAttemptId,
       courseSuggestions: input.courseSuggestions,
+      boardFigures: input.boardFigures,
     };
   }
 }

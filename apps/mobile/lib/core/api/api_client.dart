@@ -88,6 +88,77 @@ class ApiClient {
     return data;
   }
 
+  /// POST that consumes an SSE response (`data: {json}` lines).
+  /// Emits assistant text deltas via [onToken] as they arrive and returns the
+  /// final `done` event payload. If the server answers with plain JSON
+  /// (errors, non-streaming paths), it behaves exactly like [post].
+  Future<Map<String, dynamic>> postStream(
+    String path,
+    Map<String, dynamic> body, {
+    required void Function(String text) onToken,
+  }) async {
+    final client = http.Client();
+    try {
+      final req = http.Request('POST', Uri.parse('$baseUrl$path'))
+        ..headers.addAll({..._headers, 'Accept': 'text/event-stream'})
+        ..body = jsonEncode(body);
+      final res = await client.send(req);
+
+      final contentType = res.headers['content-type'] ?? '';
+      if (!contentType.contains('text/event-stream')) {
+        final text = await res.stream.bytesToString();
+        final data = _decodeBody(text, res.statusCode);
+        if (res.statusCode >= 400) {
+          throw ApiException(
+            data['error']?.toString() ?? 'Request failed',
+            res.statusCode,
+          );
+        }
+        return data;
+      }
+
+      Map<String, dynamic>? done;
+      var buffer = '';
+      await for (final chunk in res.stream.transform(utf8.decoder)) {
+        buffer += chunk;
+        final lines = buffer.split('\n');
+        buffer = lines.removeLast();
+        for (final line in lines) {
+          final trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          final payload = trimmed.substring(5).trim();
+          if (payload.isEmpty) continue;
+          dynamic decoded;
+          try {
+            decoded = jsonDecode(payload);
+          } catch (_) {
+            continue;
+          }
+          if (decoded is! Map) continue;
+          final evt = Map<String, dynamic>.from(decoded);
+          switch (evt['type']?.toString()) {
+            case 'token':
+              final text = evt['text']?.toString() ?? '';
+              if (text.isNotEmpty) onToken(text);
+            case 'done':
+              done = evt;
+            case 'error':
+              throw ApiException(
+                evt['message']?.toString() ?? 'Request failed',
+                500,
+              );
+          }
+        }
+      }
+      if (done == null) {
+        throw ApiException('Stream ended unexpectedly', 500);
+      }
+      return done;
+    } finally {
+      client.close();
+    }
+  }
+
   Future<Map<String, dynamic>> get(String path) async {
     final res = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
     final data = _decodeBody(res.body, res.statusCode);

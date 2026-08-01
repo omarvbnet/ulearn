@@ -52,6 +52,15 @@ export type ProviderConfig = {
 export interface AiProviderAdapter {
   readonly type: string;
   chat(config: ProviderConfig, messages: ChatMessage[]): Promise<ChatResult>;
+  /**
+   * Optional real token streaming. Emits text deltas via onDelta as they
+   * arrive and resolves with the full result (same shape as chat()).
+   */
+  chatStream?(
+    config: ProviderConfig,
+    messages: ChatMessage[],
+    onDelta: (text: string) => void
+  ): Promise<ChatResult>;
   embed(config: ProviderConfig, text: string): Promise<EmbeddingResult>;
   testConnection(config: ProviderConfig): Promise<{ ok: boolean; message: string }>;
   /** Optional: raster image generation / editing (e.g. FLUX.1 Kontext). */

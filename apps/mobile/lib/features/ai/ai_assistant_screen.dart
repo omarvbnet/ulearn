@@ -15,6 +15,7 @@ import 'package:ulearn/core/widgets/ulearn_logo.dart';
 import 'package:ulearn/features/ai/ai_exam_panel.dart';
 import 'package:ulearn/features/ai/ai_message_content.dart';
 import 'package:ulearn/features/ai/ai_upgrade.dart';
+import 'package:ulearn/features/ai/board_figure_view.dart';
 import 'package:ulearn/features/store/course_detail_screen.dart';
 
 class _PendingAttachment {
@@ -44,6 +45,8 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   String? _conversationId;
   bool _sending = false;
+  /// True once the assistant started streaming text (hides the thinking row).
+  bool _streamStarted = false;
   final List<_ChatBubble> _messages = [];
   final List<_PendingAttachment> _pending = [];
   List<Map<String, dynamic>> _conversations = [];
@@ -150,6 +153,16 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     }
   }
 
+  /// Whiteboard drawings painted by the AI (ubrd-figure spec maps).
+  static List<Map<String, dynamic>> _parseBoardFigures(dynamic raw) {
+    if (raw is! List) return const [];
+    final out = <Map<String, dynamic>>[];
+    for (final f in raw) {
+      if (f is Map) out.add(Map<String, dynamic>.from(f));
+    }
+    return out;
+  }
+
   Future<void> _openConversation(String id) async {
     Navigator.of(context).maybePop();
     setState(() {
@@ -213,6 +226,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
             examCompleted: exam != null,
             examResult: examResult,
             courseSuggestions: suggestions,
+            boardFigures: _parseBoardFigures(citationsMap?['boardFigures']),
             followUps: followUps.isNotEmpty
                 ? followUps
                 : AiMessageContent.inferFollowUps(content),
@@ -430,6 +444,33 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     });
     _scrollToEnd();
 
+    // Live draft bubble that fills token-by-token while the model writes.
+    int? draftIndex;
+    var draftText = '';
+    void appendToken(String text) {
+      if (!mounted) return;
+      draftText += text;
+      setState(() {
+        _streamStarted = true;
+        final bubble = _ChatBubble(role: 'assistant', text: draftText);
+        if (draftIndex == null) {
+          draftIndex = _messages.length;
+          _messages.add(bubble);
+        } else {
+          _messages[draftIndex!] = bubble;
+        }
+      });
+      _scrollToEnd();
+    }
+
+    void removeDraft() {
+      if (draftIndex == null || !mounted) return;
+      setState(() {
+        _messages.removeAt(draftIndex!);
+        draftIndex = null;
+      });
+    }
+
     try {
       final api = context.read<ApiClient>();
       final auth = context.read<AuthProvider>();
@@ -439,6 +480,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       final payload = <String, dynamic>{
         'question': q,
         'language': locale,
+        'stream': true,
         if (_conversationId != null) 'conversationId': _conversationId,
         ..._stagePayload(auth),
         if (attachments.isNotEmpty)
@@ -447,16 +489,22 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
           ),
       };
 
-      final data = await api.post('/api/ai/chat', payload);
+      final data = await api.postStream(
+        '/api/ai/chat',
+        payload,
+        onToken: appendToken,
+      );
       if (!mounted) return;
 
       if (data['needsUpgrade'] == true) {
+        removeDraft();
         setState(() => _aiLocked = true);
         await _openUpgrade();
         return;
       }
 
       if (data['needsMaterialSelection'] == true) {
+        removeDraft();
         final pendingQ =
             data['pendingQuestion']?.toString() ?? displayText;
         final pendingMode =
@@ -501,6 +549,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       }
 
       if (data['needsChapterSelection'] == true) {
+        removeDraft();
         _showChapterSelectionBubble(data, displayText);
         return;
       }
@@ -553,33 +602,40 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
 
       setState(() {
         _conversationId = data['conversationId']?.toString() ?? _conversationId;
-        _messages.add(
-          _ChatBubble(
-            role: 'assistant',
-            text: cleanAnswer,
-            citations: citations
-                .map((c) {
-                  if (c is! Map) return null;
-                  final name = c['documentName']?.toString() ?? '';
-                  if (name.isEmpty) return null;
-                  return name;
-                })
-                .whereType<String>()
-                .toSet()
-                .toList(),
-            editedFileName: editedName,
-            editedContentBase64: editedB64,
-            editedDownloadUrl: editedUrl,
-            editedMimeType: editedMime,
-            editedImageBytes: editedPreview,
-            followUps: followUps,
-            courseSuggestions: suggestions,
-          ),
+        final finalBubble = _ChatBubble(
+          role: 'assistant',
+          // The done payload carries the cleaned answer — replace the raw
+          // streamed draft with it (adds citations, files, follow-ups).
+          text: cleanAnswer,
+          citations: citations
+              .map((c) {
+                if (c is! Map) return null;
+                final name = c['documentName']?.toString() ?? '';
+                if (name.isEmpty) return null;
+                return name;
+              })
+              .whereType<String>()
+              .toSet()
+              .toList(),
+          editedFileName: editedName,
+          editedContentBase64: editedB64,
+          editedDownloadUrl: editedUrl,
+          editedMimeType: editedMime,
+          editedImageBytes: editedPreview,
+          followUps: followUps,
+          courseSuggestions: suggestions,
+          boardFigures: _parseBoardFigures(data['boardFigures']),
         );
+        if (draftIndex != null) {
+          _messages[draftIndex!] = finalBubble;
+        } else {
+          _messages.add(finalBubble);
+        }
       });
       _loadConversations();
     } catch (e) {
       if (!mounted) return;
+      removeDraft();
       final msg = e is ApiException ? e.message : e.toString();
       final text = msg.trim().isNotEmpty &&
               msg != 'Request failed' &&
@@ -590,7 +646,12 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         _messages.add(_ChatBubble(role: 'assistant', text: text));
       });
     } finally {
-      if (mounted) setState(() => _sending = false);
+      if (mounted) {
+        setState(() {
+          _sending = false;
+          _streamStarted = false;
+        });
+      }
       _scrollToEnd();
     }
   }
@@ -643,6 +704,34 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   }) async {
     setState(() => _sending = true);
     _scrollToEnd();
+
+    // Live draft bubble that fills token-by-token while the model writes.
+    int? draftIndex;
+    var draftText = '';
+    void appendToken(String text) {
+      if (!mounted) return;
+      draftText += text;
+      setState(() {
+        _streamStarted = true;
+        final bubble = _ChatBubble(role: 'assistant', text: draftText);
+        if (draftIndex == null) {
+          draftIndex = _messages.length;
+          _messages.add(bubble);
+        } else {
+          _messages[draftIndex!] = bubble;
+        }
+      });
+      _scrollToEnd();
+    }
+
+    void removeDraft() {
+      if (draftIndex == null || !mounted) return;
+      setState(() {
+        _messages.removeAt(draftIndex!);
+        draftIndex = null;
+      });
+    }
+
     try {
       final api = context.read<ApiClient>();
       final auth = context.read<AuthProvider>();
@@ -664,12 +753,17 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         if (chunkTo != null) 'chunkTo': chunkTo,
         if (isPractice) 'count': count == 10 || count == 20 ? count : 5,
         if (_conversationId != null) 'conversationId': _conversationId,
+        if (!isPractice && !isCreative) 'stream': true,
         ..._stagePayload(auth),
       };
-      final data = await api.post('/api/ai/chat', payload);
+
+      final data = isPractice || isCreative
+          ? await api.post('/api/ai/chat', payload)
+          : await api.postStream('/api/ai/chat', payload, onToken: appendToken);
       if (!mounted) return;
 
       if (data['needsChapterSelection'] == true) {
+        removeDraft();
         _showChapterSelectionBubble(data, question);
         return;
       }
@@ -738,32 +832,37 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       setState(() {
         _conversationId =
             data['conversationId']?.toString() ?? _conversationId;
-        _messages.add(
-          _ChatBubble(
-            role: 'assistant',
-            text: AiMessageContent.stripFollowUpMarkers(rawAnswer),
-            citations: citations
-                .map((c) {
-                  if (c is! Map) return null;
-                  final name = c['documentName']?.toString() ?? '';
-                  if (name.isEmpty) return null;
-                  return name;
-                })
-                .whereType<String>()
-                .toSet()
-                .toList(),
-            editedFileName: editedName,
-            editedContentBase64: editedB64,
-            editedDownloadUrl: editedUrl,
-            editedMimeType: editedMime,
-            editedImageBytes: editedPreview,
-            followUps: followUps,
-          ),
+        final finalBubble = _ChatBubble(
+          role: 'assistant',
+          text: AiMessageContent.stripFollowUpMarkers(rawAnswer),
+          citations: citations
+              .map((c) {
+                if (c is! Map) return null;
+                final name = c['documentName']?.toString() ?? '';
+                if (name.isEmpty) return null;
+                return name;
+              })
+              .whereType<String>()
+              .toSet()
+              .toList(),
+          editedFileName: editedName,
+          editedContentBase64: editedB64,
+          editedDownloadUrl: editedUrl,
+          editedMimeType: editedMime,
+          editedImageBytes: editedPreview,
+          followUps: followUps,
+          boardFigures: _parseBoardFigures(data['boardFigures']),
         );
+        if (draftIndex != null) {
+          _messages[draftIndex!] = finalBubble;
+        } else {
+          _messages.add(finalBubble);
+        }
       });
       _loadConversations();
     } catch (e) {
       if (!mounted) return;
+      removeDraft();
       final msg = e is ApiException ? e.message : e.toString();
       setState(() {
         _messages.add(
@@ -776,7 +875,12 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         );
       });
     } finally {
-      if (mounted) setState(() => _sending = false);
+      if (mounted) {
+        setState(() {
+          _sending = false;
+          _streamStarted = false;
+        });
+      }
       _scrollToEnd();
     }
   }
@@ -1090,9 +1194,10 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                 : ListView.builder(
                     controller: _scroll,
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                    itemCount: _messages.length + (_sending ? 1 : 0),
+                    itemCount:
+                        _messages.length + (_sending && !_streamStarted ? 1 : 0),
                     itemBuilder: (context, i) {
-                      if (_sending && i == _messages.length) {
+                      if (_sending && !_streamStarted && i == _messages.length) {
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 10),
                           child: Row(
@@ -1230,6 +1335,11 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                                                     _send();
                                                   },
                                           ),
+                                        if (m.boardFigures.isNotEmpty)
+                                          for (final board in m.boardFigures) ...[
+                                            const SizedBox(height: 10),
+                                            BoardFigureView(spec: board),
+                                          ],
                                         if (m.editedImageBytes != null) ...[
                                           const SizedBox(height: 10),
                                           ClipRRect(
@@ -2238,6 +2348,7 @@ class _ChatBubble {
     this.examResult,
     this.courseSuggestions = const [],
     this.followUps = const [],
+    this.boardFigures = const [],
     this.selectableMaterials = const [],
     this.selectableChapters = const [],
     this.pendingMaterialQuestion,
@@ -2261,6 +2372,8 @@ class _ChatBubble {
   final Map<String, dynamic>? examResult;
   final List<Map<String, dynamic>> courseSuggestions;
   final List<String> followUps;
+  /// Whiteboard drawings painted by the AI (ubrd-figure spec maps).
+  final List<Map<String, dynamic>> boardFigures;
   final List<Map<String, dynamic>> selectableMaterials;
   final List<Map<String, dynamic>> selectableChapters;
   final String? pendingMaterialQuestion;

@@ -33,6 +33,8 @@ const schema = z.object({
   /** Practice exam size: Basic=5, Intermediate=10, Advanced=20 */
   count: z.union([z.literal(5), z.literal(10), z.literal(20)]).optional(),
   attachments: z.array(attachmentSchema).max(8).optional(),
+  /** SSE token streaming (ChatGPT-style). */
+  stream: z.boolean().optional(),
 });
 
 export async function POST(request: Request) {
@@ -42,7 +44,7 @@ export async function POST(request: Request) {
   const parsed = schema.safeParse(await request.json());
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
-  const { question, attachments, ...rest } = parsed.data;
+  const { question, attachments, stream, ...rest } = parsed.data;
   const isPractice = rest.mode === "practice_quiz";
   const isExplainObserve = rest.mode === "explain_observe";
   if (
@@ -54,19 +56,62 @@ export async function POST(request: Request) {
     return error("question or attachments required", 422, "VALIDATION");
   }
 
-  try {
-    const result = await AiChatService.chat({
-      userId: auth.session.userId,
-      question:
-        question ||
-        (isPractice
-          ? "Generate a practice exam from my selected materials"
-          : isExplainObserve
-            ? "Explain and help me observe the selected material with shapes"
-            : ""),
-      attachments,
-      ...rest,
+  const chatInput = {
+    userId: auth.session.userId,
+    question:
+      question ||
+      (isPractice
+        ? "Generate a practice exam from my selected materials"
+        : isExplainObserve
+          ? "Explain and help me observe the selected material with shapes"
+          : ""),
+    attachments,
+    ...rest,
+  };
+
+  if (stream) {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      async start(controller) {
+        const send = (obj: Record<string, unknown>) => {
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+          } catch {
+            /* client disconnected */
+          }
+        };
+        try {
+          const result = await AiChatService.chat({
+            ...chatInput,
+            onToken: (text) => send({ type: "token", text }),
+          });
+          send({ type: "done", ...result });
+        } catch (e) {
+          send({
+            type: "error",
+            message: e instanceof Error ? e.message : "Chat failed",
+          });
+        } finally {
+          try {
+            controller.close();
+          } catch {
+            /* already closed */
+          }
+        }
+      },
     });
+    return new Response(body, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      },
+    });
+  }
+
+  try {
+    const result = await AiChatService.chat(chatInput);
     return json(result);
   } catch (e) {
     return error(e instanceof Error ? e.message : "Chat failed", 500, "AI_CHAT");

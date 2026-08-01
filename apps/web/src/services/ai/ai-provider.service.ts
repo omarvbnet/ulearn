@@ -384,6 +384,74 @@ export class AiProviderService {
     return { ...result, providerId: provider.id, providerType: provider.type, providerName: provider.name };
   }
 
+  /**
+   * Token-streaming chat. Emits deltas via onDelta as they arrive; resolves
+   * with the full result. Providers without stream support fall back to a
+   * full completion emitted as one delta. If a provider fails mid-stream the
+   * fallback provider restarts the answer — callers should replace, not
+   * append, the final text from the resolved result.
+   */
+  static async chatStream(
+    moduleKey: AiModuleKey | undefined,
+    messages: ChatMessage[],
+    userId: string | undefined,
+    onDelta: (text: string) => void,
+    overrides?: {
+      maxTokens?: number;
+      temperature?: number;
+      preferTypes?: string[];
+      skipTypes?: string[];
+    }
+  ) {
+    const started = Date.now();
+    const needsVision = messages.some((m) =>
+      (m.parts || []).some((p) => p.type === "image" && Boolean(p.dataBase64))
+    );
+    const { result, provider } = await this.withFallback(
+      moduleKey,
+      async (p, config) => {
+        const adapter = getAdapter(p.type);
+        const next: ProviderConfig = {
+          ...config,
+          ...(overrides?.maxTokens != null
+            ? { maxTokens: Math.max(config.maxTokens, overrides.maxTokens) }
+            : {}),
+          ...(overrides?.temperature != null
+            ? { temperature: overrides.temperature }
+            : {}),
+        };
+        if (adapter.chatStream && next.streaming !== false) {
+          return adapter.chatStream(next, messages, onDelta);
+        }
+        const full = await adapter.chat(next, messages);
+        if (full.text) onDelta(full.text);
+        return full;
+      },
+      needsVision
+        ? {
+            preferTypes: ["GEMINI", "OPENAI", "OPENAI_COMPATIBLE"],
+            skipTypes: ["DEEPSEEK", "KIMI", ...(overrides?.skipTypes || [])],
+          }
+        : {
+            preferTypes: overrides?.preferTypes,
+            skipTypes: overrides?.skipTypes,
+          }
+    );
+    await prisma.aiUsageLog.create({
+      data: {
+        providerId: provider.id,
+        userId,
+        moduleKey: moduleKey ?? null,
+        success: true,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+        latencyMs: Date.now() - started,
+        costEstimate: estimateCost(provider.type, result.tokensIn, result.tokensOut),
+      },
+    });
+    return { ...result, providerId: provider.id, providerType: provider.type, providerName: provider.name };
+  }
+
   static async embed(text: string, userId?: string) {
     const started = Date.now();
     const { result, provider } = await this.withFallback("EMBEDDING", async (p, config) => {
