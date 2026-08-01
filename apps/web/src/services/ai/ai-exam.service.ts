@@ -8,8 +8,10 @@ export type AiExamQuestion = {
   text: string;
   options: Record<string, string>;
   correctKey: string;
-  /** Optional FLUX diagram for shape-based questions. */
+  /** Legacy FLUX diagram (old attempts). */
   imageBase64?: string;
+  /** Whiteboard diagram drawn by the model (ubrd-figure spec). */
+  boardFigure?: unknown;
 };
 
 const PASS_PERCENTAGE = 60;
@@ -23,6 +25,7 @@ export function stripCorrectKeys(questions: AiExamQuestion[]) {
     text: q.text,
     options: q.options,
     ...(q.imageBase64 ? { imageBase64: q.imageBase64 } : {}),
+    ...(q.boardFigure ? { boardFigure: q.boardFigure } : {}),
   }));
 }
 

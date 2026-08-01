@@ -4,6 +4,10 @@ import { EmbeddingService } from "./embedding.service";
 import { VectorSearchService } from "./vector-search.service";
 import { QuizService } from "@/services/quiz.service";
 import { languageInstruction } from "./types";
+import {
+  sanitizeBoardFigure,
+  type BoardFigureSpec,
+} from "./board-figures";
 import type { Prisma } from "@prisma/client";
 
 export type GeneratedQuestion = {
@@ -23,8 +27,10 @@ export type PracticeQuizPayload = {
     text: string;
     options: Record<string, string>;
     correctKey: string;
-    /** Optional FLUX-painted diagram matching material shapes. */
+    /** Legacy FLUX-painted diagram (kept for old attempts/clients). */
     imageBase64?: string;
+    /** Whiteboard diagram drawn by the model (ubrd-figure spec). */
+    boardFigure?: BoardFigureSpec;
   }>;
   citations: Array<{ documentName: string; page: number | null }>;
 };
@@ -315,7 +321,7 @@ export class ExamGeneratorService {
     const titleSuffix = (requestSeed % 900) + 100;
     const baseTitle = generated.title?.trim() || "Practice quiz";
 
-    const questionsWithShapes = await this.paintExamShapeFigures({
+    const questionsWithShapes = await this.drawExamBoardFigures({
       userId: input.userId,
       language,
       materialText: material.text,
@@ -330,10 +336,11 @@ export class ExamGeneratorService {
   }
 
   /**
-   * When materials describe shapes/diagrams, ask the model for figure prompts
-   * and paint matching diagrams with FLUX (DeepSeek plans; FLUX paints).
+   * When materials describe shapes/diagrams, ask the model to DRAW matching
+   * whiteboard figures (ubrd-figure specs) for those questions — same board
+   * technique as chat, no FLUX raster generation.
    */
-  private static async paintExamShapeFigures(input: {
+  private static async drawExamBoardFigures(input: {
     userId: string;
     language: string;
     materialText: string;
@@ -341,52 +348,40 @@ export class ExamGeneratorService {
   }): Promise<PracticeQuestion[]> {
     const hasShapes =
       /(شكل|رسم|مخطط|هندس|دائرة|مثلث|مستطيل|diagram|figure|shape|geometry|triangle|circle|graph)/i.test(
-        input.materialText
+        `${input.materialText}\n${input.questions.map((q) => q.text).join("\n")}`
       );
     if (!hasShapes || !input.questions.length) return input.questions;
 
-    const flux = await AiProviderService.resolveProvider("AI_CREATIVE_IMAGE");
-    if (flux?.type !== "FLUX" || !flux.apiKeyEncrypted) return input.questions;
-
-    const { fluxVisibleTextGuidance } = await import("./fonts");
-    const {
-      burnArabicTypographyOntoPng,
-      extractEducationalLabels,
-    } = await import("./arabic-image-text");
-    const plan = await AiProviderService.chat(
-      "EXAM_GENERATOR",
-      [
-        {
-          role: "system",
-          content: [
-            "Return compact JSON only.",
-            'Schema: {"figures":[{"questionIndex":0,"prompt":"...","labels":["..."]}]}',
-            "For questions that refer to shapes/diagrams in the material, provide a FLUX image prompt that paints the SAME shapes (NO Arabic letters in the picture).",
-            "Put Arabic labels in the labels array (short phrases) for professional typography overlay.",
-            "questionIndex is 0-based. Max 3 figures. Skip questions that need no diagram.",
-            fluxVisibleTextGuidance(input.language, input.materialText),
-          ].join("\n"),
-        },
-        {
-          role: "user",
-          content: [
-            `Questions:\n${input.questions
-              .map((q, i) => `${i}. ${q.text}`)
-              .join("\n")}`,
-            `\nMaterial excerpt:\n${input.materialText.slice(0, 6000)}`,
-          ].join("\n"),
-        },
-      ],
-      input.userId,
-      { maxTokens: 1200, temperature: 0.3 }
-    );
-
-    let figures: Array<{
-      questionIndex?: number;
-      prompt?: string;
-      labels?: string[];
-    }> = [];
     try {
+      const plan = await AiProviderService.chat(
+        "EXAM_GENERATOR",
+        [
+          {
+            role: "system",
+            content: [
+              "Return compact JSON only. No markdown, no commentary.",
+              'Schema: {"figures":[{"questionIndex":0,"board":{"title":"short caption","shapes":[{"kind":"rect|circle|line|arrow","x1":0,"y1":0,"x2":0,"y2":0,"color":"#2563EB","width":5}],"texts":[{"x":0,"y":0,"text":"label","color":"#111827","fontSize":40}],"strokes":[{"color":"#EF4444","width":5,"points":[{"x":0,"y":0},{"x":0,"y":0}]}]}}]}',
+              "For questions that refer to shapes/diagrams in the material, DRAW the SAME diagram on a 1920x1080 whiteboard (origin top-left, white background).",
+              "Plan the layout like a professional teacher: large clear elements, no overlapping labels.",
+              `Text labels short and in the question language (${input.language}), fontSize 28-56.`,
+              "Ink palette: #111827, #2563EB, #EF4444, #22C55E, #F59E0B.",
+              "questionIndex is 0-based. Max 3 figures. Skip questions that need no diagram.",
+            ].join("\n"),
+          },
+          {
+            role: "user",
+            content: [
+              `Questions:\n${input.questions
+                .map((q, i) => `${i}. ${q.text}`)
+                .join("\n")}`,
+              `\nMaterial excerpt:\n${input.materialText.slice(0, 6000)}`,
+            ].join("\n"),
+          },
+        ],
+        input.userId,
+        { maxTokens: 3000, temperature: 0.3, disableThinking: true }
+      );
+
       const raw = (plan.text || "").trim();
       const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
       const body = (fenced?.[1] || raw).trim();
@@ -395,56 +390,27 @@ export class ExamGeneratorService {
       const parsed = JSON.parse(
         start >= 0 && end > start ? body.slice(start, end + 1) : body
       ) as {
-        figures?: Array<{
-          questionIndex?: number;
-          prompt?: string;
-          labels?: string[];
-        }>;
+        figures?: Array<{ questionIndex?: number; board?: unknown }>;
       };
-      figures = Array.isArray(parsed.figures) ? parsed.figures.slice(0, 3) : [];
-    } catch {
+      const figures = Array.isArray(parsed.figures)
+        ? parsed.figures.slice(0, 3)
+        : [];
+
+      const out = input.questions.map((q) => ({ ...q }));
+      for (const fig of figures) {
+        const idx = Number(fig.questionIndex);
+        if (!Number.isFinite(idx) || idx < 0 || idx >= out.length) continue;
+        const board = sanitizeBoardFigure(fig.board, idx);
+        if (board) out[idx] = { ...out[idx]!, boardFigure: board };
+      }
+      return out;
+    } catch (e) {
+      console.warn(
+        "[exam] board figure planning failed",
+        e instanceof Error ? e.message : e
+      );
       return input.questions;
     }
-
-    const out = input.questions.map((q) => ({ ...q }));
-    for (const fig of figures) {
-      const idx = Number(fig.questionIndex);
-      const prompt = String(fig.prompt || "").trim();
-      if (!Number.isFinite(idx) || idx < 0 || idx >= out.length || prompt.length < 12) {
-        continue;
-      }
-      try {
-        const generated = await AiProviderService.generateImage(
-          {
-            prompt: [
-              "Educational exam diagram matching the school material shapes exactly.",
-              "Clean textbook style, high contrast.",
-              fluxVisibleTextGuidance(input.language, prompt),
-              prompt,
-            ].join("\n"),
-          },
-          input.userId
-        );
-        const labels = Array.isArray(fig.labels)
-          ? fig.labels.map(String).filter(Boolean)
-          : extractEducationalLabels(`${prompt}\n${out[idx]!.text}`);
-        const pngBase64 = await burnArabicTypographyOntoPng(
-          generated.dataBase64,
-          {
-            title: labels[0] || out[idx]!.text.slice(0, 60),
-            labels: labels.slice(0, 6),
-            language: input.language,
-          }
-        );
-        out[idx] = { ...out[idx]!, imageBase64: pngBase64 };
-      } catch (e) {
-        console.warn(
-          "[exam] FLUX shape paint failed",
-          e instanceof Error ? e.message : e
-        );
-      }
-    }
-    return out;
   }
 
   private static countOverlap(generated: string[], previous: string[]): number {
@@ -574,6 +540,9 @@ export class ExamGeneratorService {
     const chatOpts = {
       maxTokens: maxTokensForCount(input.count),
       temperature: 0.55,
+      // Reasoning models burn the budget on hidden thinking, truncating the
+      // quiz JSON mid-array ("did not return valid quiz JSON" errors).
+      disableThinking: true,
     };
 
     const result = await AiProviderService.chat(

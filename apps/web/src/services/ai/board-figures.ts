@@ -95,6 +95,14 @@ function color(v: unknown): string {
   return /^#[0-9a-fA-F]{6}$/.test(s) ? s : DEFAULT_INK;
 }
 
+/** Sanitize one raw model-produced figure object into a safe ubrd-figure spec. */
+export function sanitizeBoardFigure(
+  raw: unknown,
+  index: number
+): BoardFigureSpec | null {
+  return sanitizeFigure(raw, index);
+}
+
 function sanitizeFigure(raw: unknown, index: number): BoardFigureSpec | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;

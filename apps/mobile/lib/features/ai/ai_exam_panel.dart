@@ -4,17 +4,22 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:ulearn/core/l10n/l10n_extension.dart';
 import 'package:ulearn/core/theme/app_theme.dart';
+import 'package:ulearn/features/ai/ai_message_content.dart';
+import 'package:ulearn/features/ai/board_figure_view.dart';
 
 class AiExamQuestionView {
   AiExamQuestionView({
     required this.text,
     required this.options,
     this.imageBase64,
+    this.boardFigure,
   });
 
   final String text;
   final Map<String, String> options;
   final String? imageBase64;
+  /// Whiteboard diagram drawn by the AI (ubrd-figure spec).
+  final Map<String, dynamic>? boardFigure;
 
   factory AiExamQuestionView.fromJson(Map<String, dynamic> json) {
     final opts = <String, String>{};
@@ -23,10 +28,12 @@ class AiExamQuestionView {
       raw.forEach((k, v) => opts[k.toString()] = v.toString());
     }
     final img = json['imageBase64']?.toString();
+    final board = json['boardFigure'];
     return AiExamQuestionView(
       text: json['text']?.toString() ?? '',
       options: opts,
       imageBase64: (img != null && img.isNotEmpty) ? img : null,
+      boardFigure: board is Map ? Map<String, dynamic>.from(board) : null,
     );
   }
 }
@@ -212,9 +219,12 @@ class _AiExamPanelState extends State<AiExamPanel> {
             final q = widget.exam.questions[i];
             final key = '$i';
             final selected = _answers[key];
+            final qDirection = AiMessageContent.directionFor(q.text);
             return Padding(
               padding: const EdgeInsets.only(bottom: 14),
-              child: Column(
+              child: Directionality(
+                textDirection: qDirection,
+                child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
@@ -225,6 +235,13 @@ class _AiExamPanelState extends State<AiExamPanel> {
                       height: 1.35,
                     ),
                   ),
+                  if (q.boardFigure != null) ...[
+                    const SizedBox(height: 8),
+                    Directionality(
+                      textDirection: TextDirection.ltr,
+                      child: BoardFigureView(spec: q.boardFigure!),
+                    ),
+                  ],
                   if (q.imageBase64 != null && q.imageBase64!.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     ClipRRect(
@@ -280,6 +297,7 @@ class _AiExamPanelState extends State<AiExamPanel> {
                     );
                   }),
                 ],
+                ),
               ),
             );
           }),

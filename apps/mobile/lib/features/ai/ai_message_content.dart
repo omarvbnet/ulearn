@@ -18,6 +18,21 @@ class AiMessageContent extends StatelessWidget {
   final List<String> followUps;
   final void Function(String prompt)? onFollowUp;
 
+  /// Text direction from the first strong directional character, so Arabic /
+  /// Kurdish answers align right-to-left like a native chat app.
+  static TextDirection directionFor(String text) {
+    for (final code in text.runes) {
+      final isRtl = (code >= 0x0590 && code <= 0x08FF) ||
+          (code >= 0xFB1D && code <= 0xFDFF) ||
+          (code >= 0xFE70 && code <= 0xFEFF);
+      if (isRtl) return TextDirection.rtl;
+      final isLtr = (code >= 0x41 && code <= 0x5A) ||
+          (code >= 0x61 && code <= 0x7A);
+      if (isLtr) return TextDirection.ltr;
+    }
+    return TextDirection.ltr;
+  }
+
   static String normalizeMath(String raw) {
     var s = raw;
     // Simple LaTeX fractions → readable ASCII
@@ -81,12 +96,17 @@ class AiMessageContent extends StatelessWidget {
         ? followUps
         : inferFollowUps(text);
 
+    final direction = directionFor(display);
+
     if (isUser) {
-      return Text(
-        display,
-        style: TextStyle(
-          color: AppTheme.foreground,
-          height: 1.45,
+      return Directionality(
+        textDirection: direction,
+        child: Text(
+          display,
+          style: TextStyle(
+            color: AppTheme.foreground,
+            height: 1.45,
+          ),
         ),
       );
     }
@@ -161,10 +181,13 @@ class AiMessageContent extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        MarkdownBody(
-          data: display.isEmpty ? ' ' : display,
-          selectable: true,
-          styleSheet: baseStyle,
+        Directionality(
+          textDirection: direction,
+          child: MarkdownBody(
+            data: display.isEmpty ? ' ' : display,
+            selectable: true,
+            styleSheet: baseStyle,
+          ),
         ),
         if (chips.isNotEmpty && onFollowUp != null) ...[
           const SizedBox(height: 12),

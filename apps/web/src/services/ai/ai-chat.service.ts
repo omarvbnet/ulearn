@@ -10,6 +10,7 @@ import {
   createMarkerStreamFilter,
   extractFollowUps,
 } from "./tutoring-prompt";
+import { boardFigureInstruction, extractBoardFigures } from "./board-figures";
 import {
   languageInstruction,
   unavailableAnswer,
@@ -724,6 +725,7 @@ export class AiChatService {
           .join("\n")
       : [
           tutoringCore!,
+          boardFigureInstruction(),
           hasAttachments
             ? [
                 "The student attached files/photos. Their content is provided below and/or as images.",
@@ -867,6 +869,12 @@ export class AiChatService {
       answer = unavailable;
     }
 
+    // DeepSeek paints [[BOARD]] drawings directly in the answer — extract them.
+    const { cleanMarkdown: answerNoBoards, figures: boardFigures } = editIntent
+      ? { cleanMarkdown: answer, figures: [] }
+      : extractBoardFigures(answer);
+    answer = answerNoBoards;
+
     const { cleanText, followUps } = editIntent
       ? { cleanText: answer, followUps: [] as string[] }
       : extractFollowUps(answer);
@@ -918,6 +926,7 @@ export class AiChatService {
       fromCache: false,
       attachmentNames: attachments.map((a) => a.fileName),
       editedFile,
+      boardFigures: boardFigures.length ? boardFigures : undefined,
       courseSuggestions: includeSuggestions
         ? learningCtx!.courseSuggestions.slice(0, 5)
         : undefined,
@@ -1222,9 +1231,6 @@ export class AiChatService {
     const { AiExamService } = await import("./ai-exam.service");
     const { ExamGeneratorService } = await import("./exam-generator.service");
     const { extractFluxFigurePrompts } = await import("./creative/figure-prompts");
-    const { boardFigureInstruction, extractBoardFigures } = await import(
-      "./board-figures"
-    );
 
     const documentIds = await AiExamService.assertDocumentsAllowed(
       input.userId,

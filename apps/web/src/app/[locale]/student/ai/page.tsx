@@ -43,6 +43,7 @@ type PracticeExam = {
     text: string;
     options: Record<string, string>;
     imageBase64?: string;
+    boardFigure?: BoardFigureSpec;
   }>;
 };
 
@@ -718,8 +719,9 @@ export default function StudentAiPage() {
               <div className="max-w-[92%] space-y-2">
                 {m.text ? (
                   <div
+                    dir="auto"
                     className={cn(
-                      "rounded-2xl px-4 py-3 text-sm leading-relaxed",
+                      "whitespace-pre-wrap rounded-2xl px-4 py-3 text-start text-sm leading-relaxed",
                       m.role === "user"
                         ? "bg-accent/20 text-foreground"
                         : "bg-white/5 text-foreground"
@@ -843,6 +845,7 @@ export default function StudentAiPage() {
           >
             <input
               value={input}
+              dir="auto"
               onChange={(e) => setInput(e.target.value)}
               placeholder={t.student.aiPlaceholder}
               className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
@@ -1074,9 +1077,14 @@ function ExamPanel({
       <div className="space-y-4">
         {exam.questions.map((q, i) => (
           <div key={i}>
-            <p className="mb-2 text-sm font-medium">
+            <p dir="auto" className="mb-2 text-start text-sm font-medium">
               {i + 1}. {q.text}
             </p>
+            {q.boardFigure ? (
+              <div className="mb-2">
+                <BoardFigure spec={q.boardFigure} />
+              </div>
+            ) : null}
             {q.imageBase64 ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -1090,10 +1098,11 @@ function ExamPanel({
                 <button
                   key={k}
                   type="button"
+                  dir="auto"
                   disabled={done}
                   onClick={() => setAnswers((a) => ({ ...a, [String(i)]: k }))}
                   className={cn(
-                    "block w-full rounded-xl border px-3 py-2 text-left text-sm",
+                    "block w-full rounded-xl border px-3 py-2 text-start text-sm",
                     answers[String(i)] === k
                       ? "border-accent bg-accent/15"
                       : "border-border hover:bg-white/5"
