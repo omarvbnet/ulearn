@@ -1799,6 +1799,8 @@ enum AiModuleKey {
   PROFESSOR_DOCUMENT
   AI_CREATIVE
   AI_CREATIVE_IMAGE
+  /// Voice module — assignment/usage rows exist in the DB; kept for data compatibility.
+  VOICE_TTS
 }
 
 enum KbSourceType {

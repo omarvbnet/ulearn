@@ -47,6 +47,8 @@ export type ProviderConfig = {
   temperature: number;
   topP?: number | null;
   streaming: boolean;
+  /** Skip hidden reasoning on models that support it (DeepSeek thinking). */
+  disableThinking?: boolean;
 };
 
 export interface AiProviderAdapter {

@@ -338,6 +338,7 @@ export class AiProviderService {
       temperature?: number;
       preferTypes?: string[];
       skipTypes?: string[];
+      disableThinking?: boolean;
     }
   ) {
     const started = Date.now();
@@ -356,6 +357,7 @@ export class AiProviderService {
           ...(overrides?.temperature != null
             ? { temperature: overrides.temperature }
             : {}),
+          ...(overrides?.disableThinking ? { disableThinking: true } : {}),
         };
         return adapter.chat(next, messages);
       },
@@ -401,6 +403,7 @@ export class AiProviderService {
       temperature?: number;
       preferTypes?: string[];
       skipTypes?: string[];
+      disableThinking?: boolean;
     }
   ) {
     const started = Date.now();
@@ -419,6 +422,7 @@ export class AiProviderService {
           ...(overrides?.temperature != null
             ? { temperature: overrides.temperature }
             : {}),
+          ...(overrides?.disableThinking ? { disableThinking: true } : {}),
         };
         if (adapter.chatStream && next.streaming !== false) {
           return adapter.chatStream(next, messages, onDelta);

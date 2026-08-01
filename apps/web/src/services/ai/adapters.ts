@@ -204,6 +204,12 @@ export class OpenAiCompatibleAdapter implements AiProviderAdapter {
       max_tokens: config.maxTokens,
     };
     if (config.topP != null) body.top_p = config.topP;
+    // DeepSeek reasoning models burn the max_tokens budget on hidden thinking
+    // (truncating the visible answer) and delay the first streamed token.
+    // Chat flows opt out of thinking for a fast, complete ChatGPT-like reply.
+    if (config.disableThinking && this.type === "DEEPSEEK") {
+      body.thinking = { type: "disabled" };
+    }
     return body;
   }
 

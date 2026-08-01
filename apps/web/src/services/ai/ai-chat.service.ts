@@ -824,9 +824,12 @@ export class AiChatService {
           "TEACHING_ASSISTANT",
           messages,
           input.userId,
-          createMarkerStreamFilter(input.onToken)
+          createMarkerStreamFilter(input.onToken),
+          { disableThinking: true }
         )
-      : await AiProviderService.chat("TEACHING_ASSISTANT", messages, input.userId);
+      : await AiProviderService.chat("TEACHING_ASSISTANT", messages, input.userId, {
+          disableThinking: true,
+        });
     let answer = result.text.trim();
     if (!answer) {
       answer = embedFailed
@@ -1275,13 +1278,13 @@ export class AiChatService {
           groundedMessages,
           input.userId,
           createMarkerStreamFilter(input.onToken),
-          { maxTokens: 3500 }
+          { maxTokens: 3500, disableThinking: true }
         )
       : await AiProviderService.chat(
           "TEACHING_ASSISTANT",
           groundedMessages,
           input.userId,
-          { maxTokens: 3500 }
+          { maxTokens: 3500, disableThinking: true }
         );
 
     const raw = (chat.text || "").trim();
