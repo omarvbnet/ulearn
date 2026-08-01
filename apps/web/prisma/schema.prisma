@@ -1779,8 +1779,9 @@ enum AiProviderType {
   DEEPSEEK
   JINA
   FLUX
-  /// Voice provider — rows may exist in the DB; kept for data compatibility.
+  /// Voice providers — rows exist in the DB; kept for data compatibility.
   ELEVENLABS
+  FISH_AUDIO
 }
 
 enum AiProviderStatus {
