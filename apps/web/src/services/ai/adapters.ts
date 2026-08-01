@@ -824,7 +824,7 @@ function defaultChatModel(type: string): string {
     case "KIMI":
       return "moonshot-v1-8k";
     case "DEEPSEEK":
-      return "deepseek-chat";
+      return "deepseek-v4-flash";
     default:
       return "gpt-4o-mini";
   }

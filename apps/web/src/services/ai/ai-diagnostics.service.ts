@@ -175,7 +175,7 @@ export class AiDiagnosticsService {
           fix: balance
             ? "Your chat provider account has no credit (DeepSeek: top up at platform.deepseek.com). Chat will stay down until the balance is positive."
             : isDeepseek
-              ? "Confirm DeepSeek API key, model deepseek-chat, Base URL https://api.deepseek.com/v1, and account balance."
+              ? "Confirm DeepSeek API key, model deepseek-v4-flash, Base URL https://api.deepseek.com/v1, and account balance."
               : "Verify TEACHING_ASSISTANT provider, model name, API key, and Base URL.",
         });
       }

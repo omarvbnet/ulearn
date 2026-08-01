@@ -104,8 +104,9 @@ const MODELS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
     { value: "kimi-latest", label: "kimi-latest" },
   ],
   DEEPSEEK: [
-    { value: "deepseek-chat", label: "deepseek-chat" },
-    { value: "deepseek-reasoner", label: "deepseek-reasoner" },
+    { value: "deepseek-v4-flash", label: "deepseek-v4-flash (default)" },
+    { value: "deepseek-chat", label: "deepseek-chat (deprecated)" },
+    { value: "deepseek-reasoner", label: "deepseek-reasoner (deprecated)" },
   ],
   JINA: [
     { value: "jina-embeddings-v4", label: "jina-embeddings-v4 (embeddings · recommended)" },
@@ -122,7 +123,7 @@ const MODELS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
   ],
   OPENAI_COMPATIBLE: [
     { value: "gpt-4o-mini", label: "gpt-4o-mini (compatible)" },
-    { value: "deepseek-chat", label: "deepseek-chat" },
+    { value: "deepseek-v4-flash", label: "deepseek-v4-flash" },
     { value: "moonshot-v1-8k", label: "moonshot-v1-8k" },
   ],
 };
@@ -143,7 +144,7 @@ const DEFAULT_MODEL: Record<string, string> = {
   OPENAI: "gpt-4o-mini",
   ANTHROPIC: "claude-sonnet-4-20250514",
   KIMI: "moonshot-v1-8k",
-  DEEPSEEK: "deepseek-chat",
+  DEEPSEEK: "deepseek-v4-flash",
   JINA: "jina-embeddings-v4",
   FLUX: "flux-kontext-max",
   OPENAI_COMPATIBLE: "gpt-4o-mini",
