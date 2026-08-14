@@ -1,7 +1,7 @@
 # U Learn — What's New
 
-**Version:** 1.0.21 (build 23)  
-**Date:** 2026-07-25
+**Version:** 1.0.23 (build 25)  
+**Date:** 2026-08-14
 
 Use the localized text below for App Store Connect / Google Play “What’s New”.
 
@@ -9,31 +9,31 @@ Use the localized text below for App Store Connect / Google Play “What’s New
 
 ## English (en-US)
 
-Whiteboard lessons keep the screen awake while playing, and course content is better protected against screenshots and screen recording. Also includes reliable Android board playback with PDF backgrounds and teacher board-lesson edits with ranged admin review.
+New courses are organized into sections. Open a section to watch its videos and whiteboard lessons, and see completion progress for each section.
 
 ---
 
 ## Arabic (ar-SA)
 
-تبقى الشاشة مستيقظة أثناء تشغيل دروس السبورة، وحماية أفضل لمحتوى الدورة ضد لقطات الشاشة والتسجيل. يشمل أيضاً تشغيل اللوحة بشكل موثوق على أندرويد مع خلفيات PDF وتعديل دروس اللوحة مع مراجعة المشرف للنطاقات المتغيّرة.
+الدورات الجديدة مقسّمة إلى أقسام. افتح القسم لمشاهدة فيديوهاته ودروس السبورة، وتابع نسبة إكمال كل قسم.
 
 ---
 
 ## Kurdish (ku)
 
-لە کاتی بینینی وانەی تەختە سپی شاشەکە بەئاگا دەمێنێتەوە، و پاراستنی باشتری ناوەڕۆکی کۆرس لە دژی وێنەگرتن و تۆمارکردنی شاشە. هەروەها بینینی متمانەپێکراوی تەختە لە ئەندرۆید لەگەڵ پاشخانی PDF و دەستکاریکردنی وانەکان لەگەڵ پێداچوونەوەی بەڕێوەبەر.
+کۆرسە نوێیەکان دابەش کراون بۆ بەشەکان. بەشێک بکەرەوە بۆ بینینی ڤیدیۆ و وانەکانی تەختە، و پێشکەوتنی تەواوبوونی هەر بەشێک ببینە.
 
 ---
 
 ## Turkish (tr)
 
-Tahta dersleri oynatılırken ekran uyanık kalır; kurs içeriği ekran görüntüsü ve kayda karşı daha iyi korunur. PDF arka planlı Android tahta oynatma ve öğretmen tahta düzenlemeleri (yönetici aralık incelemesi) de dahildir.
+Yeni kurslar bölümlere ayrılır. Bir bölümü açarak videolarını ve tahta derslerini izleyin; her bölümün tamamlanma ilerlemesini görün.
 
 ---
 
 ## Changelog (internal)
 
-- Bump to 1.0.21 (build 23) for Google Play
-- Keep screen awake during whiteboard lesson playback (wakelock_plus)
-- Re-enable screenshot/capture hardening on course content
-- Carry forward: Android PDF board crash harden, edit + ranged approval
+- Bump to 1.0.23 (build 25)
+- New store courses require sections; videos and UBRD live under a section
+- Student course details: section list with per-section completion progress
+- Existing courses stay a flat lesson list
