@@ -28,6 +28,7 @@ const lessonSchema = z.object({
   pdfFileSize: z.number().int().positive().optional(),
   videoAssetId: z.string().optional(),
   whiteboardAssetId: z.string().optional(),
+  sectionId: z.string().min(1).optional(),
 }).superRefine((data, ctx) => {
   if (data.lessonType === "WHITEBOARD") {
     if (!data.whiteboardAssetId) {
@@ -55,6 +56,21 @@ export async function POST(
 
   const parsed = lessonSchema.safeParse(await request.json());
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
+
+  if (course.usesSections) {
+    if (!parsed.data.sectionId) {
+      return error("Choose a course section first", 400, "SECTION_REQUIRED");
+    }
+    const section = await prisma.courseSection.findFirst({
+      where: {
+        id: parsed.data.sectionId,
+        courseId: id,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!section) return error("Section not found", 404, "SECTION_NOT_FOUND");
+  }
 
   const isInterview = parsed.data.isInterview === true;
   const isFreePreview = isInterview || parsed.data.isFreePreview === true;
@@ -113,6 +129,7 @@ export async function POST(
       videoAssetId: lessonType === "VIDEO" ? parsed.data.videoAssetId : undefined,
       whiteboardAssetId:
         lessonType === "WHITEBOARD" ? parsed.data.whiteboardAssetId : undefined,
+      sectionId: course.usesSections ? parsed.data.sectionId : undefined,
     },
   });
 

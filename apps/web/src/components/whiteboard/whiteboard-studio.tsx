@@ -33,6 +33,7 @@ type Props = {
   initialTitle?: string;
   lessonId?: string;
   whiteboardId?: string;
+  sectionId?: string;
   onPublished?: (result?: { pendingReview?: boolean }) => void;
   onCancel?: () => void;
 };
@@ -67,6 +68,7 @@ export default function WhiteboardStudio({
   initialTitle,
   lessonId,
   whiteboardId,
+  sectionId,
   onPublished,
   onCancel,
 }: Props) {
@@ -597,6 +599,7 @@ export default function WhiteboardStudio({
         whiteboardAssetId: upload.whiteboardId,
         durationSec: Math.ceil(durationMsFinal / 1000),
         fileKey: upload.objectKey,
+        ...(sectionId ? { sectionId } : {}),
       }),
     });
     if (!lesson.ok) throw new Error("LESSON_CREATE_FAILED");

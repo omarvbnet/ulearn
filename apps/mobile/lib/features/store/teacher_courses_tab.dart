@@ -98,6 +98,11 @@ class _TeacherCoursesTabState extends State<TeacherCoursesTab> {
     }
     if (choice == null || !mounted) return;
 
+    if (course['usesSections'] == true) {
+      await _openManage(id);
+      return;
+    }
+
     if (choice == 'WHITEBOARD') {
       if (!widget.whiteboardLessonsEnabled) return;
       await Navigator.of(context).push(

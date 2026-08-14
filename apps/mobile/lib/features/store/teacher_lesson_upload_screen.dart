@@ -22,10 +22,12 @@ class TeacherLessonUploadScreen extends StatefulWidget {
     super.key,
     required this.courseId,
     required this.courseTitle,
+    this.sectionId,
   });
 
   final String courseId;
   final String courseTitle;
+  final String? sectionId;
 
   @override
   State<TeacherLessonUploadScreen> createState() =>
@@ -228,6 +230,7 @@ class _TeacherLessonUploadScreenState extends State<TeacherLessonUploadScreen> {
         'isFreePreview': _accessMode == 'fullFree',
         if (_accessMode == 'timedFree') 'freePreviewSec': _freePreviewSec,
         if (_accessMode != 'timedFree') 'freePreviewSec': null,
+        if (widget.sectionId != null) 'sectionId': widget.sectionId,
       };
 
       if (_pdf != null) {

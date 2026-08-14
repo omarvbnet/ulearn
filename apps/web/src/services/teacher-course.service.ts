@@ -30,6 +30,8 @@ export type CourseReadiness = {
   hasSampleAccess: boolean;
   quizzes: number;
   documents: number;
+  usesSections: boolean;
+  sections: number;
   ready: boolean;
   missing: string[];
 };
@@ -270,6 +272,7 @@ export class TeacherCourseService {
         currency: input.currency || "IQD",
         accessMonths: months,
         status: "DRAFT",
+        usesSections: true,
       },
     });
 
@@ -466,6 +469,15 @@ export class TeacherCourseService {
             _count: { select: { questions: true } },
           },
         },
+        sections: {
+          where: { deletedAt: null },
+          orderBy: { sortOrder: "asc" },
+          select: {
+            id: true,
+            title: true,
+            sortOrder: true,
+          },
+        },
         _count: {
           select: {
             purchases: { where: { status: "PAID" } },
@@ -582,6 +594,7 @@ export class TeacherCourseService {
       select: {
         titleEn: true,
         thumbnail: true,
+        usesSections: true,
         lessons: {
           where: { deletedAt: null },
           select: {
@@ -600,6 +613,9 @@ export class TeacherCourseService {
           where: { deletedAt: null },
           select: { id: true },
         },
+        _count: {
+          select: { sections: { where: { deletedAt: null } } },
+        },
       },
     });
 
@@ -614,6 +630,8 @@ export class TeacherCourseService {
         hasSampleAccess: false,
         quizzes: 0,
         documents: 0,
+        usesSections: false,
+        sections: 0,
         ready: false,
         missing: ["Course not found"],
       };
@@ -636,12 +654,17 @@ export class TeacherCourseService {
     const hasSampleAccess = hasEnoughFullFree || hasTimedFree;
     const quizzes = await this.countValidCourseQuizzes(courseId);
     const documents = course.materials.length;
+    const usesSections = course.usesSections === true;
+    const sections = course._count.sections;
     const hasTitle = Boolean(course.titleEn?.trim() && course.titleEn.trim().length >= 2);
     const hasCover = Boolean(course.thumbnail?.trim());
 
     const missing: string[] = [];
     if (!hasTitle) missing.push("Course title");
     if (!hasCover) missing.push("Course cover image");
+    if (usesSections && sections < 1) {
+      missing.push("At least one course section");
+    }
     if (!hasSampleAccess) {
       missing.push(
         `Add ${MIN_FREE_PREVIEW_VIDEOS} free preview videos, or at least ${MIN_TIMED_FREE_PREVIEW_SEC / 60} free minutes on a lesson (or both)`
@@ -664,6 +687,8 @@ export class TeacherCourseService {
       hasSampleAccess,
       quizzes,
       documents,
+      usesSections,
+      sections,
       ready: missing.length === 0,
       missing,
     };

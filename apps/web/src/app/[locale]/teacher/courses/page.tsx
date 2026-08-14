@@ -22,7 +22,10 @@ type Lesson = {
   isInterview?: boolean;
   lessonType?: "VIDEO" | "WHITEBOARD";
   whiteboardAssetId?: string | null;
+  sectionId?: string | null;
 };
+
+type CourseSection = { id: string; title: string; sortOrder?: number };
 
 type Course = {
   id: string;
@@ -34,6 +37,8 @@ type Course = {
   reviewNotes: string | null;
   closedByLevel: boolean;
   thumbnail?: string | null;
+  usesSections?: boolean;
+  sections?: CourseSection[];
   stage: { nameEn: string };
   subject: { nameEn: string };
   lessons: Lesson[];
@@ -522,6 +527,9 @@ function LessonsModal({ course, whiteboardLessonsEnabled = true, onClose, onChan
 }) {
   const [lessons, setLessons] = useState<Lesson[]>(course.lessons);
   const [title, setTitle] = useState("");
+  const [sections, setSections] = useState<CourseSection[]>(course.sections ?? []);
+  const [sectionId, setSectionId] = useState(course.sections?.[0]?.id ?? "");
+  const [newSectionTitle, setNewSectionTitle] = useState("");
   const [lessonType, setLessonType] = useState<"VIDEO" | "WHITEBOARD">("VIDEO");
   const [showWbStudio, setShowWbStudio] = useState(false);
   const [editWb, setEditWb] = useState<{ lessonId: string; whiteboardId: string; title: string } | null>(
@@ -593,9 +601,36 @@ function LessonsModal({ course, whiteboardLessonsEnabled = true, onClose, onChan
     };
   }
 
+  async function addSection() {
+    if (!newSectionTitle.trim()) {
+      toast("Enter a section title", "error");
+      return;
+    }
+    const res = await fetch(`/api/teacher/courses/${course.id}/sections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: newSectionTitle.trim() }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      toast(d.error || "Could not add section", "error");
+      return;
+    }
+    const { section } = await res.json();
+    setSections((prev) => [...prev, section]);
+    setSectionId(section.id);
+    setNewSectionTitle("");
+    toast("Section added");
+    onChanged();
+  }
+
   async function addLesson(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
+    if (course.usesSections && !sectionId) {
+      toast("Add a section first, then add videos or whiteboard lessons inside it.", "error");
+      return;
+    }
     if (lessonType === "WHITEBOARD") {
       if (!whiteboardLessonsEnabled) {
         toast("Whiteboard lessons are disabled by admin", "error");
@@ -661,6 +696,7 @@ function LessonsModal({ course, whiteboardLessonsEnabled = true, onClose, onChan
           sortOrder: asInterview ? 0 : lessons.length,
           isFreePreview: asInterview || preview,
           isInterview: asInterview,
+          ...(course.usesSections && sectionId ? { sectionId } : {}),
           ...(pdfFileKey
             ? {
                 pdfFileKey,
@@ -818,6 +854,11 @@ function LessonsModal({ course, whiteboardLessonsEnabled = true, onClose, onChan
               >
                 <span>
                   {i + 1}. {l.title}
+                  {course.usesSections && l.sectionId && (
+                    <span className="ms-2 text-xs text-muted">
+                      {sections.find((s) => s.id === l.sectionId)?.title ?? "section"}
+                    </span>
+                  )}
                   {l.lessonType === "WHITEBOARD" && (
                     <span className="ms-2 text-xs text-accent">whiteboard</span>
                   )}
@@ -921,6 +962,7 @@ function LessonsModal({ course, whiteboardLessonsEnabled = true, onClose, onChan
           <WhiteboardStudio
             courseId={course.id}
             initialTitle={title.trim() || "Whiteboard lesson"}
+            sectionId={sectionId || undefined}
             onCancel={() => setShowWbStudio(false)}
             onPublished={() => {
               setShowWbStudio(false);
@@ -932,6 +974,38 @@ function LessonsModal({ course, whiteboardLessonsEnabled = true, onClose, onChan
           />
         ) : (
         <form onSubmit={addLesson} className="space-y-3 border-t border-card-border pt-4">
+          {course.usesSections && (
+            <div className="space-y-2 rounded-xl border border-card-border p-3">
+              <p className="text-sm font-medium">Course sections</p>
+              <p className="text-xs text-muted">
+                Videos and whiteboard lessons must belong to a section.
+              </p>
+              {sections.length > 0 && (
+                <Select
+                  label="Section"
+                  value={sectionId}
+                  onChange={(e) => setSectionId(e.target.value)}
+                >
+                  {sections.map((s) => (
+                    <option key={s.id} value={s.id}>{s.title}</option>
+                  ))}
+                </Select>
+              )}
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <Input
+                    label="New section"
+                    value={newSectionTitle}
+                    onChange={(e) => setNewSectionTitle(e.target.value)}
+                    placeholder="e.g. Chapter 1"
+                  />
+                </div>
+                <Button type="button" onClick={addSection} disabled={!newSectionTitle.trim()}>
+                  Add
+                </Button>
+              </div>
+            </div>
+          )}
           <Input
             label="Lesson title"
             value={title}
@@ -1017,7 +1091,7 @@ function LessonsModal({ course, whiteboardLessonsEnabled = true, onClose, onChan
               />
             </div>
           )}
-          <Button type="submit" disabled={uploading || !!replacingId} className="w-full">
+          <Button type="submit" disabled={uploading || !!replacingId || (course.usesSections && !sectionId)} className="w-full">
             {uploading
               ? `Uploading… ${progress}%`
               : lessonType === "WHITEBOARD"

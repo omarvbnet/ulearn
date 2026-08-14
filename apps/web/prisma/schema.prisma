@@ -419,6 +419,9 @@ model Course {
   materials CourseMaterial[]
   groupItems CourseGroupItem[]
   certificates CourseCertificate[]
+  sections     CourseSection[]
+  /// New courses require sections; existing courses stay a flat lesson list.
+  usesSections Boolean @default(false)
 
   @@index([teacherId])
   @@index([stageId])
@@ -427,9 +430,27 @@ model Course {
   @@index([deletedAt])
 }
 
+/// Grouping layer for new store courses. Videos and UBRD lessons live under a section.
+model CourseSection {
+  id        String    @id @default(cuid())
+  courseId  String
+  title     String
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  course  Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons CourseLesson[]
+
+  @@index([courseId])
+  @@index([deletedAt])
+}
+
 model CourseLesson {
   id            String   @id @default(cuid())
   courseId      String
+  sectionId     String?
   title         String
   /// VIDEO (default) keeps the existing upload/player pipeline unchanged.
   lessonType    CourseLessonType @default(VIDEO)
@@ -451,6 +472,7 @@ model CourseLesson {
   updatedAt     DateTime @updatedAt
 
   course          Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  section         CourseSection?   @relation(fields: [sectionId], references: [id], onDelete: SetNull)
   videoAsset      VideoAsset?      @relation(fields: [videoAssetId], references: [id], onDelete: SetNull)
   whiteboardAsset WhiteboardAsset? @relation(fields: [whiteboardAssetId], references: [id], onDelete: SetNull)
   likes     CourseLessonLike[]
@@ -462,6 +484,7 @@ model CourseLesson {
   materials CourseMaterial[]
 
   @@index([courseId])
+  @@index([sectionId])
   @@index([deletedAt])
   @@index([isHidden])
   @@index([lessonType])

@@ -72,6 +72,9 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   List<Map<String, dynamic>> _quizzes = [];
   List<Map<String, dynamic>> _materials = [];
   int _selectedTab = 0;
+  /// When the course uses sections, the Videos tab shows the section list
+  /// until the student taps one.
+  String? _openSectionId;
   bool _qaComposerFocused = false;
   String? _error;
   bool _reacting = false;
@@ -1050,15 +1053,68 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
       );
     }
     if (_selectedTab == 1) {
+      final usesSections = course['usesSections'] == true;
+      final sections = ((course['sections'] as List<dynamic>?) ?? [])
+          .cast<Map<String, dynamic>>();
+      if (usesSections && sections.isNotEmpty && _openSectionId == null) {
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+          children: [
+            for (final section in sections)
+              _SectionProgressCard(
+                section: section,
+                l10n: l10n,
+                onTap: () {
+                  final sid = section['id']?.toString();
+                  Map<String, dynamic>? first;
+                  for (final l in lessons) {
+                    if (l['sectionId']?.toString() == sid &&
+                        _canWatch(l, unlocked)) {
+                      first = l;
+                      break;
+                    }
+                  }
+                  setState(() {
+                    _openSectionId = sid;
+                    if (first != null) _activeLesson = first;
+                  });
+                },
+              ),
+          ],
+        );
+      }
+      final sectionLessons = _openSectionId == null
+          ? lessons
+          : lessons
+              .where((l) => l['sectionId']?.toString() == _openSectionId)
+              .toList();
       final items = _buildVideosQuizzesTab(
-        lessons: lessons,
+        lessons: sectionLessons,
         unlocked: unlocked,
         activeId: activeId,
         l10n: l10n,
       );
       return ListView(
         padding: const EdgeInsets.only(bottom: 12),
-        children: items,
+        children: [
+          if (_openSectionId != null) ...[
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.arrow_back_rounded),
+              title: Text(l10n.t('mobile.store.backToSections')),
+              onTap: () => setState(() => _openSectionId = null),
+            ),
+            if (sectionLessons.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  l10n.t('mobile.store.sectionEmpty'),
+                  style: TextStyle(color: AppTheme.muted),
+                ),
+              ),
+          ],
+          ...items,
+        ],
       );
     }
     if (_selectedTab == 2) {
@@ -2739,6 +2795,89 @@ class _MetaTag extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SectionProgressCard extends StatelessWidget {
+  const _SectionProgressCard({
+    required this.section,
+    required this.l10n,
+    required this.onTap,
+  });
+
+  final Map<String, dynamic> section;
+  final dynamic l10n;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = section['title']?.toString() ?? '';
+    final lessonCount = (section['lessonCount'] as num?)?.toInt() ?? 0;
+    final done = (section['completedLessonCount'] as num?)?.toInt() ?? 0;
+    final pct = ((section['progressPct'] as num?)?.toDouble() ?? 0).clamp(0, 100);
+    final videos = (section['videoCount'] as num?)?.toInt() ?? 0;
+    final boards = (section['whiteboardCount'] as num?)?.toInt() ?? 0;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: AppTheme.card,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.folder_open_rounded, color: AppTheme.accent),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right_rounded),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  l10n.t('mobile.store.sectionVideosBoards', {
+                    'videos': '$videos',
+                    'boards': '$boards',
+                  }),
+                  style: TextStyle(color: AppTheme.muted, fontSize: 12.5),
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(99),
+                  child: LinearProgressIndicator(
+                    value: lessonCount == 0 ? 0 : pct / 100,
+                    minHeight: 6,
+                    backgroundColor: AppTheme.cardBorder,
+                    color: AppTheme.accent,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  l10n.t('mobile.store.sectionProgress', {
+                    'done': '$done',
+                    'total': '$lessonCount',
+                  }),
+                  style: TextStyle(color: AppTheme.muted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

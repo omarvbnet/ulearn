@@ -129,6 +129,13 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
     _subjectId = course['subjectId']?.toString() ?? _subjectId;
     _stageId = course['stageId']?.toString() ?? _stageId;
     _coverUrl = course['thumbnail']?.toString();
+    if (_selectedSectionId == null) {
+      final sections = ((course['sections'] as List<dynamic>?) ?? [])
+          .cast<Map<String, dynamic>>();
+      if (sections.isNotEmpty) {
+        _selectedSectionId = sections.first['id']?.toString();
+      }
+    }
   }
 
   Future<void> _refreshReadiness() async {
@@ -140,6 +147,13 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
 
   List<Map<String, dynamic>> get _lessons =>
       ((_course?['lessons'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+
+  bool get _usesSections => _course?['usesSections'] == true;
+
+  List<Map<String, dynamic>> get _sections =>
+      ((_course?['sections'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+
+  String? _selectedSectionId;
 
   List<Map<String, dynamic>> get _quizzes =>
       ((_course?['quizzes'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
@@ -401,6 +415,8 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         'durationSec': duration,
         'isFreePreview': true,
         'isInterview': interview,
+        if (_usesSections && _selectedSectionId != null)
+          'sectionId': _selectedSectionId,
       });
 
       await _reloadCourse();
@@ -564,6 +580,7 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
             _stageId != null &&
             (_coverFile != null || (_coverUrl != null && _coverUrl!.isNotEmpty));
       case 1:
+        if (_usesSections && _sections.isEmpty) return false;
         return _hasSampleAccess;
       case 2:
         return _quizzes.length >= 2;
@@ -842,6 +859,43 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
     );
   }
 
+  Future<void> _addWizardSection() async {
+    final l10n = context.l10n;
+    final ctrl = TextEditingController();
+    final title = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n.t('mobile.teacher.addSection')),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: InputDecoration(labelText: l10n.t('mobile.teacher.sectionTitle')),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(l10n.cancel)),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: Text(l10n.save),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (title == null || title.isEmpty || _courseId == null || !mounted) return;
+    try {
+      final created = await context.read<ApiClient>().post(
+        '/api/teacher/courses/$_courseId/sections',
+        {'title': title},
+      );
+      await _reloadCourse();
+      final section = created['section'] as Map?;
+      _selectedSectionId = section?['id']?.toString() ?? _selectedSectionId;
+      if (mounted) setState(() {});
+    } catch (e) {
+      _toast(e.toString());
+    }
+  }
+
   Widget _buildVideos() {
     final l10n = context.l10n;
     return Column(
@@ -856,6 +910,33 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
           l10n.t('mobile.teacher.videosHintOptional'),
           style: TextStyle(color: AppTheme.muted, height: 1.4),
         ),
+        if (_usesSections) ...[
+          const SizedBox(height: 16),
+          Text(
+            l10n.t('mobile.teacher.sectionsSection'),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            l10n.t('mobile.teacher.sectionRequired'),
+            style: TextStyle(color: AppTheme.muted, fontSize: 12.5, height: 1.4),
+          ),
+          const SizedBox(height: 10),
+          FilledButton.tonalIcon(
+            onPressed: _busy ? null : _addWizardSection,
+            icon: const Icon(Icons.create_new_folder_outlined),
+            label: Text(l10n.t('mobile.teacher.addSection')),
+          ),
+          const SizedBox(height: 8),
+          for (final s in _sections)
+            RadioListTile<String>(
+              value: s['id']?.toString() ?? '',
+              groupValue: _selectedSectionId,
+              title: Text(s['title']?.toString() ?? ''),
+              onChanged: (v) => setState(() => _selectedSectionId = v),
+              dense: true,
+            ),
+        ],
         const SizedBox(height: 16),
         _RequirementChip(
           label: l10n.t('mobile.teacher.interviewBadge'),
@@ -900,14 +981,18 @@ class _TeacherCourseWizardScreenState extends State<TeacherCourseWizardScreen> {
         const SizedBox(height: 12),
         if (!_hasInterview)
           FilledButton.icon(
-            onPressed: _busy ? null : () => _uploadFreeVideo(interview: true),
+            onPressed: _busy || (_usesSections && _selectedSectionId == null)
+                ? null
+                : () => _uploadFreeVideo(interview: true),
             icon: const Icon(Icons.mic_rounded),
             label: Text(l10n.t('mobile.teacher.uploadInterview')),
             style: FilledButton.styleFrom(backgroundColor: AppTheme.accent, foregroundColor: Colors.black),
           )
         else if (_freeCount < 2)
           FilledButton.icon(
-            onPressed: _busy ? null : () => _uploadFreeVideo(interview: false),
+            onPressed: _busy || (_usesSections && _selectedSectionId == null)
+                ? null
+                : () => _uploadFreeVideo(interview: false),
             icon: const Icon(Icons.video_call_outlined),
             label: Text(l10n.t('mobile.teacher.uploadFreeSample')),
             style: FilledButton.styleFrom(backgroundColor: AppTheme.accent, foregroundColor: Colors.black),

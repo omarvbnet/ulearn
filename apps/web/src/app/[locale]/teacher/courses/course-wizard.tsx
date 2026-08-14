@@ -35,6 +35,8 @@ type Lesson = {
   durationSec?: number | null;
 };
 
+type Section = { id: string; title: string };
+
 type Quiz = { id: string; titleEn: string; _count?: { questions: number } };
 type Doc = { id: string; title: string };
 
@@ -60,6 +62,10 @@ export function CourseWizard({
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
+  const [usesSections, setUsesSections] = useState(false);
+  const [sections, setSections] = useState<Section[]>([]);
+  const [sectionTitle, setSectionTitle] = useState("");
+  const [selectedSectionId, setSelectedSectionId] = useState("");
 
   const [titleEn, setTitleEn] = useState("");
   const [description, setDescription] = useState("");
@@ -103,6 +109,10 @@ export function CourseWizard({
       setCoverUrl(course.thumbnail ?? null);
       setLessons(course.lessons ?? []);
       setQuizzes(course.quizzes ?? []);
+      setUsesSections(course.usesSections === true);
+      const nextSections: Section[] = course.sections ?? [];
+      setSections(nextSections);
+      setSelectedSectionId((prev) => prev || nextSections[0]?.id || "");
     }
     if (readyRes.ok) {
       const { readiness: r } = await readyRes.json();
@@ -171,6 +181,7 @@ export function CourseWizard({
         if (!res.ok) throw new Error((await res.json()).error);
         const { course } = await res.json();
         setCourseId(course.id);
+        setUsesSections(course.usesSections === true);
         await refresh(course.id);
       } else {
         const res = await fetch(`/api/teacher/courses/${courseId}`, {
@@ -189,9 +200,38 @@ export function CourseWizard({
     }
   }
 
+  async function addSection() {
+    if (!courseId || !sectionTitle.trim()) {
+      toast("Enter a section title", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/teacher/courses/${courseId}/sections`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: sectionTitle.trim() }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      const { section } = await res.json();
+      setSectionTitle("");
+      setSelectedSectionId(section.id);
+      await refresh(courseId);
+      toast("Section added");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function uploadFreeVideo() {
     if (!courseId || !videoFile || !videoTitle.trim()) {
       toast("Pick a video and title", "error");
+      return;
+    }
+    if (usesSections && !selectedSectionId) {
+      toast("Add a section first, then add videos inside it", "error");
       return;
     }
     if (asInterview === false && !hasInterview) {
@@ -234,6 +274,7 @@ export function CourseWizard({
           durationSec,
           isFreePreview: true,
           isInterview: asInterview || !hasInterview,
+          ...(usesSections && selectedSectionId ? { sectionId: selectedSectionId } : {}),
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
@@ -357,6 +398,10 @@ export function CourseWizard({
   async function next() {
     if (step === 0) return saveBasics();
     if (step === 1) {
+      if (usesSections && sections.length < 1) {
+        toast("Add at least one course section", "error");
+        return;
+      }
       const timedOk = lessons.some(
         (l) => !l.isFreePreview && (l.freePreviewSec ?? 0) >= 120
       );
@@ -456,6 +501,43 @@ export function CourseWizard({
               <p className="text-sm text-muted">
                 Upload an interview / intro video first, then one free sample ({freeCount}/2).
               </p>
+              {usesSections && (
+                <div className="space-y-3 rounded-xl border border-card-border p-4">
+                  <p className="text-sm font-medium">Course sections</p>
+                  <p className="text-xs text-muted">
+                    New courses group videos and whiteboard lessons under sections. Add a section before uploading.
+                  </p>
+                  <ul className="space-y-2">
+                    {sections.map((s) => (
+                      <li key={s.id}>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="radio"
+                            name="wizard-section"
+                            checked={selectedSectionId === s.id}
+                            onChange={() => setSelectedSectionId(s.id)}
+                          />
+                          {s.title}
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                  {sections.length === 0 && (
+                    <p className="text-xs text-muted">No sections yet.</p>
+                  )}
+                  <div className="flex gap-2">
+                    <Input
+                      label="Section title"
+                      value={sectionTitle}
+                      onChange={(e) => setSectionTitle(e.target.value)}
+                      placeholder="e.g. Chapter 1"
+                    />
+                  </div>
+                  <Button disabled={busy || !sectionTitle.trim()} onClick={addSection}>
+                    Add section
+                  </Button>
+                </div>
+              )}
               <ul className="space-y-2">
                 {lessons.filter((l) => l.isFreePreview).map((l) => (
                   <li key={l.id} className="rounded-lg border border-card-border px-3 py-2 text-sm">
@@ -483,7 +565,7 @@ export function CourseWizard({
                       <div className="h-full bg-accent transition-all" style={{ width: `${progress}%` }} />
                     </div>
                   )}
-                  <Button disabled={busy} onClick={uploadFreeVideo}>
+                  <Button disabled={busy || (usesSections && !selectedSectionId)} onClick={uploadFreeVideo}>
                     {busy ? `Uploading ${progress}%…` : "Upload free video"}
                   </Button>
                 </div>

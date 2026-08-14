@@ -27,6 +27,11 @@ export async function GET(
       stage: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
       subject: { select: { nameEn: true, nameAr: true, nameKu: true, nameTr: true } },
       lessons: { orderBy: { sortOrder: "asc" }, where: PUBLIC_LESSON_WHERE, include: { whiteboardAsset: true, videoAsset: true } },
+      sections: {
+        where: { deletedAt: null },
+        orderBy: { sortOrder: "asc" },
+        select: { id: true, title: true, sortOrder: true },
+      },
     },
   });
   if (!course) return error("Course not found", 404, "NOT_FOUND");
@@ -288,9 +293,41 @@ export async function GET(
       ? await CourseCertificateService.getStatus(userId, id, user.role)
       : null;
 
+  const usesSections = course.usesSections === true;
+  const sections = usesSections
+    ? course.sections.map((section) => {
+        const inSection = lessons.filter((l) => l.sectionId === section.id);
+        const lessonCount = inSection.length;
+        const completedLessonCount = inSection.filter((l) => l.isCompleted).length;
+        const progressPct =
+          lessonCount === 0
+            ? 0
+            : Math.round(
+                inSection.reduce(
+                  (sum, l) => sum + ((l.progressPct as number | null) ?? 0),
+                  0
+                ) / lessonCount
+              );
+        const videoCount = inSection.filter((l) => l.lessonType !== "WHITEBOARD").length;
+        const whiteboardCount = inSection.filter((l) => l.lessonType === "WHITEBOARD").length;
+        return {
+          id: section.id,
+          title: section.title,
+          sortOrder: section.sortOrder,
+          lessonCount,
+          completedLessonCount,
+          progressPct,
+          videoCount,
+          whiteboardCount,
+        };
+      })
+    : [];
+
   return json({
     course: {
       ...course,
+      sections,
+      usesSections,
       lessons,
       materials,
       totalDurationSec,

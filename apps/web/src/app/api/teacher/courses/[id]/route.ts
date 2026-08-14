@@ -78,6 +78,11 @@ export async function GET(
           questions: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
         },
       },
+      sections: {
+        where: { deletedAt: null },
+        orderBy: { sortOrder: "asc" },
+        select: { id: true, title: true, sortOrder: true },
+      },
       _count: {
         select: {
           purchases: { where: { status: "PAID" } },

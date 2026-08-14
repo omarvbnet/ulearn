@@ -90,6 +90,199 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
   int get _freeCount =>
       _lessons.where((l) => l['isFreePreview'] == true).length;
 
+  bool get _usesSections => _course?['usesSections'] == true;
+
+  List<Map<String, dynamic>> get _sections =>
+      ((_course?['sections'] as List<dynamic>?) ?? []).cast<Map<String, dynamic>>();
+
+  Future<String?> _promptText({
+    required String title,
+    String? initial,
+    required String label,
+  }) async {
+    final ctrl = TextEditingController(text: initial ?? '');
+    final value = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: InputDecoration(labelText: label),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(context.l10n.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: Text(context.l10n.save),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    return value;
+  }
+
+  Future<void> _addSection() async {
+    final l10n = context.l10n;
+    final title = await _promptText(
+      title: l10n.t('mobile.teacher.addSection'),
+      label: l10n.t('mobile.teacher.sectionTitle'),
+    );
+    if (title == null || title.isEmpty || !mounted) return;
+    try {
+      await context.read<ApiClient>().post(
+        '/api/teacher/courses/${widget.courseId}/sections',
+        {'title': title},
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.t('mobile.teacher.sectionAdded'))),
+        );
+      }
+      _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<void> _renameSection(Map<String, dynamic> section) async {
+    final l10n = context.l10n;
+    final title = await _promptText(
+      title: l10n.t('mobile.teacher.renameSection'),
+      initial: section['title']?.toString(),
+      label: l10n.t('mobile.teacher.sectionTitle'),
+    );
+    if (title == null || title.isEmpty || !mounted) return;
+    try {
+      await context.read<ApiClient>().patch(
+        '/api/teacher/courses/${widget.courseId}/sections/${section['id']}',
+        {'title': title},
+      );
+      _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<void> _deleteSection(Map<String, dynamic> section) async {
+    final l10n = context.l10n;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n.t('mobile.teacher.removeSection')),
+        content: Text(l10n.t('mobile.teacher.removeSectionConfirm')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(l10n.cancel)),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(l10n.t('common.delete'))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await context.read<ApiClient>().delete(
+        '/api/teacher/courses/${widget.courseId}/sections/${section['id']}',
+      );
+      _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.t('mobile.teacher.sectionNotEmpty'))),
+        );
+      }
+    }
+  }
+
+  Future<String?> _pickSectionId() async {
+    if (!_usesSections) return null;
+    if (_sections.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.t('mobile.teacher.sectionRequired'))),
+      );
+      return null;
+    }
+    if (_sections.length == 1) return _sections.first['id']?.toString();
+    return showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(title: Text(context.l10n.t('mobile.teacher.chooseSection'))),
+            for (final s in _sections)
+              ListTile(
+                title: Text(s['title']?.toString() ?? ''),
+                onTap: () => Navigator.pop(ctx, s['id']?.toString()),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _addLessonToSection() async {
+    final l10n = context.l10n;
+    final sectionId = await _pickSectionId();
+    if (_usesSections && sectionId == null) return;
+    if (!mounted) return;
+    final title = _titleCtrl.text.trim().isEmpty
+        ? l10n.t('mobile.teacher.manageCourse')
+        : _titleCtrl.text.trim();
+    String? choice = 'VIDEO';
+    if (widget.whiteboardLessonsEnabled) {
+      choice = await showModalBottomSheet<String>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.videocam_outlined),
+                title: const Text('Video Lesson'),
+                onTap: () => Navigator.pop(ctx, 'VIDEO'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.draw_outlined),
+                title: const Text('Whiteboard Lesson'),
+                onTap: () => Navigator.pop(ctx, 'WHITEBOARD'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (choice == null || !mounted) return;
+    if (choice == 'WHITEBOARD') {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => WhiteboardStudioScreen(
+            courseId: widget.courseId,
+            courseTitle: title,
+            sectionId: sectionId,
+          ),
+        ),
+      );
+    } else {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => TeacherLessonUploadScreen(
+            courseId: widget.courseId,
+            courseTitle: title,
+            sectionId: sectionId,
+          ),
+        ),
+      );
+    }
+    _load();
+  }
+
   Future<void> _load() async {
     try {
       final api = context.read<ApiClient>();
@@ -857,6 +1050,57 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
                           ),
                         ],
                         const SizedBox(height: 28),
+                        if (_usesSections) ...[
+                          Text(l10n.t('mobile.teacher.sectionsSection'),
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                          const SizedBox(height: 6),
+                          Text(
+                            l10n.t('mobile.teacher.sectionRequired'),
+                            style: TextStyle(color: AppTheme.muted, fontSize: 12),
+                          ),
+                          const SizedBox(height: 10),
+                          FilledButton.tonalIcon(
+                            onPressed: _addSection,
+                            icon: const Icon(Icons.create_new_folder_outlined),
+                            label: Text(l10n.t('mobile.teacher.addSection')),
+                          ),
+                          const SizedBox(height: 10),
+                          if (_sections.isEmpty)
+                            Text(
+                              l10n.t('mobile.teacher.noSectionsYet'),
+                              style: TextStyle(color: AppTheme.muted),
+                            ),
+                          for (final section in _sections)
+                            Card(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                leading: const Icon(Icons.folder_open_rounded, color: AppTheme.accent),
+                                title: Text(section['title']?.toString() ?? ''),
+                                subtitle: Text(
+                                  l10n.t('mobile.studio.lessonsCount', {
+                                    'count': '${_lessons.where((l) => l['sectionId']?.toString() == section['id']?.toString()).length}',
+                                  }),
+                                ),
+                                trailing: PopupMenuButton<String>(
+                                  onSelected: (v) {
+                                    if (v == 'rename') _renameSection(section);
+                                    if (v == 'delete') _deleteSection(section);
+                                  },
+                                  itemBuilder: (_) => [
+                                    PopupMenuItem(
+                                      value: 'rename',
+                                      child: Text(l10n.t('mobile.teacher.renameSection')),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'delete',
+                                      child: Text(l10n.t('mobile.teacher.removeSection')),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          const SizedBox(height: 20),
+                        ],
                         Text(l10n.t('mobile.teacher.lessonsSection'),
                             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
                         const SizedBox(height: 6),
@@ -866,55 +1110,7 @@ class _TeacherCourseManageScreenState extends State<TeacherCourseManageScreen> {
                         ),
                         const SizedBox(height: 10),
                         FilledButton.tonalIcon(
-                          onPressed: () async {
-                            final title = _titleCtrl.text.trim().isEmpty
-                                ? l10n.t('mobile.teacher.manageCourse')
-                                : _titleCtrl.text.trim();
-                            String? choice = 'VIDEO';
-                            if (widget.whiteboardLessonsEnabled) {
-                              choice = await showModalBottomSheet<String>(
-                                context: context,
-                                builder: (ctx) => SafeArea(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      ListTile(
-                                        leading: const Icon(Icons.videocam_outlined),
-                                        title: const Text('Video Lesson'),
-                                        onTap: () => Navigator.pop(ctx, 'VIDEO'),
-                                      ),
-                                      ListTile(
-                                        leading: const Icon(Icons.draw_outlined),
-                                        title: const Text('Whiteboard Lesson'),
-                                        onTap: () => Navigator.pop(ctx, 'WHITEBOARD'),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            }
-                            if (choice == null || !mounted) return;
-                            if (choice == 'WHITEBOARD') {
-                              await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => WhiteboardStudioScreen(
-                                    courseId: widget.courseId,
-                                    courseTitle: title,
-                                  ),
-                                ),
-                              );
-                            } else {
-                              await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => TeacherLessonUploadScreen(
-                                    courseId: widget.courseId,
-                                    courseTitle: title,
-                                  ),
-                                ),
-                              );
-                            }
-                            _load();
-                          },
+                          onPressed: _addLessonToSection,
                           icon: const Icon(Icons.upload_rounded),
                           label: Text(l10n.t('mobile.studio.addVideo')),
                         ),

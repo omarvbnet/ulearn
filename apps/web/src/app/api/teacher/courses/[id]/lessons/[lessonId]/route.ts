@@ -48,6 +48,7 @@ const schema = z.object({
   pdfMimeType: z.string().optional(),
   pdfFileSize: z.number().int().positive().optional(),
   removePdf: z.boolean().optional(),
+  sectionId: z.string().min(1).nullable().optional(),
   editDiff: editDiffSchema,
 });
 
@@ -86,6 +87,13 @@ export async function PATCH(
   if (!parsed.success) return error("Invalid input", 422, "VALIDATION");
 
   const data = parsed.data;
+  if (data.sectionId) {
+    const section = await prisma.courseSection.findFirst({
+      where: { id: data.sectionId, courseId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!section) return error("Section not found", 404, "SECTION_NOT_FOUND");
+  }
   if (
     (data.lessonType === "WHITEBOARD" || data.whiteboardAssetId) &&
     !(await isWhiteboardLessonsEnabled())

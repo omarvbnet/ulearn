@@ -41,6 +41,7 @@ class WhiteboardStudioScreen extends StatefulWidget {
     this.initialTitle,
     this.lessonId,
     this.whiteboardId,
+    this.sectionId,
   });
 
   final String courseId;
@@ -49,6 +50,7 @@ class WhiteboardStudioScreen extends StatefulWidget {
   /// When set with [whiteboardId], opens edit mode for an existing lesson.
   final String? lessonId;
   final String? whiteboardId;
+  final String? sectionId;
 
   @override
   State<WhiteboardStudioScreen> createState() => _WhiteboardStudioScreenState();
@@ -1091,6 +1093,7 @@ class _WhiteboardStudioScreenState extends State<WhiteboardStudioScreen> {
         'whiteboardAssetId': whiteboardId,
         'durationSec': (durationMs / 1000).ceil(),
         if (objectKey != null) 'fileKey': objectKey,
+        if (widget.sectionId != null) 'sectionId': widget.sectionId,
       });
 
       _setPublishProgress(100, 'Published');
