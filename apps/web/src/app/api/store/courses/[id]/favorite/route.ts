@@ -1,4 +1,4 @@
-import { error, json, requireAuth } from "@/lib/api";
+import { error, json, requireAuth, STORE_ENGAGEMENT_ROLES } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 
 /** Toggle a course bookmark (shown in the student's profile favorites). */
@@ -6,7 +6,7 @@ export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["STUDENT", "CERTIFICATE_USER"]);
+  const auth = await requireAuth(STORE_ENGAGEMENT_ROLES);
   if (auth.error) return auth.error;
 
   const { id } = await params;

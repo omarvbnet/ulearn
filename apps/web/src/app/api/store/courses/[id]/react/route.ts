@@ -1,4 +1,4 @@
-import { error, json, requireAuth } from "@/lib/api";
+import { error, json, requireAuth, STORE_ENGAGEMENT_ROLES } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { notifyTeacherCourseLike } from "@/services/engagement-notifications.service";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -11,7 +11,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth(["STUDENT", "CERTIFICATE_USER", "TEACHER"]);
+  const auth = await requireAuth(STORE_ENGAGEMENT_ROLES);
   if (auth.error) return auth.error;
 
   const { id } = await params;

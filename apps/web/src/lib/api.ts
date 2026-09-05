@@ -65,6 +65,15 @@ export async function requireAuth(
   return { session };
 }
 
+/** Any signed-in app role may like / dislike / favorite / save store content. */
+export const STORE_ENGAGEMENT_ROLES: UserRole[] = [
+  "STUDENT",
+  "CERTIFICATE_USER",
+  "TEACHER",
+  "SUPER_ADMIN",
+  "COUNTRY_ADMIN",
+];
+
 /** Session if present; otherwise null (for public browse endpoints). */
 export async function optionalAuth(): Promise<SessionPayload | null> {
   return getSession();

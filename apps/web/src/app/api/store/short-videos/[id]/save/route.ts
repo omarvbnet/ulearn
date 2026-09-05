@@ -1,4 +1,4 @@
-import { error, json, requireAuth } from "@/lib/api";
+import { error, json, requireAuth, STORE_ENGAGEMENT_ROLES } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth/session";
 import { notifyTeacherShortVideoSave } from "@/services/engagement-notifications.service";
 import { ShortVideoService } from "@/services/short-video.service";
@@ -8,7 +8,7 @@ export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth();
+  const auth = await requireAuth(STORE_ENGAGEMENT_ROLES);
   if (auth.error) return auth.error;
 
   const { id } = await params;
